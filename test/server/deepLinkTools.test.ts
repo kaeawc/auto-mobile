@@ -8,7 +8,7 @@ import { FakeDeepLinkManager } from "../fakes/FakeDeepLinkManager";
 async function checkAvdAvailability(): Promise<boolean> {
   try {
     // Add timeout to prevent hanging in CI when Android SDK is not available
-    const timeoutPromise = new Promise<boolean>((resolve) => {
+    const timeoutPromise = new Promise<boolean>(resolve => {
       setTimeout(() => resolve(false), 2000); // 2 second timeout
     });
 
@@ -255,7 +255,7 @@ describe("Deep Link Tools Registration", function() {
     test("should handle missing device ID gracefully", async function() {
       if (!avdsAvailable) {
         // Note: Bun does not support dynamic test skipping
-          return;
+        return;
       }
 
       const tool = ToolRegistry.getTool("getDeepLinks");

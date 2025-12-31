@@ -289,9 +289,16 @@ describe("ObserveScreen", function() {
       // Create a temporary ADB client to check for devices
       const tempAdb = new AdbClient(null);
 
-      // Check if any devices are connected
+      // Check if any devices are connected with timeout
       try {
-        const devices = await tempAdb.executeCommand("devices");
+        // Add timeout to prevent hanging in CI
+        const timeoutPromise = new Promise<never>((_, reject) => {
+          setTimeout(() => reject(new Error("Device check timeout")), 2000);
+        });
+
+        const devicesPromise = tempAdb.executeCommand("devices");
+        const devices = await Promise.race([devicesPromise, timeoutPromise]);
+
         const deviceLines = devices.stdout.split("\n").filter(line => line.trim() && !line.includes("List of devices"));
         if (deviceLines.length === 0) {
           // Note: Bun does not support dynamic test skipping // Skip tests if no devices are connected
@@ -348,7 +355,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should get complete observation data with all features enabled", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       // Execute observe with all features enabled
       const result = await observeScreen.execute();
@@ -378,7 +385,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should detect and report screen size correctly", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       const result = await observeScreen.execute();
 
@@ -393,7 +400,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should detect system insets correctly", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       const result = await observeScreen.execute();
 
@@ -411,7 +418,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should include active window information with the package name", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       const result = await observeScreen.execute();
 
@@ -427,7 +434,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should execute observe command multiple times maintaining consistency", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       // First observation
       const firstResult = await observeScreen.execute();
@@ -458,7 +465,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should handle errors gracefully if device is disconnected", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       // Check if there's only one device connected
       const devices = await adb.executeCommand("devices");
@@ -487,7 +494,7 @@ describe("ObserveScreen", function() {
     });
 
     test("should produce complete data that can be serialized to JSON", async function() {
-      if (!mockDevice) return; // Skip if no device available
+      if (!mockDevice) {return;} // Skip if no device available
 
       const result = await observeScreen.execute();
 

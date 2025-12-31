@@ -188,7 +188,15 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       base64PlanContent: String,
       annotation: AutoMobileTest
   ): List<String> {
-    val command = mutableListOf("npx", "auto-mobile", "--cli")
+    val command = mutableListOf<String>()
+
+    // Check for local development version first
+    val localAutoMobile = File("../../dist/src/index.js").absoluteFile
+    if (localAutoMobile.exists()) {
+      command.addAll(listOf("bun", localAutoMobile.absolutePath, "--cli"))
+    } else {
+      command.addAll(listOf("bunx", "auto-mobile", "--cli"))
+    }
 
     // Read system properties dynamically to allow test configuration
     val debugMode = System.getProperty("automobile.debug", "false").toBoolean()
@@ -276,8 +284,12 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
     val command = mutableListOf<String>()
     val useNpx = System.getProperty("automobile.use.npx", "true").toBoolean()
 
-    if (useNpx) {
-      command.addAll(listOf("npx", "auto-mobile", "--cli"))
+    // Check for local development version first
+    val localAutoMobile = File("../../dist/src/index.js").absoluteFile
+    if (localAutoMobile.exists()) {
+      command.addAll(listOf("bun", localAutoMobile.absolutePath, "--cli"))
+    } else if (useNpx) {
+      command.addAll(listOf("bunx", "auto-mobile", "--cli"))
     } else {
       command.addAll(listOf("auto-mobile", "--cli"))
     }

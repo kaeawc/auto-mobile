@@ -1,5 +1,4 @@
-import { describe, test } from "bun:test";
-import { expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 
@@ -89,7 +88,7 @@ describe("MCP Tools Registry", () => {
     Object.entries(expectedCategories).forEach(([category, expectedTools]) => {
       const categoryToolsFound = expectedTools.filter(toolName => toolNames.includes(toolName));
       expect(categoryToolsFound.length).toBeGreaterThan(0,
-                                                          `No tools found for ${category} category. Expected: ${expectedTools.join(", ")}`);
+                                                        `No tools found for ${category} category. Expected: ${expectedTools.join(", ")}`);
     });
 
     // Verify specific core tools are present

@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
@@ -278,7 +277,6 @@ describe("ObserveScreen", function() {
   });
 
   describe("Integration Tests", function() {
-    this.timeout(30000);
 
     let observeScreen: ObserveScreen;
     let adb: FakeAdbExecutor;
@@ -302,11 +300,11 @@ describe("ObserveScreen", function() {
         const devices = await adb.executeCommand("devices");
         const deviceLines = devices.stdout.split("\n").filter(line => line.trim() && !line.includes("List of devices"));
         if (deviceLines.length === 0) {
-          this.skip(); // Skip tests if no devices are connected
+          // Note: Bun does not support dynamic test skipping // Skip tests if no devices are connected
           return;
         }
       } catch (error) {
-        this.skip(); // Skip tests if ADB command fails
+        // Note: Bun does not support dynamic test skipping // Skip tests if ADB command fails
         return;
       }
 
@@ -447,7 +445,7 @@ describe("ObserveScreen", function() {
       const devices = await adb.executeCommand("devices");
       const deviceLines = devices.stdout.split("\n").filter(line => line.trim() && !line.includes("List of devices"));
       if (deviceLines.length !== 1) {
-        this.skip(); // Skip if multiple devices or no devices
+        // Note: Bun does not support dynamic test skipping // Skip if multiple devices or no devices
         return;
       }
 

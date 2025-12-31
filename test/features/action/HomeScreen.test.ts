@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test, beforeEach } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -52,9 +52,9 @@ describe("HomeScreen", () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const result = await homeScreen.execute();
-      assert.isTrue(result.success);
-      assert.equal(result.navigationMethod, "hardware");
-      assert.isDefined(result.observation);
+      expect(result.success).toBe(true);
+      expect(result.navigationMethod).toBe("hardware");
+      expect(result.observation).toBeDefined();
 
       // Verify hardware home button keyevent was executed
       const executedCommands = fakeAdb.getExecutedCommands();
@@ -69,8 +69,8 @@ describe("HomeScreen", () => {
       };
       const result = await homeScreen.execute(progressCallback);
 
-      assert.isTrue(result.success);
-      assert.equal(result.navigationMethod, "hardware");
+      expect(result.success).toBe(true);
+      expect(result.navigationMethod).toBe("hardware");
     });
 
     test("should include observation in result", async () => {
@@ -78,9 +78,9 @@ describe("HomeScreen", () => {
 
       const result = await homeScreen.execute();
 
-      assert.isTrue(result.success);
-      assert.isDefined(result.observation);
-      assert.isDefined(result.observation?.screenSize);
+      expect(result.success).toBe(true);
+      expect(result.observation).toBeDefined();
+      expect(result.observation?.screenSize).toBeDefined();
     });
   });
 
@@ -92,7 +92,7 @@ describe("HomeScreen", () => {
         await homeScreen.execute();
         assert.fail("Should have thrown an error");
       } catch (error) {
-        assert.isDefined(error);
+        expect(error).toBeDefined();
       }
     });
   });
@@ -119,10 +119,10 @@ describe("HomeScreen", () => {
       const result1 = await homeScreen.execute();
       const result2 = await homeScreen2.execute();
 
-      assert.isTrue(result1.success);
-      assert.isTrue(result2.success);
-      assert.equal(result1.navigationMethod, "hardware");
-      assert.equal(result2.navigationMethod, "hardware");
+      expect(result1.success).toBe(true);
+      expect(result2.success).toBe(true);
+      expect(result1.navigationMethod).toBe("hardware");
+      expect(result2.navigationMethod).toBe("hardware");
     });
   });
 });

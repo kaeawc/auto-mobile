@@ -1,5 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
-import { expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ListResourcesRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
@@ -20,7 +19,6 @@ describe("MCP Resources List", () => {
   });
 
   test("given no resources are registered, endpoint should return an empty list", async function() {
-    this.timeout(5000);
 
     const { client } = fixture.getContext();
 
@@ -48,7 +46,6 @@ describe("MCP Resources List", () => {
   });
 
   test("given a resource is registered, endpoint should return a list with that resource", async function() {
-    this.timeout(5000);
 
     // For this test, we need to mock or implement a resource registration
     // Since the current server doesn't have resource registration functionality,

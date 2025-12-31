@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test, beforeEach } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -64,10 +64,10 @@ describe("Shake", () => {
 
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 1000);
-      assert.equal(result.intensity, 100);
-      assert.isDefined(result.observation);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(1000);
+      expect(result.intensity).toBe(100);
+      expect(result.observation).toBeDefined();
 
       // Verify timer was called with correct duration
       assert.isTrue(fakeTimer.wasSleepCalled(1000));
@@ -89,9 +89,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 100);
-      assert.equal(result.intensity, 100);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(100);
+      expect(result.intensity).toBe(100);
       assert.isTrue(fakeTimer.wasSleepCalled(100));
     });
 
@@ -106,9 +106,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 100);
-      assert.equal(result.intensity, 200);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(100);
+      expect(result.intensity).toBe(200);
     });
 
     test("should execute shake with custom duration and intensity", async () => {
@@ -122,9 +122,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 100);
-      assert.equal(result.intensity, 150);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(100);
+      expect(result.intensity).toBe(150);
     });
 
     test("should execute shake with empty options object", async () => {
@@ -138,9 +138,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 1000);
-      assert.equal(result.intensity, 100);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(1000);
+      expect(result.intensity).toBe(100);
 
       // Verify timer was called with default duration
       assert.isTrue(fakeTimer.wasSleepCalled(1000));
@@ -157,9 +157,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 0);
-      assert.equal(result.intensity, 100);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(0);
+      expect(result.intensity).toBe(100);
     });
 
     test("should handle zero intensity", async () => {
@@ -172,9 +172,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 100);
-      assert.equal(result.intensity, 0);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(100);
+      expect(result.intensity).toBe(0);
     });
 
     test("should work with progress callback", async () => {
@@ -192,7 +192,7 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
+      expect(result.success).toBe(true);
       // Progress callback should be called by BaseVisualChange
       assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
     });
@@ -209,11 +209,11 @@ describe("Shake", () => {
         fakeTimer.resolveAll();
         const result = await resultPromise;
         // If we get here, command succeeded despite fake error
-        assert.equal(result.duration, 100);
-        assert.equal(result.intensity, 100);
+        expect(result.duration).toBe(100);
+        expect(result.intensity).toBe(100);
       } catch (caughtError) {
         // If the error bubbled up, that's also valid behavior
-        assert.isDefined(caughtError);
+        expect(caughtError).toBeDefined();
       }
     });
 
@@ -230,10 +230,10 @@ describe("Shake", () => {
         fakeTimer.resolveAll();
         const result = await resultPromise;
         // If we get here, BaseVisualChange caught the error
-        assert.isDefined(result);
+        expect(result).toBeDefined();
       } catch (caughtError) {
         // If the error bubbled up, that's also valid behavior
-        assert.isDefined(caughtError);
+        expect(caughtError).toBeDefined();
       }
     });
   });
@@ -241,18 +241,18 @@ describe("Shake", () => {
   describe("constructor", () => {
     test("should work with null deviceId", () => {
       const shakeInstance = new Shake("test-device", fakeAdb, null, fakeTimer);
-      assert.isDefined(shakeInstance);
+      expect(shakeInstance).toBeDefined();
     });
 
     test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
       const shakeInstance = new Shake("test-device", customAdb, null, fakeTimer);
-      assert.isDefined(shakeInstance);
+      expect(shakeInstance).toBeDefined();
     });
 
     test("should work with default timer when not provided", () => {
       const shakeInstance = new Shake("test-device", fakeAdb);
-      assert.isDefined(shakeInstance);
+      expect(shakeInstance).toBeDefined();
     });
   });
 
@@ -270,7 +270,7 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
+      expect(result.success).toBe(true);
       // Timer was called with the correct duration
       assert.isTrue(fakeTimer.wasSleepCalled(duration));
       // Verify timer history
@@ -291,8 +291,8 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.intensity, 9999);
+      expect(result.success).toBe(true);
+      expect(result.intensity).toBe(9999);
 
       const executedCommands = fakeAdb.getExecutedCommands();
       assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 9999:9999:9999")));
@@ -310,8 +310,8 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 200);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(200);
 
       // Both commands should still be called
       const executedCommands = fakeAdb.getExecutedCommands();
@@ -329,9 +329,9 @@ describe("Shake", () => {
       fakeTimer.resolveAll();
       const result = await resultPromise;
 
-      assert.isTrue(result.success);
-      assert.equal(result.duration, 100);
-      assert.equal(result.intensity, -50);
+      expect(result.success).toBe(true);
+      expect(result.duration).toBe(100);
+      expect(result.intensity).toBe(-50);
     });
   });
 });

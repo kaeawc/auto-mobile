@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AccessibilityServiceClient } from "../../../src/features/observe/AccessibilityServiceClient";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidAccessibilityServiceManager } from "../../../src/utils/AccessibilityServiceManager";
@@ -101,7 +100,6 @@ describe("AccessibilityServiceClient", function() {
 
   describe("getLatestHierarchy", function() {
     test("should return hierarchy data when WebSocket receives fresh data", async function() {
-      this.timeout(5000);
 
       const mockHierarchyData = {
         updatedAt: 1750934583218,
@@ -144,7 +142,6 @@ describe("AccessibilityServiceClient", function() {
     });
 
     test("should return cached data when not waiting for fresh data", async function() {
-      this.timeout(5000);
 
       const mockHierarchyData = {
         updatedAt: 1750934583218,
@@ -315,7 +312,6 @@ describe("AccessibilityServiceClient", function() {
 
   describe("getAccessibilityHierarchy", function() {
     test("should return null when service is not available", async function() {
-      this.timeout(5000);
 
       // Configure service as not available
       fakeAdb.setCommandResponse("pm list packages", { stdout: "", stderr: "" });
@@ -325,7 +321,6 @@ describe("AccessibilityServiceClient", function() {
     });
 
     it.skip("should return converted hierarchy when service is available and working", async function() {
-      this.timeout(10000);
 
       // Configure service as available
       fakeAdb.setCommandResponse("pm list packages", {

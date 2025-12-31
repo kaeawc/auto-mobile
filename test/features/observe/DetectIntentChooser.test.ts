@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { DetectIntentChooser } from "../../../src/features/observe/DetectIntentChooser";
 import { ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";

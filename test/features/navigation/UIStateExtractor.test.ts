@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ViewHierarchyResult, WindowHierarchy } from "../../../src/models";
 
@@ -6,12 +6,12 @@ describe("UIStateExtractor", () => {
   describe("extract", () => {
     test("should return undefined for undefined hierarchy", () => {
       const result = UIStateExtractor.extract(undefined);
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should return undefined for hierarchy without hierarchy property", () => {
       const result = UIStateExtractor.extract({} as ViewHierarchyResult);
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should return undefined when no selected elements or destination found", () => {
@@ -23,7 +23,7 @@ describe("UIStateExtractor", () => {
         }
       });
       const result = UIStateExtractor.extract(hierarchy);
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should extract selected element with text", () => {
@@ -38,9 +38,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "Home");
+      expect(result!.selectedElements[0].text).toBe("Home");
     });
 
     test("should extract selected element with resource-id", () => {
@@ -55,9 +55,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].resourceId, "com.app:id/nav_home");
+      expect(result!.selectedElements[0].resourceId).toBe("com.app:id/nav_home");
     });
 
     test("should extract selected element with content-desc", () => {
@@ -72,9 +72,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].contentDesc, "Home Tab");
+      expect(result!.selectedElements[0].contentDesc).toBe("Home Tab");
     });
 
     test("should extract multiple selected elements", () => {
@@ -96,10 +96,10 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 2);
-      assert.equal(result!.selectedElements[0].text, "Tab1");
-      assert.equal(result!.selectedElements[1].text, "Tab2");
+      expect(result!.selectedElements[0].text).toBe("Tab1");
+      expect(result!.selectedElements[1].text).toBe("Tab2");
     });
 
     test("should extract nested selected elements", () => {
@@ -120,9 +120,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "NestedTab");
+      expect(result!.selectedElements[0].text).toBe("NestedTab");
     });
 
     test("should extract destinationId from resource-id", () => {
@@ -136,8 +136,8 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.equal(result!.destinationId, "HomeDestination");
+      expect(result).toBeDefined();
+      expect(result!.destinationId).toBe("HomeDestination");
     });
 
     test("should extract text from child nodes for Compose layouts", () => {
@@ -158,9 +158,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "ChildText");
+      expect(result!.selectedElements[0].text).toBe("ChildText");
     });
 
     test("should ignore elements with selected=false", () => {
@@ -175,7 +175,7 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should not include elements without identifier", () => {
@@ -191,7 +191,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       // Should be undefined because the selected element has no identifier
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should extract both selected elements and destinationId", () => {
@@ -210,10 +210,10 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.equal(result!.destinationId, "SettingsDestination");
+      expect(result).toBeDefined();
+      expect(result!.destinationId).toBe("SettingsDestination");
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "General");
+      expect(result!.selectedElements[0].text).toBe("General");
     });
 
     test("should handle array of child nodes", () => {
@@ -238,9 +238,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "Second");
+      expect(result!.selectedElements[0].text).toBe("Second");
     });
 
     test("should handle real-world tab navigation hierarchy", () => {
@@ -277,10 +277,10 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.equal(result!.destinationId, "HomeDestination");
+      expect(result).toBeDefined();
+      expect(result!.destinationId).toBe("HomeDestination");
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "Media");
+      expect(result!.selectedElements[0].text).toBe("Media");
     });
   });
 
@@ -311,12 +311,12 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 1);
-      assert.equal(result!.modalStack![0].type, "dialog");
-      assert.equal(result!.modalStack![0].windowId, 123);
-      assert.equal(result!.modalStack![0].layer, 1);
+      expect(result!.modalStack![0].type).toBe("dialog");
+      expect(result!.modalStack![0].windowId).toBe(123);
+      expect(result!.modalStack![0].layer).toBe(1);
     });
 
     test("should extract bottom sheet modal from windows array", () => {
@@ -346,12 +346,12 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 1);
-      assert.equal(result!.modalStack![0].type, "bottomsheet");
-      assert.equal(result!.modalStack![0].windowId, 456);
-      assert.equal(result!.modalStack![0].identifier, "com.app:id/settings_bottom_sheet");
+      expect(result!.modalStack![0].type).toBe("bottomsheet");
+      expect(result!.modalStack![0].windowId).toBe(456);
+      expect(result!.modalStack![0].identifier).toBe("com.app:id/settings_bottom_sheet");
     });
 
     test("should extract popup modal from windows array", () => {
@@ -376,11 +376,11 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 1);
-      assert.equal(result!.modalStack![0].type, "popup");
-      assert.equal(result!.modalStack![0].identifier, "More options");
+      expect(result!.modalStack![0].type).toBe("popup");
+      expect(result!.modalStack![0].identifier).toBe("More options");
     });
 
     test("should extract multiple modals and sort by layer", () => {
@@ -416,14 +416,14 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 2);
       // Should be sorted by layer (bottom to top)
-      assert.equal(result!.modalStack![0].layer, 1);
-      assert.equal(result!.modalStack![0].type, "bottomsheet");
-      assert.equal(result!.modalStack![1].layer, 3);
-      assert.equal(result!.modalStack![1].type, "dialog");
+      expect(result!.modalStack![0].layer).toBe(1);
+      expect(result!.modalStack![0].type).toBe("bottomsheet");
+      expect(result!.modalStack![1].layer).toBe(3);
+      expect(result!.modalStack![1].type).toBe("dialog");
     });
 
     test("should extract menu modal from windows array", () => {
@@ -448,10 +448,10 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 1);
-      assert.equal(result!.modalStack![0].type, "menu");
+      expect(result!.modalStack![0].type).toBe("menu");
     });
 
     test("should not extract non-modal windows", () => {
@@ -477,7 +477,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       // Should be undefined because no selected elements or destination, and no modals
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should prefer resource-id over text for modal identifier", () => {
@@ -503,9 +503,9 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
-      assert.equal(result!.modalStack![0].identifier, "com.app:id/confirmation_dialog");
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
+      expect(result!.modalStack![0].identifier).toBe("com.app:id/confirmation_dialog");
     });
 
     test("should skip android system IDs for modal identifier", () => {
@@ -531,10 +531,10 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
-      assert.isDefined(result!.modalStack);
+      expect(result).toBeDefined();
+      expect(result!.modalStack).toBeDefined();
       // Should use text instead of android:id
-      assert.equal(result!.modalStack![0].identifier, "Dialog Title");
+      expect(result!.modalStack![0].identifier).toBe("Dialog Title");
     });
 
     test("should extract modals along with selected elements", () => {
@@ -564,12 +564,12 @@ describe("UIStateExtractor", () => {
 
       const result = UIStateExtractor.extract(hierarchy);
 
-      assert.isDefined(result);
+      expect(result).toBeDefined();
       assert.lengthOf(result!.selectedElements, 1);
-      assert.equal(result!.selectedElements[0].text, "Home");
-      assert.isDefined(result!.modalStack);
+      expect(result!.selectedElements[0].text).toBe("Home");
+      expect(result!.modalStack).toBeDefined();
       assert.lengthOf(result!.modalStack!, 1);
-      assert.equal(result!.modalStack![0].type, "bottomsheet");
+      expect(result!.modalStack![0].type).toBe("bottomsheet");
     });
   });
 
@@ -580,7 +580,7 @@ describe("UIStateExtractor", () => {
         platform: "android" as const
       };
       const result = UIStateExtractor.createScrollPosition(options);
-      assert.isUndefined(result);
+      expect(result).toBeUndefined();
     });
 
     test("should create scroll position with target element", () => {
@@ -593,11 +593,11 @@ describe("UIStateExtractor", () => {
       };
       const result = UIStateExtractor.createScrollPosition(options);
 
-      assert.isDefined(result);
-      assert.equal(result!.direction, "down");
-      assert.equal(result!.targetElement.text, "Advanced Settings");
-      assert.isUndefined(result!.container);
-      assert.isUndefined(result!.speed);
+      expect(result).toBeDefined();
+      expect(result!.direction).toBe("down");
+      expect(result!.targetElement.text).toBe("Advanced Settings");
+      expect(result!.container).toBeUndefined();
+      expect(result!.speed).toBeUndefined();
     });
 
     test("should create scroll position with container", () => {
@@ -614,13 +614,13 @@ describe("UIStateExtractor", () => {
       };
       const result = UIStateExtractor.createScrollPosition(options);
 
-      assert.isDefined(result);
-      assert.equal(result!.direction, "up");
-      assert.equal(result!.targetElement.text, "Notification Settings");
-      assert.equal(result!.targetElement.resourceId, "com.app:id/notification_item");
-      assert.isDefined(result!.container);
-      assert.equal(result!.container!.resourceId, "com.app:id/settings_list");
-      assert.isUndefined(result!.speed);
+      expect(result).toBeDefined();
+      expect(result!.direction).toBe("up");
+      expect(result!.targetElement.text).toBe("Notification Settings");
+      expect(result!.targetElement.resourceId).toBe("com.app:id/notification_item");
+      expect(result!.container).toBeDefined();
+      expect(result!.container!.resourceId).toBe("com.app:id/settings_list");
+      expect(result!.speed).toBeUndefined();
     });
 
     test("should create scroll position with speed", () => {
@@ -634,10 +634,10 @@ describe("UIStateExtractor", () => {
       };
       const result = UIStateExtractor.createScrollPosition(options);
 
-      assert.isDefined(result);
-      assert.equal(result!.direction, "down");
-      assert.equal(result!.targetElement.text, "Developer Options");
-      assert.equal(result!.speed, "slow");
+      expect(result).toBeDefined();
+      expect(result!.direction).toBe("down");
+      expect(result!.targetElement.text).toBe("Developer Options");
+      expect(result!.speed).toBe("slow");
     });
 
     test("should create scroll position with all fields", () => {
@@ -656,13 +656,13 @@ describe("UIStateExtractor", () => {
       };
       const result = UIStateExtractor.createScrollPosition(options);
 
-      assert.isDefined(result);
-      assert.equal(result!.direction, "left");
-      assert.equal(result!.targetElement.text, "Tab 3");
-      assert.equal(result!.targetElement.resourceId, "com.app:id/tab_3");
-      assert.equal(result!.container!.text, "Tab Container");
-      assert.equal(result!.container!.resourceId, "com.app:id/tab_container");
-      assert.equal(result!.speed, "fast");
+      expect(result).toBeDefined();
+      expect(result!.direction).toBe("left");
+      expect(result!.targetElement.text).toBe("Tab 3");
+      expect(result!.targetElement.resourceId).toBe("com.app:id/tab_3");
+      expect(result!.container!.text).toBe("Tab Container");
+      expect(result!.container!.resourceId).toBe("com.app:id/tab_container");
+      expect(result!.speed).toBe("fast");
     });
   });
 });

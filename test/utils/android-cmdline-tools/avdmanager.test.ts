@@ -1,8 +1,7 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { AvdManagerDependencies } from "../../../src/utils/android-cmdline-tools/avdmanager";
 
 describe("AVDManager", function() {
-  this.timeout(15000);
   let mockLocation: any;
   let avdmanager: any;
 

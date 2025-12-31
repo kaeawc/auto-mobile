@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { GetSystemInsets } from "../../../src/features/observe/GetSystemInsets";
 import { BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -129,7 +128,6 @@ describe("GetSystemInsets", function() {
   });
 
   describe("Integration Tests", function() {
-    this.timeout(15000);
 
     let getSystemInsets: GetSystemInsets;
     let fakeAdb: FakeAdbExecutor;
@@ -158,11 +156,11 @@ describe("GetSystemInsets", function() {
         const devices = await fakeAdb.executeCommand("devices");
         const deviceLines = devices.stdout.split("\n").filter((line: string) => line.trim() && !line.includes("List of devices"));
         if (deviceLines.length === 0) {
-          this.skip(); // Skip tests if no devices are connected (which will always be the case with our mock)
+          // Note: Bun does not support dynamic test skipping // Skip tests if no devices are connected (which will always be the case with our mock)
           return;
         }
       } catch (error) {
-        this.skip(); // Skip tests if ADB command fails
+        // Note: Bun does not support dynamic test skipping // Skip tests if ADB command fails
         return;
       }
     });

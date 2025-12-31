@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, before } from "bun:test";
 import { registerDeepLinkTools } from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { DeviceUtils } from "../../src/utils/deviceUtils";
@@ -17,7 +17,6 @@ async function checkAvdAvailability(): Promise<boolean> {
 }
 
 describe("Deep Link Tools Registration", function() {
-  this.timeout(5000);
   let avdsAvailable: boolean;
   let fakeDeepLinkManager: FakeDeepLinkManager;
 
@@ -119,7 +118,7 @@ describe("Deep Link Tools Registration", function() {
     describe("getDeepLinks handler", () => {
       test("should handle valid app ID", async function() {
         if (!avdsAvailable) {
-          this.skip();
+          // Note: Bun does not support dynamic test skipping
         }
 
         const tool = ToolRegistry.getTool("getDeepLinks");
@@ -147,7 +146,7 @@ describe("Deep Link Tools Registration", function() {
     describe("detectIntentChooser handler", () => {
       test("should handle optional view hierarchy", async function() {
         if (!avdsAvailable) {
-          this.skip();
+          // Note: Bun does not support dynamic test skipping
         }
 
         const tool = ToolRegistry.getTool("detectIntentChooser");
@@ -163,7 +162,7 @@ describe("Deep Link Tools Registration", function() {
 
       test("should handle provided view hierarchy", async function() {
         if (!avdsAvailable) {
-          this.skip();
+          // Note: Bun does not support dynamic test skipping
         }
 
         const tool = ToolRegistry.getTool("detectIntentChooser");
@@ -181,7 +180,7 @@ describe("Deep Link Tools Registration", function() {
     describe("handleIntentChooser handler", () => {
       test("should handle all preference options", async function() {
         if (!avdsAvailable) {
-          this.skip();
+          // Note: Bun does not support dynamic test skipping
         }
 
         const tool = ToolRegistry.getTool("handleIntentChooser");
@@ -201,7 +200,7 @@ describe("Deep Link Tools Registration", function() {
 
       test("should handle custom app package", async function() {
         if (!avdsAvailable) {
-          this.skip();
+          // Note: Bun does not support dynamic test skipping
         }
 
         const tool = ToolRegistry.getTool("handleIntentChooser");
@@ -241,7 +240,7 @@ describe("Deep Link Tools Registration", function() {
 
     test("should handle missing device ID gracefully", async function() {
       if (!avdsAvailable) {
-        this.skip();
+        // Note: Bun does not support dynamic test skipping
       }
 
       const tool = ToolRegistry.getTool("getDeepLinks");

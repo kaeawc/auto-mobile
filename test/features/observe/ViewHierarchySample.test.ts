@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import path from "path";
 import xml2js from "xml2js";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
@@ -11,7 +10,6 @@ import { AccessibilityServiceClient } from "../../../src/features/observe/Access
 
 describe("ViewHierarchy - Sample Data", function() {
   // Set longer timeout for XML parsing
-  this.timeout(10000);
 
   let viewHierarchy: ViewHierarchy;
   let fakeAdb: FakeAdbExecutor;

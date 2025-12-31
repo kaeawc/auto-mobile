@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test, beforeEach, afterEach, before } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
@@ -84,9 +84,9 @@ describe("NavigateTo", () => {
         platform: "android"
       });
 
-      assert.isFalse(result.success);
+      expect(result.success).toBe(false);
       assert.include(result.error!, "Cannot determine current screen");
-      assert.equal(result.stepsExecuted, 0);
+      expect(result.stepsExecuted).toBe(0);
     });
 
     test("should return success when already on target screen", async () => {
@@ -107,9 +107,9 @@ describe("NavigateTo", () => {
         platform: "android"
       });
 
-      assert.isTrue(result.success);
-      assert.equal(result.message, "Already on target screen");
-      assert.equal(result.stepsExecuted, 0);
+      expect(result.success).toBe(true);
+      expect(result.message).toBe("Already on target screen");
+      expect(result.stepsExecuted).toBe(0);
     });
 
     test("should return error when no path exists", async () => {
@@ -130,7 +130,7 @@ describe("NavigateTo", () => {
         platform: "android"
       });
 
-      assert.isFalse(result.success);
+      expect(result.success).toBe(false);
       assert.include(result.error!, "No known path");
       assert.include(result.error!, "HomeScreen");
       assert.include(result.error!, "UnknownScreen");
@@ -183,8 +183,8 @@ describe("NavigateTo", () => {
 
       // Should have attempted to execute the tool call
       assert.lengthOf(toolCallLog, 1);
-      assert.equal(toolCallLog[0].toolName, "tapOn");
-      assert.equal(toolCallLog[0].args.text, "Settings");
+      expect(toolCallLog[0].toolName).toBe("tapOn");
+      expect(toolCallLog[0].args.text).toBe("Settings");
     });
 
     test("should include path in successful navigation result", async () => {
@@ -227,9 +227,9 @@ describe("NavigateTo", () => {
         platform: "android"
       });
 
-      assert.isDefined(result.path);
+      expect(result.path).toBeDefined();
       assert.isArray(result.path);
-      assert.isTrue(result.path!.length > 0);
+      expect(result.path!.length > 0).toBe(true);
     });
 
     test("should report progress during navigation", async () => {
@@ -275,8 +275,8 @@ describe("NavigateTo", () => {
         }
       );
 
-      assert.isTrue(progressUpdates.length > 0);
-      assert.equal(progressUpdates[0].total, 1);
+      expect(progressUpdates.length > 0).toBe(true);
+      expect(progressUpdates[0].total).toBe(1);
       assert.include(progressUpdates[0].message, "Screen1");
       assert.include(progressUpdates[0].message, "Screen2");
     });
@@ -299,7 +299,7 @@ describe("NavigateTo", () => {
         platform: "android"
       });
 
-      assert.isDefined(result.durationMs);
+      expect(result.durationMs).toBeDefined();
       assert.isNumber(result.durationMs);
       assert.isAtLeast(result.durationMs!, 0);
     });
@@ -362,8 +362,8 @@ describe("NavigateTo", () => {
 
       // Should execute two tool calls: Home -> Settings -> Advanced
       assert.lengthOf(toolCallLog, 2);
-      assert.equal(toolCallLog[0].args.text, "Settings");
-      assert.equal(toolCallLog[1].args.text, "Advanced");
+      expect(toolCallLog[0].args.text).toBe("Settings");
+      expect(toolCallLog[1].args.text).toBe("Advanced");
     });
   });
 });

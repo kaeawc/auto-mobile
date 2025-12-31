@@ -1,5 +1,4 @@
-import { describe, test } from "bun:test";
-import { expect } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../src/server/index";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 

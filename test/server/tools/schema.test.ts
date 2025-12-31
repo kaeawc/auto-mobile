@@ -1,5 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
-import { expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
@@ -60,7 +59,6 @@ describe("MCP Tools Schema", () => {
   });
 
   test("given a request that matches valid schema, should return a valid response", async function() {
-    this.timeout(10000);
 
     const { client } = fixture.getContext();
 
@@ -75,7 +73,7 @@ describe("MCP Tools Schema", () => {
     // Test listDeviceImages tool which requires emulator CLI
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
-      this.skip(); // Skip test if emulator CLI is not available
+      // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
     }
 
     const result = await client.request({
@@ -92,7 +90,6 @@ describe("MCP Tools Schema", () => {
   });
 
   test("given a request omits fields that are optional by the schema, should return a valid response", async function() {
-    this.timeout(10000);
 
     const { client } = fixture.getContext();
 
@@ -107,7 +104,7 @@ describe("MCP Tools Schema", () => {
     // Test listDeviceImages without optional parameters (listDeviceImages has no required params)
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
-      this.skip(); // Skip test if emulator CLI is not available
+      // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
     }
 
     const result = await client.request({
@@ -124,14 +121,13 @@ describe("MCP Tools Schema", () => {
   });
 
   test("given a request contains fields that are not defined by the schema, should return an error response", async function() {
-    this.timeout(10000);
 
     const { client } = fixture.getContext();
 
     // Test with listDeviceImages and unknown parameter to avoid device dependency
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
-      this.skip(); // Skip test if emulator CLI is not available
+      // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
     }
 
     try {
@@ -161,7 +157,6 @@ describe("MCP Tools Schema", () => {
   });
 
   test("given a request contains fields that are defined by the schema but have incorrect types, should return an error response", async function() {
-    this.timeout(10000);
 
     const { client } = fixture.getContext();
 
@@ -185,7 +180,6 @@ describe("MCP Tools Schema", () => {
   });
 
   test("given a request contains fields that are defined by the schema but have incorrect values, should return an error response", async function() {
-    this.timeout(10000);
 
     const { client } = fixture.getContext();
 

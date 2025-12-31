@@ -138,23 +138,28 @@ describe("FakeSimulator", () => {
 
     test("should return empty array for uncalled methods", () => {
       const calls = fakeSimulator.getMethodCalls("nonExistentMethod");
-      expect(Array.isArray(calls)).toBe(true).that.is.empty;
+      expect(Array.isArray(calls)).toBe(true);
+      expect(calls).toHaveLength(0);
     });
   });
 
   describe("default behaviors", () => {
     test("should return empty arrays by default", async () => {
       const names = await fakeSimulator.listSimulators();
-      expect(Array.isArray(names)).toBe(true).that.is.empty;
+      expect(Array.isArray(names)).toBe(true);
+      expect(names).toHaveLength(0);
 
       const info = await fakeSimulator.getSimulatorInfo();
-      expect(Array.isArray(info)).toBe(true).that.is.empty;
+      expect(Array.isArray(info)).toBe(true);
+      expect(info).toHaveLength(0);
 
       const running = await fakeSimulator.getRunningSimulators();
-      expect(Array.isArray(running)).toBe(true).that.is.empty;
+      expect(Array.isArray(running)).toBe(true);
+      expect(running).toHaveLength(0);
 
       const apps = await fakeSimulator.listInstalledApps("udid");
-      expect(Array.isArray(apps)).toBe(true).that.is.empty;
+      expect(Array.isArray(apps)).toBe(true);
+      expect(apps).toHaveLength(0);
     });
 
     test("should return false for isSimulatorRunning by default", async () => {

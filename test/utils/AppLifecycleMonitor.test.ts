@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { AppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AppLifecycleMonitorFactory } from "../../src/utils/factories/AppLifecycleMonitorFactory";

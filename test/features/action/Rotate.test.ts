@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test, beforeEach } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -52,7 +52,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "portrait");
+      expect(orientation).toBe("portrait");
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system user_rotation"));
     });
 
@@ -61,7 +61,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "landscape");
+      expect(orientation).toBe("landscape");
     });
 
     test("should return portrait for user_rotation 2", async () => {
@@ -69,7 +69,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "portrait");
+      expect(orientation).toBe("portrait");
     });
 
     test("should return landscape for user_rotation 3", async () => {
@@ -77,7 +77,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "landscape");
+      expect(orientation).toBe("landscape");
     });
 
     test("should return portrait as default when ADB command fails", async () => {
@@ -91,7 +91,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "portrait");
+      expect(orientation).toBe("portrait");
     });
   });
 
@@ -101,7 +101,7 @@ describe("Rotate", () => {
 
       const isLocked = await rotate.isOrientationLocked();
 
-      assert.isTrue(isLocked);
+      expect(isLocked).toBe(true);
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation"));
     });
 
@@ -110,7 +110,7 @@ describe("Rotate", () => {
 
       const isLocked = await rotate.isOrientationLocked();
 
-      assert.isFalse(isLocked);
+      expect(isLocked).toBe(false);
     });
 
     test("should return false as default when ADB command fails", async () => {
@@ -124,7 +124,7 @@ describe("Rotate", () => {
 
       const isLocked = await rotate.isOrientationLocked();
 
-      assert.isFalse(isLocked);
+      expect(isLocked).toBe(false);
     });
   });
 
@@ -135,9 +135,9 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      assert.isTrue(result.success);
-      assert.equal(result.orientation, "portrait");
-      assert.isFalse(result.rotationPerformed);
+      expect(result.success).toBe(true);
+      expect(result.orientation).toBe("portrait");
+      expect(result.rotationPerformed).toBe(false);
       assert.include(result.message || "", "already in portrait orientation");
 
       // Verify that we got the current orientation
@@ -180,7 +180,7 @@ describe("Rotate", () => {
 
       const result = await rotate.execute("portrait");
 
-      assert.isTrue(result.success);
+      expect(result.success).toBe(true);
       // Verify that the unlock command was executed
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1"));
       // Verify the rotation command was executed
@@ -197,7 +197,7 @@ describe("Rotate", () => {
         source: "local"
       };
       const rotateInstance = new Rotate(device);
-      assert.isDefined(rotateInstance);
+      expect(rotateInstance).toBeDefined();
     });
 
     test("should work with custom ADB executor", () => {
@@ -209,7 +209,7 @@ describe("Rotate", () => {
       };
       const customAdb = new FakeAdbExecutor();
       const rotateInstance = new Rotate(device, customAdb);
-      assert.isDefined(rotateInstance);
+      expect(rotateInstance).toBeDefined();
     });
   });
 
@@ -219,7 +219,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "landscape");
+      expect(orientation).toBe("landscape");
     });
 
     test("should handle non-numeric ADB output", async () => {
@@ -227,7 +227,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "portrait"); // Should default to portrait
+      expect(orientation).toBe("portrait"); // Should default to portrait
     });
 
     test("should handle empty ADB output", async () => {
@@ -235,7 +235,7 @@ describe("Rotate", () => {
 
       const orientation = await rotate.getCurrentOrientation();
 
-      assert.equal(orientation, "portrait"); // Should default to portrait
+      expect(orientation).toBe("portrait"); // Should default to portrait
     });
   });
 });

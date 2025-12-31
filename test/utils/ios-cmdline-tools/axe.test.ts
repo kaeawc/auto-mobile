@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { AxeClient } from "../../../src/utils/ios-cmdline-tools/AxeClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 

@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import path from "path";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { LOG_DIR } from "../../src/utils/constants";
@@ -171,6 +171,7 @@ describe("Replay Tools", () => {
     const logs = await replayToolsService.listToolLogs();
 
     // Verify results
-    expect(Array.isArray(logs)).toBe(true).that.is.empty;
+    expect(Array.isArray(logs)).toBe(true);
+    expect(logs).toHaveLength(0);
   });
 });

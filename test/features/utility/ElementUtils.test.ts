@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { describe, test, beforeEach } from "bun:test";
 import { ElementUtils } from "../../../src/features/utility/ElementUtils";
 import { Element } from "../../../src/models";
 import { ObserveResult } from "../../../src/models";
@@ -59,17 +59,17 @@ describe("ElementUtils", () => {
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
       assert.lengthOf(result, 3);
-      assert.equal(result[0].index, 0);
-      assert.equal(result[0].text, "Root");
-      assert.equal(result[1].index, 1);
-      assert.equal(result[1].text, "Button 1");
-      assert.equal(result[2].index, 2);
-      assert.equal(result[2].text, "Text View");
+      expect(result[0].index).toBe(0);
+      expect(result[0].text).toBe("Root");
+      expect(result[1].index).toBe(1);
+      expect(result[1].text).toBe("Button 1");
+      expect(result[2].index).toBe(2);
+      expect(result[2].text).toBe("Text View");
     });
 
     test("should handle empty view hierarchy", () => {
       const result = elementUtils.flattenViewHierarchy(null as any);
-      assert.deepEqual(result, []);
+      expect(result).toEqual([]);
     });
 
     test("should handle view hierarchy without parseable elements", () => {
@@ -86,7 +86,7 @@ describe("ElementUtils", () => {
 
       const mockObserveResult = createObserveResult(viewHierarchy);
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
-      assert.deepEqual(result, []);
+      expect(result).toEqual([]);
     });
 
     test("should prefer text over content-desc", () => {
@@ -107,7 +107,7 @@ describe("ElementUtils", () => {
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
       assert.lengthOf(result, 1);
-      assert.equal(result[0].text, "Button Text");
+      expect(result[0].text).toBe("Button Text");
     });
 
     test("should use content-desc when text is not available", () => {
@@ -127,7 +127,7 @@ describe("ElementUtils", () => {
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
       assert.lengthOf(result, 1);
-      assert.equal(result[0].text, "Image Description");
+      expect(result[0].text).toBe("Image Description");
     });
   });
 
@@ -164,25 +164,25 @@ describe("ElementUtils", () => {
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 1);
 
       assert.isNotNull(result);
-      assert.deepEqual(result?.element.bounds, { left: 10, top: 10, right: 50, bottom: 50 });
-      assert.equal(result?.text, "Button 1");
+      expect(result?.element.bounds).toEqual({ left: 10, top: 10, right: 50, bottom: 50 });
+      expect(result?.text).toBe("Button 1");
     });
 
     test("should return null for invalid index", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 10);
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should return null for negative index", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, -1);
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should return null for empty view hierarchy", () => {
       const result = elementUtils.findElementByIndex(null as any, 0);
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should handle element without text", () => {
@@ -201,7 +201,7 @@ describe("ElementUtils", () => {
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 0);
 
       assert.isNotNull(result);
-      assert.isUndefined(result?.text);
+      expect(result?.text).toBeUndefined();
     });
   });
 
@@ -213,7 +213,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement);
-      assert.isTrue(result);
+      expect(result).toBe(true);
     });
 
     test("should return true when texts match", () => {
@@ -223,7 +223,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement, "Button Text");
-      assert.isTrue(result);
+      expect(result).toBe(true);
     });
 
     test("should return true for fuzzy text match", () => {
@@ -233,7 +233,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement, "Button");
-      assert.isTrue(result);
+      expect(result).toBe(true);
     });
 
     test("should return false when expected text provided but element has no text", () => {
@@ -243,7 +243,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement, "Expected Text");
-      assert.isFalse(result);
+      expect(result).toBe(false);
     });
 
     test("should return false when texts do not match", () => {
@@ -253,7 +253,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement, "Different Text");
-      assert.isFalse(result);
+      expect(result).toBe(false);
     });
 
     test("should handle case insensitive matching", () => {
@@ -263,7 +263,7 @@ describe("ElementUtils", () => {
       };
 
       const result = elementUtils.validateElementText(foundElement, "submit");
-      assert.isTrue(result);
+      expect(result).toBe(true);
     });
   });
 
@@ -339,8 +339,8 @@ describe("ElementUtils", () => {
       );
 
       assert.isNotNull(result);
-      assert.equal(result?.text, "Item 1");
-      assert.deepEqual(result?.bounds, { left: 50, top: 850, right: 1030, bottom: 950 });
+      expect(result?.text).toBe("Item 1");
+      expect(result?.bounds).toEqual({ left: 50, top: 850, right: 1030, bottom: 950 });
     });
 
     test("should not find element when it's outside the specified container", () => {
@@ -353,7 +353,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should return null when container is not found", () => {
@@ -366,7 +366,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should find element regardless of element type", () => {
@@ -380,7 +380,7 @@ describe("ElementUtils", () => {
       );
 
       assert.isNotNull(result);
-      assert.equal(result?.text, "Item 2");
+      expect(result?.text).toBe("Item 2");
       assert.include(result?.class || "", "EditText");
     });
 
@@ -408,7 +408,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNull(result); // Should not find partial matches
+      expect(result).toBeNull(); // Should not find partial matches
     });
 
     test("should handle case-sensitive matching", () => {
@@ -421,7 +421,7 @@ describe("ElementUtils", () => {
         true // case sensitive
       );
 
-      assert.isNull(result); // Should not find due to case mismatch
+      expect(result).toBeNull(); // Should not find due to case mismatch
     });
 
     test("should handle case-insensitive matching", () => {
@@ -435,7 +435,7 @@ describe("ElementUtils", () => {
       );
 
       assert.isNotNull(result);
-      assert.equal(result?.text, "Item 1");
+      expect(result?.text).toBe("Item 1");
     });
 
     test("should prefer smaller elements when multiple matches exist", () => {
@@ -478,7 +478,7 @@ describe("ElementUtils", () => {
 
       assert.isNotNull(result);
       // Should return the smaller element
-      assert.deepEqual(result?.bounds, { left: 400, top: 200, right: 680, bottom: 300 });
+      expect(result?.bounds).toEqual({ left: 400, top: 200, right: 680, bottom: 300 });
     });
 
     test("should handle content-desc attribute", () => {
@@ -513,7 +513,7 @@ describe("ElementUtils", () => {
       );
 
       assert.isNotNull(result);
-      assert.deepEqual(result?.bounds, { left: 100, top: 100, right: 300, bottom: 200 });
+      expect(result?.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 200 });
     });
 
     test("should handle missing required parameters", () => {
@@ -525,7 +525,7 @@ describe("ElementUtils", () => {
         true,
         false
       );
-      assert.isNull(result);
+      expect(result).toBeNull();
 
       // Missing text
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
@@ -536,7 +536,7 @@ describe("ElementUtils", () => {
         true,
         false
       );
-      assert.isNull(result);
+      expect(result).toBeNull();
     });
 
     test("should handle nested containers", () => {

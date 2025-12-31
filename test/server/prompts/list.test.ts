@@ -1,5 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
-import { expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 
 describe("MCP Prompts List", () => {
@@ -17,7 +16,6 @@ describe("MCP Prompts List", () => {
   });
 
   test("given no prompts are registered, endpoint should return an empty list", async function() {
-    this.timeout(5000);
 
     const { client } = fixture.getContext();
 
@@ -48,7 +46,6 @@ describe("MCP Prompts List", () => {
   });
 
   test("given a prompt is registered, endpoint should return a list with that prompt", async function() {
-    this.timeout(5000);
 
     // For this test, we need to mock or implement a prompt registration
     // Since the current server doesn't have prompt registration functionality,

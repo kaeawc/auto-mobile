@@ -1,5 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
-import { expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 
 describe("MCP Tools Text Response", () => {
@@ -17,7 +16,6 @@ describe("MCP Tools Text Response", () => {
   });
 
   it.skip("given a tool configured with text response, expect valid JSON structure", async function() {
-    this.timeout(5000);
 
     const { client } = fixture.getContext();
 

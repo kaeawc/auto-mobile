@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { ScreenshotUtils } from "../../src/utils/screenshot/ScreenshotUtils";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../src/utils/constants";
 import fs from "fs-extra";

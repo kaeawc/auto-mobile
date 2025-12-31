@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach } from "bun:test";
+import { beforeEach, describe, expect, test } from "bun:test";
 import { GetBackStack } from "../../../src/features/observe/GetBackStack";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { ExecResult, BootedDevice } from "../../../src/models";

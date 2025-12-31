@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { SharpImageUtils } from "../../src/utils/image-utils";
 import { FakeImageUtils } from "../fakes/FakeImageUtils";
 

@@ -1,11 +1,9 @@
-// import { expect } from "bun:test";
 // import { DeviceUtils } from "../src/utils/deviceUtils";
 //
 // describe("DeviceUtils", function() {
 //   let deviceUtils: DeviceUtils;
 //   let testAvdName: string;
 //
-//   this.timeout(30000); // Give more time for emulator operations
 //
 //   beforeEach(() => {
 //     deviceUtils = new DeviceUtils();
@@ -86,7 +84,7 @@
 //         }
 //       } else {
 //         // Skip this test if no emulators are running
-//         this.skip();
+//         // Note: Bun does not support dynamic test skipping
 //       }
 //     });
 //
@@ -95,7 +93,7 @@
 //       const isRunning = await deviceUtils.isAvdRunning(testAvdName);
 //
 //       if (isRunning) {
-//         this.skip(); // Skip if already running to avoid conflicts
+//         // Note: Bun does not support dynamic test skipping // Skip if already running to avoid conflicts
 //         return;
 //       }
 //
@@ -160,7 +158,7 @@
 //         expect(deviceId).toBe(runningAvd.deviceId);
 //       } else {
 //         // Skip this test if no emulators are running
-//         this.skip();
+//         // Note: Bun does not support dynamic test skipping
 //       }
 //     });
 //   });

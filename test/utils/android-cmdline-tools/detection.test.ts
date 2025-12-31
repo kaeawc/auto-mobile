@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { join } from "path";
 import {
   getTypicalAndroidSdkPaths,
@@ -84,7 +84,8 @@ describe("Android Command Line Tools - Detection", () => {
 
       const paths = getTypicalAndroidSdkPaths(systemDetection);
 
-      expect(Array.isArray(paths)).toBe(true).that.is.empty;
+      expect(Array.isArray(paths)).toBe(true);
+      expect(paths).toHaveLength(0);
     });
   });
 
@@ -155,7 +156,8 @@ describe("Android Command Line Tools - Detection", () => {
     test("should return empty array when directory does not exist", () => {
       const tools = getAvailableToolsInDirectory("/nonexistent", systemDetection);
 
-      expect(Array.isArray(tools)).toBe(true).that.is.empty;
+      expect(Array.isArray(tools)).toBe(true);
+      expect(tools).toHaveLength(0);
     });
 
     test("should return empty array when bin directory does not exist", () => {
@@ -163,7 +165,8 @@ describe("Android Command Line Tools - Detection", () => {
 
       const tools = getAvailableToolsInDirectory("/test/tools", systemDetection);
 
-      expect(Array.isArray(tools)).toBe(true).that.is.empty;
+      expect(Array.isArray(tools)).toBe(true);
+      expect(tools).toHaveLength(0);
     });
 
     test("should return available tools when they exist in bin directory", () => {
@@ -348,7 +351,8 @@ describe("Android Command Line Tools - Detection", () => {
 
       const result = await detectAndroidSdkTools(systemDetection);
 
-      expect(Array.isArray(result)).toBe(true).that.is.empty;
+      expect(Array.isArray(result)).toBe(true);
+      expect(result).toHaveLength(0);
     });
 
     test("should detect tools from ANDROID_SDK_ROOT environment variable", async () => {

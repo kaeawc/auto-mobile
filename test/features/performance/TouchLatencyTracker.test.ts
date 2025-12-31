@@ -1,4 +1,4 @@
-import { expect } from "chai";
+import { expect, describe, beforeEach } from "bun:test";
 import { describe, it, beforeEach } from "mocha";
 import { TouchLatencyTracker } from "../../../src/features/performance/TouchLatencyTracker";
 import { BootedDevice, ScreenSize } from "../../../src/models";

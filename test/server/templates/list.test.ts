@@ -1,5 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
-import { expect } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   ListResourceTemplatesRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
@@ -20,7 +19,6 @@ describe("MCP Templates List", () => {
   });
 
   test("given no templates are registered, endpoint should return an empty list", async function() {
-    this.timeout(5000);
 
     const { client } = fixture.getContext();
 
@@ -48,7 +46,6 @@ describe("MCP Templates List", () => {
   });
 
   test("given a template is registered, endpoint should return a list with that template", async function() {
-    this.timeout(5000);
 
     // For this test, we need to mock or implement a template registration
     // Since the current server doesn't have template registration functionality,

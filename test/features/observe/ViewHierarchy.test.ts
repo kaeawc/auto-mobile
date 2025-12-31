@@ -1,5 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { TakeScreenshot } from "../../../src/features/observe/TakeScreenshot";

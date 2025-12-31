@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { ListInstalledApps } from "../../../src/features/observe/ListInstalledApps";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice, AndroidUser } from "../../../src/models";

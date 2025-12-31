@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { describe, beforeEach, afterEach, before } from "bun:test";
 import {
   NavigationGraphManager,
   NavigationEvent
@@ -44,14 +44,14 @@ describe("NavigationGraphManager", () => {
 
       const instance2 = NavigationGraphManager.getInstance();
       assert.isNull(instance2.getCurrentAppId());
-      assert.deepEqual(await instance2.getKnownScreens(), []);
+      expect(await instance2.getKnownScreens()).toEqual([]);
     });
   });
 
   describe("setCurrentApp", () => {
     it("should set the current app", async () => {
       await manager.setCurrentApp("com.example.app");
-      assert.equal(manager.getCurrentAppId(), "com.example.app");
+      expect(manager.getCurrentAppId()).toBe("com.example.app");
     });
 
     it("should create separate graphs for different apps", async () => {
@@ -62,11 +62,11 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Screen2"));
 
       // App2 should only know Screen2
-      assert.deepEqual(await manager.getKnownScreens(), ["Screen2"]);
+      expect(await manager.getKnownScreens()).toEqual(["Screen2"]);
 
       // Switch back to app1
       await manager.setCurrentApp("com.app1");
-      assert.deepEqual(await manager.getKnownScreens(), ["Screen1"]);
+      expect(await manager.getKnownScreens()).toEqual(["Screen1"]);
     });
   });
 
@@ -76,8 +76,8 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(event);
 
       const screens = await manager.getKnownScreens();
-      assert.deepEqual(screens, ["HomeScreen"]);
-      assert.equal(manager.getCurrentScreen(), "HomeScreen");
+      expect(screens).toEqual(["HomeScreen"]);
+      expect(manager.getCurrentScreen()).toBe("HomeScreen");
     });
 
     it("should auto-set current app from applicationId in event", async () => {
@@ -93,23 +93,23 @@ describe("NavigationGraphManager", () => {
       await freshManager.recordNavigationEvent(event);
 
       // App should be auto-set
-      assert.equal(freshManager.getCurrentAppId(), "com.auto.detected.app");
-      assert.deepEqual(await freshManager.getKnownScreens(), ["HomeScreen"]);
+      expect(freshManager.getCurrentAppId()).toBe("com.auto.detected.app");
+      expect(await freshManager.getKnownScreens()).toEqual(["HomeScreen"]);
     });
 
     it("should switch apps when applicationId changes", async () => {
       await manager.recordNavigationEvent(createEventWithApp("Screen1", "com.app1"));
-      assert.equal(manager.getCurrentAppId(), "com.app1");
-      assert.deepEqual(await manager.getKnownScreens(), ["Screen1"]);
+      expect(manager.getCurrentAppId()).toBe("com.app1");
+      expect(await manager.getKnownScreens()).toEqual(["Screen1"]);
 
       // Switch to different app
       await manager.recordNavigationEvent(createEventWithApp("Screen2", "com.app2"));
-      assert.equal(manager.getCurrentAppId(), "com.app2");
-      assert.deepEqual(await manager.getKnownScreens(), ["Screen2"]);
+      expect(manager.getCurrentAppId()).toBe("com.app2");
+      expect(await manager.getKnownScreens()).toEqual(["Screen2"]);
 
       // Original app's graph should still exist
       await manager.setCurrentApp("com.app1");
-      assert.deepEqual(await manager.getKnownScreens(), ["Screen1"]);
+      expect(await manager.getKnownScreens()).toEqual(["Screen1"]);
     });
 
     it("should update node on revisit", async () => {
@@ -120,10 +120,10 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(event2);
 
       const node = await manager.getNode("HomeScreen");
-      assert.isDefined(node);
-      assert.equal(node!.visitCount, 2);
-      assert.equal(node!.firstSeenAt, 1000);
-      assert.equal(node!.lastSeenAt, 2000);
+      expect(node).toBeDefined();
+      expect(node!.visitCount).toBe(2);
+      expect(node!.firstSeenAt).toBe(1000);
+      expect(node!.lastSeenAt).toBe(2000);
     });
 
     it("should create edge when navigating between screens", async () => {
@@ -132,9 +132,9 @@ describe("NavigationGraphManager", () => {
 
       const edges = await manager.getEdgesFrom("Screen1");
       assert.lengthOf(edges, 1);
-      assert.equal(edges[0].from, "Screen1");
-      assert.equal(edges[0].to, "Screen2");
-      assert.equal(edges[0].edgeType, "unknown"); // No tool call recorded
+      expect(edges[0].from).toBe("Screen1");
+      expect(edges[0].to).toBe("Screen2");
+      expect(edges[0].edgeType).toBe("unknown"); // No tool call recorded
     });
 
     it("should not create edge for same screen navigation", async () => {
@@ -151,7 +151,7 @@ describe("NavigationGraphManager", () => {
       manager.recordToolCall("tapOn", { text: "Button" });
 
       const stats = await manager.getStats();
-      assert.equal(stats.toolCallHistorySize, 1);
+      expect(stats.toolCallHistorySize).toBe(1);
     });
 
     it("should correlate tool call with navigation event", async () => {
@@ -166,10 +166,10 @@ describe("NavigationGraphManager", () => {
 
       const edges = await manager.getEdgesFrom("Screen1");
       assert.lengthOf(edges, 1);
-      assert.equal(edges[0].edgeType, "tool");
-      assert.isDefined(edges[0].interaction);
-      assert.equal(edges[0].interaction!.toolName, "tapOn");
-      assert.deepEqual(edges[0].interaction!.args, { text: "Settings" });
+      expect(edges[0].edgeType).toBe("tool");
+      expect(edges[0].interaction).toBeDefined();
+      expect(edges[0].interaction!.toolName).toBe("tapOn");
+      expect(edges[0].interaction!.args).toEqual({ text: "Settings" });
     });
 
     it("should not correlate tool call outside correlation window", async () => {
@@ -184,8 +184,8 @@ describe("NavigationGraphManager", () => {
 
       const edges = await manager.getEdgesFrom("Screen1");
       assert.lengthOf(edges, 1);
-      assert.equal(edges[0].edgeType, "unknown");
-      assert.isUndefined(edges[0].interaction);
+      expect(edges[0].edgeType).toBe("unknown");
+      expect(edges[0].interaction).toBeUndefined();
     });
 
     it("should use most recent tool call within window", async () => {
@@ -201,7 +201,7 @@ describe("NavigationGraphManager", () => {
 
       const edges = await manager.getEdgesFrom("Screen1");
       assert.lengthOf(edges, 1);
-      assert.equal(edges[0].interaction!.args.text, "Second");
+      expect(edges[0].interaction!.args.text).toBe("Second");
     });
   });
 
@@ -210,10 +210,10 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("HomeScreen"));
 
       const result = await manager.findPath("HomeScreen");
-      assert.isTrue(result.found);
+      expect(result.found).toBe(true);
       assert.lengthOf(result.path, 0);
-      assert.equal(result.startScreen, "HomeScreen");
-      assert.equal(result.targetScreen, "HomeScreen");
+      expect(result.startScreen).toBe("HomeScreen");
+      expect(result.targetScreen).toBe("HomeScreen");
     });
 
     it("should find direct path to adjacent screen", async () => {
@@ -223,10 +223,10 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Screen1", 3000));
 
       const result = await manager.findPath("Screen2");
-      assert.isTrue(result.found);
+      expect(result.found).toBe(true);
       assert.lengthOf(result.path, 1);
-      assert.equal(result.path[0].from, "Screen1");
-      assert.equal(result.path[0].to, "Screen2");
+      expect(result.path[0].from).toBe("Screen1");
+      expect(result.path[0].to).toBe("Screen2");
     });
 
     it("should find multi-hop path", async () => {
@@ -238,19 +238,19 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Home", 4000));
 
       const result = await manager.findPath("Advanced");
-      assert.isTrue(result.found);
+      expect(result.found).toBe(true);
       assert.lengthOf(result.path, 2);
-      assert.equal(result.path[0].from, "Home");
-      assert.equal(result.path[0].to, "Settings");
-      assert.equal(result.path[1].from, "Settings");
-      assert.equal(result.path[1].to, "Advanced");
+      expect(result.path[0].from).toBe("Home");
+      expect(result.path[0].to).toBe("Settings");
+      expect(result.path[1].from).toBe("Settings");
+      expect(result.path[1].to).toBe("Advanced");
     });
 
     it("should return not found when no path exists", async () => {
       await manager.recordNavigationEvent(createEvent("Screen1"));
 
       const result = await manager.findPath("UnknownScreen");
-      assert.isFalse(result.found);
+      expect(result.found).toBe(false);
       assert.lengthOf(result.path, 0);
     });
 
@@ -260,19 +260,19 @@ describe("NavigationGraphManager", () => {
       await freshManager.setCurrentApp("com.test.app");
 
       const result = await freshManager.findPath("SomeScreen");
-      assert.isFalse(result.found);
+      expect(result.found).toBe(false);
     });
   });
 
   describe("getStats", () => {
     it("should return correct stats for empty graph", async () => {
       const stats = await manager.getStats();
-      assert.equal(stats.nodeCount, 0);
-      assert.equal(stats.edgeCount, 0);
-      assert.isNull(stats.currentScreen);
-      assert.equal(stats.knownEdgeCount, 0);
-      assert.equal(stats.unknownEdgeCount, 0);
-      assert.equal(stats.toolCallHistorySize, 0);
+      expect(stats.nodeCount).toBe(0);
+      expect(stats.edgeCount).toBe(0);
+      expect(stats.currentScreen).toBeNull();
+      expect(stats.knownEdgeCount).toBe(0);
+      expect(stats.unknownEdgeCount).toBe(0);
+      expect(stats.toolCallHistorySize).toBe(0);
     });
 
     it("should return correct stats after navigation", async () => {
@@ -281,21 +281,21 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Settings", Date.now() + 100));
 
       const stats = await manager.getStats();
-      assert.equal(stats.nodeCount, 2);
-      assert.equal(stats.edgeCount, 1);
-      assert.equal(stats.currentScreen, "Settings");
-      assert.equal(stats.knownEdgeCount, 1);
-      assert.equal(stats.unknownEdgeCount, 0);
+      expect(stats.nodeCount).toBe(2);
+      expect(stats.edgeCount).toBe(1);
+      expect(stats.currentScreen).toBe("Settings");
+      expect(stats.knownEdgeCount).toBe(1);
+      expect(stats.unknownEdgeCount).toBe(0);
     });
   });
 
   describe("exportGraph", () => {
     it("should export empty graph correctly", async () => {
       const exported = await manager.exportGraph();
-      assert.equal(exported.appId, "com.test.app");
+      expect(exported.appId).toBe("com.test.app");
       assert.lengthOf(exported.nodes, 0);
       assert.lengthOf(exported.edges, 0);
-      assert.isNull(exported.currentScreen);
+      expect(exported.currentScreen).toBeNull();
     });
 
     it("should export populated graph correctly", async () => {
@@ -303,14 +303,14 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Settings", 2000));
 
       const exported = await manager.exportGraph();
-      assert.equal(exported.appId, "com.test.app");
+      expect(exported.appId).toBe("com.test.app");
       assert.lengthOf(exported.nodes, 2);
       assert.lengthOf(exported.edges, 1);
-      assert.equal(exported.currentScreen, "Settings");
+      expect(exported.currentScreen).toBe("Settings");
 
       const homeNode = exported.nodes.find(n => n.screenName === "Home");
-      assert.isDefined(homeNode);
-      assert.equal(homeNode!.visitCount, 1);
+      expect(homeNode).toBeDefined();
+      expect(homeNode!.visitCount).toBe(1);
     });
   });
 
@@ -323,7 +323,7 @@ describe("NavigationGraphManager", () => {
 
       // After clearing and re-setting app, should have empty graph
       await manager.setCurrentApp("com.test.app");
-      assert.deepEqual(await manager.getKnownScreens(), []);
+      expect(await manager.getKnownScreens()).toEqual([]);
     });
   });
 
@@ -338,7 +338,7 @@ describe("NavigationGraphManager", () => {
       await manager.clearAllGraphs();
 
       assert.isNull(manager.getCurrentAppId());
-      assert.deepEqual(await manager.getKnownScreens(), []);
+      expect(await manager.getKnownScreens()).toEqual([]);
     });
   });
 
@@ -427,10 +427,10 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Check that the edge has scroll position
     const edges = await manager.getEdgesFrom("Settings");
     assert.lengthOf(edges, 1);
-    assert.isDefined(edges[0].uiState);
-    assert.isDefined(edges[0].uiState!.scrollPosition);
-    assert.equal(edges[0].uiState!.scrollPosition!.targetElement.text, "Advanced Settings");
-    assert.equal(edges[0].uiState!.scrollPosition!.direction, "down");
+    expect(edges[0].uiState).toBeDefined();
+    expect(edges[0].uiState!.scrollPosition).toBeDefined();
+    expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Advanced Settings");
+    expect(edges[0].uiState!.scrollPosition!.direction).toBe("down");
   });
 
   it("should update existing uiState with scroll position", async () => {
@@ -457,11 +457,11 @@ describe("NavigationGraphManager - Scroll Position", () => {
     // Check that both selected elements and scroll position exist
     const edges = await manager.getEdgesFrom("Settings");
     assert.lengthOf(edges, 1);
-    assert.isDefined(edges[0].uiState);
+    expect(edges[0].uiState).toBeDefined();
     assert.lengthOf(edges[0].uiState!.selectedElements, 1);
-    assert.equal(edges[0].uiState!.selectedElements[0].text, "Settings Tab");
-    assert.isDefined(edges[0].uiState!.scrollPosition);
-    assert.equal(edges[0].uiState!.scrollPosition!.targetElement.text, "Advanced Settings");
+    expect(edges[0].uiState!.selectedElements[0].text).toBe("Settings Tab");
+    expect(edges[0].uiState!.scrollPosition).toBeDefined();
+    expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Advanced Settings");
   });
 
   it("should handle scroll position with container and speed", async () => {
@@ -485,10 +485,10 @@ describe("NavigationGraphManager - Scroll Position", () => {
     const edges = await manager.getEdgesFrom("Home");
     assert.lengthOf(edges, 1);
     const scrollPos = edges[0].uiState!.scrollPosition!;
-    assert.equal(scrollPos.targetElement.text, "Item");
-    assert.equal(scrollPos.container!.resourceId, "com.app:id/list");
-    assert.equal(scrollPos.direction, "up");
-    assert.equal(scrollPos.speed, "slow");
+    expect(scrollPos.targetElement.text).toBe("Item");
+    expect(scrollPos.container!.resourceId).toBe("com.app:id/list");
+    expect(scrollPos.direction).toBe("up");
+    expect(scrollPos.speed).toBe("slow");
   });
 
   it("should not update if no swipeOn tool call exists", () => {
@@ -528,6 +528,6 @@ describe("NavigationGraphManager - Scroll Position", () => {
 
     const edges = await manager.getEdgesFrom("Screen1");
     assert.lengthOf(edges, 1);
-    assert.equal(edges[0].uiState!.scrollPosition!.targetElement.text, "Second");
+    expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Second");
   });
 });

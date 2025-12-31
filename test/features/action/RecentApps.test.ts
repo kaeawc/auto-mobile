@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { describe, test, beforeEach } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { ExecResult, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -129,9 +129,9 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.isTrue(result.success);
-      assert.equal(result.method, "gesture");
-      assert.isDefined(result.observation);
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("gesture");
+      expect(result.observation).toBeDefined();
 
       // Verify swipe command was executed
       const executedCommands = fakeAdb.getExecutedCommands();
@@ -147,9 +147,9 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.isTrue(result.success);
-      assert.equal(result.method, "legacy");
-      assert.isDefined(result.observation);
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("legacy");
+      expect(result.observation).toBeDefined();
 
       // Verify tap command was executed on the recent apps button
       const executedCommands = fakeAdb.getExecutedCommands();
@@ -165,9 +165,9 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.isTrue(result.success);
-      assert.equal(result.method, "hardware");
-      assert.isDefined(result.observation);
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("hardware");
+      expect(result.observation).toBeDefined();
 
       // Verify hardware keyevent was executed
       const executedCommands = fakeAdb.getExecutedCommands();
@@ -187,7 +187,7 @@ describe("RecentApps", () => {
       };
       const result = await recentApps.execute(progressCallback);
 
-      assert.isTrue(result.success);
+      expect(result.success).toBe(true);
       assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
     });
 
@@ -203,7 +203,7 @@ describe("RecentApps", () => {
         const result = await recentApps.execute();
         // BaseVisualChange catches the error and returns success: false
         // We're testing the graceful handling, so just ensure result is not successful
-        assert.isFalse(result.success);
+        expect(result.success).toBe(false);
       } catch (caughtError) {
         assert.include((caughtError as Error).message, "Cannot perform action without view hierarchy");
       }
@@ -235,7 +235,7 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.equal(result.method, "gesture");
+      expect(result.method).toBe("gesture");
     });
 
     test("should detect legacy navigation from recent apps button", async () => {
@@ -246,7 +246,7 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.equal(result.method, "legacy");
+      expect(result.method).toBe("legacy");
     });
 
     test("should default to hardware navigation when no indicators found", async () => {
@@ -257,7 +257,7 @@ describe("RecentApps", () => {
 
       const result = await recentApps.execute();
 
-      assert.equal(result.method, "hardware");
+      expect(result.method).toBe("hardware");
     });
   });
 
@@ -271,7 +271,7 @@ describe("RecentApps", () => {
         await recentApps.execute();
         assert.fail("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.isDefined(caughtError);
+        expect(caughtError).toBeDefined();
       }
     });
 
@@ -286,7 +286,7 @@ describe("RecentApps", () => {
         assert.fail("Expected an error to be thrown");
       } catch (caughtError) {
         // Error should be thrown when ADB command fails
-        assert.isDefined(caughtError);
+        expect(caughtError).toBeDefined();
       }
     });
 
@@ -299,7 +299,7 @@ describe("RecentApps", () => {
         await recentApps.execute();
         assert.fail("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.isDefined(caughtError);
+        expect(caughtError).toBeDefined();
       }
     });
 
@@ -342,13 +342,13 @@ describe("RecentApps", () => {
   describe("constructor", () => {
     test("should work with null deviceId", () => {
       const recentAppsInstance = new RecentApps("test-device", fakeAdb);
-      assert.isDefined(recentAppsInstance);
+      expect(recentAppsInstance).toBeDefined();
     });
 
     test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
       const recentAppsInstance = new RecentApps("test-device", customAdb);
-      assert.isDefined(recentAppsInstance);
+      expect(recentAppsInstance).toBeDefined();
     });
   });
 });

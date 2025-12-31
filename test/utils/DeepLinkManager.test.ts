@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { DeepLinkManager } from "../../src/utils/DeepLinkManager";
 import { ElementUtils } from "../../src/features/utility/ElementUtils";
 import { ViewHierarchyResult, BootedDevice } from "../../src/models";
@@ -517,7 +517,7 @@ Receiver Resolver Table:
       expect(result.schemes).toContain("myapp");
       expect(result.hosts).toContain("example.com");
       expect(result.hosts).toContain("deep");
-      expect(result.intentFilters).length).toBeGreaterThan(0);
+      expect(result.intentFilters.length).toBeGreaterThan(0);
     });
 
     test("should handle empty dumpsys output", () => {

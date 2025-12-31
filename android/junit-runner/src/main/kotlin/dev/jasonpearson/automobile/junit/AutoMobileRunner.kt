@@ -127,72 +127,52 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   private fun executeAutoMobilePlan(planPath: String, annotation: AutoMobileTest, testName: String): ExecutionResult {
     val startTime = System.currentTimeMillis()
     val debugMode = System.getProperty("automobile.debug", "false").toBoolean()
-    val debugWriter = if (debugMode) DebugFileWriter("junit-runner") else null
 
     try {
-      debugWriter?.addSection("JUNIT RUNNER - START")
-          ?.addKeyValues(
-              "Test Class" to klass.simpleName,
-              "Test Method" to testName,
-              "Plan Path" to planPath,
-              "Device" to annotation.device,
-              "Timeout" to "${annotation.timeoutMs}ms",
-              "AI Assistance" to annotation.aiAssistance
-          )
+      if (debugMode) {
+        println("=== JUNIT RUNNER - START ===")
+        println("Test Class: ${klass.simpleName}")
+        println("Test Method: $testName")
+        println("Plan Path: $planPath")
+        println("Device: ${annotation.device}")
+        println("Timeout: ${annotation.timeoutMs}ms")
+        println("AI Assistance: ${annotation.aiAssistance}")
+      }
 
       // Read the YAML plan content
       val planContent = File(planPath).readText()
 
-      debugWriter?.addSubsection("Plan Content", planContent)
+      if (debugMode) {
+        println("Plan content length: ${planContent.length} bytes")
+      }
 
       // Base64 encode the plan content to safely pass through command line
-      val encodeStartTime = System.currentTimeMillis()
       val base64Content = java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
-      val encodeTime = System.currentTimeMillis() - encodeStartTime
 
-      debugWriter?.addSubsection("Base64 Encoding")
-          ?.addTiming("Encode Time", encodeTime)
-          ?.addKeyValues(
-              "Original Length" to planContent.length,
-              "Base64 Length" to base64Content.length,
-              "Base64 Preview" to base64Content.substring(0, minOf(100, base64Content.length)) + "..."
-          )
+      if (debugMode) {
+        println("Base64 encoded length: ${base64Content.length} bytes")
+      }
 
       val command = buildAutoMobileExecutePlanCommand(base64Content, annotation)
-
-      debugWriter?.addSubsection("Command Execution")
-          ?.addContent("Command: ${command.joinToString(" ")}")
 
       println("Executing command: ${command.joinToString(" ")}")
 
       val executionStartTime = System.currentTimeMillis()
       val result = AutoMobileSharedUtils.executeCommand(command, annotation.timeoutMs)
       val commandExecutionTime = System.currentTimeMillis() - executionStartTime
-
       val executionTime = System.currentTimeMillis() - startTime
 
-      debugWriter?.addSubsection("Execution Result")
-          ?.addTiming("Command Execution Time", commandExecutionTime)
-          ?.addTiming("Total Execution Time", executionTime)
-          ?.addKeyValues(
-              "Exit Code" to result.exitCode,
-              "Output Length" to result.output.length,
-              "Error Output Length" to result.errorOutput.length
-          )
-
-      debugWriter?.addSubsection("CLI Output", result.output)
-
-      if (result.errorOutput.isNotEmpty()) {
-        debugWriter?.addSubsection("CLI Error Output", result.errorOutput)
-      }
-
       if (debugMode) {
-        println("AutoMobile CLI output:\n${result.output}")
+        println("=== Execution Result ===")
+        println("Command Execution Time: ${commandExecutionTime}ms")
+        println("Total Execution Time: ${executionTime}ms")
+        println("Exit Code: ${result.exitCode}")
+        println("Output Length: ${result.output.length} bytes")
+        println("Error Output Length: ${result.errorOutput.length} bytes")
+        println("\nAutoMobile CLI output:\n${result.output}")
         if (result.errorOutput.isNotEmpty()) {
-          println("AutoMobile CLI errors:\n${result.errorOutput}")
+          println("\nAutoMobile CLI errors:\n${result.errorOutput}")
         }
-        println(
-            "Exit code: ${result.exitCode}, Execution time: ${executionTime}ms")
       }
 
       // Write log file for this test execution
@@ -209,7 +189,9 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       println("Test output written to: ${logFile.absolutePath}")
 
       val finalResult = if (result.exitCode == 0) {
-        debugWriter?.addSection("JUNIT RUNNER - COMPLETED SUCCESSFULLY")
+        if (debugMode) {
+          println("=== JUNIT RUNNER - COMPLETED SUCCESSFULLY ===")
+        }
         ExecutionResult(
             success = true,
             exitCode = result.exitCode,
@@ -217,7 +199,9 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
             executionTimeMs = executionTime,
             logFile = logFile)
       } else {
-        debugWriter?.addSubsection("Execution Failed - Handling Failure")
+        if (debugMode) {
+          println("=== Execution Failed - Handling Failure ===")
+        }
         handleFailure(
             annotation,
             result.exitCode,
@@ -227,22 +211,15 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
             logFile)
       }
 
-      debugWriter?.write()
-      if (debugMode && debugWriter != null) {
-        println("Debug log written to: ${debugWriter.getFilePath()}")
-      }
-
       return finalResult
     } catch (e: Exception) {
       val executionTime = System.currentTimeMillis() - startTime
       println("Error executing AutoMobile plan: ${e.message}")
 
-      debugWriter?.addError(e)
-          ?.addSection("JUNIT RUNNER - FAILED WITH EXCEPTION")
-          ?.write()
-
-      if (debugMode && debugWriter != null) {
-        println("Debug log written to: ${debugWriter.getFilePath()}")
+      if (debugMode) {
+        println("=== JUNIT RUNNER - FAILED WITH EXCEPTION ===")
+        println("Exception: ${e.message}")
+        e.printStackTrace()
       }
 
       return ExecutionResult(

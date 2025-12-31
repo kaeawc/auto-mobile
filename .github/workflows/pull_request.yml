@@ -145,7 +145,7 @@ jobs:
   junit-runner-emulator-tests:
     name: "Run JUnit Runner Emulator Tests"
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 15
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v4

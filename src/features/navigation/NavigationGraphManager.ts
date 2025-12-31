@@ -17,7 +17,7 @@ import {
 } from "../../utils/interfaces/NavigationGraph";
 
 // Re-export types for convenience
-export {
+export type {
   NavigationGraph,
   NavigationEvent,
   NavigationNode,
@@ -94,35 +94,26 @@ export class NavigationGraphManager implements NavigationGraph {
   }
 
   /**
-   * Get or create the graph for the current app.
-   */
-  private getGraph(): InternalNavigationGraph | null {
-    if (!this.currentAppId) {
-      return null;
-    }
-    return this.graphs.get(this.currentAppId) || null;
-  }
-
-  /**
    * Record back stack information for the current screen.
    * Updates the current node with back stack depth and task ID.
    */
-  public recordBackStack(backStack: BackStackInfo): void {
-    const graph = this.getGraph();
-    if (!graph || !graph.currentScreen) {
-      logger.debug(`[NAVIGATION_GRAPH] Cannot record back stack - no current screen`);
+  public async recordBackStack(backStack: BackStackInfo): Promise<void> {
+    if (!this.currentAppId || !this.currentScreen) {
+      logger.debug(`[NAVIGATION_GRAPH] Cannot record back stack - no current app or screen`);
       return;
     }
 
-    const node = graph.nodes.get(graph.currentScreen);
-    if (node) {
-      node.backStackDepth = backStack.depth;
-      node.taskId = backStack.currentTaskId;
-      logger.debug(
-        `[NAVIGATION_GRAPH] Updated back stack for ${graph.currentScreen}: ` +
-        `depth=${backStack.depth}, taskId=${backStack.currentTaskId}`
-      );
-    }
+    await this.repository.updateNodeBackStack(
+      this.currentAppId,
+      this.currentScreen,
+      backStack.depth,
+      backStack.currentTaskId
+    );
+
+    logger.debug(
+      `[NAVIGATION_GRAPH] Updated back stack for ${this.currentScreen}: ` +
+      `depth=${backStack.depth}, taskId=${backStack.currentTaskId}`
+    );
   }
 
   /**
@@ -600,6 +591,8 @@ export class NavigationGraphManager implements NavigationGraph {
       firstSeenAt: dbNode.first_seen_at,
       lastSeenAt: dbNode.last_seen_at,
       visitCount: dbNode.visit_count,
+      backStackDepth: dbNode.back_stack_depth ?? undefined,
+      taskId: dbNode.task_id ?? undefined,
       modalStack: modals.length > 0
         ? modals.map((id, layer) => ({
           type: "overlay" as const,

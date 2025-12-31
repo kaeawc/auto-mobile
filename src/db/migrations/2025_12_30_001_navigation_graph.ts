@@ -22,6 +22,8 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("first_seen_at", "integer", col => col.notNull())
     .addColumn("last_seen_at", "integer", col => col.notNull())
     .addColumn("visit_count", "integer", col => col.notNull().defaultTo(1))
+    .addColumn("back_stack_depth", "integer")
+    .addColumn("task_id", "integer")
     .addColumn("created_at", "text", col =>
       col.notNull().defaultTo("datetime('now')")
     )

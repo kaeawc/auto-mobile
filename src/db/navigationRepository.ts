@@ -139,6 +139,31 @@ export class NavigationRepository {
   }
 
   /**
+   * Update back stack information for a node.
+   */
+  async updateNodeBackStack(
+    appId: string,
+    screenName: string,
+    backStackDepth: number,
+    taskId: number
+  ): Promise<void> {
+    const db = getDatabase();
+    await db
+      .updateTable("navigation_nodes")
+      .set({
+        back_stack_depth: backStackDepth,
+        task_id: taskId,
+      })
+      .where("app_id", "=", appId)
+      .where("screen_name", "=", screenName)
+      .execute();
+
+    logger.debug(
+      `[NAV_REPO] Updated back stack for ${screenName}: depth=${backStackDepth}, taskId=${taskId}`
+    );
+  }
+
+  /**
    * Get all nodes for an app.
    */
   async getNodes(appId: string): Promise<NavigationNode[]> {

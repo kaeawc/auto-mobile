@@ -320,7 +320,7 @@ describe("AccessibilityServiceClient", function() {
       expect(result).toBeNull();
     });
 
-    it.skip("should return converted hierarchy when service is available and working", async function() {
+    test.skip("should return converted hierarchy when service is available and working", async function() {
 
       // Configure service as available
       fakeAdb.setCommandResponse("pm list packages", {

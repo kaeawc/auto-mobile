@@ -126,7 +126,7 @@ describe("Explore", () => {
   }
 
   describe("execute", () => {
-    it.skip("should complete with default options (requires full device setup)", async () => {
+    test.skip("should complete with default options (requires full device setup)", async () => {
       // This test requires mocking TapOnElement which is complex
       // Core functionality is tested in unit tests below
       explore = new Explore(device, mockAdb);
@@ -143,7 +143,7 @@ describe("Explore", () => {
       assert.exists(result.coverage);
     });
 
-    it.skip("should respect maxInteractions limit (requires full device setup)", async () => {
+    test.skip("should respect maxInteractions limit (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -156,7 +156,7 @@ describe("Explore", () => {
       assert.isAtMost(result.interactionsPerformed, maxInteractions);
     });
 
-    it.skip("should discover new screens (requires full device setup)", async () => {
+    test.skip("should discover new screens (requires full device setup)", async () => {
       const manager = NavigationGraphManager.getInstance();
       manager.setCurrentApp("com.test.app");
 
@@ -183,7 +183,7 @@ describe("Explore", () => {
       assert.exists(result.navigationGraph);
     });
 
-    it.skip("should track exploration path (requires full device setup)", async () => {
+    test.skip("should track exploration path (requires full device setup)", async () => {
       const manager = NavigationGraphManager.getInstance();
       manager.setCurrentApp("com.test.app");
 
@@ -208,7 +208,7 @@ describe("Explore", () => {
       assert.isArray(result.explorationPath);
     });
 
-    it.skip("should calculate coverage correctly (requires full device setup)", async () => {
+    test.skip("should calculate coverage correctly (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -364,7 +364,7 @@ describe("Explore", () => {
   });
 
   describe("exploration strategies", () => {
-    it.skip("should support breadth-first strategy (requires full device setup)", async () => {
+    test.skip("should support breadth-first strategy (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -377,7 +377,7 @@ describe("Explore", () => {
       expect(result.success).toBe(true);
     });
 
-    it.skip("should support depth-first strategy (requires full device setup)", async () => {
+    test.skip("should support depth-first strategy (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -390,7 +390,7 @@ describe("Explore", () => {
       expect(result.success).toBe(true);
     });
 
-    it.skip("should support weighted strategy (requires full device setup)", async () => {
+    test.skip("should support weighted strategy (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -405,7 +405,7 @@ describe("Explore", () => {
   });
 
   describe("exploration modes", () => {
-    it.skip("should support discover mode (requires full device setup)", async () => {
+    test.skip("should support discover mode (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -418,7 +418,7 @@ describe("Explore", () => {
       expect(result.success).toBe(true);
     });
 
-    it.skip("should support validate mode (requires full device setup)", async () => {
+    test.skip("should support validate mode (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -431,7 +431,7 @@ describe("Explore", () => {
       expect(result.success).toBe(true);
     });
 
-    it.skip("should support hybrid mode (requires full device setup)", async () => {
+    test.skip("should support hybrid mode (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -446,7 +446,7 @@ describe("Explore", () => {
   });
 
   describe("safety features", () => {
-    it.skip("should track consecutive back presses (requires full device setup)", async () => {
+    test.skip("should track consecutive back presses (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
 
       // Mock observe screen that returns no navigation elements
@@ -463,7 +463,7 @@ describe("Explore", () => {
       expect(result.success).toBe(true);
     });
 
-    it.skip("should include performance metrics (requires full device setup)", async () => {
+    test.skip("should include performance metrics (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -479,7 +479,7 @@ describe("Explore", () => {
   });
 
   describe("element tracking", () => {
-    it.skip("should track element interactions (requires full device setup)", async () => {
+    test.skip("should track element interactions (requires full device setup)", async () => {
       explore = new Explore(device, mockAdb);
       (explore as any).observeScreen = mockObserveScreen;
 
@@ -517,7 +517,7 @@ describe("Explore", () => {
       const key3 = (explore as any).getElementKey(element3);
 
       expect(key1).toBe(key2);
-      assert.notEqual(key1, key3);
+      expect(key1).not.toBe(key3);
     });
   });
 });

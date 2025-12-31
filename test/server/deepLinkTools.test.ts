@@ -1,14 +1,14 @@
-import { expect, describe, test, beforeEach, afterEach, before } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, beforeAll } from "bun:test";
 import { registerDeepLinkTools } from "../../src/server/deepLinkTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
-import { DeviceUtils } from "../../src/utils/deviceUtils";
+import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
 import { FakeDeepLinkManager } from "../fakes/FakeDeepLinkManager";
 
 // Helper function to check if AVDs are available
 async function checkAvdAvailability(): Promise<boolean> {
   try {
-    const deviceUtils = new DeviceUtils();
-    const avds = await deviceUtils.listDeviceImages();
+    const deviceUtils = new MultiPlatformDeviceManager();
+    const avds = await deviceUtils.listDeviceImages("android");
     return avds.length > 0;
   } catch (error) {
     // If we can't list AVDs (e.g., Android SDK not available), return false
@@ -20,7 +20,7 @@ describe("Deep Link Tools Registration", function() {
   let avdsAvailable: boolean;
   let fakeDeepLinkManager: FakeDeepLinkManager;
 
-  before(async function() {
+  beforeAll(async function() {
     // Check if AVDs are available once before all tests
     avdsAvailable = await checkAvdAvailability();
     if (!avdsAvailable) {

@@ -74,6 +74,7 @@ describe("MCP Tools Schema", () => {
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
       // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
+      return;
     }
 
     const result = await client.request({
@@ -105,6 +106,7 @@ describe("MCP Tools Schema", () => {
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
       // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
+      return;
     }
 
     const result = await client.request({
@@ -128,6 +130,7 @@ describe("MCP Tools Schema", () => {
     const emulatorAvailable = await checkEmulatorAvailable();
     if (!emulatorAvailable) {
       // Note: Bun does not support dynamic test skipping // Skip test if emulator CLI is not available
+      return;
     }
 
     try {

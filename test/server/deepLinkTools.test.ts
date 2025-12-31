@@ -7,9 +7,18 @@ import { FakeDeepLinkManager } from "../fakes/FakeDeepLinkManager";
 // Helper function to check if AVDs are available
 async function checkAvdAvailability(): Promise<boolean> {
   try {
-    const deviceUtils = new MultiPlatformDeviceManager();
-    const avds = await deviceUtils.listDeviceImages("android");
-    return avds.length > 0;
+    // Add timeout to prevent hanging in CI when Android SDK is not available
+    const timeoutPromise = new Promise<boolean>((resolve) => {
+      setTimeout(() => resolve(false), 2000); // 2 second timeout
+    });
+
+    const checkPromise = (async () => {
+      const deviceUtils = new MultiPlatformDeviceManager();
+      const avds = await deviceUtils.listDeviceImages("android");
+      return avds.length > 0;
+    })();
+
+    return await Promise.race([checkPromise, timeoutPromise]);
   } catch (error) {
     // If we can't list AVDs (e.g., Android SDK not available), return false
     return false;

@@ -2,8 +2,8 @@
  * Vision-based element detection fallback module
  */
 
-export { VisionFallback, DEFAULT_VISION_CONFIG } from './VisionFallback.js';
-export { ClaudeVisionClient } from './ClaudeVisionClient.js';
+export { VisionFallback, DEFAULT_VISION_CONFIG } from "./VisionFallback.js";
+export { ClaudeVisionClient } from "./ClaudeVisionClient.js";
 export type {
   VisionFallbackConfig,
   VisionFallbackResult,
@@ -11,4 +11,4 @@ export type {
   NavigationStep,
   AlternativeSelector,
   ClaudeVisionAnalysis,
-} from './VisionTypes.js';
+} from "./VisionTypes.js";

@@ -3,13 +3,13 @@
  * Coordinates vision providers (Claude) to find elements when traditional methods fail
  */
 
-import { ClaudeVisionClient } from './ClaudeVisionClient.js';
+import { ClaudeVisionClient } from "./ClaudeVisionClient.js";
 import type {
   VisionFallbackConfig,
   VisionFallbackResult,
   ElementSearchCriteria,
-} from './VisionTypes.js';
-import type { ViewHierarchyNode } from '../models/ViewHierarchyResult.js';
+} from "./VisionTypes.js";
+import type { ViewHierarchyNode } from "../models/ViewHierarchyResult.js";
 
 export class VisionFallback {
   private config: VisionFallbackConfig;
@@ -21,7 +21,7 @@ export class VisionFallback {
     this.resultCache = new Map();
 
     // Initialize Claude client if provider is 'claude'
-    if (config.provider === 'claude') {
+    if (config.provider === "claude") {
       this.claudeClient = new ClaudeVisionClient();
     }
   }
@@ -32,25 +32,25 @@ export class VisionFallback {
     searchCriteria: ElementSearchCriteria
   ): Promise<VisionFallbackResult> {
     if (!this.config.enabled) {
-      throw new Error('Vision fallback is not enabled');
+      throw new Error("Vision fallback is not enabled");
     }
 
     // Check cache first
     if (this.config.cacheResults) {
       const cached = this.getCachedResult(screenshotPath, searchCriteria);
       if (cached) {
-        console.log('✓ Vision fallback: Using cached result');
+        console.log("✓ Vision fallback: Using cached result");
         return cached;
       }
     }
 
     // Use Claude vision
-    if (this.config.provider === 'claude') {
+    if (this.config.provider === "claude") {
       if (!this.claudeClient) {
-        throw new Error('Claude client not initialized');
+        throw new Error("Claude client not initialized");
       }
 
-      console.log('🔍 Vision fallback: Analyzing with Claude...');
+      console.log("🔍 Vision fallback: Analyzing with Claude...");
       const result = await this.claudeClient.analyzeUIElement(
         screenshotPath,
         searchCriteria,
@@ -141,8 +141,8 @@ export class VisionFallback {
  */
 export const DEFAULT_VISION_CONFIG: VisionFallbackConfig = {
   enabled: false, // Disabled by default
-  provider: 'claude',
-  confidenceThreshold: 'high',
+  provider: "claude",
+  confidenceThreshold: "high",
   maxCostUsd: 1.0, // $1 max per call (very conservative)
   cacheResults: true,
   cacheTtlMinutes: 60,

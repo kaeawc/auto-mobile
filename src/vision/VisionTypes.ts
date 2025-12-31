@@ -10,15 +10,15 @@ export interface ElementSearchCriteria {
 }
 
 export interface NavigationStep {
-  action: 'tap' | 'swipe' | 'scroll' | 'input' | 'wait';
+  action: "tap" | "swipe" | "scroll" | "input" | "wait";
   target?: string; // Element text or resourceId
-  direction?: 'up' | 'down' | 'left' | 'right';
+  direction?: "up" | "down" | "left" | "right";
   value?: string; // For input actions
   description: string;
 }
 
 export interface AlternativeSelector {
-  type: 'text' | 'resourceId';
+  type: "text" | "resourceId";
   value: string;
   confidence: number; // 0-1
   reasoning: string;
@@ -26,7 +26,7 @@ export interface AlternativeSelector {
 
 export interface VisionFallbackResult {
   found: boolean;
-  confidence: 'high' | 'medium' | 'low';
+  confidence: "high" | "medium" | "low";
 
   // When element can be reached via navigation
   navigationSteps?: NavigationStep[];
@@ -42,13 +42,13 @@ export interface VisionFallbackResult {
   costUsd: number;
   durationMs: number;
   screenshotPath: string;
-  provider: 'claude' | 'local'; // Which provider was used
+  provider: "claude" | "local"; // Which provider was used
 }
 
 export interface VisionFallbackConfig {
   enabled: boolean;
-  provider: 'claude'; // Only Claude for now, can add 'local' later
-  confidenceThreshold: 'high' | 'medium' | 'low';
+  provider: "claude"; // Only Claude for now, can add 'local' later
+  confidenceThreshold: "high" | "medium" | "low";
   maxCostUsd: number;
   cacheResults: boolean;
   cacheTtlMinutes: number;

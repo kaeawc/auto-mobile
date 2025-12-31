@@ -100,7 +100,7 @@ export class TapOnElement extends BaseVisualChange {
 
     // Vision fallback: Try Claude vision API if all retries exhausted
     if (!element && attempt >= TapOnElement.MAX_ATTEMPTS && this.visionConfig.enabled && observeResult) {
-      logger.info('🔍 Element not found after retries, trying vision fallback...');
+      logger.info("🔍 Element not found after retries, trying vision fallback...");
 
       try {
         // Take a screenshot for vision analysis
@@ -108,8 +108,8 @@ export class TapOnElement extends BaseVisualChange {
         const screenshotResult = await screenshot.execute({});
 
         if (!screenshotResult.success || !screenshotResult.path) {
-          logger.error('Failed to capture screenshot for vision fallback');
-          throw new Error('Screenshot capture failed');
+          logger.error("Failed to capture screenshot for vision fallback");
+          throw new Error("Screenshot capture failed");
         }
 
         const visionFallback = new VisionFallback(this.visionConfig);
@@ -124,10 +124,10 @@ export class TapOnElement extends BaseVisualChange {
         );
 
         // If high confidence navigation steps provided, throw error with steps
-        if (visionResult.confidence === 'high' && visionResult.navigationSteps && visionResult.navigationSteps.length > 0) {
+        if (visionResult.confidence === "high" && visionResult.navigationSteps && visionResult.navigationSteps.length > 0) {
           const stepsText = visionResult.navigationSteps
             .map((step, i) => `${i + 1}. ${step.description}`)
-            .join('\n');
+            .join("\n");
 
           throw new ActionableError(
             `Element not found, but AI suggests these steps:\n${stepsText}\n\n` +
@@ -139,7 +139,7 @@ export class TapOnElement extends BaseVisualChange {
         if (visionResult.alternativeSelectors && visionResult.alternativeSelectors.length > 0) {
           const suggestions = visionResult.alternativeSelectors
             .map(alt => `- ${alt.type}: "${alt.value}" (${alt.reasoning})`)
-            .join('\n');
+            .join("\n");
 
           throw new ActionableError(
             `Element not found. AI suggests trying:\n${suggestions}\n\n` +
@@ -149,7 +149,7 @@ export class TapOnElement extends BaseVisualChange {
 
         // Otherwise, throw detailed error with vision insights
         throw new ActionableError(
-          `Element not found. ${visionResult.reason || 'No clear path found.'}\n\n` +
+          `Element not found. ${visionResult.reason || "No clear path found."}\n\n` +
           `(Cost: $${visionResult.costUsd.toFixed(4)}, Confidence: ${visionResult.confidence})`
         );
 
@@ -157,7 +157,7 @@ export class TapOnElement extends BaseVisualChange {
         if (error instanceof ActionableError) {
           throw error;
         }
-        logger.error('Vision fallback failed:', error);
+        logger.error("Vision fallback failed:", error);
         // Fall through to standard error
       }
     }

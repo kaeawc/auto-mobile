@@ -2,22 +2,22 @@
  * Claude Vision API client for UI element detection
  */
 
-import Anthropic from '@anthropic-ai/sdk';
-import fs from 'fs';
+import Anthropic from "@anthropic-ai/sdk";
+import fs from "fs";
 import type {
   ElementSearchCriteria,
   ClaudeVisionAnalysis,
   VisionFallbackResult,
   NavigationStep,
   AlternativeSelector,
-} from './VisionTypes.js';
-import type { ViewHierarchyNode } from '../models/ViewHierarchyResult.js';
+} from "./VisionTypes.js";
+import type { ViewHierarchyNode } from "../models/ViewHierarchyResult.js";
 
 export class ClaudeVisionClient {
   private client: Anthropic;
   private model: string;
 
-  constructor(apiKey?: string, model: string = 'claude-sonnet-4-5') {
+  constructor(apiKey?: string, model: string = "claude-sonnet-4-5") {
     this.client = new Anthropic({
       apiKey: apiKey || process.env.ANTHROPIC_API_KEY,
     });
@@ -37,7 +37,7 @@ export class ClaudeVisionClient {
 
       // Read screenshot as base64
       const imageData = fs.readFileSync(screenshotPath);
-      const base64Image = imageData.toString('base64');
+      const base64Image = imageData.toString("base64");
 
       // Call Claude vision API
       const response = await this.client.messages.create({
@@ -45,18 +45,18 @@ export class ClaudeVisionClient {
         max_tokens: 2048,
         messages: [
           {
-            role: 'user',
+            role: "user",
             content: [
               {
-                type: 'image',
+                type: "image",
                 source: {
-                  type: 'base64',
-                  media_type: 'image/png',
+                  type: "base64",
+                  media_type: "image/png",
                   data: base64Image,
                 },
               },
               {
-                type: 'text',
+                type: "text",
                 text: prompt,
               },
             ],
@@ -82,7 +82,7 @@ export class ClaudeVisionClient {
         screenshotPath
       );
     } catch (error) {
-      console.error('Claude Vision API error:', error);
+      console.error("Claude Vision API error:", error);
       throw error;
     }
   }
@@ -93,10 +93,10 @@ export class ClaudeVisionClient {
   ): string {
     const parts: string[] = [];
 
-    parts.push('You are an Android UI automation expert analyzing a screenshot to help locate a specific UI element.');
-    parts.push('');
+    parts.push("You are an Android UI automation expert analyzing a screenshot to help locate a specific UI element.");
+    parts.push("");
 
-    parts.push('SEARCH CRITERIA:');
+    parts.push("SEARCH CRITERIA:");
     if (criteria.text) {
       parts.push(`- Text: "${criteria.text}"`);
     }
@@ -106,41 +106,41 @@ export class ClaudeVisionClient {
     if (criteria.description) {
       parts.push(`- Description: ${criteria.description}`);
     }
-    parts.push('');
+    parts.push("");
 
     if (hierarchy) {
-      parts.push('VIEW HIERARCHY (for reference):');
-      parts.push('```json');
+      parts.push("VIEW HIERARCHY (for reference):");
+      parts.push("```json");
       parts.push(JSON.stringify(hierarchy, null, 2).slice(0, 5000)); // Limit size
-      parts.push('```');
-      parts.push('');
+      parts.push("```");
+      parts.push("");
     }
 
-    parts.push('ANALYSIS TASKS:');
-    parts.push('1. **Locate Element**: Find the element matching the criteria in the screenshot');
-    parts.push('   - If found, provide exact coordinates and bounds');
-    parts.push('   - If not visible, explain why (scrolled off-screen, hidden, doesn\'t exist)');
-    parts.push('');
+    parts.push("ANALYSIS TASKS:");
+    parts.push("1. **Locate Element**: Find the element matching the criteria in the screenshot");
+    parts.push("   - If found, provide exact coordinates and bounds");
+    parts.push("   - If not visible, explain why (scrolled off-screen, hidden, doesn't exist)");
+    parts.push("");
 
-    parts.push('2. **Alternative Selectors**: If element visible but criteria don\'t match exactly');
-    parts.push('   - Suggest corrected text or resource ID values');
-    parts.push('   - Explain what changed (typo, UI update, etc.)');
-    parts.push('');
+    parts.push("2. **Alternative Selectors**: If element visible but criteria don't match exactly");
+    parts.push("   - Suggest corrected text or resource ID values");
+    parts.push("   - Explain what changed (typo, UI update, etc.)");
+    parts.push("");
 
-    parts.push('3. **Navigation Steps**: If element exists but requires navigation to reach');
-    parts.push('   - Provide step-by-step instructions to reach it');
-    parts.push('   - Include specific UI elements to interact with');
-    parts.push('   - Only suggest if you have HIGH confidence (>90%)');
-    parts.push('');
+    parts.push("3. **Navigation Steps**: If element exists but requires navigation to reach");
+    parts.push("   - Provide step-by-step instructions to reach it");
+    parts.push("   - Include specific UI elements to interact with");
+    parts.push("   - Only suggest if you have HIGH confidence (>90%)");
+    parts.push("");
 
-    parts.push('4. **Similar Elements**: List elements that might be what the user intended');
-    parts.push('   - Include their text, resource IDs, and visual appearance');
-    parts.push('   - Explain why they might be confused');
-    parts.push('');
+    parts.push("4. **Similar Elements**: List elements that might be what the user intended");
+    parts.push("   - Include their text, resource IDs, and visual appearance");
+    parts.push("   - Explain why they might be confused");
+    parts.push("");
 
-    parts.push('RESPONSE FORMAT (JSON only):');
-    parts.push('```json');
-    parts.push('{');
+    parts.push("RESPONSE FORMAT (JSON only):");
+    parts.push("```json");
+    parts.push("{");
     parts.push('  "elementFound": boolean,');
     parts.push('  "elementLocation": {"x": number, "y": number, "width": number, "height": number} | null,');
     parts.push('  "suggestedText": string | null,');
@@ -148,29 +148,29 @@ export class ClaudeVisionClient {
     parts.push('  "navigationRequired": boolean,');
     parts.push('  "steps": [');
     parts.push('    {"action": "tap|swipe|scroll|input", "target": string, "reasoning": string}');
-    parts.push('  ] | null,');
+    parts.push("  ] | null,");
     parts.push('  "visualDescription": string,');
     parts.push('  "similarElements": string[],');
     parts.push('  "confidence": number,  // 0-1');
     parts.push('  "reasoning": string');
-    parts.push('}');
-    parts.push('```');
-    parts.push('');
+    parts.push("}");
+    parts.push("```");
+    parts.push("");
 
-    parts.push('IMPORTANT:');
-    parts.push('- Only suggest navigation steps if confidence > 0.9');
-    parts.push('- Be specific about element positions and attributes');
-    parts.push('- If unsure, explain what you see and why it\'s ambiguous');
-    parts.push('- Return ONLY the JSON, no additional text');
+    parts.push("IMPORTANT:");
+    parts.push("- Only suggest navigation steps if confidence > 0.9");
+    parts.push("- Be specific about element positions and attributes");
+    parts.push("- If unsure, explain what you see and why it's ambiguous");
+    parts.push("- Return ONLY the JSON, no additional text");
 
-    return parts.join('\n');
+    return parts.join("\n");
   }
 
   private parseClaudeResponse(response: Anthropic.Message): ClaudeVisionAnalysis {
     // Extract text from response
-    let responseText = '';
+    let responseText = "";
     for (const block of response.content) {
-      if (block.type === 'text') {
+      if (block.type === "text") {
         responseText += block.text;
       }
     }
@@ -179,7 +179,7 @@ export class ClaudeVisionClient {
     const jsonMatch = responseText.match(/```json\n([\s\S]*?)\n```/) || responseText.match(/\{[\s\S]*\}/);
 
     if (!jsonMatch) {
-      throw new Error('Failed to parse JSON from Claude response');
+      throw new Error("Failed to parse JSON from Claude response");
     }
 
     const jsonStr = jsonMatch[1] || jsonMatch[0];
@@ -192,10 +192,10 @@ export class ClaudeVisionClient {
       suggestedResourceId: parsed.suggestedResourceId || undefined,
       navigationRequired: parsed.navigationRequired || false,
       steps: parsed.steps || undefined,
-      visualDescription: parsed.visualDescription || '',
+      visualDescription: parsed.visualDescription || "",
       similarElements: parsed.similarElements || [],
       confidence: parsed.confidence || 0,
-      reasoning: parsed.reasoning || '',
+      reasoning: parsed.reasoning || "",
     };
   }
 
@@ -206,9 +206,9 @@ export class ClaudeVisionClient {
     screenshotPath: string
   ): VisionFallbackResult {
     // Determine confidence level
-    const confidenceLevel: 'high' | 'medium' | 'low' =
-      analysis.confidence >= 0.9 ? 'high' :
-      analysis.confidence >= 0.7 ? 'medium' : 'low';
+    const confidenceLevel: "high" | "medium" | "low" =
+      analysis.confidence >= 0.9 ? "high" :
+        analysis.confidence >= 0.7 ? "medium" : "low";
 
     // Build navigation steps if provided
     const navigationSteps: NavigationStep[] | undefined = analysis.steps?.map(step => ({
@@ -221,18 +221,18 @@ export class ClaudeVisionClient {
     const alternativeSelectors: AlternativeSelector[] = [];
     if (analysis.suggestedText) {
       alternativeSelectors.push({
-        type: 'text',
+        type: "text",
         value: analysis.suggestedText,
         confidence: analysis.confidence,
-        reasoning: 'Claude suggested this text as alternative',
+        reasoning: "Claude suggested this text as alternative",
       });
     }
     if (analysis.suggestedResourceId) {
       alternativeSelectors.push({
-        type: 'resourceId',
+        type: "resourceId",
         value: analysis.suggestedResourceId,
         confidence: analysis.confidence,
-        reasoning: 'Claude suggested this resource ID as alternative',
+        reasoning: "Claude suggested this resource ID as alternative",
       });
     }
 
@@ -246,18 +246,18 @@ export class ClaudeVisionClient {
       costUsd,
       durationMs,
       screenshotPath,
-      provider: 'claude',
+      provider: "claude",
     };
   }
 
-  private mapAction(action: string): NavigationStep['action'] {
+  private mapAction(action: string): NavigationStep["action"] {
     const normalized = action.toLowerCase();
-    if (normalized.includes('tap') || normalized.includes('click')) return 'tap';
-    if (normalized.includes('swipe')) return 'swipe';
-    if (normalized.includes('scroll')) return 'scroll';
-    if (normalized.includes('input') || normalized.includes('type')) return 'input';
-    if (normalized.includes('wait')) return 'wait';
-    return 'tap'; // Default
+    if (normalized.includes("tap") || normalized.includes("click")) {return "tap";}
+    if (normalized.includes("swipe")) {return "swipe";}
+    if (normalized.includes("scroll")) {return "scroll";}
+    if (normalized.includes("input") || normalized.includes("type")) {return "input";}
+    if (normalized.includes("wait")) {return "wait";}
+    return "tap"; // Default
   }
 
   private calculateCost(inputTokens: number, outputTokens: number): number {

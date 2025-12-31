@@ -15,8 +15,8 @@ import { AccessibilityServiceClient } from "../observe/AccessibilityServiceClien
 import { AxeClient } from "../../utils/ios-cmdline-tools/AxeClient";
 import { WebDriverAgent } from "../../utils/ios-cmdline-tools/WebDriverAgent";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { VisionFallback, DEFAULT_VISION_CONFIG, type VisionFallbackConfig } from "../../vision/index.js";
-import { TakeScreenshot } from "../observe/TakeScreenshot.js";
+import { VisionFallback, DEFAULT_VISION_CONFIG, type VisionFallbackConfig } from "../../vision/index";
+import { TakeScreenshot } from "../observe/TakeScreenshot";
 
 /**
  * Command to tap on UI element containing specified text

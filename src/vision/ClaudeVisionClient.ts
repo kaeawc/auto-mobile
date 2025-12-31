@@ -10,8 +10,8 @@ import type {
   VisionFallbackResult,
   NavigationStep,
   AlternativeSelector,
-} from "./VisionTypes.js";
-import type { ViewHierarchyNode } from "../models/ViewHierarchyResult.js";
+} from "./VisionTypes";
+import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 
 export class ClaudeVisionClient {
   private client: Anthropic;

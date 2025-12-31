@@ -3,13 +3,13 @@
  * Coordinates vision providers (Claude) to find elements when traditional methods fail
  */
 
-import { ClaudeVisionClient } from "./ClaudeVisionClient.js";
+import { ClaudeVisionClient } from "./ClaudeVisionClient";
 import type {
   VisionFallbackConfig,
   VisionFallbackResult,
   ElementSearchCriteria,
-} from "./VisionTypes.js";
-import type { ViewHierarchyNode } from "../models/ViewHierarchyResult.js";
+} from "./VisionTypes";
+import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 
 export class VisionFallback {
   private config: VisionFallbackConfig;

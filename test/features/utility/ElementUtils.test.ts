@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { ElementUtils } from "../../../src/features/utility/ElementUtils";
 import { Element } from "../../../src/models";
 import { ObserveResult } from "../../../src/models";
@@ -26,7 +26,7 @@ describe("ElementUtils", () => {
   });
 
   describe("flattenViewHierarchy", () => {
-    it("should flatten a simple view hierarchy", () => {
+    test("should flatten a simple view hierarchy", () => {
       const viewHierarchy = {
         hierarchy: {
           node: {
@@ -67,12 +67,12 @@ describe("ElementUtils", () => {
       assert.equal(result[2].text, "Text View");
     });
 
-    it("should handle empty view hierarchy", () => {
+    test("should handle empty view hierarchy", () => {
       const result = elementUtils.flattenViewHierarchy(null as any);
       assert.deepEqual(result, []);
     });
 
-    it("should handle view hierarchy without parseable elements", () => {
+    test("should handle view hierarchy without parseable elements", () => {
       const viewHierarchy = {
         hierarchy: {
           node: {
@@ -89,7 +89,7 @@ describe("ElementUtils", () => {
       assert.deepEqual(result, []);
     });
 
-    it("should prefer text over content-desc", () => {
+    test("should prefer text over content-desc", () => {
       const viewHierarchy = {
         hierarchy: {
           node: {
@@ -110,7 +110,7 @@ describe("ElementUtils", () => {
       assert.equal(result[0].text, "Button Text");
     });
 
-    it("should use content-desc when text is not available", () => {
+    test("should use content-desc when text is not available", () => {
       const viewHierarchy = {
         hierarchy: {
           node: {
@@ -159,7 +159,7 @@ describe("ElementUtils", () => {
       }
     };
 
-    it("should find element by valid index", () => {
+    test("should find element by valid index", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 1);
 
@@ -168,24 +168,24 @@ describe("ElementUtils", () => {
       assert.equal(result?.text, "Button 1");
     });
 
-    it("should return null for invalid index", () => {
+    test("should return null for invalid index", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 10);
       assert.isNull(result);
     });
 
-    it("should return null for negative index", () => {
+    test("should return null for negative index", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, -1);
       assert.isNull(result);
     });
 
-    it("should return null for empty view hierarchy", () => {
+    test("should return null for empty view hierarchy", () => {
       const result = elementUtils.findElementByIndex(null as any, 0);
       assert.isNull(result);
     });
 
-    it("should handle element without text", () => {
+    test("should handle element without text", () => {
       const viewHierarchy = {
         hierarchy: {
           node: {
@@ -206,7 +206,7 @@ describe("ElementUtils", () => {
   });
 
   describe("validateElementText", () => {
-    it("should return true when no expected text is provided", () => {
+    test("should return true when no expected text is provided", () => {
       const foundElement = {
         element: mockElement,
         text: "Some text"
@@ -216,7 +216,7 @@ describe("ElementUtils", () => {
       assert.isTrue(result);
     });
 
-    it("should return true when texts match", () => {
+    test("should return true when texts match", () => {
       const foundElement = {
         element: mockElement,
         text: "Button Text"
@@ -226,7 +226,7 @@ describe("ElementUtils", () => {
       assert.isTrue(result);
     });
 
-    it("should return true for fuzzy text match", () => {
+    test("should return true for fuzzy text match", () => {
       const foundElement = {
         element: mockElement,
         text: "Submit Button"
@@ -236,7 +236,7 @@ describe("ElementUtils", () => {
       assert.isTrue(result);
     });
 
-    it("should return false when expected text provided but element has no text", () => {
+    test("should return false when expected text provided but element has no text", () => {
       const foundElement = {
         element: mockElement,
         text: undefined
@@ -246,7 +246,7 @@ describe("ElementUtils", () => {
       assert.isFalse(result);
     });
 
-    it("should return false when texts do not match", () => {
+    test("should return false when texts do not match", () => {
       const foundElement = {
         element: mockElement,
         text: "Button Text"
@@ -256,7 +256,7 @@ describe("ElementUtils", () => {
       assert.isFalse(result);
     });
 
-    it("should handle case insensitive matching", () => {
+    test("should handle case insensitive matching", () => {
       const foundElement = {
         element: mockElement,
         text: "SUBMIT BUTTON"
@@ -328,7 +328,7 @@ describe("ElementUtils", () => {
       }
     };
 
-    it("should find element by text within specified container", () => {
+    test("should find element by text within specified container", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -343,7 +343,7 @@ describe("ElementUtils", () => {
       assert.deepEqual(result?.bounds, { left: 50, top: 850, right: 1030, bottom: 950 });
     });
 
-    it("should not find element when it's outside the specified container", () => {
+    test("should not find element when it's outside the specified container", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -356,7 +356,7 @@ describe("ElementUtils", () => {
       assert.isNull(result);
     });
 
-    it("should return null when container is not found", () => {
+    test("should return null when container is not found", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -369,7 +369,7 @@ describe("ElementUtils", () => {
       assert.isNull(result);
     });
 
-    it("should find element regardless of element type", () => {
+    test("should find element regardless of element type", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -384,7 +384,7 @@ describe("ElementUtils", () => {
       assert.include(result?.class || "", "EditText");
     });
 
-    it("should find all matching elements including different types", () => {
+    test("should find all matching elements including different types", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -398,7 +398,7 @@ describe("ElementUtils", () => {
       assert.include(result?.text || "", "Item");
     });
 
-    it("should handle exact text matching", () => {
+    test("should handle exact text matching", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -411,7 +411,7 @@ describe("ElementUtils", () => {
       assert.isNull(result); // Should not find partial matches
     });
 
-    it("should handle case-sensitive matching", () => {
+    test("should handle case-sensitive matching", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -424,7 +424,7 @@ describe("ElementUtils", () => {
       assert.isNull(result); // Should not find due to case mismatch
     });
 
-    it("should handle case-insensitive matching", () => {
+    test("should handle case-insensitive matching", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchyWithContainer);
       const result = elementUtils.findElementByText(
         mockObserveResult.viewHierarchy,
@@ -438,7 +438,7 @@ describe("ElementUtils", () => {
       assert.equal(result?.text, "Item 1");
     });
 
-    it("should prefer smaller elements when multiple matches exist", () => {
+    test("should prefer smaller elements when multiple matches exist", () => {
       const hierarchyWithMultipleMatches = {
         hierarchy: {
           node: {
@@ -481,7 +481,7 @@ describe("ElementUtils", () => {
       assert.deepEqual(result?.bounds, { left: 400, top: 200, right: 680, bottom: 300 });
     });
 
-    it("should handle content-desc attribute", () => {
+    test("should handle content-desc attribute", () => {
       const hierarchyWithContentDesc = {
         hierarchy: {
           node: {
@@ -516,7 +516,7 @@ describe("ElementUtils", () => {
       assert.deepEqual(result?.bounds, { left: 100, top: 100, right: 300, bottom: 200 });
     });
 
-    it("should handle missing required parameters", () => {
+    test("should handle missing required parameters", () => {
       // Missing viewHierarchy
       let result = elementUtils.findElementByText(
         null as any,
@@ -539,7 +539,7 @@ describe("ElementUtils", () => {
       assert.isNull(result);
     });
 
-    it("should handle nested containers", () => {
+    test("should handle nested containers", () => {
       const nestedHierarchy = {
         hierarchy: {
           node: {

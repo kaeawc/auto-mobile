@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { BootedDevice, Element, ObserveResult } from "../../../src/models";
@@ -227,7 +227,7 @@ describe("Explore", () => {
   });
 
   describe("element selection", () => {
-    it("should prioritize navigation elements", async () => {
+    test("should prioritize navigation elements", async () => {
       const nodes = [
         createMockViewHierarchyNode({
           "text": "Settings",
@@ -259,7 +259,7 @@ describe("Explore", () => {
       assert.isTrue(hasSettings);
     });
 
-    it("should calculate navigation scores correctly", async () => {
+    test("should calculate navigation scores correctly", async () => {
       explore = new Explore(device, mockAdb);
 
       const buttonElement = createMockElement({
@@ -288,7 +288,7 @@ describe("Explore", () => {
       assert.isAbove(buttonScore, 0);
     });
 
-    it("should filter out non-clickable elements", async () => {
+    test("should filter out non-clickable elements", async () => {
       const nodes = [
         createMockViewHierarchyNode({ "clickable": "true" }),
         createMockViewHierarchyNode({ "clickable": "false" }),
@@ -306,7 +306,7 @@ describe("Explore", () => {
   });
 
   describe("blocker detection", () => {
-    it("should detect permission dialogs", async () => {
+    test("should detect permission dialogs", async () => {
       const elements = [
         createMockElement({ text: "Allow" }),
         createMockElement({ text: "While using the app" }),
@@ -319,7 +319,7 @@ describe("Explore", () => {
       assert.isTrue(isPermission);
     });
 
-    it("should detect login screens", async () => {
+    test("should detect login screens", async () => {
       const elements = [
         createMockElement({ "text": "Sign in", "class": "android.widget.Button" }),
         createMockElement({ "text": "", "class": "android.widget.EditText" }),
@@ -332,7 +332,7 @@ describe("Explore", () => {
       assert.isTrue(isLogin);
     });
 
-    it("should detect rating dialogs", async () => {
+    test("should detect rating dialogs", async () => {
       const elements = [
         createMockElement({ text: "Rate this app" }),
         createMockElement({ text: "Not now" }),
@@ -345,7 +345,7 @@ describe("Explore", () => {
       assert.isTrue(isRating);
     });
 
-    it("should not detect regular screens as blockers", async () => {
+    test("should not detect regular screens as blockers", async () => {
       const elements = [
         createMockElement({ text: "Home" }),
         createMockElement({ text: "Settings" }),
@@ -494,7 +494,7 @@ describe("Explore", () => {
       }
     });
 
-    it("should generate unique element keys", async () => {
+    test("should generate unique element keys", async () => {
       explore = new Explore(device, mockAdb);
 
       const element1 = createMockElement({

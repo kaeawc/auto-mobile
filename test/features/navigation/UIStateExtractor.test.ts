@@ -1,20 +1,20 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ViewHierarchyResult, WindowHierarchy } from "../../../src/models";
 
 describe("UIStateExtractor", () => {
   describe("extract", () => {
-    it("should return undefined for undefined hierarchy", () => {
+    test("should return undefined for undefined hierarchy", () => {
       const result = UIStateExtractor.extract(undefined);
       assert.isUndefined(result);
     });
 
-    it("should return undefined for hierarchy without hierarchy property", () => {
+    test("should return undefined for hierarchy without hierarchy property", () => {
       const result = UIStateExtractor.extract({} as ViewHierarchyResult);
       assert.isUndefined(result);
     });
 
-    it("should return undefined when no selected elements or destination found", () => {
+    test("should return undefined when no selected elements or destination found", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -26,7 +26,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result);
     });
 
-    it("should extract selected element with text", () => {
+    test("should extract selected element with text", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -43,7 +43,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].text, "Home");
     });
 
-    it("should extract selected element with resource-id", () => {
+    test("should extract selected element with resource-id", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -60,7 +60,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].resourceId, "com.app:id/nav_home");
     });
 
-    it("should extract selected element with content-desc", () => {
+    test("should extract selected element with content-desc", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -77,7 +77,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].contentDesc, "Home Tab");
     });
 
-    it("should extract multiple selected elements", () => {
+    test("should extract multiple selected elements", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: [
@@ -102,7 +102,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[1].text, "Tab2");
     });
 
-    it("should extract nested selected elements", () => {
+    test("should extract nested selected elements", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -125,7 +125,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].text, "NestedTab");
     });
 
-    it("should extract destinationId from resource-id", () => {
+    test("should extract destinationId from resource-id", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -140,7 +140,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.destinationId, "HomeDestination");
     });
 
-    it("should extract text from child nodes for Compose layouts", () => {
+    test("should extract text from child nodes for Compose layouts", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -163,7 +163,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].text, "ChildText");
     });
 
-    it("should ignore elements with selected=false", () => {
+    test("should ignore elements with selected=false", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -178,7 +178,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result);
     });
 
-    it("should not include elements without identifier", () => {
+    test("should not include elements without identifier", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -194,7 +194,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result);
     });
 
-    it("should extract both selected elements and destinationId", () => {
+    test("should extract both selected elements and destinationId", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -216,7 +216,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].text, "General");
     });
 
-    it("should handle array of child nodes", () => {
+    test("should handle array of child nodes", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: [
@@ -243,7 +243,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.selectedElements[0].text, "Second");
     });
 
-    it("should handle real-world tab navigation hierarchy", () => {
+    test("should handle real-world tab navigation hierarchy", () => {
       const hierarchy = createHierarchy({
         bounds: "[0,0][1080,2400]",
         node: {
@@ -285,7 +285,7 @@ describe("UIStateExtractor", () => {
   });
 
   describe("modal extraction", () => {
-    it("should extract dialog modal from windows array", () => {
+    test("should extract dialog modal from windows array", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]",
@@ -319,7 +319,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].layer, 1);
     });
 
-    it("should extract bottom sheet modal from windows array", () => {
+    test("should extract bottom sheet modal from windows array", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]",
@@ -354,7 +354,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].identifier, "com.app:id/settings_bottom_sheet");
     });
 
-    it("should extract popup modal from windows array", () => {
+    test("should extract popup modal from windows array", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -383,7 +383,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].identifier, "More options");
     });
 
-    it("should extract multiple modals and sort by layer", () => {
+    test("should extract multiple modals and sort by layer", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -426,7 +426,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![1].type, "dialog");
     });
 
-    it("should extract menu modal from windows array", () => {
+    test("should extract menu modal from windows array", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -454,7 +454,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].type, "menu");
     });
 
-    it("should not extract non-modal windows", () => {
+    test("should not extract non-modal windows", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -480,7 +480,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result);
     });
 
-    it("should prefer resource-id over text for modal identifier", () => {
+    test("should prefer resource-id over text for modal identifier", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -508,7 +508,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].identifier, "com.app:id/confirmation_dialog");
     });
 
-    it("should skip android system IDs for modal identifier", () => {
+    test("should skip android system IDs for modal identifier", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]"
@@ -537,7 +537,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.modalStack![0].identifier, "Dialog Title");
     });
 
-    it("should extract modals along with selected elements", () => {
+    test("should extract modals along with selected elements", () => {
       const hierarchy = createHierarchyWithWindows(
         {
           bounds: "[0,0][1080,2400]",
@@ -574,7 +574,7 @@ describe("UIStateExtractor", () => {
   });
 
   describe("createScrollPosition", () => {
-    it("should return undefined when lookFor is not specified", () => {
+    test("should return undefined when lookFor is not specified", () => {
       const options = {
         direction: "down" as const,
         platform: "android" as const
@@ -583,7 +583,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result);
     });
 
-    it("should create scroll position with target element", () => {
+    test("should create scroll position with target element", () => {
       const options = {
         direction: "down" as const,
         platform: "android" as const,
@@ -600,7 +600,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result!.speed);
     });
 
-    it("should create scroll position with container", () => {
+    test("should create scroll position with container", () => {
       const options = {
         direction: "up" as const,
         platform: "android" as const,
@@ -623,7 +623,7 @@ describe("UIStateExtractor", () => {
       assert.isUndefined(result!.speed);
     });
 
-    it("should create scroll position with speed", () => {
+    test("should create scroll position with speed", () => {
       const options = {
         direction: "down" as const,
         platform: "android" as const,
@@ -640,7 +640,7 @@ describe("UIStateExtractor", () => {
       assert.equal(result!.speed, "slow");
     });
 
-    it("should create scroll position with all fields", () => {
+    test("should create scroll position with all fields", () => {
       const options = {
         direction: "left" as const,
         platform: "android" as const,

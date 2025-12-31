@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { ExecResult, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -120,7 +120,7 @@ describe("RecentApps", () => {
   });
 
   describe("execute", () => {
-    it("should execute gesture navigation when gesture indicators are detected", async () => {
+    test("should execute gesture navigation when gesture indicators are detected", async () => {
       // Use factory function to create new objects on each call
       fakeObserveScreen.setObserveResult(() =>
         createObserveResult(createGestureNavigationHierarchy())
@@ -138,7 +138,7 @@ describe("RecentApps", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input swipe") && cmd.includes("500")));
     });
 
-    it("should execute legacy navigation when recent apps button is detected", async () => {
+    test("should execute legacy navigation when recent apps button is detected", async () => {
       // Use factory function to create new objects on each call
       fakeObserveScreen.setObserveResult(() =>
         createObserveResult(createLegacyNavigationHierarchy())
@@ -156,7 +156,7 @@ describe("RecentApps", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input tap 900 1860")));
     });
 
-    it("should execute hardware navigation when no navigation indicators are detected", async () => {
+    test("should execute hardware navigation when no navigation indicators are detected", async () => {
       // Use factory function to create new objects on each call
       fakeObserveScreen.setObserveResult(() =>
         createObserveResult(createEmptyHierarchy())
@@ -174,7 +174,7 @@ describe("RecentApps", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent 187")));
     });
 
-    it("should work with progress callback", async () => {
+    test("should work with progress callback", async () => {
       // Use factory function to create new objects on each call
       fakeObserveScreen.setObserveResult(() =>
         createObserveResult(createGestureNavigationHierarchy())
@@ -191,7 +191,7 @@ describe("RecentApps", () => {
       assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
     });
 
-    it("should handle missing view hierarchy gracefully", async () => {
+    test("should handle missing view hierarchy gracefully", async () => {
       // Set factory to return null viewHierarchy
       fakeObserveScreen.setObserveResult(() => {
         const result = createObserveResult();
@@ -209,7 +209,7 @@ describe("RecentApps", () => {
       }
     });
 
-    it("should handle missing screen size gracefully", async () => {
+    test("should handle missing screen size gracefully", async () => {
       // Set factory to return null screenSize
       fakeObserveScreen.setObserveResult(() => {
         const result = createObserveResult(createGestureNavigationHierarchy());
@@ -227,7 +227,7 @@ describe("RecentApps", () => {
   });
 
   describe("detectNavigationStyle", () => {
-    it("should detect gesture navigation from home handle", async () => {
+    test("should detect gesture navigation from home handle", async () => {
       const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
 
       fakeObserveScreen.setObserveResult(mockCachedObservation);
@@ -238,7 +238,7 @@ describe("RecentApps", () => {
       assert.equal(result.method, "gesture");
     });
 
-    it("should detect legacy navigation from recent apps button", async () => {
+    test("should detect legacy navigation from recent apps button", async () => {
       const mockCachedObservation = createObserveResult(createLegacyNavigationHierarchy());
 
       fakeObserveScreen.setObserveResult(mockCachedObservation);
@@ -249,7 +249,7 @@ describe("RecentApps", () => {
       assert.equal(result.method, "legacy");
     });
 
-    it("should default to hardware navigation when no indicators found", async () => {
+    test("should default to hardware navigation when no indicators found", async () => {
       const mockCachedObservation = createObserveResult(createEmptyHierarchy());
 
       fakeObserveScreen.setObserveResult(mockCachedObservation);
@@ -262,7 +262,7 @@ describe("RecentApps", () => {
   });
 
   describe("error handling", () => {
-    it("should handle gesture navigation ADB command failure", async () => {
+    test("should handle gesture navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
       fakeAdb.setDefaultResponse({ stdout: "", stderr: "error" });
@@ -275,7 +275,7 @@ describe("RecentApps", () => {
       }
     });
 
-    it("should handle legacy navigation ADB command failure", async () => {
+    test("should handle legacy navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createLegacyNavigationHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
       // Set default response with error to simulate ADB failure
@@ -290,7 +290,7 @@ describe("RecentApps", () => {
       }
     });
 
-    it("should handle hardware navigation ADB command failure", async () => {
+    test("should handle hardware navigation ADB command failure", async () => {
       const mockCachedObservation = createObserveResult(createEmptyHierarchy());
       fakeObserveScreen.setObserveResult(mockCachedObservation);
       fakeAdb.setCommandResponse("shell input keyevent 187", { stdout: "", stderr: "error" });
@@ -303,7 +303,7 @@ describe("RecentApps", () => {
       }
     });
 
-    it("should handle missing system insets for gesture navigation", async () => {
+    test("should handle missing system insets for gesture navigation", async () => {
       const mockCachedObservation = createObserveResult(createGestureNavigationHierarchy());
       (mockCachedObservation.systemInsets as any) = null;
       fakeObserveScreen.setObserveResult(mockCachedObservation);
@@ -316,7 +316,7 @@ describe("RecentApps", () => {
       }
     });
 
-    it("should handle missing recent apps button in legacy navigation", async () => {
+    test("should handle missing recent apps button in legacy navigation", async () => {
       // Use a hierarchy that won't have navigation indicators, so it defaults to hardware
       // but we'll force it to legacy by mocking the detectNavigationStyle result
       const mockCachedObservation = createObserveResult(createEmptyHierarchy());
@@ -340,12 +340,12 @@ describe("RecentApps", () => {
   });
 
   describe("constructor", () => {
-    it("should work with null deviceId", () => {
+    test("should work with null deviceId", () => {
       const recentAppsInstance = new RecentApps("test-device", fakeAdb);
       assert.isDefined(recentAppsInstance);
     });
 
-    it("should work with custom AdbClient", () => {
+    test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
       const recentAppsInstance = new RecentApps("test-device", customAdb);
       assert.isDefined(recentAppsInstance);

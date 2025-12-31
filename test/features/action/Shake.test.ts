@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -46,7 +46,7 @@ describe("Shake", () => {
   });
 
   describe("execute", () => {
-    it("should execute shake with default parameters", async () => {
+    test("should execute shake with default parameters", async () => {
       // Mock successful ADB commands
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
@@ -78,7 +78,7 @@ describe("Shake", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 0:0:0")));
     });
 
-    it("should execute shake with custom duration", async () => {
+    test("should execute shake with custom duration", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -95,7 +95,7 @@ describe("Shake", () => {
       assert.isTrue(fakeTimer.wasSleepCalled(100));
     });
 
-    it("should execute shake with custom intensity", async () => {
+    test("should execute shake with custom intensity", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 200:200:200", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -111,7 +111,7 @@ describe("Shake", () => {
       assert.equal(result.intensity, 200);
     });
 
-    it("should execute shake with custom duration and intensity", async () => {
+    test("should execute shake with custom duration and intensity", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 150:150:150", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -127,7 +127,7 @@ describe("Shake", () => {
       assert.equal(result.intensity, 150);
     });
 
-    it("should execute shake with empty options object", async () => {
+    test("should execute shake with empty options object", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -146,7 +146,7 @@ describe("Shake", () => {
       assert.isTrue(fakeTimer.wasSleepCalled(1000));
     });
 
-    it("should handle zero duration", async () => {
+    test("should handle zero duration", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -162,7 +162,7 @@ describe("Shake", () => {
       assert.equal(result.intensity, 100);
     });
 
-    it("should handle zero intensity", async () => {
+    test("should handle zero intensity", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
       fakeObserveScreen.setObserveResult(mockObservation);
@@ -177,7 +177,7 @@ describe("Shake", () => {
       assert.equal(result.intensity, 0);
     });
 
-    it("should work with progress callback", async () => {
+    test("should work with progress callback", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -197,7 +197,7 @@ describe("Shake", () => {
       assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
     });
 
-    it("should handle ADB command failure during shake start", async () => {
+    test("should handle ADB command failure during shake start", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "error" });
 
       const mockObservation = createObserveResult();
@@ -217,7 +217,7 @@ describe("Shake", () => {
       }
     });
 
-    it("should handle ADB command failure during shake stop", async () => {
+    test("should handle ADB command failure during shake stop", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "error" });
 
@@ -239,25 +239,25 @@ describe("Shake", () => {
   });
 
   describe("constructor", () => {
-    it("should work with null deviceId", () => {
+    test("should work with null deviceId", () => {
       const shakeInstance = new Shake("test-device", fakeAdb, null, fakeTimer);
       assert.isDefined(shakeInstance);
     });
 
-    it("should work with custom AdbClient", () => {
+    test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
       const shakeInstance = new Shake("test-device", customAdb, null, fakeTimer);
       assert.isDefined(shakeInstance);
     });
 
-    it("should work with default timer when not provided", () => {
+    test("should work with default timer when not provided", () => {
       const shakeInstance = new Shake("test-device", fakeAdb);
       assert.isDefined(shakeInstance);
     });
   });
 
   describe("timing", () => {
-    it("should respect the duration timing", async () => {
+    test("should respect the duration timing", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -280,7 +280,7 @@ describe("Shake", () => {
   });
 
   describe("edge cases", () => {
-    it("should handle very high intensity values", async () => {
+    test("should handle very high intensity values", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 9999:9999:9999", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -298,7 +298,7 @@ describe("Shake", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 9999:9999:9999")));
     });
 
-    it("should handle very long duration", async () => {
+    test("should handle very long duration", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration 100:100:100", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();
@@ -318,7 +318,7 @@ describe("Shake", () => {
       assert.isAtLeast(executedCommands.length, 2);
     });
 
-    it("should handle negative values gracefully", async () => {
+    test("should handle negative values gracefully", async () => {
       fakeAdb.setCommandResponse("emu sensor set acceleration -50:-50:-50", { stdout: "", stderr: "" });
       fakeAdb.setCommandResponse("emu sensor set acceleration 0:0:0", { stdout: "", stderr: "" });
       const mockObservation = createObserveResult();

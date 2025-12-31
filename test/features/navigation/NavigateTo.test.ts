@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
@@ -76,7 +76,7 @@ describe("NavigateTo", () => {
   });
 
   describe("execute", () => {
-    it("should return error when no current screen", async () => {
+    test("should return error when no current screen", async () => {
       navigateTo = new NavigateTo(device, null);
 
       const result = await navigateTo.execute({
@@ -89,7 +89,7 @@ describe("NavigateTo", () => {
       assert.equal(result.stepsExecuted, 0);
     });
 
-    it("should return success when already on target screen", async () => {
+    test("should return success when already on target screen", async () => {
       const manager = NavigationGraphManager.getInstance();
       await manager.recordNavigationEvent({
         destination: "HomeScreen",
@@ -112,7 +112,7 @@ describe("NavigateTo", () => {
       assert.equal(result.stepsExecuted, 0);
     });
 
-    it("should return error when no path exists", async () => {
+    test("should return error when no path exists", async () => {
       const manager = NavigationGraphManager.getInstance();
       await manager.recordNavigationEvent({
         destination: "HomeScreen",
@@ -136,7 +136,7 @@ describe("NavigateTo", () => {
       assert.include(result.error!, "UnknownScreen");
     });
 
-    it("should execute tool call when path exists", async () => {
+    test("should execute tool call when path exists", async () => {
       const manager = NavigationGraphManager.getInstance();
       const now = Date.now();
 
@@ -187,7 +187,7 @@ describe("NavigateTo", () => {
       assert.equal(toolCallLog[0].args.text, "Settings");
     });
 
-    it("should include path in successful navigation result", async () => {
+    test("should include path in successful navigation result", async () => {
       const manager = NavigationGraphManager.getInstance();
       const now = Date.now();
 
@@ -232,7 +232,7 @@ describe("NavigateTo", () => {
       assert.isTrue(result.path!.length > 0);
     });
 
-    it("should report progress during navigation", async () => {
+    test("should report progress during navigation", async () => {
       const manager = NavigationGraphManager.getInstance();
       const now = Date.now();
       const progressUpdates: Array<{ current: number; total: number; message: string }> = [];
@@ -281,7 +281,7 @@ describe("NavigateTo", () => {
       assert.include(progressUpdates[0].message, "Screen2");
     });
 
-    it("should return duration in result", async () => {
+    test("should return duration in result", async () => {
       const manager = NavigationGraphManager.getInstance();
       await manager.recordNavigationEvent({
         destination: "HomeScreen",
@@ -306,7 +306,7 @@ describe("NavigateTo", () => {
   });
 
   describe("multi-hop navigation", () => {
-    it("should find and execute multi-hop path", async () => {
+    test("should find and execute multi-hop path", async () => {
       const manager = NavigationGraphManager.getInstance();
       const now = Date.now();
 

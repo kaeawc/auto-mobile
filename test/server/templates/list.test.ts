@@ -1,5 +1,5 @@
-import { describe, it, beforeEach, afterEach } from "mocha";
-import { expect } from "chai";
+import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expect } from "bun:test";
 import {
   ListResourceTemplatesRequestSchema
 } from "@modelcontextprotocol/sdk/types.js";
@@ -19,7 +19,7 @@ describe("MCP Templates List", () => {
     }
   });
 
-  it("given no templates are registered, endpoint should return an empty list", async function() {
+  test("given no templates are registered, endpoint should return an empty list", async function() {
     this.timeout(5000);
 
     const { client } = fixture.getContext();
@@ -41,13 +41,13 @@ describe("MCP Templates List", () => {
     }, listResourceTemplatesResponseSchema);
 
     // Verify empty resource templates list
-    expect(result).to.be.an("object");
-    expect(result).to.have.property("resourceTemplates");
-    expect(result.resourceTemplates).to.be.an("array");
-    expect(result.resourceTemplates).to.have.length(0);
+    expect(typeof result).toBe("object");
+    expect(result).toHaveProperty("resourceTemplates");
+    expect(Array.isArray(result.resourceTemplates)).toBe(true);
+    expect(result.resourceTemplates).toHaveLength(0);
   });
 
-  it("given a template is registered, endpoint should return a list with that template", async function() {
+  test("given a template is registered, endpoint should return a list with that template", async function() {
     this.timeout(5000);
 
     // For this test, we need to mock or implement a template registration
@@ -89,16 +89,16 @@ describe("MCP Templates List", () => {
     }, listResourceTemplatesResponseSchema);
 
     // Verify resource templates list contains the test template
-    expect(result).to.be.an("object");
-    expect(result).to.have.property("resourceTemplates");
-    expect(result.resourceTemplates).to.be.an("array");
-    expect(result.resourceTemplates).to.have.length(1);
+    expect(typeof result).toBe("object");
+    expect(result).toHaveProperty("resourceTemplates");
+    expect(Array.isArray(result.resourceTemplates)).toBe(true);
+    expect(result.resourceTemplates).toHaveLength(1);
 
     // Verify the template has required properties
     const template = result.resourceTemplates[0];
-    expect(template).to.have.property("uriTemplate", testTemplate.uriTemplate);
-    expect(template).to.have.property("name", testTemplate.name);
-    expect(template).to.have.property("description", testTemplate.description);
-    expect(template).to.have.property("mimeType", testTemplate.mimeType);
+    expect(template).toHaveProperty("uriTemplate", testTemplate.uriTemplate);
+    expect(template).toHaveProperty("name", testTemplate.name);
+    expect(template).toHaveProperty("description", testTemplate.description);
+    expect(template).toHaveProperty("mimeType", testTemplate.mimeType);
   });
 });

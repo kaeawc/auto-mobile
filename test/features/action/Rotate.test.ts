@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
@@ -47,7 +47,7 @@ describe("Rotate", () => {
   });
 
   describe("getCurrentOrientation", () => {
-    it("should return portrait for user_rotation 0", async () => {
+    test("should return portrait for user_rotation 0", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -56,7 +56,7 @@ describe("Rotate", () => {
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system user_rotation"));
     });
 
-    it("should return landscape for user_rotation 1", async () => {
+    test("should return landscape for user_rotation 1", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -64,7 +64,7 @@ describe("Rotate", () => {
       assert.equal(orientation, "landscape");
     });
 
-    it("should return portrait for user_rotation 2", async () => {
+    test("should return portrait for user_rotation 2", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("2"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -72,7 +72,7 @@ describe("Rotate", () => {
       assert.equal(orientation, "portrait");
     });
 
-    it("should return landscape for user_rotation 3", async () => {
+    test("should return landscape for user_rotation 3", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("3"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -80,7 +80,7 @@ describe("Rotate", () => {
       assert.equal(orientation, "landscape");
     });
 
-    it("should return portrait as default when ADB command fails", async () => {
+    test("should return portrait as default when ADB command fails", async () => {
       fakeAdb.setDefaultResponse({
         stdout: "",
         stderr: "Error",
@@ -96,7 +96,7 @@ describe("Rotate", () => {
   });
 
   describe("isOrientationLocked", () => {
-    it("should return true when accelerometer_rotation is 0", async () => {
+    test("should return true when accelerometer_rotation is 0", async () => {
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("0"));
 
       const isLocked = await rotate.isOrientationLocked();
@@ -105,7 +105,7 @@ describe("Rotate", () => {
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation"));
     });
 
-    it("should return false when accelerometer_rotation is 1", async () => {
+    test("should return false when accelerometer_rotation is 1", async () => {
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
 
       const isLocked = await rotate.isOrientationLocked();
@@ -113,7 +113,7 @@ describe("Rotate", () => {
       assert.isFalse(isLocked);
     });
 
-    it("should return false as default when ADB command fails", async () => {
+    test("should return false as default when ADB command fails", async () => {
       fakeAdb.setDefaultResponse({
         stdout: "",
         stderr: "Error",
@@ -129,7 +129,7 @@ describe("Rotate", () => {
   });
 
   describe("execute", () => {
-    it("should skip rotation when already in desired orientation", async () => {
+    test("should skip rotation when already in desired orientation", async () => {
       // Setup: device is already in portrait orientation
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
 
@@ -146,7 +146,7 @@ describe("Rotate", () => {
       assert.isFalse(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0"));
     });
 
-    it("should get current orientation and lock status before rotation", async () => {
+    test("should get current orientation and lock status before rotation", async () => {
       // Setup: device starts in portrait, needs to rotate to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
@@ -159,7 +159,7 @@ describe("Rotate", () => {
       assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation"));
     });
 
-    it("should attempt rotation command when orientation differs", async () => {
+    test("should attempt rotation command when orientation differs", async () => {
       // Setup: device is in portrait, rotating to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
@@ -171,7 +171,7 @@ describe("Rotate", () => {
       assert.isTrue(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\""));
     });
 
-    it("should unlock orientation if locked before rotation", async () => {
+    test("should unlock orientation if locked before rotation", async () => {
       // Setup: device is landscape with orientation locked
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("0")); // Locked
@@ -189,7 +189,7 @@ describe("Rotate", () => {
   });
 
   describe("constructor", () => {
-    it("should work with non-null deviceId", () => {
+    test("should work with non-null deviceId", () => {
       const device: BootedDevice = {
         name: "Test Device",
         platform: "android",
@@ -200,7 +200,7 @@ describe("Rotate", () => {
       assert.isDefined(rotateInstance);
     });
 
-    it("should work with custom ADB executor", () => {
+    test("should work with custom ADB executor", () => {
       const device: BootedDevice = {
         name: "Test Device",
         platform: "android",
@@ -214,7 +214,7 @@ describe("Rotate", () => {
   });
 
   describe("edge cases", () => {
-    it("should handle whitespace in ADB output", async () => {
+    test("should handle whitespace in ADB output", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("  1  \n"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -222,7 +222,7 @@ describe("Rotate", () => {
       assert.equal(orientation, "landscape");
     });
 
-    it("should handle non-numeric ADB output", async () => {
+    test("should handle non-numeric ADB output", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("not-a-number"));
 
       const orientation = await rotate.getCurrentOrientation();
@@ -230,7 +230,7 @@ describe("Rotate", () => {
       assert.equal(orientation, "portrait"); // Should default to portrait
     });
 
-    it("should handle empty ADB output", async () => {
+    test("should handle empty ADB output", async () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult(""));
 
       const orientation = await rotate.getCurrentOrientation();

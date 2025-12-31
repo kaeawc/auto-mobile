@@ -1,4 +1,4 @@
-import { assert } from "chai";
+import { expect, describe, test, beforeEach, afterEach, before, after } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -48,7 +48,7 @@ describe("HomeScreen", () => {
   });
 
   describe("execute", () => {
-    it("should execute hardware navigation using keyevent 3", async () => {
+    test("should execute hardware navigation using keyevent 3", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const result = await homeScreen.execute();
@@ -61,7 +61,7 @@ describe("HomeScreen", () => {
       assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent 3")));
     });
 
-    it("should work with progress callback", async () => {
+    test("should work with progress callback", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const progressCallback = async () => {
@@ -73,7 +73,7 @@ describe("HomeScreen", () => {
       assert.equal(result.navigationMethod, "hardware");
     });
 
-    it("should include observation in result", async () => {
+    test("should include observation in result", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "" });
 
       const result = await homeScreen.execute();
@@ -85,7 +85,7 @@ describe("HomeScreen", () => {
   });
 
   describe("error handling", () => {
-    it("should propagate errors when hardware navigation fails", async () => {
+    test("should propagate errors when hardware navigation fails", async () => {
       fakeAdb.setCommandResponse("shell input keyevent 3", { stdout: "", stderr: "Hardware failed" });
 
       try {
@@ -98,7 +98,7 @@ describe("HomeScreen", () => {
   });
 
   describe("multiple devices", () => {
-    it("should work with different device IDs", async () => {
+    test("should work with different device IDs", async () => {
       const homeScreen2 = new HomeScreen("device-2", fakeAdb);
 
       // Set up fakes for the second HomeScreen instance

@@ -132,6 +132,7 @@ class BunSqliteConnection implements DatabaseConnection {
     }
   }
 
+  // eslint-disable-next-line require-yield
   async *streamQuery<R>(): AsyncIterableIterator<QueryResult<R>> {
     throw new Error("Streaming is not supported by BunSqliteDialect");
   }

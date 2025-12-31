@@ -1,4 +1,4 @@
-import { describe, test } from "bun:test";
+import { expect, describe, test } from "bun:test";
 import { UIStateExtractor } from "../../../src/features/navigation/UIStateExtractor";
 import { ViewHierarchyResult, WindowHierarchy } from "../../../src/models";
 

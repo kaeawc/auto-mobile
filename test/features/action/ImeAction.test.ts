@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { ImeAction } from "../../../src/features/action/ImeAction";
 import { ExecResult, ObserveResult, BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

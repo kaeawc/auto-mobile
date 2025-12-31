@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";

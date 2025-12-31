@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { ElementUtils } from "../../../src/features/utility/ElementUtils";
 import { Element } from "../../../src/models";
 import { ObserveResult } from "../../../src/models";

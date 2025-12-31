@@ -1,4 +1,4 @@
-import { describe, test, beforeEach, afterEach, before } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, beforeAll } from "bun:test";
 import { NavigateTo } from "../../../src/features/navigation/NavigateTo";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
@@ -14,7 +14,7 @@ describe("NavigateTo", () => {
   // Map of text -> screen to simulate navigation when tools are called
   let navigationMap: Map<string, string>;
 
-  before(async () => {
+  beforeAll(async () => {
     // Run database migrations once before all tests
     await runMigrations();
   });

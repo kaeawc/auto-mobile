@@ -1,4 +1,4 @@
-import { describe, test, beforeEach, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { Explore } from "../../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { BootedDevice, Element, ObserveResult } from "../../../src/models";

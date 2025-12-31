@@ -1,4 +1,4 @@
-import { describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { ExecResult, ObserveResult } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";

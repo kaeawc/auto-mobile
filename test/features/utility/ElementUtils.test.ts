@@ -58,7 +58,7 @@ describe("ElementUtils", () => {
       const mockObserveResult = createObserveResult(viewHierarchy);
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
-      assert.lengthOf(result, 3);
+      expect(result.length).toBe(3);
       expect(result[0].index).toBe(0);
       expect(result[0].text).toBe("Root");
       expect(result[1].index).toBe(1);
@@ -106,7 +106,7 @@ describe("ElementUtils", () => {
       const mockObserveResult = createObserveResult(viewHierarchy);
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
-      assert.lengthOf(result, 1);
+      expect(result.length).toBe(1);
       expect(result[0].text).toBe("Button Text");
     });
 
@@ -126,7 +126,7 @@ describe("ElementUtils", () => {
       const mockObserveResult = createObserveResult(viewHierarchy);
       const result = elementUtils.flattenViewHierarchy(mockObserveResult.viewHierarchy);
 
-      assert.lengthOf(result, 1);
+      expect(result.length).toBe(1);
       expect(result[0].text).toBe("Image Description");
     });
   });
@@ -163,7 +163,7 @@ describe("ElementUtils", () => {
       const mockObserveResult = createObserveResult(mockViewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 1);
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.element.bounds).toEqual({ left: 10, top: 10, right: 50, bottom: 50 });
       expect(result?.text).toBe("Button 1");
     });
@@ -200,7 +200,7 @@ describe("ElementUtils", () => {
       const mockObserveResult = createObserveResult(viewHierarchy);
       const result = elementUtils.findElementByIndex(mockObserveResult.viewHierarchy, 0);
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.text).toBeUndefined();
     });
   });
@@ -338,7 +338,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.text).toBe("Item 1");
       expect(result?.bounds).toEqual({ left: 50, top: 850, right: 1030, bottom: 950 });
     });
@@ -379,9 +379,9 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.text).toBe("Item 2");
-      assert.include(result?.class || "", "EditText");
+      expect(result?.class || "").toContain("EditText");
     });
 
     test("should find all matching elements including different types", () => {
@@ -394,8 +394,8 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNotNull(result);
-      assert.include(result?.text || "", "Item");
+      expect(result).not.toBeNull();
+      expect(result?.text || "").toContain("Item");
     });
 
     test("should handle exact text matching", () => {
@@ -434,7 +434,7 @@ describe("ElementUtils", () => {
         false // case-insensitive
       );
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.text).toBe("Item 1");
     });
 
@@ -476,7 +476,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       // Should return the smaller element
       expect(result?.bounds).toEqual({ left: 400, top: 200, right: 680, bottom: 300 });
     });
@@ -512,7 +512,7 @@ describe("ElementUtils", () => {
         false
       );
 
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
       expect(result?.bounds).toEqual({ left: 100, top: 100, right: 300, bottom: 200 });
     });
 
@@ -589,7 +589,7 @@ describe("ElementUtils", () => {
         true,
         false
       );
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
 
       // Should also find when searching in outer container
       result = elementUtils.findElementByText(
@@ -599,7 +599,7 @@ describe("ElementUtils", () => {
         true,
         false
       );
-      assert.isNotNull(result);
+      expect(result).not.toBeNull();
     });
   });
 });

@@ -39,7 +39,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("Home");
     });
 
@@ -56,7 +56,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].resourceId).toBe("com.app:id/nav_home");
     });
 
@@ -73,7 +73,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].contentDesc).toBe("Home Tab");
     });
 
@@ -97,7 +97,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 2);
+      expect(result!.selectedElements).toHaveLength(2);
       expect(result!.selectedElements[0].text).toBe("Tab1");
       expect(result!.selectedElements[1].text).toBe("Tab2");
     });
@@ -121,7 +121,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("NestedTab");
     });
 
@@ -159,7 +159,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("ChildText");
     });
 
@@ -212,7 +212,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.destinationId).toBe("SettingsDestination");
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("General");
     });
 
@@ -239,7 +239,7 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("Second");
     });
 
@@ -279,7 +279,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.destinationId).toBe("HomeDestination");
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("Media");
     });
   });
@@ -313,7 +313,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 1);
+      expect(result!.modalStack!).toHaveLength(1);
       expect(result!.modalStack![0].type).toBe("dialog");
       expect(result!.modalStack![0].windowId).toBe(123);
       expect(result!.modalStack![0].layer).toBe(1);
@@ -348,7 +348,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 1);
+      expect(result!.modalStack!).toHaveLength(1);
       expect(result!.modalStack![0].type).toBe("bottomsheet");
       expect(result!.modalStack![0].windowId).toBe(456);
       expect(result!.modalStack![0].identifier).toBe("com.app:id/settings_bottom_sheet");
@@ -378,7 +378,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 1);
+      expect(result!.modalStack!).toHaveLength(1);
       expect(result!.modalStack![0].type).toBe("popup");
       expect(result!.modalStack![0].identifier).toBe("More options");
     });
@@ -418,7 +418,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 2);
+      expect(result!.modalStack!).toHaveLength(2);
       // Should be sorted by layer (bottom to top)
       expect(result!.modalStack![0].layer).toBe(1);
       expect(result!.modalStack![0].type).toBe("bottomsheet");
@@ -450,7 +450,7 @@ describe("UIStateExtractor", () => {
 
       expect(result).toBeDefined();
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 1);
+      expect(result!.modalStack!).toHaveLength(1);
       expect(result!.modalStack![0].type).toBe("menu");
     });
 
@@ -565,10 +565,10 @@ describe("UIStateExtractor", () => {
       const result = UIStateExtractor.extract(hierarchy);
 
       expect(result).toBeDefined();
-      assert.lengthOf(result!.selectedElements, 1);
+      expect(result!.selectedElements).toHaveLength(1);
       expect(result!.selectedElements[0].text).toBe("Home");
       expect(result!.modalStack).toBeDefined();
-      assert.lengthOf(result!.modalStack!, 1);
+      expect(result!.modalStack!).toHaveLength(1);
       expect(result!.modalStack![0].type).toBe("bottomsheet");
     });
   });

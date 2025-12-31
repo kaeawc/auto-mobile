@@ -135,7 +135,7 @@ describe("RecentApps", () => {
 
       // Verify swipe command was executed
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input swipe") && cmd.includes("500")));
+      expect(executedCommands.some(cmd => cmd.includes("shell input swipe") && cmd.includes("500"))).toBe(true);
     });
 
     test("should execute legacy navigation when recent apps button is detected", async () => {
@@ -153,7 +153,7 @@ describe("RecentApps", () => {
 
       // Verify tap command was executed on the recent apps button
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input tap 900 1860")));
+      expect(executedCommands.some(cmd => cmd.includes("shell input tap 900 1860"))).toBe(true);
     });
 
     test("should execute hardware navigation when no navigation indicators are detected", async () => {
@@ -171,7 +171,7 @@ describe("RecentApps", () => {
 
       // Verify hardware keyevent was executed
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent 187")));
+      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent 187"))).toBe(true);
     });
 
     test("should work with progress callback", async () => {
@@ -188,7 +188,7 @@ describe("RecentApps", () => {
       const result = await recentApps.execute(progressCallback);
 
       expect(result.success).toBe(true);
-      assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
+      expect(callbackCalled || fakeObserveScreen.wasMethodCalled("execute")).toBe(true);
     });
 
     test("should handle missing view hierarchy gracefully", async () => {
@@ -205,7 +205,7 @@ describe("RecentApps", () => {
         // We're testing the graceful handling, so just ensure result is not successful
         expect(result.success).toBe(false);
       } catch (caughtError) {
-        assert.include((caughtError as Error).message, "Cannot perform action without view hierarchy");
+        expect((caughtError as Error).message).toContain("Cannot perform action without view hierarchy");
       }
     });
 
@@ -219,9 +219,9 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.include((caughtError as Error).message, "Screen size or system insets not available");
+        expect((caughtError as Error).message).toContain("Screen size or system insets not available");
       }
     });
   });
@@ -269,7 +269,7 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
         expect(caughtError).toBeDefined();
       }
@@ -283,7 +283,7 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
         // Error should be thrown when ADB command fails
         expect(caughtError).toBeDefined();
@@ -297,7 +297,7 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
         expect(caughtError).toBeDefined();
       }
@@ -310,9 +310,9 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.include((caughtError as Error).message, "Screen size or system insets not available");
+        expect((caughtError as Error).message).toContain("Screen size or system insets not available");
       }
     });
 
@@ -329,9 +329,9 @@ describe("RecentApps", () => {
 
       try {
         await recentApps.execute();
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.include((caughtError as Error).message, "Recent apps button not found");
+        expect((caughtError as Error).message).toContain("Recent apps button not found");
       } finally {
         // Restore the original method
         (recentApps as any).detectNavigationStyle = originalDetectNavigationStyle;

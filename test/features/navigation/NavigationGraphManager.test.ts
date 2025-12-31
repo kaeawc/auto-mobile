@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, afterEach, beforeAll } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, beforeAll, it } from "bun:test";
 import {
   NavigationGraphManager,
   NavigationEvent
@@ -32,7 +32,7 @@ describe("NavigationGraphManager", () => {
     test("should return the same instance", () => {
       const instance1 = NavigationGraphManager.getInstance();
       const instance2 = NavigationGraphManager.getInstance();
-      assert.strictEqual(instance1, instance2);
+      expect(instance1).toBe(instance2);
     });
 
     test("should reset instance correctly", async () => {
@@ -43,7 +43,7 @@ describe("NavigationGraphManager", () => {
       NavigationGraphManager.resetInstance();
 
       const instance2 = NavigationGraphManager.getInstance();
-      assert.isNull(instance2.getCurrentAppId());
+      expect(instance2.getCurrentAppId()).toBeNull();
       expect(await instance2.getKnownScreens()).toEqual([]);
     });
   });
@@ -85,7 +85,7 @@ describe("NavigationGraphManager", () => {
       const freshManager = NavigationGraphManager.getInstance();
 
       // No app set initially
-      assert.isNull(freshManager.getCurrentAppId());
+      expect(freshManager.getCurrentAppId()).toBeNull();
 
       // Record event with applicationId
       const event = createEvent("HomeScreen");
@@ -131,7 +131,7 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Screen2", 2000));
 
       const edges = await manager.getEdgesFrom("Screen1");
-      assert.lengthOf(edges, 1);
+      expect(edges).toHaveLength(1);
       expect(edges[0].from).toBe("Screen1");
       expect(edges[0].to).toBe("Screen2");
       expect(edges[0].edgeType).toBe("unknown"); // No tool call recorded
@@ -142,7 +142,7 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Screen1", 2000));
 
       const edges = await manager.getEdgesFrom("Screen1");
-      assert.lengthOf(edges, 0);
+      expect(edges).toHaveLength(0);
     });
   });
 
@@ -165,7 +165,7 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("SettingsScreen", now + 500));
 
       const edges = await manager.getEdgesFrom("Screen1");
-      assert.lengthOf(edges, 1);
+      expect(edges).toHaveLength(1);
       expect(edges[0].edgeType).toBe("tool");
       expect(edges[0].interaction).toBeDefined();
       expect(edges[0].interaction!.toolName).toBe("tapOn");
@@ -183,7 +183,7 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("SettingsScreen", now + 3000));
 
       const edges = await manager.getEdgesFrom("Screen1");
-      assert.lengthOf(edges, 1);
+      expect(edges).toHaveLength(1);
       expect(edges[0].edgeType).toBe("unknown");
       expect(edges[0].interaction).toBeUndefined();
     });
@@ -200,7 +200,7 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Screen2", now + 500));
 
       const edges = await manager.getEdgesFrom("Screen1");
-      assert.lengthOf(edges, 1);
+      expect(edges).toHaveLength(1);
       expect(edges[0].interaction!.args.text).toBe("Second");
     });
   });
@@ -211,7 +211,7 @@ describe("NavigationGraphManager", () => {
 
       const result = await manager.findPath("HomeScreen");
       expect(result.found).toBe(true);
-      assert.lengthOf(result.path, 0);
+      expect(result.path).toHaveLength(0);
       expect(result.startScreen).toBe("HomeScreen");
       expect(result.targetScreen).toBe("HomeScreen");
     });
@@ -224,7 +224,7 @@ describe("NavigationGraphManager", () => {
 
       const result = await manager.findPath("Screen2");
       expect(result.found).toBe(true);
-      assert.lengthOf(result.path, 1);
+      expect(result.path).toHaveLength(1);
       expect(result.path[0].from).toBe("Screen1");
       expect(result.path[0].to).toBe("Screen2");
     });
@@ -239,7 +239,7 @@ describe("NavigationGraphManager", () => {
 
       const result = await manager.findPath("Advanced");
       expect(result.found).toBe(true);
-      assert.lengthOf(result.path, 2);
+      expect(result.path).toHaveLength(2);
       expect(result.path[0].from).toBe("Home");
       expect(result.path[0].to).toBe("Settings");
       expect(result.path[1].from).toBe("Settings");
@@ -251,7 +251,7 @@ describe("NavigationGraphManager", () => {
 
       const result = await manager.findPath("UnknownScreen");
       expect(result.found).toBe(false);
-      assert.lengthOf(result.path, 0);
+      expect(result.path).toHaveLength(0);
     });
 
     test("should return not found when no current screen", async () => {
@@ -293,8 +293,8 @@ describe("NavigationGraphManager", () => {
     test("should export empty graph correctly", async () => {
       const exported = await manager.exportGraph();
       expect(exported.appId).toBe("com.test.app");
-      assert.lengthOf(exported.nodes, 0);
-      assert.lengthOf(exported.edges, 0);
+      expect(exported.nodes).toHaveLength(0);
+      expect(exported.edges).toHaveLength(0);
       expect(exported.currentScreen).toBeNull();
     });
 
@@ -304,8 +304,8 @@ describe("NavigationGraphManager", () => {
 
       const exported = await manager.exportGraph();
       expect(exported.appId).toBe("com.test.app");
-      assert.lengthOf(exported.nodes, 2);
-      assert.lengthOf(exported.edges, 1);
+      expect(exported.nodes).toHaveLength(2);
+      expect(exported.edges).toHaveLength(1);
       expect(exported.currentScreen).toBe("Settings");
 
       const homeNode = exported.nodes.find(n => n.screenName === "Home");
@@ -337,7 +337,7 @@ describe("NavigationGraphManager", () => {
 
       await manager.clearAllGraphs();
 
-      assert.isNull(manager.getCurrentAppId());
+      expect(manager.getCurrentAppId()).toBeNull();
       expect(await manager.getKnownScreens()).toEqual([]);
     });
   });
@@ -350,8 +350,8 @@ describe("NavigationGraphManager", () => {
       await manager.recordNavigationEvent(createEvent("Settings", 4000));
 
       const edges = await manager.getEdgesTo("Settings");
-      assert.lengthOf(edges, 2);
-      edges.forEach(e => assert.equal(e.to, "Settings"));
+      expect(edges).toHaveLength(2);
+      edges.forEach(e => expect(e.to).toBe("Settings"));
     });
   });
 });
@@ -426,7 +426,7 @@ describe("NavigationGraphManager - Scroll Position", () => {
 
     // Check that the edge has scroll position
     const edges = await manager.getEdgesFrom("Settings");
-    assert.lengthOf(edges, 1);
+    expect(edges).toHaveLength(1);
     expect(edges[0].uiState).toBeDefined();
     expect(edges[0].uiState!.scrollPosition).toBeDefined();
     expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Advanced Settings");
@@ -456,9 +456,9 @@ describe("NavigationGraphManager - Scroll Position", () => {
 
     // Check that both selected elements and scroll position exist
     const edges = await manager.getEdgesFrom("Settings");
-    assert.lengthOf(edges, 1);
+    expect(edges).toHaveLength(1);
     expect(edges[0].uiState).toBeDefined();
-    assert.lengthOf(edges[0].uiState!.selectedElements, 1);
+    expect(edges[0].uiState!.selectedElements).toHaveLength(1);
     expect(edges[0].uiState!.selectedElements[0].text).toBe("Settings Tab");
     expect(edges[0].uiState!.scrollPosition).toBeDefined();
     expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Advanced Settings");
@@ -483,7 +483,7 @@ describe("NavigationGraphManager - Scroll Position", () => {
     await manager.recordNavigationEvent(createEvent("Details"));
 
     const edges = await manager.getEdgesFrom("Home");
-    assert.lengthOf(edges, 1);
+    expect(edges).toHaveLength(1);
     const scrollPos = edges[0].uiState!.scrollPosition!;
     expect(scrollPos.targetElement.text).toBe("Item");
     expect(scrollPos.container!.resourceId).toBe("com.app:id/list");
@@ -527,7 +527,7 @@ describe("NavigationGraphManager - Scroll Position", () => {
     await manager.recordNavigationEvent(createEvent("Screen2"));
 
     const edges = await manager.getEdgesFrom("Screen1");
-    assert.lengthOf(edges, 1);
+    expect(edges).toHaveLength(1);
     expect(edges[0].uiState!.scrollPosition!.targetElement.text).toBe("Second");
   });
 });

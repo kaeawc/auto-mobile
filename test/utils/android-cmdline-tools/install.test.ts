@@ -31,7 +31,8 @@ describe("Android Command Line Tools - Installation", () => {
 
       // Check checksums are present
       Object.values(CMDLINE_TOOLS_DOWNLOAD.platforms).forEach(platform => {
-        expect(typeof platform.checksum).toBe("string").with.length(64); // SHA-256 hex
+        expect(typeof platform.checksum).toBe("string");
+        expect(platform.checksum.length).toBe(64); // SHA-256 hex
       });
     });
   });

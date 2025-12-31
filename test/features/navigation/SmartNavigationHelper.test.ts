@@ -61,9 +61,9 @@ describe("SmartNavigationHelper", function() {
         1 // Current back stack depth
       );
 
-      expect(result.shouldUseBack).to.be.true;
-      expect(result.backPresses).to.equal(1);
-      expect(result.reason).to.include("Depth difference is 1");
+      expect(result.shouldUseBack).toBe(true);
+      expect(result.backPresses).toBe(1);
+      expect(result.reason).toContain("Depth difference is 1");
     });
 
     test("should not recommend back button when current depth is lower", async function() {
@@ -102,8 +102,8 @@ describe("SmartNavigationHelper", function() {
         2 // Current depth is less than target depth
       );
 
-      expect(result.shouldUseBack).to.be.false;
-      expect(result.reason).to.include("not greater than target depth");
+      expect(result.shouldUseBack).toBe(false);
+      expect(result.reason).toContain("not greater than target depth");
     });
 
     test("should not recommend back button when target has no back stack info", async function() {
@@ -125,8 +125,8 @@ describe("SmartNavigationHelper", function() {
         3
       );
 
-      expect(result.shouldUseBack).to.be.false;
-      expect(result.reason).to.include("no back stack information");
+      expect(result.shouldUseBack).toBe(false);
+      expect(result.reason).toContain("no back stack information");
     });
 
     test("should recommend multiple back presses when path matches depth", async function() {
@@ -180,10 +180,10 @@ describe("SmartNavigationHelper", function() {
       // This may be true or false depending on whether the path is found
       // The key is that if shouldUseBack is true, backPresses should equal 2
       if (result.shouldUseBack) {
-        expect(result.backPresses).to.equal(2);
+        expect(result.backPresses).toBe(2);
       } else {
         // If back button is not recommended, it should be for a valid reason
-        expect(result.reason).to.exist;
+        expect(result.reason).toBeDefined();
       }
     });
   });
@@ -213,7 +213,7 @@ describe("SmartNavigationHelper", function() {
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
 
-      expect(result).to.be.true;
+      expect(result).toBe(true);
     });
 
     test("should return false for screens in different tasks", async function() {
@@ -240,7 +240,7 @@ describe("SmartNavigationHelper", function() {
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
 
-      expect(result).to.be.false;
+      expect(result).toBe(false);
     });
 
     test("should return false when task info is missing", async function() {
@@ -256,7 +256,7 @@ describe("SmartNavigationHelper", function() {
 
       const result = await SmartNavigationHelper.areInSameTask("ScreenA", "ScreenB");
 
-      expect(result).to.be.false;
+      expect(result).toBe(false);
     });
   });
 
@@ -289,8 +289,8 @@ describe("SmartNavigationHelper", function() {
         1
       );
 
-      expect(result.method).to.equal("back");
-      expect(result.backPresses).to.equal(1);
+      expect(result.method).toBe("back");
+      expect(result.backPresses).toBe(1);
     });
 
     test("should recommend forward navigation when back is not suitable", async function() {
@@ -323,7 +323,7 @@ describe("SmartNavigationHelper", function() {
         0
       );
 
-      expect(result.method).to.equal("forward");
+      expect(result.method).toBe("forward");
     });
 
     test("should return unknown when no navigation path exists", async function() {
@@ -333,7 +333,7 @@ describe("SmartNavigationHelper", function() {
         2
       );
 
-      expect(result.method).to.equal("unknown");
+      expect(result.method).toBe("unknown");
     });
   });
 });

@@ -70,12 +70,12 @@ describe("Shake", () => {
       expect(result.observation).toBeDefined();
 
       // Verify timer was called with correct duration
-      assert.isTrue(fakeTimer.wasSleepCalled(1000));
+      expect(fakeTimer.wasSleepCalled(1000)).toBe(true);
 
       // Verify ADB commands were executed
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 100:100:100")));
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 0:0:0")));
+      expect(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 100:100:100"))).toBe(true);
+      expect(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 0:0:0"))).toBe(true);
     });
 
     test("should execute shake with custom duration", async () => {
@@ -92,7 +92,7 @@ describe("Shake", () => {
       expect(result.success).toBe(true);
       expect(result.duration).toBe(100);
       expect(result.intensity).toBe(100);
-      assert.isTrue(fakeTimer.wasSleepCalled(100));
+      expect(fakeTimer.wasSleepCalled(100)).toBe(true);
     });
 
     test("should execute shake with custom intensity", async () => {
@@ -143,7 +143,7 @@ describe("Shake", () => {
       expect(result.intensity).toBe(100);
 
       // Verify timer was called with default duration
-      assert.isTrue(fakeTimer.wasSleepCalled(1000));
+      expect(fakeTimer.wasSleepCalled(1000)).toBe(true);
     });
 
     test("should handle zero duration", async () => {
@@ -194,7 +194,7 @@ describe("Shake", () => {
 
       expect(result.success).toBe(true);
       // Progress callback should be called by BaseVisualChange
-      assert.isTrue(callbackCalled || fakeObserveScreen.wasMethodCalled("execute"));
+      expect(callbackCalled || fakeObserveScreen.wasMethodCalled("execute")).toBe(true);
     });
 
     test("should handle ADB command failure during shake start", async () => {
@@ -272,10 +272,10 @@ describe("Shake", () => {
 
       expect(result.success).toBe(true);
       // Timer was called with the correct duration
-      assert.isTrue(fakeTimer.wasSleepCalled(duration));
+      expect(fakeTimer.wasSleepCalled(duration)).toBe(true);
       // Verify timer history
       const sleepHistory = fakeTimer.getSleepHistory();
-      assert.include(sleepHistory, duration);
+      expect(sleepHistory).toContain(duration);
     });
   });
 
@@ -295,7 +295,7 @@ describe("Shake", () => {
       expect(result.intensity).toBe(9999);
 
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 9999:9999:9999")));
+      expect(executedCommands.some(cmd => cmd.includes("emu sensor set acceleration 9999:9999:9999"))).toBe(true);
     });
 
     test("should handle very long duration", async () => {
@@ -315,7 +315,7 @@ describe("Shake", () => {
 
       // Both commands should still be called
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isAtLeast(executedCommands.length, 2);
+      expect(executedCommands.length).toBeGreaterThanOrEqual(2);
     });
 
     test("should handle negative values gracefully", async () => {

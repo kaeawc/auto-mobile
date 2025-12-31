@@ -58,7 +58,7 @@ describe("HomeScreen", () => {
 
       // Verify hardware home button keyevent was executed
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent 3")));
+      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent 3"))).toBe(true);
     });
 
     test("should work with progress callback", async () => {
@@ -90,7 +90,7 @@ describe("HomeScreen", () => {
 
       try {
         await homeScreen.execute();
-        assert.fail("Should have thrown an error");
+        throw new Error("Should have thrown an error");
       } catch (error) {
         expect(error).toBeDefined();
       }

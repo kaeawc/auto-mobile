@@ -176,18 +176,14 @@ Available Packages:
       const result = await avdmanager.listSystemImages(undefined, mockDeps);
 
       expect(result).toHaveLength(2);
-      expect(result[0]).toContainEqual({
-        packageName: "system-images;android-33;google_apis;arm64-v8a",
-        apiLevel: 33,
-        tag: "google_apis",
-        abi: "arm64-v8a"
-      });
-      expect(result[1]).toContainEqual({
-        packageName: "system-images;android-34;google_apis;x86_64",
-        apiLevel: 34,
-        tag: "google_apis",
-        abi: "x86_64"
-      });
+      expect(result[0].packageName).toBe("system-images;android-33;google_apis;arm64-v8a");
+      expect(result[0].apiLevel).toBe(33);
+      expect(result[0].tag).toBe("google_apis");
+      expect(result[0].abi).toBe("arm64-v8a");
+      expect(result[1].packageName).toBe("system-images;android-34;google_apis;x86_64");
+      expect(result[1].apiLevel).toBe(34);
+      expect(result[1].tag).toBe("google_apis");
+      expect(result[1].abi).toBe("x86_64");
     });
 
     test("should filter system images by criteria", async () => {
@@ -355,25 +351,19 @@ Available Android Virtual Devices:
 
       expect(result).toHaveLength(3);
 
-      expect(result[0]).toContainEqual({
-        name: "test_avd_1",
-        path: "/Users/test/.android/avd/test_avd_1.avd",
-        target: "Google APIs (Google Inc.)",
-        basedOn: "Android 13.0 (Tiramisu) Tag/ABI: google_apis/arm64-v8a"
-      });
+      expect(result[0].name).toBe("test_avd_1");
+      expect(result[0].path).toBe("/Users/test/.android/avd/test_avd_1.avd");
+      expect(result[0].target).toBe("Google APIs (Google Inc.)");
+      expect(result[0].basedOn).toBe("Android 13.0 (Tiramisu) Tag/ABI: google_apis/arm64-v8a");
 
-      expect(result[1]).toContainEqual({
-        name: "test_avd_2",
-        path: "/Users/test/.android/avd/test_avd_2.avd",
-        target: "Google APIs (Google Inc.)",
-        basedOn: "Android 14.0 (UpsideDownCake) Tag/ABI: google_apis_playstore/x86_64"
-      });
+      expect(result[1].name).toBe("test_avd_2");
+      expect(result[1].path).toBe("/Users/test/.android/avd/test_avd_2.avd");
+      expect(result[1].target).toBe("Google APIs (Google Inc.)");
+      expect(result[1].basedOn).toBe("Android 14.0 (UpsideDownCake) Tag/ABI: google_apis_playstore/x86_64");
 
-      expect(result[2]).toContainEqual({
-        name: "broken_avd",
-        path: "/Users/test/.android/avd/broken_avd.avd",
-        error: "Missing system image for Google Play arm64-v8a Medium Phone API 35."
-      });
+      expect(result[2].name).toBe("broken_avd");
+      expect(result[2].path).toBe("/Users/test/.android/avd/broken_avd.avd");
+      expect(result[2].error).toBe("Missing system image for Google Play arm64-v8a Medium Phone API 35.");
     });
   });
 
@@ -409,23 +399,17 @@ id: pixel_4
 
       expect(result).toHaveLength(3);
 
-      expect(result[0]).toContainEqual({
-        id: "0",
-        name: "TV (1080p)",
-        oem: "Generic"
-      });
+      expect(result[0].id).toBe("0");
+      expect(result[0].name).toBe("TV (1080p)");
+      expect(result[0].oem).toBe("Generic");
 
-      expect(result[1]).toContainEqual({
-        id: "1",
-        name: "Nexus 5X",
-        oem: "LGE"
-      });
+      expect(result[1].id).toBe("1");
+      expect(result[1].name).toBe("Nexus 5X");
+      expect(result[1].oem).toBe("LGE");
 
-      expect(result[2]).toContainEqual({
-        id: "pixel_4",
-        name: "Pixel 4",
-        oem: "Google"
-      });
+      expect(result[2].id).toBe("pixel_4");
+      expect(result[2].name).toBe("Pixel 4");
+      expect(result[2].oem).toBe("Google");
     });
   });
 

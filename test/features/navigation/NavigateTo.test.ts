@@ -85,7 +85,7 @@ describe("NavigateTo", () => {
       });
 
       expect(result.success).toBe(false);
-      assert.include(result.error!, "Cannot determine current screen");
+      expect(result.error!).toContain("Cannot determine current screen");
       expect(result.stepsExecuted).toBe(0);
     });
 
@@ -131,9 +131,9 @@ describe("NavigateTo", () => {
       });
 
       expect(result.success).toBe(false);
-      assert.include(result.error!, "No known path");
-      assert.include(result.error!, "HomeScreen");
-      assert.include(result.error!, "UnknownScreen");
+      expect(result.error!).toContain("No known path");
+      expect(result.error!).toContain("HomeScreen");
+      expect(result.error!).toContain("UnknownScreen");
     });
 
     test("should execute tool call when path exists", async () => {
@@ -182,7 +182,7 @@ describe("NavigateTo", () => {
       });
 
       // Should have attempted to execute the tool call
-      assert.lengthOf(toolCallLog, 1);
+      expect(toolCallLog).toHaveLength(1);
       expect(toolCallLog[0].toolName).toBe("tapOn");
       expect(toolCallLog[0].args.text).toBe("Settings");
     });
@@ -228,7 +228,7 @@ describe("NavigateTo", () => {
       });
 
       expect(result.path).toBeDefined();
-      assert.isArray(result.path);
+      expect(Array.isArray(result.path)).toBe(true);
       expect(result.path!.length > 0).toBe(true);
     });
 
@@ -277,8 +277,8 @@ describe("NavigateTo", () => {
 
       expect(progressUpdates.length > 0).toBe(true);
       expect(progressUpdates[0].total).toBe(1);
-      assert.include(progressUpdates[0].message, "Screen1");
-      assert.include(progressUpdates[0].message, "Screen2");
+      expect(progressUpdates[0].message).toContain("Screen1");
+      expect(progressUpdates[0].message).toContain("Screen2");
     });
 
     test("should return duration in result", async () => {
@@ -300,8 +300,8 @@ describe("NavigateTo", () => {
       });
 
       expect(result.durationMs).toBeDefined();
-      assert.isNumber(result.durationMs);
-      assert.isAtLeast(result.durationMs!, 0);
+      expect(typeof result.durationMs).toBe("number");
+      expect(result.durationMs!).toBeGreaterThanOrEqual(0);
     });
   });
 
@@ -361,7 +361,7 @@ describe("NavigateTo", () => {
       });
 
       // Should execute two tool calls: Home -> Settings -> Advanced
-      assert.lengthOf(toolCallLog, 2);
+      expect(toolCallLog).toHaveLength(2);
       expect(toolCallLog[0].args.text).toBe("Settings");
       expect(toolCallLog[1].args.text).toBe("Advanced");
     });

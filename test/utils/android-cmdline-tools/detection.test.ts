@@ -39,8 +39,10 @@ describe("Android Command Line Tools - Detection", () => {
 
     test("should have valid tool descriptions", () => {
       Object.values(ANDROID_TOOLS).forEach((tool: any) => {
-        expect(typeof tool.name).toBe("string").that.is.not.empty;
-        expect(typeof tool.description).toBe("string").that.is.not.empty;
+        expect(typeof tool.name).toBe("string");
+        expect(tool.name.length).toBeGreaterThan(0);
+        expect(typeof tool.description).toBe("string");
+        expect(tool.description.length).toBeGreaterThan(0);
       });
     });
   });

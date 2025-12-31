@@ -90,10 +90,10 @@ describe("ImeAction", () => {
       expect(result.observation).toBeDefined();
 
       // Verify accessibility service was called with correct action
-      assert.isTrue(fakeA11yService.wasImeActionCalled("done"), "Accessibility service should have been called with 'done' action");
+      expect(fakeA11yService.wasImeActionCalled("done")).toBe(true);
       // Should NOT call ADB when accessibility service succeeds
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isEmpty(executedCommands, "ADB should not be called when accessibility service succeeds");
+      expect(executedCommands.length).toBe(0);
     });
 
     test("should execute IME action 'next' via accessibility service", async () => {
@@ -110,7 +110,7 @@ describe("ImeAction", () => {
       expect(result.success).toBe(true);
       expect(result.action).toBe("next");
 
-      assert.isTrue(fakeA11yService.wasImeActionCalled("next"));
+      expect(fakeA11yService.wasImeActionCalled("next")).toBe(true);
     });
 
     test("should execute IME action 'search' via accessibility service", async () => {
@@ -127,7 +127,7 @@ describe("ImeAction", () => {
       expect(result.success).toBe(true);
       expect(result.action).toBe("search");
 
-      assert.isTrue(fakeA11yService.wasImeActionCalled("search"));
+      expect(fakeA11yService.wasImeActionCalled("search")).toBe(true);
     });
 
     test("should execute IME action 'send' via accessibility service", async () => {
@@ -144,7 +144,7 @@ describe("ImeAction", () => {
       expect(result.success).toBe(true);
       expect(result.action).toBe("send");
 
-      assert.isTrue(fakeA11yService.wasImeActionCalled("send"));
+      expect(fakeA11yService.wasImeActionCalled("send")).toBe(true);
     });
 
     test("should execute IME action 'go' via accessibility service", async () => {
@@ -161,7 +161,7 @@ describe("ImeAction", () => {
       expect(result.success).toBe(true);
       expect(result.action).toBe("go");
 
-      assert.isTrue(fakeA11yService.wasImeActionCalled("go"));
+      expect(fakeA11yService.wasImeActionCalled("go")).toBe(true);
     });
 
     test("should execute IME action 'previous' via accessibility service", async () => {
@@ -178,7 +178,7 @@ describe("ImeAction", () => {
       expect(result.success).toBe(true);
       expect(result.action).toBe("previous");
 
-      assert.isTrue(fakeA11yService.wasImeActionCalled("previous"));
+      expect(fakeA11yService.wasImeActionCalled("previous")).toBe(true);
     });
 
     test("should handle empty action string", async () => {
@@ -189,9 +189,9 @@ describe("ImeAction", () => {
       expect(result.error).toBe("No IME action provided");
 
       // Should not call accessibility service or ADB commands
-      assert.isEmpty(fakeA11yService.getImeActionHistory(), "Accessibility service should not have been called for empty action");
+      expect(fakeA11yService.getImeActionHistory().length).toBe(0);
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isEmpty(executedCommands, "ADB should not be called for empty action");
+      expect(executedCommands.length).toBe(0);
     });
 
     test("should work with progress callback", async () => {
@@ -224,11 +224,11 @@ describe("ImeAction", () => {
       expect(result.action).toBe("done");
 
       // Verify timer was called with 100ms delay
-      assert.isTrue(fakeTimer.wasCalledWithDuration(100), "Timer should have been called with 100ms");
+      expect(fakeTimer.wasCalledWithDuration(100)).toBe(true);
 
       // Then ADB fallback was used
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_ENTER")), "ADB should have executed KEYCODE_ENTER command");
+      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_ENTER"))).toBe(true);
     });
 
     test("should fall back to ADB for multi-key actions when accessibility service fails", async () => {
@@ -244,12 +244,12 @@ describe("ImeAction", () => {
       expect(result.action).toBe("previous");
 
       // Verify timer was called with 100ms delay
-      assert.isTrue(fakeTimer.wasCalledWithDuration(100), "Timer should have been called with 100ms");
+      expect(fakeTimer.wasCalledWithDuration(100)).toBe(true);
 
       // Then ADB fallback was used with both key events for Shift+Tab
       const executedCommands = fakeAdb.getExecutedCommands();
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_SHIFT_LEFT")), "ADB should have executed KEYCODE_SHIFT_LEFT command");
-      assert.isTrue(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_TAB")), "ADB should have executed KEYCODE_TAB command");
+      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_SHIFT_LEFT"))).toBe(true);
+      expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_TAB"))).toBe(true);
     });
   });
 
@@ -291,7 +291,7 @@ describe("ImeAction", () => {
 
       expect(result.success).toBe(true);
       // Verify that timer.sleep(100) was called in ADB fallback path
-      assert.isTrue(fakeTimer.wasCalledWithDuration(100), "Timer should have been called with 100ms delay");
+      expect(fakeTimer.wasCalledWithDuration(100)).toBe(true);
     });
   });
 
@@ -303,9 +303,9 @@ describe("ImeAction", () => {
 
       try {
         await imeAction.execute("done");
-        assert.fail("Expected an error to be thrown");
+        throw new Error("Expected an error to be thrown");
       } catch (caughtError) {
-        assert.include((caughtError as Error).message, "Cannot perform action without view hierarchy");
+        expect((caughtError as Error).message).toContain("Cannot perform action without view hierarchy");
       }
     });
 
@@ -326,7 +326,7 @@ describe("ImeAction", () => {
         expect(result.action).toBe("done");
       } catch (caughtError) {
         // If the error bubbled up, that's also valid behavior
-        assert.include((caughtError as Error).message, "Failed to observe screen");
+        expect((caughtError as Error).message).toContain("Failed to observe screen");
       }
     });
 
@@ -365,7 +365,7 @@ describe("ImeAction", () => {
 
         expect(result.success, `Action '${action}' should succeed`).toBe(true);
         expect(result.action).toBe(action);
-        assert.isTrue(fakeA11yService.wasImeActionCalled(action), `Accessibility service should have been called with '${action}'`);
+        expect(fakeA11yService.wasImeActionCalled(action)).toBe(true);
       }
     });
 
@@ -412,7 +412,7 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("done");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER")).toBe(true);
     });
 
     test("should map next to KEYCODE_TAB in ADB fallback", async () => {
@@ -422,7 +422,7 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("next");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_TAB"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_TAB")).toBe(true);
     });
 
     test("should map search to KEYCODE_SEARCH in ADB fallback", async () => {
@@ -432,7 +432,7 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("search");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_SEARCH"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_SEARCH")).toBe(true);
     });
 
     test("should map send to KEYCODE_ENTER in ADB fallback", async () => {
@@ -442,7 +442,7 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("send");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER")).toBe(true);
     });
 
     test("should map go to KEYCODE_ENTER in ADB fallback", async () => {
@@ -452,7 +452,7 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("go");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_ENTER")).toBe(true);
     });
 
     test("should map previous to SHIFT+TAB combination in ADB fallback", async () => {
@@ -463,10 +463,10 @@ describe("ImeAction", () => {
       const result = await imeAction.execute("previous");
 
       expect(result.success).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_SHIFT_LEFT"));
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_TAB"));
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_SHIFT_LEFT")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_TAB")).toBe(true);
       // At least 2 calls for the key combination, but BaseVisualChange might make additional calls
-      assert.isAtLeast(fakeAdb.getExecutedCommands().length, 2);
+      expect(fakeAdb.getExecutedCommands().length).toBeGreaterThanOrEqual(2);
     });
   });
 });

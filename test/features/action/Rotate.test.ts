@@ -53,7 +53,7 @@ describe("Rotate", () => {
       const orientation = await rotate.getCurrentOrientation();
 
       expect(orientation).toBe("portrait");
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system user_rotation"));
+      expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(true);
     });
 
     test("should return landscape for user_rotation 1", async () => {
@@ -102,7 +102,7 @@ describe("Rotate", () => {
       const isLocked = await rotate.isOrientationLocked();
 
       expect(isLocked).toBe(true);
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation"));
+      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(true);
     });
 
     test("should return false when accelerometer_rotation is 1", async () => {
@@ -138,12 +138,12 @@ describe("Rotate", () => {
       expect(result.success).toBe(true);
       expect(result.orientation).toBe("portrait");
       expect(result.rotationPerformed).toBe(false);
-      assert.include(result.message || "", "already in portrait orientation");
+      expect(result.message || "").toContain("already in portrait orientation");
 
       // Verify that we got the current orientation
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system user_rotation"));
+      expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(true);
       // Should not have tried to set rotation since already in desired orientation
-      assert.isFalse(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0"));
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(false);
     });
 
     test("should get current orientation and lock status before rotation", async () => {
@@ -155,8 +155,8 @@ describe("Rotate", () => {
       await rotate.execute("landscape");
 
       // Verify ADB calls were made to check orientation state
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system user_rotation"));
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation"));
+      expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(true);
     });
 
     test("should attempt rotation command when orientation differs", async () => {
@@ -168,7 +168,7 @@ describe("Rotate", () => {
       await rotate.execute("landscape");
 
       // Verify the combined rotation command was executed
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\""));
+      expect(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\"")).toBe(true);
     });
 
     test("should unlock orientation if locked before rotation", async () => {
@@ -182,9 +182,9 @@ describe("Rotate", () => {
 
       expect(result.success).toBe(true);
       // Verify that the unlock command was executed
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1"));
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(true);
       // Verify the rotation command was executed
-      assert.isTrue(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 0\""));
+      expect(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 0\"")).toBe(true);
     });
   });
 

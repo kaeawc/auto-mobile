@@ -87,7 +87,7 @@ jobs:
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
   # TODO: Re-enable once test isolation issue is resolved
-  # See: https://github.com/kaeawc/auto-mobile/issues/XXX
+  # See: https://github.com/kaeawc/auto-mobile/issues/107
   # junit-runner-emulator-tests:
   #   name: "Run JUnit Runner Emulator Tests"
   #   runs-on: ubuntu-latest

@@ -282,13 +282,13 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   /** Build AutoMobile command - used by tests via reflection */
   private fun buildAutoMobileCommand(planPath: String, annotation: AutoMobileTest): List<String> {
     val command = mutableListOf<String>()
-    val useNpx = System.getProperty("automobile.use.npx", "true").toBoolean()
+    val useBunx = System.getProperty("automobile.use.bunx", "true").toBoolean()
 
     // Check for local development version first
     val localAutoMobile = File("../../dist/src/index.js").absoluteFile
     if (localAutoMobile.exists()) {
       command.addAll(listOf("bun", localAutoMobile.absolutePath, "--cli"))
-    } else if (useNpx) {
+    } else if (useBunx) {
       command.addAll(listOf("bunx", "auto-mobile", "--cli"))
     } else {
       command.addAll(listOf("auto-mobile", "--cli"))

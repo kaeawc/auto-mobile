@@ -61,7 +61,17 @@ runs:
         force-avd-creation: false
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
         disable-animations: false
-        script: echo "Generated AVD snapshot for caching."
+        script: |
+          echo "=========================================="
+          echo "AVD CREATION DEBUG"
+          echo "=========================================="
+          echo "Emulator version: $(emulator -version 2>/dev/null || echo 'unknown')"
+          echo "Android SDK tools location: $ANDROID_HOME"
+          ls -la "$ANDROID_HOME" 2>/dev/null || echo "ANDROID_HOME not found"
+          echo "AVD directory: $ANDROID_AVD_HOME"
+          ls -la "$ANDROID_AVD_HOME" 2>/dev/null || echo "ANDROID_AVD_HOME not found"
+          echo ""
+          echo "Generated AVD snapshot for caching."
 
     - name: Run Emulator
       uses: reactivecircus/android-emulator-runner@v2.30.0
@@ -70,14 +80,69 @@ runs:
         arch: ${{ inputs.arch }}
         target: ${{ inputs.target }}
         script: |
-          if [ -n "${{ inputs.accessibility-apk-path }}" ]; then
-            if [ ! -f "${{ inputs.accessibility-apk-path }}" ]; then
-              echo "Accessibility APK not found at ${{ inputs.accessibility-apk-path }}"
+          set -x
+          echo "=========================================="
+          echo "EMULATOR SETUP DEBUG START"
+          echo "=========================================="
+          echo "Current shell: $SHELL"
+          echo "Current user: $(whoami)"
+          echo "Current directory: $(pwd)"
+          echo "Working directory input: '${{ inputs.working-directory }}'"
+          echo "Script to run: '${{ inputs.script }}'"
+          echo "Accessibility APK path input: '${{ inputs.accessibility-apk-path }}'"
+          echo ""
+          echo "Environment variables:"
+          env | grep -E "(ANDROID|ADB|PATH|SHELL|HOME)" | sort
+          echo ""
+          echo "Checking adb availability..."
+          which adb || echo "adb not found in PATH"
+          adb --version || echo "adb version check failed"
+          echo ""
+          echo "Listing connected devices..."
+          adb devices || echo "adb devices failed"
+          echo ""
+          echo "=========================================="
+          echo "ACCESSIBILITY APK INSTALLATION"
+          echo "=========================================="
+          APK_PATH="${{ inputs.accessibility-apk-path }}"
+          echo "APK_PATH variable set to: '$APK_PATH'"
+          if [ -n "$APK_PATH" ]; then
+            echo "APK_PATH is not empty, proceeding with checks..."
+            echo "Checking if file exists: $APK_PATH"
+            if [ ! -f "$APK_PATH" ]; then
+              echo "ERROR: Accessibility APK not found at '$APK_PATH'"
+              echo "Current directory contents:"
+              ls -la
+              echo "Checking parent directories..."
+              ls -la "$(dirname "$APK_PATH")" || echo "Parent directory not found"
               exit 1
+            else
+              echo "SUCCESS: APK file found at $APK_PATH"
+              echo "File details:"
+              ls -lh "$APK_PATH"
+              file "$APK_PATH"
+              echo "Installing accessibility service APK..."
+              echo "Running: adb install -r '$APK_PATH'"
+              adb install -r "$APK_PATH"
+              APK_INSTALL_EXIT=$?
+              echo "adb install exit code: $APK_INSTALL_EXIT"
+              if [ $APK_INSTALL_EXIT -ne 0 ]; then
+                echo "ERROR: APK installation failed with exit code $APK_INSTALL_EXIT"
+                exit $APK_INSTALL_EXIT
+              fi
+              echo "SUCCESS: APK installed successfully"
             fi
-            echo "Installing accessibility service APK from ${{ inputs.accessibility-apk-path }}"
-            adb install -r "${{ inputs.accessibility-apk-path }}"
+          else
+            echo "APK_PATH is empty, skipping APK installation"
           fi
+          echo ""
+          echo "=========================================="
+          echo "RUNNING TEST SCRIPT"
+          echo "=========================================="
+          echo "Working directory: ${{ inputs.working-directory }}"
+          echo "About to execute: ${{ inputs.script }}"
+          echo "=========================================="
+          set +x
           ${{ inputs.script }}
         working-directory: ${{ inputs.working-directory }}
         force-avd-creation: false

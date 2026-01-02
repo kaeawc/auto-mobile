@@ -79,7 +79,7 @@ runs:
         api-level: ${{ inputs.api_level }}
         arch: ${{ inputs.arch }}
         target: ${{ inputs.target }}
-        script: ../../scripts/android/run-emulator-tests.sh "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
+        script: ../scripts/android/run-emulator-tests.sh "${{ inputs.accessibility-apk-path }}" "${{ inputs.script }}"
         working-directory: ${{ inputs.working-directory }}
         force-avd-creation: false
         emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none

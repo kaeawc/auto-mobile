@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import { logger } from "../utils/logger";
 import { SOCKET_PATH, PID_FILE_PATH } from "./constants";
 import { DaemonClient } from "./client";
 import { readFile } from "node:fs/promises";
@@ -216,7 +215,7 @@ export async function runSocketDiagnostics(): Promise<SocketDiagnostics> {
 
   // Try to get file stats to check read/write permissions
   try {
-    const stats = await (await import("node:fs/promises")).stat(SOCKET_PATH);
+    await (await import("node:fs/promises")).stat(SOCKET_PATH);
     diagnostics.socketReadable = true;
     diagnostics.socketWritable = true;
   } catch (error) {

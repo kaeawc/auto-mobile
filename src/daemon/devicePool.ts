@@ -266,15 +266,15 @@ export class DevicePool {
     assigned: number;
     error: number;
     avgAssignments: number;
-  } {
+    } {
     const all = this.getAllDevices();
     const idle = this.getIdleDevices().length;
     const assigned = this.getAssignedDevices().length;
     const error = this.getErrorDevices().length;
     const avgAssignments = all.length > 0
       ? Math.round(
-          all.reduce((sum, d) => sum + d.assignmentCount, 0) / all.length
-        )
+        all.reduce((sum, d) => sum + d.assignmentCount, 0) / all.length
+      )
       : 0;
 
     return {

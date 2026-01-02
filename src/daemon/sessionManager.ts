@@ -271,7 +271,6 @@ export class SessionManager {
    */
   private startCleanupTimer(): void {
     this.cleanupTimer = setInterval(() => {
-      const now = Date.now();
       const expiredSessions: string[] = [];
 
       for (const [sessionId, session] of this.sessions) {
@@ -314,7 +313,7 @@ export class SessionManager {
     activeSessions: number;
     expiredSessions: number;
     assignedDevices: number;
-  } {
+    } {
     const activeSessions = this.getAllSessions().length;
     const expiredSessions = this.sessions.size - activeSessions;
 

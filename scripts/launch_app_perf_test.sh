@@ -107,17 +107,20 @@ mkdir -p "$SCRATCH_DIR"
 
 # Logging functions
 log_info() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
+    local msg
+    msg="[$(date '+%Y-%m-%d %H:%M:%S')] [INFO] $*"
     echo "$msg" | tee -a "$DEBUG_LOG" >&2
 }
 
 log_debug() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*"
+    local msg
+    msg="[$(date '+%Y-%m-%d %H:%M:%S')] [DEBUG] $*"
     echo "$msg" >> "$DEBUG_LOG" >&2
 }
 
 log_error() {
-    local msg="[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*"
+    local msg
+    msg="[$(date '+%Y-%m-%d %H:%M:%S')] [ERROR] $*"
     echo "$msg" | tee -a "$DEBUG_LOG" >&2
 }
 
@@ -131,9 +134,12 @@ check_stability_criteria() {
     local deadline_delta="$6"
 
     # Convert to integers for comparison
-    local p50_int=$(echo "$p50" | cut -d'.' -f1)
-    local p90_int=$(echo "$p90" | cut -d'.' -f1)
-    local p95_int=$(echo "$p95" | cut -d'.' -f1)
+    local p50_int
+    p50_int=$(echo "$p50" | cut -d'.' -f1)
+    local p90_int
+    p90_int=$(echo "$p90" | cut -d'.' -f1)
+    local p95_int
+    p95_int=$(echo "$p95" | cut -d'.' -f1)
 
     # Default to 0 if empty
     p50_int=${p50_int:-0}
@@ -160,7 +166,8 @@ check_stability_criteria() {
 # Perform a single app launch with detailed metrics collection
 launch_and_collect_metrics() {
     local launch_num="$1"
-    local start_time=$(get_time_ms)
+    local start_time
+    start_time=$(get_time_ms)
 
     log_info "=========================================="
     log_info "Launch #$launch_num - Starting cold boot launch"
@@ -171,13 +178,15 @@ launch_and_collect_metrics() {
 
     # Launch the app using the CLI daemon with coldBoot=true (with fallback to direct)
     log_info "Launching app with CLI daemon: $PACKAGE_NAME"
-    local launch_start=$(get_time_ms)
+    local launch_start
+    launch_start=$(get_time_ms)
 
     # Run the launch command and capture output
     local launch_output
     launch_output=$(bun src/index.ts --cli launchApp --appId "$PACKAGE_NAME" --coldBoot true 2>&1 || echo "LAUNCH_FAILED")
 
-    local launch_end=$(get_time_ms)
+    local launch_end
+    launch_end=$(get_time_ms)
     local launch_duration=$((launch_end - launch_start))
 
     log_info "App launch completed in ${launch_duration}ms"
@@ -188,7 +197,8 @@ launch_and_collect_metrics() {
 
     # Poll for UI stability with detailed metrics collection
     local poll_count=0
-    local poll_start=$(get_time_ms)
+    local poll_start
+    poll_start=$(get_time_ms)
     local last_non_idle_time=$poll_start
     local is_stable=0
     local stability_achieved_at=0
@@ -197,13 +207,15 @@ launch_and_collect_metrics() {
     local prev_slow_ui=""
     local prev_deadline=""
 
-    local metrics_log="$SCRATCH_DIR/metrics_launch_${launch_num}_$(get_time_ms).log"
+    local metrics_log
+    metrics_log="$SCRATCH_DIR/metrics_launch_${launch_num}_$(get_time_ms).log"
 
     # Headers for metrics log
     echo "poll_num,elapsed_ms,p50,p90,p95,p99,missed_vsync,slow_ui,deadline,mv_delta,su_delta,dd_delta,is_stable_criteria,stable_duration_ms" > "$metrics_log"
 
     while true; do
-        local current_time=$(get_time_ms)
+        local current_time
+        current_time=$(get_time_ms)
         local elapsed=$((current_time - poll_start))
 
         # Check timeout
@@ -214,7 +226,6 @@ launch_and_collect_metrics() {
 
         # Get gfxinfo output
         local gfx_output
-        local gfx_error
         gfx_output=$($ADB_CMD shell dumpsys gfxinfo "$PACKAGE_NAME" 2>&1)
         local gfx_exit=$?
 
@@ -231,13 +242,20 @@ launch_and_collect_metrics() {
         fi
 
         # Extract metrics using simpler grep patterns that work on macOS and Linux
-        local p50=$(echo "$gfx_output" | grep "^50th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
-        local p90=$(echo "$gfx_output" | grep "^90th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
-        local p95=$(echo "$gfx_output" | grep "^95th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
-        local p99=$(echo "$gfx_output" | grep "^99th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
-        local missed_vsync=$(echo "$gfx_output" | grep "^Number Missed Vsync:" | awk '{print $4}' || echo "")
-        local slow_ui=$(echo "$gfx_output" | grep "^Number Slow UI thread:" | awk '{print $5}' || echo "")
-        local deadline=$(echo "$gfx_output" | grep "^Number Frame deadline missed:" | head -1 | awk '{print $5}' || echo "")
+        local p50
+        p50=$(echo "$gfx_output" | grep "^50th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        local p90
+        p90=$(echo "$gfx_output" | grep "^90th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        local p95
+        p95=$(echo "$gfx_output" | grep "^95th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        local p99
+        p99=$(echo "$gfx_output" | grep "^99th percentile:" | awk '{print $3}' | sed 's/ms//' || echo "")
+        local missed_vsync
+        missed_vsync=$(echo "$gfx_output" | grep "^Number Missed Vsync:" | awk '{print $4}' || echo "")
+        local slow_ui
+        slow_ui=$(echo "$gfx_output" | grep "^Number Slow UI thread:" | awk '{print $5}' || echo "")
+        local deadline
+        deadline=$(echo "$gfx_output" | grep "^Number Frame deadline missed:" | head -1 | awk '{print $5}' || echo "")
 
         # Skip if we couldn't parse metrics
         if [[ -z "$p50" || -z "$missed_vsync" || -z "$slow_ui" || -z "$deadline" ]]; then
@@ -267,7 +285,8 @@ launch_and_collect_metrics() {
         prev_deadline="$deadline"
 
         # Check stability criteria
-        local criteria_met=$(check_stability_criteria "$p50" "$p90" "$p95" "$mv_delta" "$su_delta" "$dd_delta")
+        local criteria_met
+        criteria_met=$(check_stability_criteria "$p50" "$p90" "$p95" "$mv_delta" "$su_delta" "$dd_delta")
 
         # Calculate stable duration
         local stable_duration=$((current_time - last_non_idle_time))
@@ -295,7 +314,8 @@ launch_and_collect_metrics() {
         sleep 0.017
     done
 
-    local total_time=$(get_time_ms)
+    local total_time
+    total_time=$(get_time_ms)
     local total_duration=$((total_time - start_time))
 
     log_info "Launch #$launch_num Summary:"
@@ -351,18 +371,23 @@ main() {
 
     # Run launches
     for ((i=1; i<=NUM_LAUNCHES; i++)); do
-        local result=$(launch_and_collect_metrics $i)
+        local result
+        result=$(launch_and_collect_metrics $i)
 
         # Parse result
-        local launch_id=$(echo "$result" | cut -d'|' -f1)
-        local total_time=$(echo "$result" | cut -d'|' -f2)
-        local launch_time=$(echo "$result" | cut -d'|' -f3)
-        local stability_time=$(echo "$result" | cut -d'|' -f4)
-        local poll_count=$(echo "$result" | cut -d'|' -f5)
-        local is_stable=$(echo "$result" | cut -d'|' -f6)
+        local total_time
+        total_time=$(echo "$result" | cut -d'|' -f2)
+        local launch_time
+        launch_time=$(echo "$result" | cut -d'|' -f3)
+        local stability_time
+        stability_time=$(echo "$result" | cut -d'|' -f4)
+        local poll_count
+        poll_count=$(echo "$result" | cut -d'|' -f5)
+        local is_stable
+        is_stable=$(echo "$result" | cut -d'|' -f6)
 
-        all_durations+=($total_time)
-        all_poll_counts+=($poll_count)
+        all_durations+=("$total_time")
+        all_poll_counts+=("$poll_count")
         [[ $is_stable -eq 1 ]] && all_stable_counts=$((all_stable_counts + 1))
 
         # Add to JSON

@@ -19,7 +19,9 @@ import org.junit.runners.model.FrameworkMethod
  */
 class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(klass) {
 
-  private val agent = AutoMobileAgent()
+  // Phase 4: Lazy initialization of AutoMobileAgent (only initialized if AI assistance needed)
+  private val agent: AutoMobileAgent
+    get() = LazyInitializer.getAgent()
 
   override fun run(notifier: RunNotifier) {
     // Skip the entire class if no devices are available
@@ -260,9 +262,14 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           success = false,
           exitCode = exitCode,
           output = output,
-          errorMessage =
-              "AutoMobile CLI failed with exit code $exitCode" +
-                  if (errorOutput.isNotEmpty()) "\nErrors: $errorOutput" else "",
+          errorMessage = buildString {
+            append("AutoMobile CLI failed with exit code ")
+            append(exitCode)
+            if (errorOutput.isNotEmpty()) {
+              append("\nErrors: ")
+              append(errorOutput)
+            }
+          },
           executionTimeMs = baseExecutionTime,
           logFile = logFile)
     }
@@ -287,9 +294,13 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           success = false,
           exitCode = exitCode,
           output = output,
-          errorMessage =
-              "AutoMobile CLI failed and AI recovery unsuccessful" +
-                  if (errorOutput.isNotEmpty()) "\nErrors: $errorOutput" else "",
+          errorMessage = buildString {
+            append("AutoMobile CLI failed and AI recovery unsuccessful")
+            if (errorOutput.isNotEmpty()) {
+              append("\nErrors: ")
+              append(errorOutput)
+            }
+          },
           aiRecoveryAttempted = true,
           aiRecoverySuccessful = false,
           executionTimeMs = baseExecutionTime + recoveryResult.recoveryTimeMs,

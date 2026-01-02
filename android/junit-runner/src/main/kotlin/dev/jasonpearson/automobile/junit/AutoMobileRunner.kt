@@ -375,6 +375,15 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
     private const val MAX_LOGS_TO_KEEP = 10
 
+    // Phase 7: Cache frequently used strings to avoid repeated allocations
+    private val SEPARATOR_LONG = "=".repeat(80)
+    private val SEPARATOR_SHORT = "-".repeat(80)
+
+    // Phase 7: Thread-local SimpleDateFormat for log content (not filename - that uses compact format)
+    private val logTimestampFormat: ThreadLocal<SimpleDateFormat> = ThreadLocal.withInitial {
+      SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS")
+    }
+
     /**
      * Write test execution output to a log file in the scratch directory.
      * Returns the path to the log file.
@@ -397,41 +406,42 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       val logFile = File(LOG_DIR, "${timestamp}_${sanitizedClassName}_${sanitizedTestName}.log")
 
       val logContent = buildString {
-        appendLine("=".repeat(80))
+        // Phase 7: Use cached separator strings instead of repeated string allocations
+        appendLine(SEPARATOR_LONG)
         appendLine("Test Execution Log")
-        appendLine("=".repeat(80))
+        appendLine(SEPARATOR_LONG)
         appendLine("Test Class: $className")
         appendLine("Test Method: $testName")
-        appendLine("Timestamp: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS").format(Date())}")
+        appendLine("Timestamp: ${logTimestampFormat.get().format(Date())}")
         appendLine("Status: ${if (success) "SUCCESS" else "FAILED"}")
         appendLine("Exit Code: $exitCode")
         appendLine("Execution Time: ${executionTimeMs}ms")
-        appendLine("=".repeat(80))
+        appendLine(SEPARATOR_LONG)
         appendLine()
 
         if (performanceMeasurements.isNotEmpty()) {
           appendLine("PERFORMANCE METRICS:")
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           performanceMeasurements.forEach { (label, duration) ->
             appendLine("  $label: ${duration}ms")
           }
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           appendLine()
         }
 
         if (stdout.isNotEmpty()) {
           appendLine("STDOUT:")
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           appendLine(stdout)
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           appendLine()
         }
 
         if (stderr.isNotEmpty()) {
           appendLine("STDERR:")
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           appendLine(stderr)
-          appendLine("-".repeat(80))
+          appendLine(SEPARATOR_SHORT)
           appendLine()
         }
 
@@ -440,9 +450,9 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           appendLine()
         }
 
-        appendLine("=".repeat(80))
+        appendLine(SEPARATOR_LONG)
         appendLine("End of Log")
-        appendLine("=".repeat(80))
+        appendLine(SEPARATOR_LONG)
       }
 
       // Use async log writing to remove file I/O from critical path

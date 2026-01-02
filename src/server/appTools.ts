@@ -67,7 +67,9 @@ export function registerAppTools(
   const terminateAppHandler = async (device: BootedDevice, args: AppActionArgs) => {
     try {
       const terminateApp = new TerminateApp(device);
-      const result = await terminateApp.execute(args.appId); // observe = true
+      const result = await terminateApp.execute(args.appId, {
+        skipUiStability: true // skip the 12+ second stability polling
+      });
 
       return createJSONToolResponse({
         message: `Terminated app ${args.appId}`,

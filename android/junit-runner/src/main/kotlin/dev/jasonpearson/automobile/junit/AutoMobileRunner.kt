@@ -217,26 +217,36 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       base64PlanContent: String,
       annotation: AutoMobileTest
   ): List<String> {
-    val command = mutableListOf<String>()
+    // Phase 8: Pre-sized ArrayList to avoid list resizing overhead
+    // Typical command has 8-10 elements depending on options
+    val command = ArrayList<String>(12)
 
     // Prefer local development version first (cached to avoid repeated filesystem checks)
     if (localAutoMobileExists()) {
-      command.addAll(listOf("bun", localAutoMobilePath, "--cli"))
+      // Phase 8: Direct adds instead of addAll(listOf(...)) to reduce allocations
+      command.add("bun")
+      command.add(localAutoMobilePath)
+      command.add("--cli")
     } else {
       // Use bunx for package execution (bunx caches resolution)
-      command.addAll(listOf("bunx", "auto-mobile", "--cli"))
+      command.add("bunx")
+      command.add("auto-mobile")
+      command.add("--cli")
     }
 
     // Use cached system properties to avoid repeated reads
     val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
 
     command.add("executePlan")
-    // Pass base64-encoded plan content prefixed with "base64:" to indicate encoding
-    command.addAll(listOf("--planContent", "base64:$base64PlanContent"))
-    command.addAll(listOf("--platform", "android"))
+    // Phase 8: Direct adds with inline string building instead of intermediate list allocation
+    command.add("--planContent")
+    command.add("base64:$base64PlanContent")
+    command.add("--platform")
+    command.add("android")
 
     if (annotation.device != "auto") {
-      command.addAll(listOf("--device", annotation.device))
+      command.add("--device")
+      command.add(annotation.device)
     }
 
     if (debugMode) {
@@ -319,22 +329,32 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   /** Build AutoMobile command - used by tests via reflection */
   private fun buildAutoMobileCommand(planPath: String, annotation: AutoMobileTest): List<String> {
-    val command = mutableListOf<String>()
+    // Phase 8: Pre-sized ArrayList to avoid list resizing
+    val command = ArrayList<String>(10)
     val useBunx = SystemPropertyCache.getBoolean("automobile.use.bunx", true)
 
     // Check for local development version first (cached to avoid repeated filesystem checks)
     if (localAutoMobileExists()) {
-      command.addAll(listOf("bun", localAutoMobilePath, "--cli"))
+      // Phase 8: Direct adds instead of addAll(listOf(...))
+      command.add("bun")
+      command.add(localAutoMobilePath)
+      command.add("--cli")
     } else if (useBunx) {
-      command.addAll(listOf("bunx", "auto-mobile", "--cli"))
+      command.add("bunx")
+      command.add("auto-mobile")
+      command.add("--cli")
     } else {
-      command.addAll(listOf("auto-mobile", "--cli"))
+      command.add("auto-mobile")
+      command.add("--cli")
     }
 
-    command.addAll(listOf("test", "run", planPath))
+    command.add("test")
+    command.add("run")
+    command.add(planPath)
 
     if (annotation.device != "auto") {
-      command.addAll(listOf("--device", annotation.device))
+      command.add("--device")
+      command.add(annotation.device)
     }
 
     val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)

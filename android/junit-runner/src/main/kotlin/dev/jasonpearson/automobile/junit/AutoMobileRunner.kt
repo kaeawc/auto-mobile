@@ -129,19 +129,29 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
     try {
       // Read the YAML plan content
+      val planReadStart = System.currentTimeMillis()
       val planContent = File(planPath).readText()
+      PerformanceTracker.measure("Plan file read", planReadStart)
 
       // Base64 encode the plan content to safely pass through command line
+      val base64Start = System.currentTimeMillis()
       val base64Content = java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
+      PerformanceTracker.measure("Base64 encoding", base64Start)
 
+      val cmdBuildStart = System.currentTimeMillis()
       val command = buildAutoMobileExecutePlanCommand(base64Content, annotation)
+      PerformanceTracker.measure("Command building", cmdBuildStart)
 
       println("Executing command: ${command.joinToString(" ")}")
 
+      val execStart = System.currentTimeMillis()
       val result = AutoMobileSharedUtils.executeCommand(command, annotation.timeoutMs)
+      PerformanceTracker.measure("Command execution", execStart)
+
       val executionTime = System.currentTimeMillis() - startTime
 
       // Write log file for this test execution
+      val logWriteStart = System.currentTimeMillis()
       val logFile = writeTestLog(
           testName = testName,
           className = klass.simpleName,
@@ -149,8 +159,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           stderr = result.errorOutput,
           exitCode = result.exitCode,
           executionTimeMs = executionTime,
-          success = result.exitCode == 0
+          success = result.exitCode == 0,
+          performanceMeasurements = PerformanceTracker.getMeasurements()
       )
+      PerformanceTracker.measure("Log file write", logWriteStart)
+      PerformanceTracker.clear()
 
       println("Test output written to: ${logFile.absolutePath}")
 
@@ -341,7 +354,8 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         stderr: String,
         exitCode: Int,
         executionTimeMs: Long,
-        success: Boolean
+        success: Boolean,
+        performanceMeasurements: List<Pair<String, Long>> = emptyList()
     ): File {
       val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(Date())
       val sanitizedTestName = testName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
@@ -360,6 +374,16 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         appendLine("Execution Time: ${executionTimeMs}ms")
         appendLine("=".repeat(80))
         appendLine()
+
+        if (performanceMeasurements.isNotEmpty()) {
+          appendLine("PERFORMANCE METRICS:")
+          appendLine("-".repeat(80))
+          performanceMeasurements.forEach { (label, duration) ->
+            appendLine("  $label: ${duration}ms")
+          }
+          appendLine("-".repeat(80))
+          appendLine()
+        }
 
         if (stdout.isNotEmpty()) {
           appendLine("STDOUT:")

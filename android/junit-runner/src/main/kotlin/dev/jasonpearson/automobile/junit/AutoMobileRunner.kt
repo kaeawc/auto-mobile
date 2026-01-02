@@ -390,8 +390,10 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         performanceMeasurements: List<Pair<String, Long>> = emptyList()
     ): File {
       val timestamp = SimpleDateFormat("yyyyMMdd-HHmmss-SSS").format(Date())
-      val sanitizedTestName = testName.replace(Regex("[^a-zA-Z0-9_-]"), "_")
-      val sanitizedClassName = className.replace(Regex("[^a-zA-Z0-9_-]"), "_")
+      // Phase 6: Use cached regex patterns to avoid repeated compilation
+      val sanitizationRegex = RegexCache.getRegex("[^a-zA-Z0-9_-]")
+      val sanitizedTestName = testName.replace(sanitizationRegex, "_")
+      val sanitizedClassName = className.replace(sanitizationRegex, "_")
       val logFile = File(LOG_DIR, "${timestamp}_${sanitizedClassName}_${sanitizedTestName}.log")
 
       val logContent = buildString {

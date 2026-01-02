@@ -133,7 +133,8 @@ class DeviceAvailabilityChecker {
             ?: throw IllegalStateException("ANDROID_HOME environment variable is not set")
 
     // Validate the path to prevent command injection
-    if (androidHome.contains(Regex("[;&|`\$()<>\\s]"))) {
+    // Phase 6: Use cached regex to avoid repeated compilation
+    if (androidHome.contains(RegexCache.getRegex("[;&|`\$()<>\\s]"))) {
       throw IllegalStateException("ANDROID_HOME contains invalid characters")
     }
 

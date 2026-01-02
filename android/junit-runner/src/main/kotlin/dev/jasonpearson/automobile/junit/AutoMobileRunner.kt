@@ -60,7 +60,10 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       val planPath = getPlanPathOrGenerate(method, annotation)
       val resolvedPlanPath = resolvePlanPath(planPath)
 
-      println("Running AutoMobile test: ${method.name} with plan: $planPath")
+      val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
+      if (debugMode) {
+        println("Running AutoMobile test: ${method.name} with plan: $planPath")
+      }
 
       val result = executeAutoMobilePlan(resolvedPlanPath, annotation, method.name)
 
@@ -112,21 +115,30 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   }
 
   private fun resolvePlanPath(planPath: String): String {
+    // Check cache first to avoid repeated classpath resolution
+    PlanCache.getCachedPath(planPath)?.let { return it }
+
     val classLoader = klass.classLoader
     val resource =
         classLoader.getResource(planPath)
             ?: throw IllegalArgumentException("YAML plan not found in test resources: $planPath")
 
-    return File(resource.toURI()).path
+    val resolvedPath = File(resource.toURI()).path
+    PlanCache.cachePath(planPath, resolvedPath)
+    return resolvedPath
   }
 
   private fun executeAutoMobilePlan(planPath: String, annotation: AutoMobileTest, testName: String): ExecutionResult {
     val startTime = System.currentTimeMillis()
 
     try {
-      // Read the YAML plan content
+      // Read the YAML plan content (with caching for repeated plans)
       val planReadStart = System.currentTimeMillis()
-      val planContent = File(planPath).readText()
+      val planContent = PlanCache.getCachedContent(planPath) ?: run {
+        val content = File(planPath).readText()
+        PlanCache.cacheContent(planPath, content)
+        content
+      }
       PerformanceTracker.measure("Plan file read", planReadStart)
 
       // Base64 encode the plan content to safely pass through command line
@@ -138,7 +150,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       val command = buildAutoMobileExecutePlanCommand(base64Content, annotation)
       PerformanceTracker.measure("Command building", cmdBuildStart)
 
-      println("Executing command: ${command.joinToString(" ")}")
+      // Gate verbose output behind debug mode
+      val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
+      if (debugMode) {
+        println("Executing command: ${command.joinToString(" ")}")
+      }
 
       val execStart = System.currentTimeMillis()
       val result = AutoMobileSharedUtils.executeCommand(command, annotation.timeoutMs)
@@ -161,7 +177,9 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       PerformanceTracker.measure("Log file write", logWriteStart)
       PerformanceTracker.clear()
 
-      println("Test output written to: ${logFile.absolutePath}")
+      if (debugMode) {
+        println("Test output written to: ${logFile.absolutePath}")
+      }
 
       val finalResult = if (result.exitCode == 0) {
         ExecutionResult(

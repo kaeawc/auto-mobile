@@ -217,10 +217,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   ): List<String> {
     val command = mutableListOf<String>()
 
-    // Check for local development version first (cached to avoid repeated filesystem checks)
+    // Prefer local development version first (cached to avoid repeated filesystem checks)
     if (localAutoMobileExists()) {
       command.addAll(listOf("bun", localAutoMobilePath, "--cli"))
     } else {
+      // Use bunx for package execution (bunx caches resolution)
       command.addAll(listOf("bunx", "auto-mobile", "--cli"))
     }
 

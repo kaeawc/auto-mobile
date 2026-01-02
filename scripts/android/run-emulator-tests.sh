@@ -15,6 +15,7 @@
 #     "accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk" \
 #     "./gradlew :junit-runner:test"
 #
+# shellcheck disable=SC2012 # Using ls for readable debug output is appropriate here
 
 set -euo pipefail
 

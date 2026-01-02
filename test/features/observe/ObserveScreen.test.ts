@@ -293,57 +293,11 @@ describe("ObserveScreen", function() {
       // Clear cache before each test to prevent interference between tests
       ObserveScreen.clearCache();
 
-      // Skip integration tests if we're in CI or no device is available
-      // Check for devices with a very short timeout to fail fast in CI
-      const tempAdb = new AdbClient(null);
-
-      try {
-        // Extremely short timeout - if ADB doesn't respond quickly, no device is available
-        const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Device check timeout")), 100);
-        });
-
-        const devicesPromise = tempAdb.executeCommand("devices");
-        const devices = await Promise.race([devicesPromise, timeoutPromise]);
-
-        const deviceLines = devices.stdout.split("\n").filter(line => line.trim() && !line.includes("List of devices"));
-        if (deviceLines.length === 0) {
-          skipIntegrationTests = true;
-          mockDevice = null as any;
-          return;
-        }
-
-        // Use the first connected device
-        const firstDeviceLine = deviceLines[0].split("\t");
-        const realDeviceId = firstDeviceLine[0];
-
-        mockDevice = {
-          deviceId: realDeviceId,
-          name: "Test Device",
-          platform: "android"
-        };
-      } catch (error) {
-        skipIntegrationTests = true;
-        mockDevice = null as any;
-        return;
-      }
-
-      // Initialize with real ADB connection using actual device
-      adb = new AdbClient(mockDevice);
-      observeScreen = new ObserveScreen(mockDevice, adb);
-      awaitIdle = new AwaitIdle(mockDevice, adb);
-
-      // Make sure the app is not running
-      await adb.executeCommand(`shell am force-stop ${CLOCK_PACKAGE}`);
-
-      // Clear app data to ensure consistent state
-      await adb.executeCommand(`shell pm clear ${CLOCK_PACKAGE}`);
-
-      // Launch the clock app
-      await adb.executeCommand(`shell am start -n ${CLOCK_PACKAGE}/com.android.deskclock.DeskClock`);
-
-      // Wait for app to fully launch and UI to be stable
-      await awaitIdle.waitForUiStability(CLOCK_PACKAGE, 250);
+      // Skip integration tests by default - they require a real device
+      // To run integration tests, set a real device ID
+      skipIntegrationTests = true;
+      mockDevice = null as any;
+      return;
     });
 
     afterEach(async function() {

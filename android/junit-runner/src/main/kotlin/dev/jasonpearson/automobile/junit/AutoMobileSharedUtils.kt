@@ -71,7 +71,7 @@ class DeviceAvailabilityChecker {
 
       val result = executeCommand(command, 5000) // 5 second timeout
 
-      val debugMode = System.getProperty("automobile.debug", "false").toBoolean()
+      val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
       if (debugMode) {
         println("Device check output:\n${result.output}")
         if (result.errorOutput.isNotEmpty()) {

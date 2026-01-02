@@ -21,10 +21,6 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   private val agent = AutoMobileAgent()
 
-  init {
-    AutoMobileSharedUtils.deviceChecker.checkDeviceAvailability()
-  }
-
   override fun run(notifier: RunNotifier) {
     // Skip the entire class if no devices are available
     if (!AutoMobileSharedUtils.deviceChecker.areDevicesAvailable()) {
@@ -203,16 +199,15 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   ): List<String> {
     val command = mutableListOf<String>()
 
-    // Check for local development version first
-    val localAutoMobile = File("../../dist/src/index.js").absoluteFile
-    if (localAutoMobile.exists()) {
-      command.addAll(listOf("bun", localAutoMobile.absolutePath, "--cli"))
+    // Check for local development version first (cached to avoid repeated filesystem checks)
+    if (localAutoMobileExists()) {
+      command.addAll(listOf("bun", localAutoMobilePath, "--cli"))
     } else {
       command.addAll(listOf("bunx", "auto-mobile", "--cli"))
     }
 
-    // Read system properties dynamically to allow test configuration
-    val debugMode = System.getProperty("automobile.debug", "false").toBoolean()
+    // Use cached system properties to avoid repeated reads
+    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
 
     command.add("executePlan")
     // Pass base64-encoded plan content prefixed with "base64:" to indicate encoding
@@ -239,7 +234,7 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       logFile: File
   ): ExecutionResult {
 
-    val ciMode = System.getProperty("automobile.ci.mode", "false").toBoolean()
+    val ciMode = SystemPropertyCache.getBoolean("automobile.ci.mode", false)
     if (!annotation.aiAssistance || ciMode) {
       println("AI assistance disabled or in CI mode, marking test as failed")
       return ExecutionResult(
@@ -295,12 +290,11 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   /** Build AutoMobile command - used by tests via reflection */
   private fun buildAutoMobileCommand(planPath: String, annotation: AutoMobileTest): List<String> {
     val command = mutableListOf<String>()
-    val useBunx = System.getProperty("automobile.use.bunx", "true").toBoolean()
+    val useBunx = SystemPropertyCache.getBoolean("automobile.use.bunx", true)
 
-    // Check for local development version first
-    val localAutoMobile = File("../../dist/src/index.js").absoluteFile
-    if (localAutoMobile.exists()) {
-      command.addAll(listOf("bun", localAutoMobile.absolutePath, "--cli"))
+    // Check for local development version first (cached to avoid repeated filesystem checks)
+    if (localAutoMobileExists()) {
+      command.addAll(listOf("bun", localAutoMobilePath, "--cli"))
     } else if (useBunx) {
       command.addAll(listOf("bunx", "auto-mobile", "--cli"))
     } else {
@@ -313,13 +307,21 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       command.addAll(listOf("--device", annotation.device))
     }
 
-    val debugMode = System.getProperty("automobile.debug", "false").toBoolean()
+    val debugMode = SystemPropertyCache.getBoolean("automobile.debug", false)
     if (debugMode) {
       command.add("--debug")
     }
 
     return command
   }
+
+  // Cached local AutoMobile file check to avoid repeated filesystem operations
+  private fun localAutoMobileExists(): Boolean = localAutoMobileExistsCache ?: File(localAutoMobilePath).exists().also { localAutoMobileExistsCache = it }
+
+  private val localAutoMobilePath: String
+    get() = File("../../dist/src/index.js").absolutePath
+
+  private var localAutoMobileExistsCache: Boolean? = null
 
   private data class ExecutionResult(
       val success: Boolean,
@@ -411,20 +413,26 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
         appendLine("=".repeat(80))
       }
 
-      logFile.writeText(logContent)
-      cleanupOldLogs()
+      // Use async log writing to remove file I/O from critical path
+      AsyncLogWriter.writeAsync(logFile, logContent) { writtenFile ->
+        // Deferred cleanup: only run cleanup when log count > 2x threshold
+        deferredCleanupOldLogs()
+      }
 
       return logFile
     }
 
     /**
-     * Clean up old log files, keeping only the most recent MAX_LOGS_TO_KEEP files.
+     * Deferred log cleanup - only runs cleanup when log count exceeds 2x the max threshold.
+     * This avoids running cleanup on every test execution.
      */
-    private fun cleanupOldLogs() {
+    private fun deferredCleanupOldLogs() {
       val logFiles = LOG_DIR.listFiles { file -> file.isFile && file.extension == "log" }
           ?: return
 
-      if (logFiles.size > MAX_LOGS_TO_KEEP) {
+      // Only cleanup when we have significantly more logs than needed (2x threshold)
+      val cleanupThreshold = MAX_LOGS_TO_KEEP * 2
+      if (logFiles.size > cleanupThreshold) {
         logFiles
             .sortedByDescending { it.lastModified() }
             .drop(MAX_LOGS_TO_KEEP)

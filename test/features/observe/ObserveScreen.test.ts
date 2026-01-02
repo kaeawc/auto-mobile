@@ -14,6 +14,9 @@ describe("ObserveScreen", function() {
     let mockDevice: BootedDevice;
 
     beforeEach(function() {
+      // Clear cache before each test to prevent interference between tests
+      ObserveScreen.clearCache();
+
       mockDevice = {
         deviceId: "test-device",
         name: "Test Device",
@@ -283,17 +286,21 @@ describe("ObserveScreen", function() {
     let adb: AdbClient;
     let awaitIdle: AwaitIdle;
     let mockDevice: BootedDevice;
+    let skipIntegrationTests = false;
     const CLOCK_PACKAGE = "com.google.android.deskclock";
 
     beforeEach(async function() {
-      // Create a temporary ADB client to check for devices
+      // Clear cache before each test to prevent interference between tests
+      ObserveScreen.clearCache();
+
+      // Skip integration tests if we're in CI or no device is available
+      // Check for devices with a very short timeout to fail fast in CI
       const tempAdb = new AdbClient(null);
 
-      // Check if any devices are connected with timeout
       try {
-        // Add timeout to prevent hanging in CI
+        // Extremely short timeout - if ADB doesn't respond quickly, no device is available
         const timeoutPromise = new Promise<never>((_, reject) => {
-          setTimeout(() => reject(new Error("Device check timeout")), 2000);
+          setTimeout(() => reject(new Error("Device check timeout")), 100);
         });
 
         const devicesPromise = tempAdb.executeCommand("devices");
@@ -301,8 +308,7 @@ describe("ObserveScreen", function() {
 
         const deviceLines = devices.stdout.split("\n").filter(line => line.trim() && !line.includes("List of devices"));
         if (deviceLines.length === 0) {
-          // Note: Bun does not support dynamic test skipping // Skip tests if no devices are connected
-          // Set mockDevice to null to signal tests should skip
+          skipIntegrationTests = true;
           mockDevice = null as any;
           return;
         }
@@ -317,7 +323,7 @@ describe("ObserveScreen", function() {
           platform: "android"
         };
       } catch (error) {
-        // Note: Bun does not support dynamic test skipping // Skip tests if ADB command fails
+        skipIntegrationTests = true;
         mockDevice = null as any;
         return;
       }

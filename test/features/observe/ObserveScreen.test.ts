@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ObserveScreen } from "../../../src/features/observe/ObserveScreen";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
-import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
-import { AwaitIdle } from "../../../src/features/observe/AwaitIdle";
 import { ObserveResult } from "../../../src/models/ObserveResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { logger } from "../../../src/utils/logger";
@@ -283,11 +281,7 @@ describe("ObserveScreen", function() {
   describe("Integration Tests", function() {
 
     let observeScreen: ObserveScreen;
-    let adb: AdbClient;
-    let awaitIdle: AwaitIdle;
     let mockDevice: BootedDevice;
-    let skipIntegrationTests = false;
-    const CLOCK_PACKAGE = "com.google.android.deskclock";
 
     beforeEach(async function() {
       // Clear cache before each test to prevent interference between tests
@@ -295,23 +289,12 @@ describe("ObserveScreen", function() {
 
       // Skip integration tests by default - they require a real device
       // To run integration tests, set a real device ID
-      skipIntegrationTests = true;
       mockDevice = null as any;
       return;
     });
 
     afterEach(async function() {
-      // Skip cleanup if no device was set up
-      if (!mockDevice || !adb) {
-        return;
-      }
-
-      try {
-        // Clean up after test
-        await adb.executeCommand(`shell am force-stop ${CLOCK_PACKAGE}`);
-      } catch (error) {
-        // Ignore cleanup errors
-      }
+      // No cleanup needed since integration tests are skipped
     });
 
     test("should get complete observation data with all features enabled", async function() {

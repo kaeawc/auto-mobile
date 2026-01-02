@@ -164,7 +164,7 @@ jobs:
         with:
           script: "./gradlew :junit-runner:test"
           working-directory: './android/'
-          accessibility-apk-path: ./apk/accessibility-service-debug.apk
+          accessibility-apk-path: ../apk/accessibility-service-debug.apk
 
       - name: "Upload Test Results"
         if: always()

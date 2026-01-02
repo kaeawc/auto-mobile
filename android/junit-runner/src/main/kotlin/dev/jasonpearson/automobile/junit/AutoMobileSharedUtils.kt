@@ -4,7 +4,10 @@ import java.util.concurrent.TimeUnit
 
 /** Shared utilities for AutoMobile tests. */
 object AutoMobileSharedUtils {
-  val deviceChecker = DeviceAvailabilityChecker()
+  // Phase 5: Lazy device checker initialization
+  val deviceChecker: DeviceAvailabilityChecker by lazy {
+    DeviceAvailabilityChecker()
+  }
 
   fun executeCommand(command: List<String>, timeoutMs: Long): CommandResult {
     val process = ProcessBuilder(command).start()

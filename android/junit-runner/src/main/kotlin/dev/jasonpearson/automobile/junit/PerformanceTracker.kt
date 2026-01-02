@@ -5,7 +5,10 @@ package dev.jasonpearson.automobile.junit
  * Timing output is only printed when automobile.junitrunner.perf.debug=true is set.
  */
 object PerformanceTracker {
-  private val perfDebugMode = System.getProperty("automobile.junitrunner.perf.debug", "false").toBoolean()
+  // Phase 5: Lazy evaluation of perf debug mode
+  private val perfDebugMode: Boolean by lazy {
+    System.getProperty("automobile.junitrunner.perf.debug", "false").toBoolean()
+  }
 
   private val timings = mutableMapOf<String, Long>()
   private val measurements = mutableListOf<Pair<String, Long>>()

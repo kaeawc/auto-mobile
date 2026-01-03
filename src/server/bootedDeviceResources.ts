@@ -1,5 +1,5 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
-import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
+import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 
@@ -24,6 +24,28 @@ export interface BootedDevicesResourceContent {
   iosCount: number;
   lastUpdated: string;  // ISO 8601
   devices: BootedDeviceInfo[];
+}
+
+// Module-level device manager for dependency injection
+let deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager();
+
+/**
+ * Set a custom device manager for testing
+ * @param manager - The device manager to use (or null to reset to default)
+ */
+export function setDeviceManager(manager: PlatformDeviceManager | null): void {
+  if (manager === null) {
+    deviceManager = new MultiPlatformDeviceManager();
+  } else {
+    deviceManager = manager;
+  }
+}
+
+/**
+ * Get the current device manager (for testing purposes)
+ */
+export function getDeviceManager(): PlatformDeviceManager {
+  return deviceManager;
 }
 
 // Convert BootedDevice to BootedDeviceInfo
@@ -71,8 +93,6 @@ async function getBootedDevicesByPlatform(params: Record<string, string>): Promi
 
 // Core function to fetch booted devices for specified platforms
 async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<BootedDevicesResourceContent> {
-  const deviceManager = new MultiPlatformDeviceManager();
-
   const devices: BootedDeviceInfo[] = [];
   let androidCount = 0;
   let iosCount = 0;

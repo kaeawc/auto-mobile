@@ -1,11 +1,48 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { ResourceRegistry } from "../../../src/server/resourceRegistry";
+import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
+import { setDeviceManager, BootedDevicesResourceContent } from "../../../src/server/bootedDeviceResources";
+import { BootedDevice } from "../../../src/models";
 
 describe("MCP Booted Device Resources", () => {
   let fixture: McpTestFixture;
+  let fakeDeviceUtils: FakeDeviceUtils;
+
+  // Mock device data
+  const mockAndroidDevice1: BootedDevice = {
+    name: "Pixel_7_API_34",
+    platform: "android",
+    deviceId: "emulator-5554",
+    source: "local"
+  };
+
+  const mockAndroidDevice2: BootedDevice = {
+    name: "Pixel_8_API_35",
+    platform: "android",
+    deviceId: "emulator-5556",
+    source: "local"
+  };
+
+  const mockIosDevice1: BootedDevice = {
+    name: "iPhone 15 Pro",
+    platform: "ios",
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    source: "local"
+  };
+
+  const mockIosDevice2: BootedDevice = {
+    name: "iPad Pro (12.9-inch)",
+    platform: "ios",
+    deviceId: "B2C3D4E5-F6A7-8901-BCDE-F12345678901",
+    source: "local"
+  };
 
   beforeEach(async () => {
+    // Set up fake device utils before each test
+    fakeDeviceUtils = new FakeDeviceUtils();
+    setDeviceManager(fakeDeviceUtils);
+
     fixture = new McpTestFixture();
     await fixture.setup();
   });
@@ -14,6 +51,8 @@ describe("MCP Booted Device Resources", () => {
     if (fixture) {
       await fixture.teardown();
     }
+    // Reset to default device manager
+    setDeviceManager(null);
   });
 
   describe("Resource Listing", () => {
@@ -72,8 +111,12 @@ describe("MCP Booted Device Resources", () => {
     });
   });
 
-  describe("Resource Reading", () => {
-    test("should return all booted devices resource", async function() {
+  describe("Resource Reading with Mock Devices", () => {
+    test("should return correct counts when there are multiple devices", async function() {
+      // Set up mock devices
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+
       const { client } = fixture.getContext();
 
       const { z } = await import("zod");
@@ -100,24 +143,50 @@ describe("MCP Booted Device Resources", () => {
       expect(content.mimeType).toBe("application/json");
       expect(content.text).toBeDefined();
 
-      // Parse and verify content structure
-      const data = JSON.parse(content.text!);
-      expect(data).toHaveProperty("totalCount");
-      expect(data).toHaveProperty("androidCount");
-      expect(data).toHaveProperty("iosCount");
-      expect(data).toHaveProperty("lastUpdated");
-      expect(data).toHaveProperty("devices");
-      expect(Array.isArray(data.devices)).toBe(true);
+      // Parse and verify content
+      const data: BootedDevicesResourceContent = JSON.parse(content.text!);
+      expect(data.totalCount).toBe(3);
+      expect(data.androidCount).toBe(2);
+      expect(data.iosCount).toBe(1);
+      expect(data.devices).toHaveLength(3);
 
       // Verify lastUpdated is a valid ISO 8601 date
       expect(() => new Date(data.lastUpdated)).not.toThrow();
-
-      // Verify counts match
-      expect(data.totalCount).toBe(data.devices.length);
-      expect(data.totalCount).toBe(data.androidCount + data.iosCount);
     });
 
-    test("should return android-specific booted devices via template", async function() {
+    test("should return empty results when no devices are booted", async function() {
+      // No devices set up - fakeDeviceUtils returns empty by default
+      const { client } = fixture.getContext();
+
+      const { z } = await import("zod");
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile://devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.totalCount).toBe(0);
+      expect(data.androidCount).toBe(0);
+      expect(data.iosCount).toBe(0);
+      expect(data.devices).toHaveLength(0);
+    });
+
+    test("should filter correctly for android platform", async function() {
+      // Set up both Android and iOS devices
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1, mockAndroidDevice2]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, mockIosDevice2]);
+
       const { client } = fixture.getContext();
 
       const { z } = await import("zod");
@@ -141,14 +210,13 @@ describe("MCP Booted Device Resources", () => {
       expect(result.contents).toHaveLength(1);
       const content = result.contents[0];
       expect(content.uri).toBe("automobile://devices/booted/android");
-      expect(content.mimeType).toBe("application/json");
 
       // Parse and verify content
-      const data = JSON.parse(content.text!);
-      expect(data).toHaveProperty("totalCount");
-      expect(data).toHaveProperty("androidCount");
-      expect(data).toHaveProperty("iosCount");
-      expect(data.iosCount).toBe(0); // Should only contain Android
+      const data: BootedDevicesResourceContent = JSON.parse(content.text!);
+      expect(data.totalCount).toBe(2);
+      expect(data.androidCount).toBe(2);
+      expect(data.iosCount).toBe(0);
+      expect(data.devices).toHaveLength(2);
 
       // Verify all devices are Android
       for (const device of data.devices) {
@@ -156,7 +224,11 @@ describe("MCP Booted Device Resources", () => {
       }
     });
 
-    test("should return ios-specific booted devices via template", async function() {
+    test("should filter correctly for ios platform", async function() {
+      // Set up both Android and iOS devices
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1, mockIosDevice2]);
+
       const { client } = fixture.getContext();
 
       const { z } = await import("zod");
@@ -180,19 +252,51 @@ describe("MCP Booted Device Resources", () => {
       expect(result.contents).toHaveLength(1);
       const content = result.contents[0];
       expect(content.uri).toBe("automobile://devices/booted/ios");
-      expect(content.mimeType).toBe("application/json");
 
       // Parse and verify content
-      const data = JSON.parse(content.text!);
-      expect(data).toHaveProperty("totalCount");
-      expect(data).toHaveProperty("androidCount");
-      expect(data).toHaveProperty("iosCount");
-      expect(data.androidCount).toBe(0); // Should only contain iOS
+      const data: BootedDevicesResourceContent = JSON.parse(content.text!);
+      expect(data.totalCount).toBe(2);
+      expect(data.androidCount).toBe(0);
+      expect(data.iosCount).toBe(2);
+      expect(data.devices).toHaveLength(2);
 
       // Verify all devices are iOS
       for (const device of data.devices) {
         expect(device.platform).toBe("ios");
       }
+    });
+
+    test("should include all device properties in response", async function() {
+      // Set up a single device to check all properties
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+      const { client } = fixture.getContext();
+
+      const { z } = await import("zod");
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile://devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.devices).toHaveLength(1);
+
+      const device = data.devices[0];
+      expect(device.name).toBe("Pixel_7_API_34");
+      expect(device.platform).toBe("android");
+      expect(device.deviceId).toBe("emulator-5554");
+      expect(device.source).toBe("local");
     });
 
     test("should return error for invalid platform", async function() {
@@ -221,6 +325,65 @@ describe("MCP Booted Device Resources", () => {
       const data = JSON.parse(content.text!);
       expect(data).toHaveProperty("error");
       expect(data.error).toContain("Invalid platform");
+    });
+  });
+
+  describe("Device Manager Integration", () => {
+    test("should call getBootedDevices for android when filtering", async function() {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+
+      const { client } = fixture.getContext();
+
+      const { z } = await import("zod");
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile://devices/booted/android"
+        }
+      }, readResourceResponseSchema);
+
+      // Verify getBootedDevices was called for android
+      expect(fakeDeviceUtils.wasMethodCalled("getBootedDevices")).toBe(true);
+      const operations = fakeDeviceUtils.getExecutedOperations();
+      expect(operations).toContain("getBootedDevices:android");
+    });
+
+    test("should call getBootedDevices for both platforms when requesting all devices", async function() {
+      fakeDeviceUtils.setBootedDevices("android", [mockAndroidDevice1]);
+      fakeDeviceUtils.setBootedDevices("ios", [mockIosDevice1]);
+
+      const { client } = fixture.getContext();
+
+      const { z } = await import("zod");
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile://devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      // Verify getBootedDevices was called for both platforms
+      const operations = fakeDeviceUtils.getExecutedOperations();
+      expect(operations).toContain("getBootedDevices:android");
+      expect(operations).toContain("getBootedDevices:ios");
     });
   });
 });

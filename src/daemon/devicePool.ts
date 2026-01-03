@@ -3,6 +3,7 @@ import { SessionManager } from "./sessionManager";
 import { ActionableError } from "../models";
 import { Mutex } from "async-mutex";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Pooled Device Status
@@ -37,12 +38,18 @@ export class DevicePool {
   private devices: Map<string, PooledDevice> = new Map();
   private sessionManager: SessionManager;
   private assignmentMutex = new Mutex();
+  private timer: Timer;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
 
-  constructor(sessionManager: SessionManager) {
+  // Device wait configuration for parallel test execution
+  private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
+  private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
+
+  constructor(sessionManager: SessionManager, timer: Timer = defaultTimer) {
     this.sessionManager = sessionManager;
+    this.timer = timer;
   }
 
   /**
@@ -180,10 +187,89 @@ export class DevicePool {
    *
    * Automatically refreshes device pool if empty, handling race conditions during
    * daemon startup where device discovery may not have completed.
+   *
+   * When all devices are busy, waits with timeout for a device to become available.
+   * This enables parallel test execution with limited devices.
    */
   async assignDeviceToSession(sessionId: string): Promise<string> {
-    // Use mutex to ensure only one caller at a time can assign a device
-    // This prevents race conditions where two tests could grab the same device
+    const startTime = this.timer.now();
+    let attemptCount = 0;
+
+    while (true) {
+      attemptCount++;
+      const elapsed = this.timer.now() - startTime;
+
+      // Check timeout
+      if (elapsed > this.DEVICE_WAIT_TIMEOUT_MS) {
+        const stats = this.getStats();
+        throw new ActionableError(
+          `Timed out waiting for device after ${Math.round(elapsed / 1000)}s (${attemptCount} attempts).\n` +
+          `Session: ${sessionId}\n` +
+          `Device pool status:\n` +
+          `  Total devices: ${stats.total}\n` +
+          `  Idle: ${stats.idle}\n` +
+          `  Assigned: ${stats.assigned}\n` +
+          `  Error: ${stats.error}\n\n` +
+          `Suggestions:\n` +
+          `  - Reduce parallel test count to match available devices\n` +
+          `  - Start additional emulators or connect more physical devices\n` +
+          `  - Check if tests are properly releasing devices after completion`
+        );
+      }
+
+      // Try to assign device (mutex ensures atomic assignment)
+      const result = await this.tryAssignDevice(sessionId);
+
+      if (result.success) {
+        if (attemptCount > 1) {
+          logger.info(
+            `Device ${result.deviceId} assigned to session ${sessionId} ` +
+            `after ${attemptCount} attempts (${elapsed}ms wait)`
+          );
+        }
+        return result.deviceId!;
+      }
+
+      // No device available - check if we should wait or fail
+      if (result.shouldWait) {
+        // Devices exist but are busy - wait and retry
+        if (attemptCount === 1) {
+          logger.info(
+            `All ${result.totalDevices} devices busy, ` +
+            `session ${sessionId} waiting for availability (timeout: ${this.DEVICE_WAIT_TIMEOUT_MS / 1000}s)...`
+          );
+        }
+        await this.timer.sleep(this.DEVICE_WAIT_INTERVAL_MS);
+      } else {
+        // No devices at all - fail immediately
+        const stats = this.getStats();
+        throw new ActionableError(
+          `No devices in pool to assign to session ${sessionId}.\n` +
+          `Device pool status:\n` +
+          `  Total devices: ${stats.total}\n` +
+          `  Idle: ${stats.idle}\n` +
+          `  Assigned: ${stats.assigned}\n` +
+          `  Error: ${stats.error}\n\n` +
+          `Suggestions:\n` +
+          `  - Start an emulator or connect a physical device\n` +
+          `  - Check device pool status: auto-mobile --daemon available-devices\n` +
+          `  - Verify ADB is working: adb devices`
+        );
+      }
+    }
+  }
+
+  /**
+   * Try to assign a device to a session (single attempt)
+   *
+   * Returns success status and whether caller should wait and retry.
+   */
+  private async tryAssignDevice(sessionId: string): Promise<{
+    success: boolean;
+    deviceId?: string;
+    shouldWait: boolean;
+    totalDevices: number;
+  }> {
     return await this.assignmentMutex.runExclusive(async () => {
       // Find first idle device
       let device = Array.from(this.devices.values()).find(d => d.status === "idle");
@@ -199,20 +285,19 @@ export class DevicePool {
         }
       }
 
+      const totalDevices = this.devices.size;
+
       if (!device) {
-        const stats = this.getStats();
-        throw new ActionableError(
-          `No available devices to assign to session ${sessionId}.\n` +
-          `Device pool status:\n` +
-          `  Total devices: ${stats.total}\n` +
-          `  Idle: ${stats.idle}\n` +
-          `  Assigned: ${stats.assigned}\n` +
-          `  Error: ${stats.error}\n\n` +
-          `Suggestions:\n` +
-          `  - Wait for another session to complete and release its device\n` +
-          `  - Start additional emulators or connect more physical devices\n` +
-          `  - Check device pool status: auto-mobile --daemon available-devices`
-        );
+        // No idle device - check if devices exist but are busy
+        const busyDevices = Array.from(this.devices.values()).filter(
+          d => d.status === "busy"
+        ).length;
+
+        return {
+          success: false,
+          shouldWait: busyDevices > 0, // Wait if devices are busy, fail if none exist
+          totalDevices,
+        };
       }
 
       // Assign to session
@@ -227,7 +312,12 @@ export class DevicePool {
 
       logger.info(`Assigned device ${device.id} to session ${sessionId}`);
 
-      return device.id;
+      return {
+        success: true,
+        deviceId: device.id,
+        shouldWait: false,
+        totalDevices,
+      };
     });
   }
 

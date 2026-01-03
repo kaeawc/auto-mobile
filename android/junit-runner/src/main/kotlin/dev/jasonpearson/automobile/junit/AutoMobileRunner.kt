@@ -3,6 +3,8 @@ package dev.jasonpearson.automobile.junit
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlin.jvm.java
 import org.junit.runner.notification.Failure
 import org.junit.runner.notification.RunNotifier
@@ -38,6 +40,61 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
     // Proceed with normal execution if devices are available
     super.run(notifier)
+  }
+
+  override fun getChildren(): List<FrameworkMethod> {
+    return super.getChildren()
+  }
+
+  override fun childrenInvoker(notifier: RunNotifier): org.junit.runners.model.Statement {
+    // Get max parallel forks from system property, default to number of available processors
+    val maxParallelForks = SystemPropertyCache.get("junit.parallel.forks",
+      Runtime.getRuntime().availableProcessors().toString()).toIntOrNull() ?: 2
+
+    val children = getChildren()
+
+    // Only parallelize if we have multiple children and parallelism is enabled
+    if (children.size <= 1 || maxParallelForks <= 1) {
+      // Fall back to sequential execution
+      return super.childrenInvoker(notifier)
+    }
+
+    // Return a Statement that executes children in parallel
+    return object : org.junit.runners.model.Statement() {
+      override fun evaluate() {
+        // Create thread pool for parallel execution
+        val executor = Executors.newFixedThreadPool(maxParallelForks.coerceAtMost(children.size))
+
+        try {
+          // Submit each test method for parallel execution
+          val futures = children.map { child ->
+            executor.submit {
+              // Synchronize notifier access to ensure thread safety
+              runChild(child, SynchronizedRunNotifier(notifier))
+            }
+          }
+
+          // Wait for all test methods to complete and collect any exceptions
+          val exceptions = mutableListOf<Throwable>()
+          futures.forEach { future ->
+            try {
+              future.get()
+            } catch (e: Exception) {
+              // Collect exceptions to report after all tests complete
+              exceptions.add(e.cause ?: e)
+            }
+          }
+
+          // If any test failed, throw the first exception
+          if (exceptions.isNotEmpty()) {
+            throw exceptions.first()
+          }
+        } finally {
+          executor.shutdown()
+          executor.awaitTermination(1, TimeUnit.HOURS)
+        }
+      }
+    }
   }
 
   override fun runChild(method: FrameworkMethod, notifier: RunNotifier) {
@@ -501,5 +558,46 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
             .forEach { it.delete() }
       }
     }
+  }
+}
+
+/**
+ * Thread-safe wrapper for RunNotifier to ensure synchronized access from parallel test threads.
+ */
+private class SynchronizedRunNotifier(private val delegate: RunNotifier) : RunNotifier() {
+
+  @Synchronized
+  override fun fireTestStarted(description: org.junit.runner.Description) {
+    delegate.fireTestStarted(description)
+  }
+
+  @Synchronized
+  override fun fireTestFinished(description: org.junit.runner.Description) {
+    delegate.fireTestFinished(description)
+  }
+
+  @Synchronized
+  override fun fireTestFailure(failure: Failure) {
+    delegate.fireTestFailure(failure)
+  }
+
+  @Synchronized
+  override fun fireTestAssumptionFailed(failure: Failure) {
+    delegate.fireTestAssumptionFailed(failure)
+  }
+
+  @Synchronized
+  override fun fireTestIgnored(description: org.junit.runner.Description) {
+    delegate.fireTestIgnored(description)
+  }
+
+  @Synchronized
+  override fun addListener(listener: org.junit.runner.notification.RunListener) {
+    delegate.addListener(listener)
+  }
+
+  @Synchronized
+  override fun removeListener(listener: org.junit.runner.notification.RunListener) {
+    delegate.removeListener(listener)
   }
 }

@@ -19,13 +19,13 @@ const uid = getUserId();
 /**
  * Default port for the daemon's internal HTTP server
  */
-export const DEFAULT_DAEMON_PORT = 9001;
+export const DEFAULT_DAEMON_PORT = 3000;
 
 /**
  * Port range to try if default port is unavailable
  */
-export const DAEMON_PORT_RANGE_START = 9001;
-export const DAEMON_PORT_RANGE_END = 9010;
+export const DAEMON_PORT_RANGE_START = 3000;
+export const DAEMON_PORT_RANGE_END = 3010;
 
 /**
  * Unix socket path for daemon communication

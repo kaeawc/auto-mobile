@@ -13,6 +13,7 @@ import { setDebugModeEnabled } from "./utils/debug";
 import { serverConfig } from "./utils/ServerConfig";
 import { runDaemonCommand } from "./daemon/manager";
 import { startDaemon } from "./daemon/daemon";
+import { DEFAULT_DAEMON_PORT } from "./daemon/constants";
 
 // Interface for transport configuration
 interface TransportConfig {
@@ -484,8 +485,10 @@ async function main() {
     }
 
     if (daemonMode) {
+      // Check if --port was explicitly passed, otherwise let daemon use its default
+      const explicitPort = process.argv.includes("--port");
       await startDaemon({
-        port: transport.port,
+        port: explicitPort ? transport.port : undefined,
         host: transport.host,
         debug,
         debugPerf,

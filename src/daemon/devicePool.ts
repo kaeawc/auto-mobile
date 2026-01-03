@@ -1,5 +1,6 @@
 import { logger } from "../utils/logger";
 import { SessionManager } from "./sessionManager";
+import { ActionableError } from "../models";
 
 /**
  * Pooled Device Status
@@ -114,9 +115,18 @@ export class DevicePool {
     const device = Array.from(this.devices.values()).find(d => d.status === "idle");
 
     if (!device) {
-      throw new Error(
-        `No available devices to assign to session ${sessionId}. ` +
-        `All ${this.devices.size} devices are currently in use.`
+      const stats = this.getStats();
+      throw new ActionableError(
+        `No available devices to assign to session ${sessionId}.\n` +
+        `Device pool status:\n` +
+        `  Total devices: ${stats.total}\n` +
+        `  Idle: ${stats.idle}\n` +
+        `  Assigned: ${stats.assigned}\n` +
+        `  Error: ${stats.error}\n\n` +
+        `Suggestions:\n` +
+        `  - Wait for another session to complete and release its device\n` +
+        `  - Start additional emulators or connect more physical devices\n` +
+        `  - Check device pool status: auto-mobile --daemon available-devices`
       );
     }
 

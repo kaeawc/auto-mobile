@@ -31,7 +31,7 @@ export interface DeviceSessionManager {
 
   /**
    * Ensure a device is ready for the specified platform and return its ID
-   * Throws an error if both Android and iOS devices are connected
+   * Throws an error if both Android and iOS devices are connected when auto-detecting platform
    */
   ensureDeviceReady(platform: SomePlatform, providedDeviceId?: string): Promise<BootedDevice>;
 
@@ -173,7 +173,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
   /**
    * Ensure a device is ready for the specified platform and return its ID
-   * Throws an error if both Android and iOS devices are connected
+   * Throws an error if both Android and iOS devices are connected when auto-detecting platform
    */
   public async ensureDeviceReady(platform: SomePlatform, providedDeviceId?: string): Promise<BootedDevice> {
     // Detect all connected devices
@@ -183,13 +183,6 @@ export class DeviceSessionManager implements DeviceSessionManager {
     logger.info(`Found ${androidDevices.length} android devices`);
     const iosDevices = connectedPlatforms.filter(device => device.platform === "ios");
     logger.info(`Found ${iosDevices.length} ios devices`);
-
-    // Check if both platforms have devices - this is not allowed
-    if (androidDevices.length > 0 && iosDevices.length > 0) {
-      throw new ActionableError(
-        "Both Android and iOS devices are connected. Please disconnect devices from one platform to continue."
-      );
-    }
 
     // Get devices for the requested platform
     let platformDevices: BootedDevice[] = [];
@@ -204,6 +197,13 @@ export class DeviceSessionManager implements DeviceSessionManager {
         resolvedPlatform = "ios";
         break;
       default:
+        // Only check for mixed platforms when auto-detecting (not explicitly specified)
+        if (androidDevices.length > 0 && iosDevices.length > 0) {
+          throw new ActionableError(
+            "Both Android and iOS devices are connected. Please disconnect devices from one platform to continue."
+          );
+        }
+
         if (androidDevices.length > 0) {
           platformDevices = androidDevices;
           resolvedPlatform = "android";

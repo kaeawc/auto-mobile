@@ -2,6 +2,7 @@ import { logger } from "../utils/logger";
 import { SessionManager } from "./sessionManager";
 import { ActionableError } from "../models";
 import { Mutex } from "async-mutex";
+import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 
 /**
  * Pooled Device Status
@@ -68,6 +69,53 @@ export class DevicePool {
   }
 
   /**
+   * Refresh device pool by discovering connected devices
+   *
+   * Automatically called when pool is empty and a session requests a device.
+   * This handles race conditions during daemon startup where device discovery
+   * may not have completed before tests begin.
+   *
+   * Only adds new devices - does not remove existing devices that may be assigned.
+   */
+  async refreshDevices(): Promise<number> {
+    try {
+      logger.info("Refreshing device pool - discovering connected devices...");
+      const deviceManager = new MultiPlatformDeviceManager();
+      const bootedDevices = await deviceManager.getBootedDevices("android");
+      const now = Date.now();
+      let addedCount = 0;
+
+      for (const device of bootedDevices) {
+        if (!this.devices.has(device.deviceId)) {
+          this.devices.set(device.deviceId, {
+            id: device.deviceId,
+            sessionId: null,
+            status: "idle",
+            lastUsedAt: now,
+            assignmentCount: 0,
+            errorCount: 0,
+          });
+          addedCount++;
+          logger.info(`Added device ${device.deviceId} to pool during refresh`);
+        }
+      }
+
+      if (addedCount > 0) {
+        logger.info(`Device pool refreshed: added ${addedCount} new devices (total: ${this.devices.size})`);
+      } else if (bootedDevices.length === 0) {
+        logger.warn("No devices found during pool refresh. Is an emulator running?");
+      } else {
+        logger.debug(`Device pool refresh: all ${bootedDevices.length} devices already in pool`);
+      }
+
+      return addedCount;
+    } catch (error) {
+      logger.error(`Failed to refresh device pool: ${error}`);
+      return 0;
+    }
+  }
+
+  /**
    * Add a new device to the pool
    */
   addDevice(deviceId: string): void {
@@ -114,13 +162,27 @@ export class DevicePool {
    *
    * Uses mutex to ensure atomic device assignment and prevent race conditions
    * when multiple tests run in parallel.
+   *
+   * Automatically refreshes device pool if empty, handling race conditions during
+   * daemon startup where device discovery may not have completed.
    */
   async assignDeviceToSession(sessionId: string): Promise<string> {
     // Use mutex to ensure only one caller at a time can assign a device
     // This prevents race conditions where two tests could grab the same device
     return await this.assignmentMutex.runExclusive(async () => {
       // Find first idle device
-      const device = Array.from(this.devices.values()).find(d => d.status === "idle");
+      let device = Array.from(this.devices.values()).find(d => d.status === "idle");
+
+      // If no devices available and pool is empty, try to refresh
+      // This handles race conditions during daemon startup
+      if (!device && this.devices.size === 0) {
+        logger.info("Device pool is empty, attempting auto-refresh...");
+        const addedCount = await this.refreshDevices();
+        if (addedCount > 0) {
+          // Try again after refresh
+          device = Array.from(this.devices.values()).find(d => d.status === "idle");
+        }
+      }
 
       if (!device) {
         const stats = this.getStats();

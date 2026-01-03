@@ -42,8 +42,9 @@ export const PID_FILE_PATH = `/tmp/auto-mobile-daemon-${uid}.pid`;
 /**
  * Connection timeout in milliseconds
  * How long to wait for daemon to respond
+ * Increased to 30s to accommodate parallel test execution where tests may wait for device availability
  */
-export const CONNECTION_TIMEOUT_MS = 5000;
+export const CONNECTION_TIMEOUT_MS = 30000;
 
 /**
  * Health check interval in milliseconds

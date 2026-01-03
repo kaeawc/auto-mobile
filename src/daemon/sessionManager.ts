@@ -118,11 +118,14 @@ export class SessionManager {
   ): Promise<Session> {
     const existing = this.getSession(sessionId);
     if (existing) {
+      logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
       // Update last used time
       existing.lastUsedAt = Date.now();
       existing.expiresAt = Date.now() + this.SESSION_TIMEOUT_MS;
       return existing;
     }
+
+    logger.info(`[SessionManager] Creating new session ${sessionId}, calling devicePool.assignDeviceToSession()`);
 
     // Need to create new session - assign device from pool
     if (!devicePool) {
@@ -142,6 +145,7 @@ export class SessionManager {
       );
     }
 
+    logger.info(`[SessionManager] Successfully created session ${sessionId} with device ${session.assignedDevice}`);
     return session;
   }
 

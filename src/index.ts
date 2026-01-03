@@ -13,7 +13,6 @@ import { setDebugModeEnabled } from "./utils/debug";
 import { serverConfig } from "./utils/ServerConfig";
 import { runDaemonCommand } from "./daemon/manager";
 import { startDaemon } from "./daemon/daemon";
-import { DEFAULT_DAEMON_PORT } from "./daemon/constants";
 
 // Interface for transport configuration
 interface TransportConfig {

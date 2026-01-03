@@ -78,10 +78,20 @@ export class DevicePool {
    * Only adds new devices - does not remove existing devices that may be assigned.
    */
   async refreshDevices(): Promise<number> {
+    const startTime = Date.now();
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
+
+      // Log environment for debugging CI issues
+      const androidHome = process.env.ANDROID_HOME || "(not set)";
+      const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
+      logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
+
       const deviceManager = new MultiPlatformDeviceManager();
       const bootedDevices = await deviceManager.getBootedDevices("android");
+      const discoveryTime = Date.now() - startTime;
+      logger.info(`Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`);
+
       const now = Date.now();
       let addedCount = 0;
 
@@ -104,13 +114,18 @@ export class DevicePool {
         logger.info(`Device pool refreshed: added ${addedCount} new devices (total: ${this.devices.size})`);
       } else if (bootedDevices.length === 0) {
         logger.warn("No devices found during pool refresh. Is an emulator running?");
+        logger.warn("Ensure 'adb devices' returns connected devices in the daemon process environment.");
       } else {
         logger.debug(`Device pool refresh: all ${bootedDevices.length} devices already in pool`);
       }
 
       return addedCount;
     } catch (error) {
-      logger.error(`Failed to refresh device pool: ${error}`);
+      const elapsed = Date.now() - startTime;
+      logger.error(`Failed to refresh device pool after ${elapsed}ms: ${error}`);
+      if (error instanceof Error) {
+        logger.error(`Stack trace: ${error.stack}`);
+      }
       return 0;
     }
   }

@@ -154,10 +154,28 @@ function parseArgs(): {
   };
 }
 
+// Format uptime in human-readable form
+function formatUptime(ms: number): string {
+  const seconds = Math.floor(ms / 1000);
+  const minutes = Math.floor(seconds / 60);
+  const hours = Math.floor(minutes / 60);
+
+  if (hours > 0) {
+    return `${hours}h ${minutes % 60}m ${seconds % 60}s`;
+  } else if (minutes > 0) {
+    return `${minutes}m ${seconds % 60}s`;
+  }
+  return `${seconds}s`;
+}
+
 // Create and start Streamable HTTP server
 async function startStreamableServer(transport: TransportConfig, debug: boolean): Promise<void> {
   const server = createHttpServer();
   const transports = new Map<string, StreamableHTTPServerTransport>();
+
+  // Server instance tracking for health checks and restart detection
+  const serverInstanceId = randomUUID();
+  const serverStartTime = Date.now();
 
   server.on("request", async (req, res) => {
     // CORS headers for development
@@ -172,6 +190,26 @@ async function startStreamableServer(transport: TransportConfig, debug: boolean)
     }
 
     const url = new URL(req.url!, `http://${req.headers.host}`);
+
+    // Health check endpoint for connection status and restart detection
+    if (url.pathname === "/health" || url.pathname === "/auto-mobile/health") {
+      const uptimeMs = Date.now() - serverStartTime;
+      const health = {
+        status: "ok",
+        server: "AutoMobile",
+        version: "0.0.6",
+        instanceId: serverInstanceId,
+        uptime: {
+          ms: uptimeMs,
+          human: formatUptime(uptimeMs)
+        },
+        activeSessions: transports.size,
+        transport: "streamable"
+      };
+      res.writeHead(200, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(health, null, 2));
+      return;
+    }
 
     if (url.pathname === "/auto-mobile/streamable") {
       // Get session ID from header
@@ -236,9 +274,16 @@ async function startStreamableServer(transport: TransportConfig, debug: boolean)
 
         await mcpServer.connect(streamableTransport);
       } else {
-        // Invalid session
+        // Session not found - likely server restarted
+        logger.warn(`Session not found: ${sessionId}. Server may have restarted. Active sessions: ${transports.size}`);
         res.writeHead(404, { "Content-Type": "application/json" });
-        res.end(JSON.stringify({ error: "Session not found" }));
+        res.end(JSON.stringify({
+          error: "Session not found",
+          message: "The session may have expired or the server was restarted. Please reinitialize the connection.",
+          hint: "If using mcp-remote, restart the MCP client to establish a new session.",
+          serverInstanceId,
+          activeSessions: transports.size
+        }));
         return;
       }
 

@@ -13,6 +13,44 @@ import { setDebugModeEnabled } from "./utils/debug";
 import { serverConfig } from "./utils/ServerConfig";
 import { runDaemonCommand } from "./daemon/manager";
 import { startDaemon } from "./daemon/daemon";
+import { execSync } from "node:child_process";
+
+// Detect port from git branch name for worktree isolation
+// e.g., work/164-feature-name -> port 9164
+function detectPortFromBranch(): number {
+  const basePort = 9000;
+
+  // Check environment variable first (explicit override)
+  const envPort = process.env.AUTO_MOBILE_PORT;
+  if (envPort) {
+    const port = parseInt(envPort, 10);
+    if (!isNaN(port) && port > 0 && port < 65536) {
+      return port;
+    }
+  }
+
+  try {
+    const branch = execSync("git rev-parse --abbrev-ref HEAD", {
+      encoding: "utf-8",
+      stdio: ["pipe", "pipe", "pipe"]
+    }).trim();
+
+    // Extract issue number from branch name patterns:
+    // work/164-feature-name, feature/164-name, fix/164, issue-164, etc.
+    const match = branch.match(/\b(\d{1,4})\b/);
+    if (match) {
+      const issueNumber = parseInt(match[1], 10);
+      // Keep port in valid range (9001-9999 for issue numbers 1-999)
+      if (issueNumber > 0 && issueNumber < 1000) {
+        return basePort + issueNumber;
+      }
+    }
+  } catch {
+    // Not in a git repo or git not available, use default
+  }
+
+  return basePort;
+}
 
 // Interface for transport configuration
 interface TransportConfig {
@@ -42,9 +80,10 @@ function parseArgs(): {
   const args = process.argv.slice(2);
 
   // Default transport configuration
+  // Port is auto-detected from git branch for worktree isolation
   const transport: TransportConfig = {
     type: "stdio",
-    port: 9000,
+    port: detectPortFromBranch(),
     host: "localhost"
   };
 
@@ -194,11 +233,22 @@ async function startStreamableServer(transport: TransportConfig, debug: boolean)
     // Health check endpoint for connection status and restart detection
     if (url.pathname === "/health" || url.pathname === "/auto-mobile/health") {
       const uptimeMs = Date.now() - serverStartTime;
+      let branch: string | undefined;
+      try {
+        branch = execSync("git rev-parse --abbrev-ref HEAD", {
+          encoding: "utf-8",
+          stdio: ["pipe", "pipe", "pipe"]
+        }).trim();
+      } catch {
+        // Not in git repo
+      }
       const health = {
         status: "ok",
         server: "AutoMobile",
         version: "0.0.6",
         instanceId: serverInstanceId,
+        port: transport.port,
+        branch,
         uptime: {
           ms: uptimeMs,
           human: formatUptime(uptimeMs)

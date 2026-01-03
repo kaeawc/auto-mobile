@@ -24,18 +24,53 @@ automatically restarts, allowing rapid iteration without manual restarts.
 # Start with hot reloading (bun --watch), streamable is the default
 bun run dev
 
-# Custom port
+# Custom port (overrides auto-detection)
 bun run dev:port 8080
 ```
 
-The server runs at `http://localhost:9000/auto-mobile/streamable` by default.
+### Automatic Port Detection (Worktree Isolation)
+
+The dev server automatically detects the port from your git branch name, enabling multiple worktrees to run
+simultaneously without port conflicts:
+
+| Branch | Port |
+|--------|------|
+| `work/164-feature-name` | 9164 |
+| `work/120-other-feature` | 9120 |
+| `main` (no issue number) | 9000 |
+
+**How it works:**
+- Extracts the first number (1-999) from the branch name
+- Adds it to base port 9000 (e.g., issue #164 → port 9164)
+- Falls back to 9000 if no number is found
+
+**Override options:**
+```shell
+# Environment variable (highest priority)
+AUTO_MOBILE_PORT=8080 bun run dev
+
+# Command line flag
+bun run dev:port 8080
+```
+
+This allows you to run multiple worktrees simultaneously:
+```shell
+# Terminal 1 (work/164-feature)
+cd ~/worktrees/auto-mobile/work-164-feature
+bun run dev  # → port 9164
+
+# Terminal 2 (work/120-other)
+cd ~/worktrees/auto-mobile/work-120-other
+bun run dev  # → port 9120
+```
 
 ### Health Check Endpoint
 
 Monitor server status and detect restarts using the health endpoint:
 
 ```shell
-curl http://localhost:9000/health
+# Use the port for your worktree (e.g., 9164 for issue #164)
+curl http://localhost:9164/health
 ```
 
 Response:
@@ -45,6 +80,8 @@ Response:
   "server": "AutoMobile",
   "version": "0.0.6",
   "instanceId": "unique-server-instance-id",
+  "port": 9164,
+  "branch": "work/164-feature-name",
   "uptime": {
     "ms": 12345,
     "human": "12s"
@@ -54,7 +91,9 @@ Response:
 }
 ```
 
-The `instanceId` changes each time the server restarts, which can be used to detect when reconnection is needed.
+- `instanceId` changes each time the server restarts (detect reconnection needs)
+- `port` shows the auto-detected or configured port
+- `branch` shows the current git branch
 
 ## MCP Client Configuration
 

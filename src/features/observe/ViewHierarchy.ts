@@ -943,7 +943,7 @@ export class ViewHierarchy {
 
     // Process children
     const children = node.node;
-    let filteredChildren: any[] = [];
+    const filteredChildren: any[] = [];
 
     if (children) {
       const childArray = Array.isArray(children) ? children : [children];

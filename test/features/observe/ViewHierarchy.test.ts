@@ -1271,7 +1271,7 @@ describe("Offscreen Node Filtering", function() {
     // Flatten nodes for checking
     const flatNodes: string[] = [];
     const collectNodes = (node: any) => {
-      if (node.text) flatNodes.push(node.text);
+      if (node.text) {flatNodes.push(node.text);}
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         children.forEach(collectNodes);
@@ -1299,7 +1299,7 @@ describe("Offscreen Node Filtering", function() {
 
     const flatNodes: string[] = [];
     const collectNodes = (node: any) => {
-      if (node.text) flatNodes.push(node.text);
+      if (node.text) {flatNodes.push(node.text);}
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         children.forEach(collectNodes);
@@ -1326,7 +1326,7 @@ describe("Offscreen Node Filtering", function() {
 
     const flatNodes: string[] = [];
     const collectNodes = (node: any) => {
-      if (node.text) flatNodes.push(node.text);
+      if (node.text) {flatNodes.push(node.text);}
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         children.forEach(collectNodes);
@@ -1354,7 +1354,7 @@ describe("Offscreen Node Filtering", function() {
 
     const flatNodes: string[] = [];
     const collectNodes = (node: any) => {
-      if (node.text) flatNodes.push(node.text);
+      if (node.text) {flatNodes.push(node.text);}
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         children.forEach(collectNodes);
@@ -1398,7 +1398,7 @@ describe("Offscreen Node Filtering", function() {
 
     const flatNodes: string[] = [];
     const collectNodes = (node: any) => {
-      if (node.text) flatNodes.push(node.text);
+      if (node.text) {flatNodes.push(node.text);}
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         children.forEach(collectNodes);

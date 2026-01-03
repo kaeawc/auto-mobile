@@ -331,6 +331,16 @@ export class ObserveScreen {
         // (it creates nested serial blocks that conflict with parallel tracking)
         await this.collectViewHierarchy(result, queryOptions, perf, skipWaitForFresh, minTimestamp);
 
+        // Filter out completely offscreen nodes to reduce hierarchy size
+        // This is especially beneficial for scrollable content like YouTube
+        if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
+          result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
+            result.viewHierarchy,
+            result.screenSize.width,
+            result.screenSize.height
+          );
+        }
+
         // Populate activeWindow from view hierarchy packageName if available
         if (result.viewHierarchy?.packageName && !result.activeWindow) {
           result.activeWindow = {
@@ -356,6 +366,15 @@ export class ObserveScreen {
           perf.track("screenSize", () => this.collectScreenSize({} as ExecResult, result)),
           this.collectViewHierarchy(result, queryOptions, perf, skipWaitForFresh, minTimestamp),
         ]);
+
+        // Filter out completely offscreen nodes to reduce hierarchy size
+        if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
+          result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
+            result.viewHierarchy,
+            result.screenSize.width,
+            result.screenSize.height
+          );
+        }
 
         perf.end();
         break;

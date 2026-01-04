@@ -35,6 +35,12 @@ inputs:
 runs:
   using: "composite"
   steps:
+    - name: Setup Java
+      uses: actions/setup-java@v4
+      with:
+        distribution: "temurin"
+        java-version: "21"
+
     - name: Enable KVM group perms
       shell: ${{ inputs.shell }}
       run: |

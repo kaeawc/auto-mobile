@@ -291,8 +291,8 @@ DAEMON_READY=false
 for i in $(seq 1 $MAX_RETRIES); do
   echo "Attempt $i/$MAX_RETRIES: Checking daemon and device pool..."
 
-  # Call daemon_available_devices and capture output
-  RESULT=$(bun dist/src/index.js --cli daemon_available_devices --platform android 2>&1) || true
+  # Call daemon_available_devices and capture output (no platform param - it's daemon-level)
+  RESULT=$(bun dist/src/index.js --cli daemon_available_devices 2>&1) || true
   echo "$RESULT"
 
   # Check if we have at least 1 available device (device pool is initialized)

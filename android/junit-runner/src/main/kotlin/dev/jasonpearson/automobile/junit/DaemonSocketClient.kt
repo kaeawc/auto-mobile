@@ -1,6 +1,5 @@
 package dev.jasonpearson.automobile.junit
 
-import com.sun.security.auth.module.UnixSystem
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.Closeable
@@ -112,16 +111,8 @@ internal object DaemonSocketPaths {
   }
 
   private fun getUserId(): String {
-    val osName = System.getProperty("os.name").lowercase()
-    if (osName.contains("win")) {
-      return System.getProperty("user.name", "default")
-    }
-
-    return try {
-      UnixSystem().uid.toString()
-    } catch (e: Exception) {
-      System.getProperty("user.name", "default")
-    }
+    val userName = System.getProperty("user.name", "default")
+    return if (userName.isNotBlank()) userName else "default"
   }
 }
 

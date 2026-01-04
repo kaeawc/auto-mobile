@@ -249,7 +249,12 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       }
 
       val execStart = System.currentTimeMillis()
-      val response = DaemonSocketClientManager.callTool("executePlan", daemonRequestArgs, annotation.timeoutMs)
+      val heartbeat = DaemonHeartbeat.start(sessionUuid)
+      val response = try {
+        DaemonSocketClientManager.callTool("executePlan", daemonRequestArgs, annotation.timeoutMs)
+      } finally {
+        heartbeat.close()
+      }
       PerformanceTracker.measure("Daemon request execution", execStart)
 
       val executionTime = System.currentTimeMillis() - startTime

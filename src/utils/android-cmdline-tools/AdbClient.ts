@@ -1,9 +1,11 @@
-import { exec, spawn } from "child_process";
+import { exec, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, ExecResult, AndroidUser } from "../../models";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { AdbExecutor } from "./interfaces/AdbExecutor";
+import { getAbortSignal } from "../AbortContext";
+import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 
 // Enhance the standard execAsync result to implement the ExecResult interface
 const execAsync = async (command: string, maxBuffer?: number): Promise<ExecResult> => {
@@ -28,6 +30,7 @@ export class AdbClient implements AdbExecutor {
   spawnFn: typeof spawn;
   private adbPath: string;
   private isTestMode: boolean;
+  private activeProcesses: Set<ChildProcess> = new Set();
 
   // Static cache for device list
   private static deviceListCache: { devices: BootedDevice[], timestamp: number } | null = null;
@@ -180,9 +183,15 @@ export class AdbClient implements AdbExecutor {
    * @param noRetry - Optional flag to disable retry logic for commands expected to fail
    * @returns Promise with command output
    */
-  async executeCommand(command: string, timeoutMs?: number, maxBuffer?: number, noRetry?: boolean): Promise<ExecResult> {
+  async executeCommand(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    noRetry?: boolean,
+    signal?: AbortSignal
+  ): Promise<ExecResult> {
     const startTime = Date.now();
-    const result = await this.executeCommandImpl(command, timeoutMs, maxBuffer, 0, noRetry);
+    const result = await this.executeCommandImpl(command, timeoutMs, maxBuffer, 0, noRetry, signal);
     const duration = Date.now() - startTime;
 
     // Only log longer commands or ones that take significant time
@@ -234,55 +243,123 @@ export class AdbClient implements AdbExecutor {
    * @param noRetry - Optional flag to disable retry logic for commands expected to fail
    * @returns Promise with command output
    */
-  private async executeCommandImpl(command: string, timeoutMs?: number, maxBuffer?: number, attempt: number = 0, noRetry?: boolean): Promise<ExecResult> {
+  private async executeCommandImpl(
+    command: string,
+    timeoutMs?: number,
+    maxBuffer?: number,
+    attempt: number = 0,
+    noRetry?: boolean,
+    signal?: AbortSignal
+  ): Promise<ExecResult> {
     const baseCommand = await this.getBaseCommand();
     const fullCommand = `${baseCommand} ${command}`;
     const startTime = Date.now();
+    const resolvedSignal = signal ?? getAbortSignal();
 
     // Log which device is receiving this command for parallel execution debugging
     const deviceInfo = this.device ? `[DEVICE:${this.device.deviceId}]` : "[NO-DEVICE]";
     logger.info(`[ADB] ${deviceInfo} Executing: ${command.length > 80 ? command.substring(0, 80) + "..." : command}`);
 
-    // Use Promise.race to implement timeout if specified
-    if (timeoutMs) {
-      let timeoutId: NodeJS.Timeout;
-
-      const timeoutPromise = new Promise<ExecResult>((_, reject) => {
-        timeoutId = setTimeout(
-          () => reject(new Error(`Command timed out after ${timeoutMs}ms: ${fullCommand}`)),
-          timeoutMs
-        );
-      });
-
-      try {
-        const result = await Promise.race([this.execAsync(fullCommand, maxBuffer), timeoutPromise]);
-        const duration = Date.now() - startTime;
-        logger.info(`[ADB] Command completed in ${duration}ms: ${command}`);
-        return result;
-      } catch (error) {
-        const duration = Date.now() - startTime;
-        logger.warn(`[ADB] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
-        throw error;
-      } finally {
-        clearTimeout(timeoutId!);
-      }
-    }
-
-    // No timeout specified
     try {
-      const result = await this.execAsync(fullCommand, maxBuffer);
+      const result = await this.execWithSignal(fullCommand, maxBuffer, timeoutMs, resolvedSignal);
       const duration = Date.now() - startTime;
       logger.info(`[ADB] Command completed in ${duration}ms: ${command}`);
       return result;
     } catch (error) {
-      if (!noRetry && attempt < AdbClient.MAX_ADB_RETRIES) {
-        return this.executeCommandImpl(command, timeoutMs, maxBuffer, attempt + 1, noRetry);
-      } else {
-        const duration = Date.now() - startTime;
-        logger.warn(`[ADB] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
-        throw error;
+      if (resolvedSignal?.aborted) {
+        throw new Error(OPERATION_CANCELLED_MESSAGE);
       }
+      if (!noRetry && attempt < AdbClient.MAX_ADB_RETRIES) {
+        return this.executeCommandImpl(command, timeoutMs, maxBuffer, attempt + 1, noRetry, resolvedSignal);
+      }
+      const duration = Date.now() - startTime;
+      logger.warn(`[ADB] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
+      throw error;
     }
+  }
+
+  private async execWithSignal(
+    command: string,
+    maxBuffer?: number,
+    timeoutMs?: number,
+    signal?: AbortSignal
+  ): Promise<ExecResult> {
+    if (signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
+
+    if (this.isTestMode) {
+      return this.execAsync(command, maxBuffer);
+    }
+
+    return new Promise<ExecResult>((resolve, reject) => {
+      let settled = false;
+      const options = maxBuffer ? { maxBuffer } : undefined;
+      const child = exec(command, options, (error, stdout, stderr) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve({
+          stdout: typeof stdout === "string" ? stdout : stdout.toString(),
+          stderr: typeof stderr === "string" ? stderr : stderr.toString(),
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        });
+      });
+
+      this.activeProcesses.add(child);
+
+      const onAbort = () => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        cleanup();
+        child.kill("SIGTERM");
+        reject(new Error(OPERATION_CANCELLED_MESSAGE));
+      };
+
+      const onExit = () => {
+        this.activeProcesses.delete(child);
+      };
+
+      const cleanup = () => {
+        this.activeProcesses.delete(child);
+        child.off("exit", onExit);
+        if (signal) {
+          signal.removeEventListener("abort", onAbort);
+        }
+        if (timeoutId) {
+          clearTimeout(timeoutId);
+        }
+      };
+
+      let timeoutId: NodeJS.Timeout | undefined;
+      if (timeoutMs) {
+        timeoutId = setTimeout(() => {
+          if (settled) {
+            return;
+          }
+          settled = true;
+          cleanup();
+          child.kill("SIGTERM");
+          reject(new Error(`Command timed out after ${timeoutMs}ms: ${command}`));
+        }, timeoutMs);
+      }
+
+      child.on("exit", onExit);
+
+      if (signal) {
+        signal.addEventListener("abort", onAbort, { once: true });
+      }
+    });
   }
 
   /**
@@ -326,8 +403,8 @@ export class AdbClient implements AdbExecutor {
    * Uses dumpsys power to check mWakefulness state
    * @returns Promise<boolean> - true if screen is on (Awake), false if off (Asleep/Dozing)
    */
-  async isScreenOn(): Promise<boolean> {
-    const wakefulness = await this.getWakefulness();
+  async isScreenOn(signal?: AbortSignal): Promise<boolean> {
+    const wakefulness = await this.getWakefulness(signal);
     return wakefulness === "Awake";
   }
 
@@ -336,9 +413,9 @@ export class AdbClient implements AdbExecutor {
    * Uses dumpsys power to check mWakefulness state
    * @returns Promise with wakefulness state: "Awake", "Asleep", "Dozing", or null if unknown
    */
-  async getWakefulness(): Promise<"Awake" | "Asleep" | "Dozing" | null> {
+  async getWakefulness(signal?: AbortSignal): Promise<"Awake" | "Asleep" | "Dozing" | null> {
     try {
-      const result = await this.executeCommand("shell dumpsys power | grep mWakefulness=", undefined, undefined, true);
+      const result = await this.executeCommand("shell dumpsys power | grep mWakefulness=", undefined, undefined, true, signal);
       const match = result.stdout.match(/mWakefulness=(\w+)/);
       if (match) {
         const state = match[1];
@@ -359,10 +436,10 @@ export class AdbClient implements AdbExecutor {
    * Falls back to pm list users if dumpsys fails
    * @returns Promise with array of Android users
    */
-  async listUsers(): Promise<AndroidUser[]> {
+  async listUsers(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
       // Try dumpsys user first - provides more structured output
-      const result = await this.executeCommand("shell dumpsys user", undefined, undefined, true);
+      const result = await this.executeCommand("shell dumpsys user", undefined, undefined, true, signal);
       const users = this.parseUsersFromDumpsys(result.stdout);
 
       if (users.length > 0) {
@@ -372,10 +449,10 @@ export class AdbClient implements AdbExecutor {
 
       // If dumpsys parsing failed, fall back to pm list users
       logger.debug("[ADB] dumpsys user parsing returned no users, falling back to pm list users");
-      return await this.listUsersLegacy();
+      return await this.listUsersLegacy(signal);
     } catch (error) {
       logger.debug(`[ADB] dumpsys user failed: ${(error as Error).message}, falling back to pm list users`);
-      return await this.listUsersLegacy();
+      return await this.listUsersLegacy(signal);
     }
   }
 
@@ -456,9 +533,9 @@ export class AdbClient implements AdbExecutor {
    *     UserInfo{10:Work profile:30} running
    * @returns Promise with array of Android users
    */
-  private async listUsersLegacy(): Promise<AndroidUser[]> {
+  private async listUsersLegacy(signal?: AbortSignal): Promise<AndroidUser[]> {
     try {
-      const result = await this.executeCommand("shell pm list users", undefined, undefined, true);
+      const result = await this.executeCommand("shell pm list users", undefined, undefined, true, signal);
       const lines = result.stdout.split("\n");
       const users: AndroidUser[] = [];
 
@@ -508,13 +585,14 @@ export class AdbClient implements AdbExecutor {
    * Uses dumpsys activity to find the resumed/focused activity
    * @returns Promise with { packageName: string, userId: number } or null if no app in foreground
    */
-  async getForegroundApp(): Promise<{ packageName: string; userId: number } | null> {
+  async getForegroundApp(signal?: AbortSignal): Promise<{ packageName: string; userId: number } | null> {
     try {
       const result = await this.executeCommand(
         'shell dumpsys activity activities | grep -E "(mResumedActivity|mFocusedActivity|topResumedActivity)" | head -1',
         undefined,
         undefined,
-        true
+        true,
+        signal
       );
 
       // Parse output to extract package name and user ID

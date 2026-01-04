@@ -126,27 +126,27 @@ export class RecompositionTracker {
           return;
         }
 
-      const skipCount = this.coerceNumber(recomposition.skipCount) ?? 0;
-      const rolling1sAverage = this.coerceNumber(recomposition.rolling1sAverage) ?? 0;
-      const durationMs = this.coerceNumber(recomposition.durationMs) ?? undefined;
-      const likelyCause = recomposition.likelyCause ?? "unknown";
-      const resourceId = recomposition.resourceId ?? props?.["resource-id"] ?? null;
-      const testTag = recomposition.testTag ?? props?.["test-tag"] ?? null;
+        const skipCount = this.coerceNumber(recomposition.skipCount) ?? 0;
+        const rolling1sAverage = this.coerceNumber(recomposition.rolling1sAverage) ?? 0;
+        const durationMs = this.coerceNumber(recomposition.durationMs) ?? undefined;
+        const likelyCause = recomposition.likelyCause ?? "unknown";
+        const resourceId = recomposition.resourceId ?? props?.["resource-id"] ?? null;
+        const testTag = recomposition.testTag ?? props?.["test-tag"] ?? null;
 
         entries.push({
           id: recomposition.id,
           composableName: recomposition.composableName,
-        resourceId,
-        testTag,
-        total,
-        skipCount,
-        rolling1sAverage,
-        durationMs,
-        likelyCause,
-        parentChain: recomposition.parentChain,
-        stableAnnotated: recomposition.stableAnnotated,
-        rememberedCount: recomposition.rememberedCount,
-        nodeRef: node
+          resourceId,
+          testTag,
+          total,
+          skipCount,
+          rolling1sAverage,
+          durationMs,
+          likelyCause,
+          parentChain: recomposition.parentChain,
+          stableAnnotated: recomposition.stableAnnotated,
+          rememberedCount: recomposition.rememberedCount,
+          nodeRef: node
         });
       });
     }
@@ -264,7 +264,12 @@ export class RecompositionTracker {
         duration_ms: entry.durationMs ?? null,
         likely_cause: entry.likelyCause ?? null,
         parent_chain_json: entry.parentChain ? JSON.stringify(entry.parentChain) : null,
-        stable_annotated: entry.stableAnnotated == null ? null : entry.stableAnnotated ? 1 : 0,
+        stable_annotated:
+          entry.stableAnnotated === null || entry.stableAnnotated === undefined
+            ? null
+            : entry.stableAnnotated
+              ? 1
+              : 0,
         remembered_count: entry.rememberedCount ?? null,
         timestamp
       }));

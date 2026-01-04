@@ -11,6 +11,7 @@ class ServerConfig {
   private _uiPerfModeEnabled: boolean = false;
   private _accessibilityAuditConfig: AccessibilityAuditConfig | null = null;
   private _memPerfAuditEnabled: boolean = false;
+  private _strictAwaitEnabled: boolean = false;
 
   private constructor() {}
 
@@ -47,6 +48,14 @@ class ServerConfig {
 
   isMemPerfAuditEnabled(): boolean {
     return this._memPerfAuditEnabled;
+  }
+
+  setStrictAwaitEnabled(enabled: boolean): void {
+    this._strictAwaitEnabled = enabled;
+  }
+
+  isStrictAwaitEnabled(): boolean {
+    return this._strictAwaitEnabled;
   }
 }
 

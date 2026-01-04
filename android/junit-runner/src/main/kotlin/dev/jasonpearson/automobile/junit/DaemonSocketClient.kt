@@ -111,8 +111,24 @@ internal object DaemonSocketPaths {
   }
 
   private fun getUserId(): String {
-    val userName = System.getProperty("user.name", "default")
-    return if (userName.isNotBlank()) userName else "default"
+    val userName = System.getProperty("user.name", "default").ifBlank { "default" }
+    val osName = System.getProperty("os.name").lowercase()
+    if (osName.contains("win")) {
+      return userName
+    }
+
+    return try {
+      val process = ProcessBuilder("id", "-u").start()
+      val exitCode = process.waitFor(2, java.util.concurrent.TimeUnit.SECONDS)
+      if (!exitCode) {
+        process.destroy()
+        return userName
+      }
+      val uid = process.inputStream.bufferedReader().readText().trim()
+      if (uid.isNotEmpty()) uid else userName
+    } catch (e: Exception) {
+      userName
+    }
   }
 }
 

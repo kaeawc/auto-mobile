@@ -40,11 +40,18 @@ class ViewHierarchyExtractor {
 
   private val json = Json { ignoreUnknownKeys = true }
 
-  /** Extracts view hierarchy from the active window */
+  /**
+   * Extracts view hierarchy from the active window.
+   * @param rootNode Root accessibility node
+   * @param textFilter Optional text filter
+   * @param screenDimensions Optional screen dimensions for offscreen filtering
+   * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
+   */
   fun extractFromActiveWindow(
       rootNode: AccessibilityNodeInfo?,
       textFilter: String? = null,
-      screenDimensions: ScreenDimensions? = null
+      screenDimensions: ScreenDimensions? = null,
+      dedupeTextContentDesc: Boolean = true
   ): ViewHierarchy? {
     if (rootNode == null) {
       Log.w(TAG, "Root node is null")
@@ -52,9 +59,8 @@ class ViewHierarchyExtractor {
     }
 
     return try {
-      val rootElement = extractNodeInfo(rootNode, 0, textFilter, screenDimensions)
-      val processedElement = rootElement?.let { processForAccessibility(it) }
-      val optimizedElement = processedElement?.let { optimizeHierarchy(it) }
+      val rootElement = extractNodeInfo(rootNode, 0, textFilter, screenDimensions, dedupeTextContentDesc)
+      val optimizedElement = rootElement?.let { optimizeHierarchy(it) }
 
       ViewHierarchy(packageName = rootNode.packageName?.toString(), hierarchy = optimizedElement)
     } catch (e: Exception) {
@@ -72,12 +78,14 @@ class ViewHierarchyExtractor {
    * @param activeWindowRoot Root node of the active window (for backward compatibility)
    * @param textFilter Optional text filter
    * @param screenDimensions Optional screen dimensions for offscreen filtering
+   * @param dedupeTextContentDesc When true, omit content-desc when it equals text (default: true)
    */
   fun extractFromAllWindows(
       windows: List<AccessibilityWindowInfo>,
       activeWindowRoot: AccessibilityNodeInfo?,
       textFilter: String? = null,
-      screenDimensions: ScreenDimensions? = null
+      screenDimensions: ScreenDimensions? = null,
+      dedupeTextContentDesc: Boolean = true
   ): ViewHierarchy {
     if (windows.isEmpty() && activeWindowRoot == null) {
       Log.w(TAG, "No windows available for extraction")
@@ -103,9 +111,8 @@ class ViewHierarchyExtractor {
           else -> "unknown_${window.type}"
         }
 
-        val element = extractNodeInfo(rootNode, 0, textFilter, screenDimensions)
-        val processedElement = element?.let { processForAccessibility(it) }
-        val optimizedElement = processedElement?.let { optimizeHierarchy(it) }
+        val element = extractNodeInfo(rootNode, 0, textFilter, screenDimensions, dedupeTextContentDesc)
+        val optimizedElement = element?.let { optimizeHierarchy(it) }
         val packageName = rootNode.packageName?.toString()
 
         // The active window becomes the main hierarchy (backward compatibility)
@@ -147,9 +154,8 @@ class ViewHierarchyExtractor {
 
     // Fallback to activeWindowRoot if no active window found in window list
     if (mainHierarchy == null && activeWindowRoot != null) {
-      val element = extractNodeInfo(activeWindowRoot, 0, textFilter, screenDimensions)
-      val processed = element?.let { processForAccessibility(it) }
-      mainHierarchy = processed?.let { optimizeHierarchy(it) }
+      val element = extractNodeInfo(activeWindowRoot, 0, textFilter, screenDimensions, dedupeTextContentDesc)
+      mainHierarchy = element?.let { optimizeHierarchy(it) }
       mainPackageName = activeWindowRoot.packageName?.toString()
     }
 
@@ -254,12 +260,20 @@ class ViewHierarchyExtractor {
     }
   }
 
-  /** Recursively extracts node information with depth limiting and offscreen filtering */
+  /**
+   * Recursively extracts node information with depth limiting, offscreen filtering, and zero-area filtering.
+   * @param node The accessibility node to extract
+   * @param depth Current recursion depth
+   * @param textFilter Optional text filter
+   * @param screenDimensions Optional screen dimensions for offscreen filtering
+   * @param dedupeTextContentDesc When true, omit content-desc when it equals text
+   */
   private fun extractNodeInfo(
       node: AccessibilityNodeInfo,
       depth: Int,
       textFilter: String? = null,
-      screenDimensions: ScreenDimensions? = null
+      screenDimensions: ScreenDimensions? = null,
+      dedupeTextContentDesc: Boolean = true
   ): UIElementInfo? {
     if (depth > MAX_DEPTH) {
       return null
@@ -269,6 +283,11 @@ class ViewHierarchyExtractor {
       val bounds = Rect()
       node.getBoundsInScreen(bounds)
       val elementBounds = ElementBounds(bounds)
+
+      // Filter zero-area bounds early
+      if (elementBounds.hasZeroArea()) {
+        return null
+      }
 
       // Filter completely offscreen nodes early to avoid processing subtrees
       if (screenDimensions != null && screenDimensions.isValid()) {
@@ -283,7 +302,7 @@ class ViewHierarchyExtractor {
       for (i in 0 until childCount) {
         val child = node.getChild(i)
         if (child != null) {
-          val childInfo = extractNodeInfo(child, depth + 1, textFilter, screenDimensions)
+          val childInfo = extractNodeInfo(child, depth + 1, textFilter, screenDimensions, dedupeTextContentDesc)
           if (childInfo != null) {
             children.add(childInfo)
           }
@@ -425,12 +444,20 @@ class ViewHierarchyExtractor {
         textColor = null // Remove the getTextColorHex(node) call
       }
 
+      // Dedupe content-desc when it equals text (keep text, omit content-desc)
+      val rawContentDesc = node.contentDescription?.toString()
+      val contentDesc = if (dedupeTextContentDesc && rawContentDesc == text) {
+        null
+      } else {
+        rawContentDesc
+      }
+
       val elementInfo =
           UIElementInfo(
               text = text,
               textSize = textSize,
               textColor = textColor,
-              contentDesc = node.contentDescription?.toString(),
+              contentDesc = contentDesc,
               className = className,
               resourceId = node.viewIdResourceName,
               bounds = ElementBounds(bounds),

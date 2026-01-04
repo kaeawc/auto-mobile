@@ -24,6 +24,12 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
     get() = top + height / 2
 
   /**
+   * Check if bounds have zero or negative area.
+   * @return True if the element has no visible area
+   */
+  fun hasZeroArea(): Boolean = width <= 0 || height <= 0
+
+  /**
    * Check if bounds are completely offscreen given screen dimensions.
    * @param screenWidth Screen width in pixels
    * @param screenHeight Screen height in pixels

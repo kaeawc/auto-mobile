@@ -81,7 +81,7 @@ describe("Parallel Execution Across Multiple Devices", function() {
       for (let i = 0; i < 70; i++) {
         fakeTimer.advanceTime(1000);
         await new Promise(resolve => setImmediate(resolve));
-        if (error) break;
+        if (error) {break;}
       }
 
       await assignPromise;

@@ -216,6 +216,47 @@ fi
 
 echo ""
 
+print_section "DAEMON WARM-UP"
+
+echo "Starting AutoMobile daemon to avoid first-test timeout..."
+echo "This ensures the daemon is fully initialized before tests run."
+echo ""
+
+# Go to project root to access the built auto-mobile CLI
+cd ..
+
+# Build the TypeScript project if dist doesn't exist
+if [ ! -f "dist/src/index.js" ]; then
+  echo "Building auto-mobile..."
+  bun run build
+fi
+
+# Warm up the daemon by calling daemon_available_devices
+# This starts the daemon, initializes device pool, and waits for it to be ready
+echo "Warming up daemon with device check..."
+MAX_RETRIES=5
+RETRY_DELAY=5
+
+for i in $(seq 1 $MAX_RETRIES); do
+  echo "Attempt $i/$MAX_RETRIES: Checking daemon availability..."
+  if bun dist/src/index.js --cli daemon_available_devices --platform android 2>&1; then
+    print_success "Daemon is ready and devices are available"
+    break
+  else
+    if [ "$i" -eq "$MAX_RETRIES" ]; then
+      print_warning "Daemon warm-up failed after $MAX_RETRIES attempts, proceeding anyway..."
+    else
+      echo "Daemon not ready yet, waiting ${RETRY_DELAY}s before retry..."
+      sleep $RETRY_DELAY
+    fi
+  fi
+done
+
+# Return to android directory for test execution
+cd android
+
+echo ""
+
 print_section "RUNNING TEST SCRIPT"
 
 echo "Working directory: $(pwd)"

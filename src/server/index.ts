@@ -18,7 +18,6 @@ import { registerInteractionTools } from "./interactionTools";
 import { registerAppTools } from "./appTools";
 import { registerUtilityTools } from "./utilityTools";
 import { registerDeviceTools } from "./deviceTools";
-import { registerConfigurationTools } from "./configurationTools";
 import { registerDeepLinkTools } from "./deepLinkTools";
 import { registerEnvironmentTools } from "./environmentTools";
 import { registerDebugTools } from "./debugTools";
@@ -45,7 +44,6 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerAppTools();
   registerUtilityTools();
   registerDeviceTools();
-  registerConfigurationTools();
   registerDeepLinkTools();
   registerEnvironmentTools();
   registerNavigationTools();

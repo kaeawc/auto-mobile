@@ -232,25 +232,37 @@ if [ ! -f "dist/src/index.js" ]; then
 fi
 
 # Warm up the daemon by calling daemon_available_devices
-# This starts the daemon, initializes device pool, and waits for it to be ready
+# This starts the daemon, initializes device pool, and waits for devices to be discovered
+# The device pool initialization is async, so we need to wait until devices are actually available
 echo "Warming up daemon with device check..."
-MAX_RETRIES=5
-RETRY_DELAY=5
+MAX_RETRIES=30
+RETRY_DELAY=2
+DAEMON_READY=false
 
 for i in $(seq 1 $MAX_RETRIES); do
-  echo "Attempt $i/$MAX_RETRIES: Checking daemon availability..."
-  if bun dist/src/index.js --cli daemon_available_devices --platform android 2>&1; then
+  echo "Attempt $i/$MAX_RETRIES: Checking daemon and device pool..."
+
+  # Call daemon_available_devices and capture output
+  RESULT=$(bun dist/src/index.js --cli daemon_available_devices --platform android 2>&1) || true
+  echo "$RESULT"
+
+  # Check if we have at least 1 available device (device pool is initialized)
+  if echo "$RESULT" | grep -q '"availableDevices":[^0]'; then
     print_success "Daemon is ready and devices are available"
+    DAEMON_READY=true
     break
+  elif echo "$RESULT" | grep -q '"availableDevices":0'; then
+    echo "Device pool not yet initialized (0 devices), waiting ${RETRY_DELAY}s..."
+    sleep $RETRY_DELAY
   else
-    if [ "$i" -eq "$MAX_RETRIES" ]; then
-      print_warning "Daemon warm-up failed after $MAX_RETRIES attempts, proceeding anyway..."
-    else
-      echo "Daemon not ready yet, waiting ${RETRY_DELAY}s before retry..."
-      sleep $RETRY_DELAY
-    fi
+    echo "Daemon not ready yet, waiting ${RETRY_DELAY}s..."
+    sleep $RETRY_DELAY
   fi
 done
+
+if [ "$DAEMON_READY" = false ]; then
+  print_warning "Daemon warm-up: No devices found after $MAX_RETRIES attempts, proceeding anyway..."
+fi
 
 # Return to android directory for test execution
 cd android

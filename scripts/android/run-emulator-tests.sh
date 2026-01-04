@@ -71,7 +71,7 @@ retry_with_backoff() {
   local attempt=1
   local exit_code=0
 
-  while [ $attempt -le $max_attempts ]; do
+  while [ "$attempt" -le "$max_attempts" ]; do
     echo ""
     echo -e "${BLUE}[Attempt $attempt/$max_attempts]${NC} Running: $*"
     echo ""
@@ -91,10 +91,10 @@ retry_with_backoff() {
 
     # Check if this is a transient/retryable error
     if echo "$output" | grep -qE "(status code 403|Forbidden|Could not resolve|timeout|Connection refused|Connection reset|ETIMEDOUT|ECONNRESET|503 Service Unavailable|502 Bad Gateway)"; then
-      if [ $attempt -lt $max_attempts ]; then
+      if [ "$attempt" -lt "$max_attempts" ]; then
         print_warning "Transient error detected (attempt $attempt/$max_attempts)"
         echo "Retrying in ${delay}s with exponential backoff..."
-        sleep $delay
+        sleep "$delay"
         delay=$((delay * 2))
         attempt=$((attempt + 1))
       else

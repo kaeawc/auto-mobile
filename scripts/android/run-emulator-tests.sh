@@ -62,6 +62,55 @@ print_warning() {
   echo -e "${YELLOW}⚠ $1${NC}"
 }
 
+# Retry function with exponential backoff for transient failures
+# Detects known transient error patterns (403, timeout, connection issues)
+retry_with_backoff() {
+  local max_attempts="${RETRY_MAX_ATTEMPTS:-3}"
+  local initial_delay="${RETRY_INITIAL_DELAY:-10}"
+  local delay=$initial_delay
+  local attempt=1
+  local exit_code=0
+
+  while [ $attempt -le $max_attempts ]; do
+    echo ""
+    echo -e "${BLUE}[Attempt $attempt/$max_attempts]${NC} Running: $*"
+    echo ""
+
+    # Run the command and capture output and exit code
+    set +e
+    output=$("$@" 2>&1)
+    exit_code=$?
+    set -e
+
+    echo "$output"
+
+    if [ $exit_code -eq 0 ]; then
+      print_success "Command succeeded on attempt $attempt"
+      return 0
+    fi
+
+    # Check if this is a transient/retryable error
+    if echo "$output" | grep -qE "(status code 403|Forbidden|Could not resolve|timeout|Connection refused|Connection reset|ETIMEDOUT|ECONNRESET|503 Service Unavailable|502 Bad Gateway)"; then
+      if [ $attempt -lt $max_attempts ]; then
+        print_warning "Transient error detected (attempt $attempt/$max_attempts)"
+        echo "Retrying in ${delay}s with exponential backoff..."
+        sleep $delay
+        delay=$((delay * 2))
+        attempt=$((attempt + 1))
+      else
+        print_error "Command failed after $max_attempts attempts (transient errors)"
+        return $exit_code
+      fi
+    else
+      # Not a transient error, fail immediately
+      print_error "Command failed with non-transient error (exit code: $exit_code)"
+      return $exit_code
+    fi
+  done
+
+  return $exit_code
+}
+
 # Main script starts here
 print_section "EMULATOR SETUP DEBUG START"
 
@@ -274,6 +323,13 @@ print_section "RUNNING TEST SCRIPT"
 echo "Working directory: $(pwd)"
 echo "About to execute: $TEST_SCRIPT"
 echo ""
+echo "Retry configuration:"
+echo "  Max attempts: ${RETRY_MAX_ATTEMPTS:-3}"
+echo "  Initial delay: ${RETRY_INITIAL_DELAY:-10}s (doubles on each retry)"
+echo "  Retryable errors: 403, timeout, connection issues"
+echo ""
 
-set +x  # Disable verbose output for cleaner test results
-eval "$TEST_SCRIPT"
+# Use retry_with_backoff to handle transient CI failures (Maven 403, network issues)
+# The function will retry up to 3 times with exponential backoff for known transient errors
+# but will fail immediately for actual test failures or code issues
+retry_with_backoff eval "$TEST_SCRIPT"

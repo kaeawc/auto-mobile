@@ -1,4 +1,4 @@
-import { exec, spawn, type ChildProcess } from "child_process";
+import { execFile, spawn, type ChildProcess } from "child_process";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, ExecResult, AndroidUser } from "../../models";
@@ -7,10 +7,16 @@ import { AdbExecutor } from "./interfaces/AdbExecutor";
 import { getAbortSignal } from "../AbortContext";
 import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 
-// Enhance the standard execAsync result to implement the ExecResult interface
-const execAsync = async (command: string, maxBuffer?: number): Promise<ExecResult> => {
+type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
+
+// Enhance the standard execFileAsync result to implement the ExecResult interface
+const execFileAsync: ExecFileAsync = async (
+  file: string,
+  args: string[],
+  maxBuffer?: number
+): Promise<ExecResult> => {
   const options = maxBuffer ? { maxBuffer } : undefined;
-  const result = await promisify(exec)(command, options);
+  const result = await promisify(execFile)(file, args, options);
 
   // Add the required string methods
   const enhancedResult: ExecResult = {
@@ -26,7 +32,7 @@ const execAsync = async (command: string, maxBuffer?: number): Promise<ExecResul
 
 export class AdbClient implements AdbExecutor {
   device: BootedDevice | null;
-  execAsync: (command: string, maxBuffer?: number) => Promise<ExecResult>;
+  execAsync: ExecFileAsync;
   spawnFn: typeof spawn;
   private adbPath: string;
   private isTestMode: boolean;
@@ -49,15 +55,29 @@ export class AdbClient implements AdbExecutor {
    */
   constructor(
     device: BootedDevice | null = null,
-    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | null = null,
+    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync | null = null,
     spawnFn: typeof spawn | null = null
   ) {
     this.device = device;
-    this.execAsync = execAsyncFn || execAsync;
+    this.execAsync = execAsyncFn
+      ? this.wrapExecAsync(execAsyncFn)
+      : execFileAsync;
     this.spawnFn = spawnFn || spawn;
     this.isTestMode = execAsyncFn !== null; // If custom execAsync provided, we're in test mode
     // Initialize with fallback, will be updated lazily
     this.adbPath = this.getFallbackAdbPath();
+  }
+
+  private wrapExecAsync(
+    execAsyncFn: ((command: string, maxBuffer?: number) => Promise<ExecResult>) | ExecFileAsync
+  ): ExecFileAsync {
+    if (execAsyncFn.length >= 3) {
+      return execAsyncFn as ExecFileAsync;
+    }
+    return async (file: string, args: string[], maxBuffer?: number) => {
+      const command = [file, ...args].join(" ");
+      return (execAsyncFn as (command: string, maxBuffer?: number) => Promise<ExecResult>)(command, maxBuffer);
+    };
   }
 
   /**
@@ -83,7 +103,7 @@ export class AdbClient implements AdbExecutor {
     if (envPath !== "adb") {
       // We got a path from environment variables, verify it exists
       try {
-        await this.execAsync(`${envPath} version`);
+        await this.execAsync(envPath, ["version"]);
         logger.debug(`Using ADB from environment: ${envPath}`);
         return envPath;
       } catch {
@@ -93,7 +113,7 @@ export class AdbClient implements AdbExecutor {
 
     // 2. Try to find via `which adb` (works in CI environments where adb is in PATH)
     try {
-      const whichResult = await this.execAsync("which adb");
+      const whichResult = await this.execAsync("which", ["adb"]);
       const adbFromPath = whichResult.stdout.trim();
       if (adbFromPath) {
         logger.debug(`Found ADB via which: ${adbFromPath}`);
@@ -162,9 +182,19 @@ export class AdbClient implements AdbExecutor {
    * @returns The base ADB command
    */
   async getBaseCommand(): Promise<string> {
+    const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    return [adbPath, ...baseArgs].join(" ");
+  }
+
+  async getBaseCommandParts(): Promise<{ adbPath: string; baseArgs: string[] }> {
     const deviceId = this.device?.deviceId;
     const adbPath = await this.ensureAdbPath();
-    return deviceId ? `${adbPath} -s ${deviceId}` : adbPath;
+    const baseArgs = deviceId ? ["-s", deviceId] : [];
+    return { adbPath, baseArgs };
+  }
+
+  async getAdbPathOnly(): Promise<string> {
+    return this.ensureAdbPath();
   }
 
   /**
@@ -251,8 +281,9 @@ export class AdbClient implements AdbExecutor {
     noRetry?: boolean,
     signal?: AbortSignal
   ): Promise<ExecResult> {
-    const baseCommand = await this.getBaseCommand();
-    const fullCommand = `${baseCommand} ${command}`;
+    const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    const commandArgs = this.parseCommandArgs(command);
+    const fullArgs = [...baseArgs, ...commandArgs];
     const startTime = Date.now();
     const resolvedSignal = signal ?? getAbortSignal();
 
@@ -261,7 +292,7 @@ export class AdbClient implements AdbExecutor {
     logger.info(`[ADB] ${deviceInfo} Executing: ${command.length > 80 ? command.substring(0, 80) + "..." : command}`);
 
     try {
-      const result = await this.execWithSignal(fullCommand, maxBuffer, timeoutMs, resolvedSignal);
+      const result = await this.execWithSignal(adbPath, fullArgs, maxBuffer, timeoutMs, resolvedSignal);
       const duration = Date.now() - startTime;
       logger.info(`[ADB] Command completed in ${duration}ms: ${command}`);
       return result;
@@ -279,7 +310,8 @@ export class AdbClient implements AdbExecutor {
   }
 
   private async execWithSignal(
-    command: string,
+    file: string,
+    args: string[],
     maxBuffer?: number,
     timeoutMs?: number,
     signal?: AbortSignal
@@ -289,13 +321,13 @@ export class AdbClient implements AdbExecutor {
     }
 
     if (this.isTestMode) {
-      return this.execAsync(command, maxBuffer);
+      return this.execAsync(file, args, maxBuffer);
     }
 
     return new Promise<ExecResult>((resolve, reject) => {
       let settled = false;
       const options = maxBuffer ? { maxBuffer } : undefined;
-      const child = exec(command, options, (error, stdout, stderr) => {
+      const child = execFile(file, args, options, (error, stdout, stderr) => {
         if (settled) {
           return;
         }
@@ -350,7 +382,7 @@ export class AdbClient implements AdbExecutor {
           settled = true;
           cleanup();
           child.kill("SIGTERM");
-          reject(new Error(`Command timed out after ${timeoutMs}ms: ${command}`));
+          reject(new Error(`Command timed out after ${timeoutMs}ms: ${file} ${args.join(" ")}`));
         }, timeoutMs);
       }
 
@@ -360,6 +392,65 @@ export class AdbClient implements AdbExecutor {
         signal.addEventListener("abort", onAbort, { once: true });
       }
     });
+  }
+
+  private parseCommandArgs(command: string): string[] {
+    const trimmed = command.trim();
+    if (trimmed.startsWith("shell ")) {
+      let shellCommand = trimmed.slice(6).trim();
+      if (
+        (shellCommand.startsWith("\"") && shellCommand.endsWith("\"")) ||
+        (shellCommand.startsWith("'") && shellCommand.endsWith("'"))
+      ) {
+        shellCommand = shellCommand.slice(1, -1);
+      }
+      return ["shell", shellCommand];
+    }
+
+    const args: string[] = [];
+    let current = "";
+    let inSingle = false;
+    let inDouble = false;
+    let escape = false;
+
+    for (const char of trimmed) {
+      if (escape) {
+        current += char;
+        escape = false;
+        continue;
+      }
+
+      if (char === "\\" && !inSingle) {
+        escape = true;
+        continue;
+      }
+
+      if (char === "'" && !inDouble) {
+        inSingle = !inSingle;
+        continue;
+      }
+
+      if (char === "\"" && !inSingle) {
+        inDouble = !inDouble;
+        continue;
+      }
+
+      if (!inSingle && !inDouble && /\s/.test(char)) {
+        if (current.length > 0) {
+          args.push(current);
+          current = "";
+        }
+        continue;
+      }
+
+      current += char;
+    }
+
+    if (current.length > 0) {
+      args.push(current);
+    }
+
+    return args;
   }
 
   /**
@@ -378,8 +469,8 @@ export class AdbClient implements AdbExecutor {
 
     logger.info("Getting list of connected devices");
     // Use raw ADB command without device ID since we're listing devices
-    const baseCommand = await this.getBaseCommand();
-    const result = await this.execAsync(`${baseCommand} devices`);
+    const { adbPath, baseArgs } = await this.getBaseCommandParts();
+    const result = await this.execAsync(adbPath, [...baseArgs, "devices"]);
     const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
 
     const devices = lines

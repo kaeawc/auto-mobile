@@ -175,13 +175,8 @@ describe("AccessibilityServiceManager", function() {
 
     test("should fall back to host hashing when sha256sum fails", async function() {
       const expectedApkPath = "/data/app/dev.jasonpearson.automobile.accessibilityservice/base.apk";
-      const tempDir = "/tmp/auto-mobile/";
-      const localApkPath = path.join(tempDir, "accessibility-service-installed-test-device.apk");
       const apkContent = Buffer.from("fake-apk-content");
       const expectedSha = crypto.createHash("sha256").update(apkContent).digest("hex");
-
-      await fs.mkdir(tempDir, { recursive: true });
-      await fs.writeFile(localApkPath, apkContent);
 
       const createExecResult = (stdout: string, stderr: string) => ({
         stdout,
@@ -204,6 +199,11 @@ describe("AccessibilityServiceManager", function() {
         }
 
         if (strippedCommand.includes("pull")) {
+          const match = strippedCommand.match(/pull\s+"[^"]+"\s+"([^"]+)"/);
+          if (match?.[1]) {
+            await fs.mkdir(path.dirname(match[1]), { recursive: true });
+            await fs.writeFile(match[1], apkContent);
+          }
           return createExecResult("", "");
         }
 

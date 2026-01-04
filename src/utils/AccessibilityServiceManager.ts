@@ -7,6 +7,7 @@ import { promisify } from "util";
 import { BootedDevice } from "../models";
 import { APK_URL, APK_SHA256_CHECKSUM } from "../constants/release";
 import crypto from "crypto";
+import os from "os";
 
 const execAsync = promisify(exec);
 
@@ -602,8 +603,7 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       });
     }
 
-    const tempDir = "/tmp/auto-mobile/";
-    await fs.mkdir(tempDir, { recursive: true });
+    const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-apk-"));
     const safeDeviceId = (this.device.deviceId || "device").replace(/[^a-zA-Z0-9_.-]/g, "_");
     const localApkPath = path.join(tempDir, `accessibility-service-installed-${safeDeviceId}.apk`);
 
@@ -625,7 +625,7 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       };
     } finally {
       try {
-        await fs.unlink(localApkPath);
+        await fs.rm(tempDir, { recursive: true, force: true });
       } catch {
       }
     }

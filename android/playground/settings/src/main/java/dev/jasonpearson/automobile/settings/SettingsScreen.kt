@@ -212,7 +212,6 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
   }
   }
 }
-      }
 
   // Email editing bottom sheet
   if (isEditingEmail) {
@@ -224,6 +223,7 @@ fun SettingsScreen(onLogout: () -> Unit, onGuestModeNavigateToLogin: () -> Unit 
           viewModel.saveEmail(tempEmail)
           isEditingEmail = false
         })
+  }
   }
 }
 

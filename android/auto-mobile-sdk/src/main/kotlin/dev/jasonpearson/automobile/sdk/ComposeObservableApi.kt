@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.ExperimentalComposeRuntimeApi
+import androidx.compose.runtime.InternalComposeApi
 import androidx.compose.runtime.RecomposeScope
 import androidx.compose.runtime.Recomposer
 import androidx.compose.runtime.currentCompositionContext
@@ -17,7 +18,7 @@ import java.util.concurrent.ConcurrentHashMap
  * Enables the Compose Observable API for recomposition cause tracking.
  * Call once near the root of your composition.
  */
-@OptIn(ExperimentalComposeRuntimeApi::class)
+@OptIn(ExperimentalComposeRuntimeApi::class, InternalComposeApi::class)
 @Composable
 fun EnableComposeObservableApi() {
     val recomposer = currentCompositionContext as? Recomposer ?: return

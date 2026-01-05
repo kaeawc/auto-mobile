@@ -488,7 +488,7 @@ export class IdentifyInteractions {
       return {
         tool: "swipeOn",
         params: {
-          revealContent: "below",
+          direction: "up", // finger swipes up to reveal content below
           ...(container ? { container } : {})
         }
       };

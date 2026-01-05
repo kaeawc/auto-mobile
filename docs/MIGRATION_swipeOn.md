@@ -209,8 +209,8 @@ This migration guide will help you transition from the old tools to the new unif
 | `container.elementId` | string | No* | Resource ID of container element |
 | `container.text` | string | No* | Text within container element (finds nearest scrollable parent) |
 | `autoTarget` | boolean | No | Auto-target a scrollable container when `container` is omitted (default true). Set to false only if you intend to swipe the entire screen after autoTarget selected a list unexpectedly. |
-| `direction` | enum | **Yes*** | Direction your finger moves: "up", "down", "left", "right" |
-| `revealContent` | enum | **Yes*** | Semantic intent: content to reveal ("above", "below", "left", "right"). `revealContent: "below"` maps to `direction: "up"`. |
+| `direction` | enum | **Yes** | Direction: "up", "down", "left", "right". Interpretation depends on `gestureType`. |
+| `gestureType` | enum | No | How to interpret direction: "swipeFingerTowardsDirection" (default, finger moves in direction) or "scrollTowardsDirection" (content scrolls in direction). |
 | `lookFor` | object | No | Search for element while scrolling |
 | `lookFor.text` | string | No* | Text to search for |
 | `lookFor.elementId` | string | No* | Element ID to search for |
@@ -222,7 +222,6 @@ This migration guide will help you transition from the old tools to the new unif
 | `platform` | enum | **Yes** | Platform: "android", "ios" |
 
 \* When using `container`, specify exactly one of `container.elementId` or `container.text`
-\* Provide either `direction` (finger movement) or `revealContent` (semantic intent). If both are set, they must match.
 
 ## Operation Modes
 
@@ -252,7 +251,7 @@ The `swipeOn` tool automatically determines the operation mode based on paramete
 
 2. **Use container swipes for lists and feeds:**
    ```json
-   { "container": { "elementId": "list" }, "revealContent": "below", "platform": "android" }
+   { "container": { "elementId": "list" }, "direction": "up", "platform": "android" }
    ```
 
 3. **Use element swipes for carousels:**
@@ -264,16 +263,17 @@ The `swipeOn` tool automatically determines the operation mode based on paramete
    ```json
    {
      "container": { "elementId": "list" },
-     "revealContent": "below",
+     "direction": "up",
      "lookFor": { "text": "Item 42" },
      "platform": "android"
    }
    ```
 
-5. **Prefer `revealContent` when you're thinking in terms of "show me what's below/above":**
+5. **Use `gestureType` when thinking in terms of content movement:**
    ```json
-   { "revealContent": "above", "platform": "android" }
+   { "direction": "up", "gestureType": "scrollTowardsDirection", "platform": "android" }
    ```
+   This scrolls content upward (finger swipes down) to reveal content above.
 
 6. **Prefer `speed` over `duration` for readability:**
    ```json

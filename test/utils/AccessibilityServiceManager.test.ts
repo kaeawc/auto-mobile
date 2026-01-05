@@ -332,5 +332,91 @@ describe("AccessibilityServiceManager", function() {
       expect(result.status).toBe("reinstalled");
       expect(localFakeAdb.wasCommandExecuted("shell pm uninstall")).toBe(true);
     });
+
+    test("should reinstall when installed SHA cannot be determined", async function() {
+      AndroidAccessibilityServiceManager.setExpectedChecksumForTesting("expected-sha");
+      const executedCommands: string[] = [];
+      const apkPath = "/data/app/dev.jasonpearson.automobile.accessibilityservice/base.apk";
+
+      const localExecAsync = async (command: string) => {
+        const prefix = "adb -s test-device ";
+        const strippedCommand = command.startsWith(prefix) ? command.slice(prefix.length) : command;
+        executedCommands.push(strippedCommand);
+
+        if (strippedCommand.includes("shell pm list packages")) {
+          return createExecResult(`package:${AndroidAccessibilityServiceManager.PACKAGE}\n`, "");
+        }
+
+        if (strippedCommand.includes("shell pm path")) {
+          return createExecResult(`package:${apkPath}\n`, "");
+        }
+
+        if (strippedCommand.includes("shell sha256sum")) {
+          throw new Error("sha256sum not available");
+        }
+
+        if (strippedCommand.includes("pull")) {
+          throw new Error("pull failed");
+        }
+
+        if (strippedCommand.includes("shell pm uninstall")) {
+          return createExecResult("Success", "");
+        }
+
+        if (strippedCommand.includes("install -r -d")) {
+          throw new Error("Unexpected upgrade call");
+        }
+
+        return createExecResult("", "");
+      };
+
+      const localAdbClient = new AdbClient(testDevice, localExecAsync);
+      AndroidAccessibilityServiceManager.resetInstances();
+      const manager = AndroidAccessibilityServiceManager.getInstance(testDevice, localAdbClient);
+      (manager as any).downloadApk = async () => "/tmp/fake-accessibility.apk";
+      (manager as any).cleanupApk = async () => undefined;
+      (manager as any).install = async () => undefined;
+      (manager as any).enable = async () => undefined;
+
+      const result = await manager.ensureCompatibleVersion();
+      expect(result.status).toBe("reinstalled");
+      expect(executedCommands.some(command => command.includes("install -r -d"))).toBe(false);
+      expect(executedCommands.some(command => command.includes("shell pm uninstall"))).toBe(true);
+    });
+
+    test("should mark download unavailable when offline", async function() {
+      AndroidAccessibilityServiceManager.setExpectedChecksumForTesting("expected-sha");
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidAccessibilityServiceManager.PACKAGE}`, {
+        stdout: `package:${AndroidAccessibilityServiceManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidAccessibilityServiceManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.accessibilityservice/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.accessibilityservice/base.apk\n",
+        stderr: ""
+      });
+
+      const localExecAsync = async (command: string, maxBuffer?: number) => {
+        const prefix = "adb -s test-device ";
+        const strippedCommand = command.startsWith(prefix) ? command.slice(prefix.length) : command;
+        return localFakeAdb.executeCommand(strippedCommand, undefined, maxBuffer);
+      };
+
+      const localAdbClient = new AdbClient(testDevice, localExecAsync);
+      AndroidAccessibilityServiceManager.resetInstances();
+      const manager = AndroidAccessibilityServiceManager.getInstance(testDevice, localAdbClient);
+      (manager as any).downloadApk = async () => {
+        throw new Error("Could not resolve host");
+      };
+
+      const result = await manager.ensureCompatibleVersion();
+      expect(result.status).toBe("failed");
+      expect(result.downloadUnavailable).toBe(true);
+      expect(result.error).toContain("offline");
+    });
   });
 });

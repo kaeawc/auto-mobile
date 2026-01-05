@@ -1,4 +1,4 @@
-import { getDatabase } from "../../db/database";
+import { ensureMigrations, getDatabase } from "../../db/database";
 import type { FeatureFlagConfig, FeatureFlagDefinition, FeatureFlagKey } from "./FeatureFlagDefinitions";
 
 export interface FeatureFlagRecord {
@@ -16,6 +16,7 @@ export interface FeatureFlagRepository {
 
 export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   async ensureFlags(definitions: FeatureFlagDefinition[]): Promise<void> {
+    await ensureMigrations();
     const db = getDatabase();
     const existing = await db
       .selectFrom("feature_flags")
@@ -44,6 +45,7 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   }
 
   async listFlags(): Promise<FeatureFlagRecord[]> {
+    await ensureMigrations();
     const db = getDatabase();
     const rows = await db
       .selectFrom("feature_flags")
@@ -59,6 +61,7 @@ export class SqliteFeatureFlagRepository implements FeatureFlagRepository {
   }
 
   async upsertFlag(key: FeatureFlagKey, enabled: boolean, config?: FeatureFlagConfig | null): Promise<void> {
+    await ensureMigrations();
     const db = getDatabase();
     const now = new Date().toISOString();
     const existing = await db

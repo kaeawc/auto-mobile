@@ -41,6 +41,7 @@ export interface AccessibilityVersionCheckResult {
   attemptedDownload?: boolean;
   attemptedInstall?: boolean;
   attemptedReinstall?: boolean;
+  downloadUnavailable?: boolean;
   error?: string;
   upgradeError?: string;
   reinstallError?: string;
@@ -288,68 +289,79 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       installedApkPath: installedShaResult.apkPath
     };
 
-    if (!installedShaResult.sha256) {
-      return {
-        ...result,
-        status: "failed",
-        error: installedShaResult.error || "Unable to determine installed APK checksum"
-      };
+    const installedSha = installedShaResult.sha256;
+    const needsReinstallDueToUnknownSha = !installedSha;
+
+    if (!installedSha && installedShaResult.error) {
+      logger.warn("[ACCESSIBILITY_SERVICE] Unable to determine installed APK checksum, forcing reinstall", {
+        error: installedShaResult.error
+      });
     }
 
-    if (installedShaResult.sha256.toLowerCase() === expectedSha.toLowerCase()) {
+    if (installedSha && installedSha.toLowerCase() === expectedSha.toLowerCase()) {
       return result;
     }
 
-    logger.info("[ACCESSIBILITY_SERVICE] Installed APK SHA mismatch, attempting upgrade", {
-      expected: expectedSha,
-      actual: installedShaResult.sha256
-    });
+    if (needsReinstallDueToUnknownSha) {
+      logger.warn("[ACCESSIBILITY_SERVICE] Installed APK checksum unavailable, forcing reinstall");
+    } else {
+      logger.info("[ACCESSIBILITY_SERVICE] Installed APK SHA mismatch, attempting upgrade", {
+        expected: expectedSha,
+        actual: installedSha
+      });
+    }
 
     let apkPath: string | null = null;
     try {
       result.attemptedDownload = true;
       apkPath = await this.downloadApk();
 
-      try {
-        result.attemptedInstall = true;
-        await this.adb.executeCommand(`install -r -d "${apkPath}"`);
-        logger.info("[ACCESSIBILITY_SERVICE] APK upgraded successfully");
-        this.clearAvailabilityCache();
-        return {
-          ...result,
-          status: "upgraded"
-        };
-      } catch (upgradeError) {
-        const upgradeMessage = upgradeError instanceof Error ? upgradeError.message : String(upgradeError);
-        logger.warn("[ACCESSIBILITY_SERVICE] Upgrade failed, attempting reinstall", { error: upgradeMessage });
-        result.upgradeError = upgradeMessage;
-
+      if (!needsReinstallDueToUnknownSha) {
         try {
-          result.attemptedReinstall = true;
-          await this.adb.executeCommand(`shell pm uninstall ${AndroidAccessibilityServiceManager.PACKAGE}`);
-          await this.install(apkPath);
-          await this.enable();
-          logger.info("[ACCESSIBILITY_SERVICE] APK reinstalled and service re-enabled");
+          result.attemptedInstall = true;
+          await this.adb.executeCommand(`install -r -d "${apkPath}"`);
+          logger.info("[ACCESSIBILITY_SERVICE] APK upgraded successfully");
           this.clearAvailabilityCache();
           return {
             ...result,
-            status: "reinstalled"
+            status: "upgraded"
           };
-        } catch (reinstallError) {
-          const reinstallMessage = reinstallError instanceof Error ? reinstallError.message : String(reinstallError);
-          return {
-            ...result,
-            status: "failed",
-            reinstallError: reinstallMessage
-          };
+        } catch (upgradeError) {
+          const upgradeMessage = upgradeError instanceof Error ? upgradeError.message : String(upgradeError);
+          logger.warn("[ACCESSIBILITY_SERVICE] Upgrade failed, attempting reinstall", { error: upgradeMessage });
+          result.upgradeError = upgradeMessage;
         }
+      }
+
+      try {
+        result.attemptedReinstall = true;
+        await this.adb.executeCommand(`shell pm uninstall ${AndroidAccessibilityServiceManager.PACKAGE}`);
+        await this.install(apkPath);
+        await this.enable();
+        logger.info("[ACCESSIBILITY_SERVICE] APK reinstalled and service re-enabled");
+        this.clearAvailabilityCache();
+        return {
+          ...result,
+          status: "reinstalled"
+        };
+      } catch (reinstallError) {
+        const reinstallMessage = reinstallError instanceof Error ? reinstallError.message : String(reinstallError);
+        return {
+          ...result,
+          status: "failed",
+          reinstallError: reinstallMessage
+        };
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
+      const downloadUnavailable = this.isNetworkError(message);
       return {
         ...result,
         status: "failed",
-        error: message
+        downloadUnavailable,
+        error: downloadUnavailable
+          ? "Unable to download the latest accessibility service APK while offline. Connect to the internet and retry."
+          : message
       };
     } finally {
       if (apkPath) {
@@ -382,17 +394,18 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
         throw new Error(`Downloaded APK is too small (${stats.size} bytes), likely invalid`);
       }
 
+      const expectedChecksum = this.getExpectedChecksum();
       // Perform checksum verification (only if checksum is provided)
-      if (APK_SHA256_CHECKSUM.length > 0) {
+      if (expectedChecksum.length > 0) {
         const { stdout: sha256sum } = await execAsync(`sha256sum "${apkPath}"`);
         const actualChecksum = sha256sum.split(" ")[0];
 
-        if (actualChecksum !== APK_SHA256_CHECKSUM) {
+        if (actualChecksum !== expectedChecksum) {
           logger.warn("APK checksum verification failed", {
-            expected: APK_SHA256_CHECKSUM,
+            expected: expectedChecksum,
             actual: actualChecksum
           });
-          throw new Error(`APK checksum verification failed. Expected: ${APK_SHA256_CHECKSUM}, Got: ${actualChecksum}`);
+          throw new Error(`APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`);
         }
 
         logger.info("APK checksum verified successfully", { checksum: actualChecksum });
@@ -659,5 +672,18 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
 
   private getExpectedChecksum(): string {
     return AndroidAccessibilityServiceManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
+  }
+
+  private isNetworkError(message: string): boolean {
+    const normalized = message.toLowerCase();
+    return (
+      normalized.includes("could not resolve host") ||
+      normalized.includes("failed to connect") ||
+      normalized.includes("network is unreachable") ||
+      normalized.includes("connection timed out") ||
+      normalized.includes("timed out") ||
+      normalized.includes("name lookup timed out") ||
+      normalized.includes("temporary failure in name resolution")
+    );
   }
 }

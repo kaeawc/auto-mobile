@@ -90,6 +90,11 @@ PY
 
 update_json_version "package.json" "$new_version" "$dry_run"
 
+if ! command -v rg >/dev/null 2>&1; then
+  echo "ripgrep (rg) is required for fast Gradle scanning." >&2
+  exit 1
+fi
+
 while IFS= read -r -d '' gradle_file; do
   replace_optional_single_match \
     "$gradle_file" \
@@ -102,7 +107,7 @@ while IFS= read -r -d '' gradle_file; do
     'versionName\s*=\s*"[^"]*"' \
     "versionName = \"${snapshot_version}\"" \
     "$dry_run"
-done < <(find android -type f -name "build.gradle.kts" -print0)
+done < <(rg -l --null -g 'build.gradle.kts' -e 'versionName\s*=' -e '^version\s*=' android)
 
 if [[ "$dry_run" == true ]]; then
   echo "Dry run complete. package.json -> ${new_version}"

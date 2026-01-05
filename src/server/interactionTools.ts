@@ -17,6 +17,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { ObserveScreen } from "../features/observe/ObserveScreen";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
+import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 
 // Type definitions for better TypeScript support
@@ -85,7 +86,8 @@ export interface SwipeOnArgs {
     text?: string;
   };
   autoTarget?: boolean;
-  direction: "up" | "down" | "left" | "right";
+  direction?: "up" | "down" | "left" | "right";
+  revealContent?: "above" | "below" | "left" | "right";
   lookFor?: {
     elementId?: string;
     text?: string;
@@ -171,7 +173,23 @@ export const swipeOnSchema = z.object({
     text: z.string().optional().describe("Text within the container (finds nearest scrollable parent of element containing this text)")
   }).optional().describe("Container element to swipe within. REQUIRED for scrolling lists (RecyclerView/ScrollView/ListView). Omit only for intentional full-screen swipes like page navigation or dismissing sheets."),
   autoTarget: z.boolean().optional().describe("Auto-target a scrollable container when container is omitted (default true). Set to false only if you intend to swipe the entire screen after autoTarget selected a list unexpectedly."),
-  direction: z.enum(["up", "down", "left", "right"]).describe("Direction to swipe finger: 'up' swipes finger up (content moves down, reveals content from above), 'down' swipes finger down (content moves up, reveals content from below)"),
+  direction: z.enum(["up", "down", "left", "right"]).optional().describe(
+    `Direction YOUR FINGER moves on the screen.
+
+ASCII guide (finger vs content):
+  "up"    = finger up, content moves DOWN, reveals content FROM ABOVE
+  "down"  = finger down, content moves UP, reveals content FROM BELOW
+  "left"  = finger left, content moves RIGHT, reveals content FROM RIGHT
+  "right" = finger right, content moves LEFT, reveals content FROM LEFT
+
+To see more content BELOW: use direction "up".
+To see more content ABOVE: use direction "down".`
+  ),
+  revealContent: z.enum(["above", "below", "left", "right"]).optional().describe(
+    `Semantic intent: which content you want to reveal.
+Examples: "below" reveals content below the current view (finger swipes "up").
+Mutually exclusive with direction unless they match.`
+  ),
   lookFor: z.object({
     elementId: z.string().optional().describe("ID of the element to look for"),
     text: z.string().optional().describe("Text to look for"),
@@ -181,6 +199,18 @@ export const swipeOnSchema = z.object({
   // Framework parameters for device management (optional)
   sessionUuid: z.string().optional(),
   deviceId: z.string().optional()
+}).superRefine((data, ctx) => {
+  const resolved = resolveSwipeDirection({
+    direction: data.direction,
+    revealContent: data.revealContent
+  });
+
+  if (resolved.error) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: resolved.error
+    });
+  }
 });
 
 export const clearTextSchema = z.object({
@@ -527,12 +557,20 @@ export function registerInteractionTools() {
       container: args.container,
       autoTarget: args.autoTarget,
       direction: args.direction,
+      revealContent: args.revealContent,
       lookFor: args.lookFor,
       speed: args.speed
       // duration and scrollMode are internal-only, not exposed in schema
     };
 
     const result = await swipeOn.execute(options, progress);
+
+    const resolvedDirection = resolveSwipeDirection({
+      direction: args.direction,
+      revealContent: args.revealContent
+    }).direction;
+
+    const directionLabel = resolvedDirection ?? args.direction ?? "unknown";
 
     // Determine message based on operation type
     let message = "";
@@ -550,13 +588,13 @@ export function registerInteractionTools() {
       }
     } else if (!args.container) {
       // No container = screen swipe
-      message = `Swiped ${args.direction} on screen`;
+      message = `Swiped ${directionLabel} on screen`;
     } else if (args.container.text) {
-      message = `Swiped ${args.direction} in container with text "${args.container.text}"`;
+      message = `Swiped ${directionLabel} in container with text "${args.container.text}"`;
     } else if (args.container.elementId) {
-      message = `Swiped ${args.direction} in container with id "${args.container.elementId}"`;
+      message = `Swiped ${directionLabel} in container with id "${args.container.elementId}"`;
     } else {
-      message = `Swiped ${args.direction}`;
+      message = `Swiped ${directionLabel}`;
     }
 
     if (result.warning) {

@@ -1,6 +1,9 @@
 /**
  * Options for swiping on screen or element
  */
+export type SwipeDirection = "up" | "down" | "left" | "right";
+export type RevealContentDirection = "above" | "below" | "left" | "right";
+
 export interface SwipeOnOptions {
   // Include system insets (status/navigation bars)
   includeSystemInsets?: boolean; // Include status/navigation bars (default false)
@@ -14,8 +17,11 @@ export interface SwipeOnOptions {
   // Auto-target a scrollable container when no container is specified (default true)
   autoTarget?: boolean;
 
-  // Direction (required)
-  direction: "up" | "down" | "left" | "right";
+  // Direction your finger moves on the screen
+  direction?: SwipeDirection;
+
+  // Semantic intent: content you want to reveal
+  revealContent?: RevealContentDirection;
 
   // Search for element while scrolling (optional)
   lookFor?: {

@@ -4,21 +4,44 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 IDE_PLUGIN_DIR="${ANDROID_STUDIO_PLUGINS_DIR:-${IDEA_PLUGINS_DIR:-}}"
 
+# Auto-detect IntelliJ/Android Studio plugins directory on macOS
 if [[ -z "$IDE_PLUGIN_DIR" ]]; then
+  OS_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
+  if [[ "$OS_NAME" == "darwin" ]]; then
+    # Search for JetBrains IDE plugins directories
+    JETBRAINS_DIR="$HOME/Library/Application Support/JetBrains"
+    if [[ -d "$JETBRAINS_DIR" ]]; then
+      # Find most recent IntelliJ or Android Studio directory
+      IDE_PLUGIN_DIR=$(find "$JETBRAINS_DIR" -maxdepth 1 -type d \( -name "IntelliJIdea*" -o -name "AndroidStudio*" \) 2>/dev/null | sort -r | head -n 1 || true)
+      if [[ -n "$IDE_PLUGIN_DIR" ]]; then
+        IDE_PLUGIN_DIR="$IDE_PLUGIN_DIR/plugins"
+      fi
+    fi
+  fi
+fi
+
+if [[ -z "$IDE_PLUGIN_DIR" ]]; then
+  echo "Could not auto-detect IDE plugins directory."
   echo "Set ANDROID_STUDIO_PLUGINS_DIR or IDEA_PLUGINS_DIR to your IDE plugins directory."
   echo "Example (macOS):"
-  echo "  export ANDROID_STUDIO_PLUGINS_DIR=\"$HOME/Library/Application Support/Google/AndroidStudio2025.2/plugins\""
+  echo "  export IDEA_PLUGINS_DIR=\"\$HOME/Library/Application Support/JetBrains/IntelliJIdea2025.3/plugins\""
+  echo "  export ANDROID_STUDIO_PLUGINS_DIR=\"\$HOME/Library/Application Support/Google/AndroidStudio2025.2/plugins\""
   exit 1
 fi
 
 if [[ ! -d "$IDE_PLUGIN_DIR" ]]; then
   echo "Plugins directory not found: $IDE_PLUGIN_DIR"
+  echo "Make sure your IDE has been run at least once to create the plugins directory."
   exit 1
 fi
 
+echo "Using plugins directory: $IDE_PLUGIN_DIR"
+
+# Build the plugin using its own gradlew
+echo "Building IDE plugin..."
 (
-  cd "$ROOT_DIR/android"
-  ./gradlew -p ide-plugin buildPlugin
+  cd "$ROOT_DIR/android/ide-plugin"
+  ./gradlew buildPlugin
 )
 
 PLUGIN_ZIP=$(find "$ROOT_DIR/android/ide-plugin/build/distributions" -maxdepth 1 -name '*.zip' -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -n 1 || true)
@@ -27,24 +50,15 @@ if [[ -z "$PLUGIN_ZIP" ]]; then
   exit 1
 fi
 
-TMP_DIR="$(mktemp -d)"
-trap 'rm -rf "$TMP_DIR"' EXIT
+PLUGIN_NAME="auto-mobile-ide-plugin"
 
-unzip -q "$PLUGIN_ZIP" -d "$TMP_DIR"
-PLUGIN_DIR=$(find "$TMP_DIR" -mindepth 1 -maxdepth 1 -type d | head -n 1 || true)
-if [[ -z "$PLUGIN_DIR" ]]; then
-  echo "Failed to unpack plugin zip"
-  exit 1
-fi
-
-PLUGIN_NAME="$(basename "$PLUGIN_DIR")"
-DEST_DIR="$IDE_PLUGIN_DIR/$PLUGIN_NAME"
-
-rm -rf "$DEST_DIR"
+# Remove old version and install new
+echo "Installing plugin..."
+rm -rf "${IDE_PLUGIN_DIR:?}/${PLUGIN_NAME:?}"
 mkdir -p "$IDE_PLUGIN_DIR"
-cp -R "$PLUGIN_DIR" "$DEST_DIR"
+unzip -q "$PLUGIN_ZIP" -d "$IDE_PLUGIN_DIR"
 
-echo "Installed $PLUGIN_NAME to $DEST_DIR"
+echo "Installed $PLUGIN_NAME to $IDE_PLUGIN_DIR/$PLUGIN_NAME"
 
 OS_NAME="$(uname -s | tr '[:upper:]' '[:lower:]')"
 
@@ -94,29 +108,30 @@ restart_ide_macos() {
   fi
 
   if [[ -z "$app_name" ]]; then
-    read -r -p "Enter the IDE app name to restart (e.g., Android Studio): " app_name
+    read -r -p "Enter the IDE app name to restart (e.g., IntelliJ IDEA): " app_name
   fi
 
   if [[ -z "$app_name" ]]; then
     echo "Skipping restart: no IDE app name provided."
+    echo "Please restart your IDE manually to load the plugin."
     return 0
   fi
 
   echo "Restarting $app_name..."
-  osascript -e "tell application \"$app_name\" to quit" || true
-  sleep 2
-  pkill -f "$app_name" || true
+  pkill -f "$app_name" 2>/dev/null || true
+  sleep 1
   open -a "$app_name"
 }
 
 restart_ide_linux() {
   local ide_cmd="${IDE_CMD:-}"
   if [[ -z "$ide_cmd" ]]; then
-    echo "Set IDE_CMD to the launch command for your IDE (e.g., studio.sh or idea.sh)."
+    echo "Set IDE_CMD to the launch command for your IDE (e.g., idea.sh or studio.sh)."
     read -r -p "Enter IDE command to launch (leave empty to skip): " ide_cmd
   fi
   if [[ -z "$ide_cmd" ]]; then
     echo "Skipping restart: no IDE command provided."
+    echo "Please restart your IDE manually to load the plugin."
     return 0
   fi
 
@@ -133,6 +148,7 @@ restart_ide_windows() {
   fi
   if [[ -z "$ide_cmd" ]]; then
     echo "Skipping restart: no IDE command provided."
+    echo "Please restart your IDE manually to load the plugin."
     return 0
   fi
 
@@ -141,6 +157,11 @@ restart_ide_windows() {
   taskkill //F //IM studio64.exe 2>/dev/null || true
   cmd.exe /C start "" "$ide_cmd"
 }
+
+echo ""
+echo "Plugin installed successfully!"
+echo "Restart your IDE to load the plugin."
+echo ""
 
 if [[ "$OS_NAME" == "darwin" ]]; then
   restart_ide_macos "${IDE_APP_NAME:-}"

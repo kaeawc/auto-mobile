@@ -67,7 +67,13 @@ class WebSocketServer(
         null,
     private val onRequestDrag:
         ((
-            requestId: String?, x1: Int, y1: Int, x2: Int, y2: Int, duration: Long, holdTime: Long,
+            requestId: String?,
+            x1: Int,
+            y1: Int,
+            x2: Int,
+            y2: Int,
+            duration: Long,
+            holdTime: Long,
         ) -> Unit)? =
         null,
     private val onRequestPinch:

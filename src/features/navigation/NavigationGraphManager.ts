@@ -745,6 +745,7 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
     }
 
     const detail = await this.buildNodeDetail(dbNode);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { id, ...node } = detail;
     return node;
   }

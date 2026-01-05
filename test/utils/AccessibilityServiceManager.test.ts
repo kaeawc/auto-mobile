@@ -15,10 +15,12 @@ describe("AccessibilityServiceManager", function() {
   let adbClient: AdbClient;
   let originalApkPathEnv: string | undefined;
   let originalSkipChecksumEnv: string | undefined;
+  let originalSkipDownloadEnv: string | undefined;
 
   beforeEach(function() {
     originalApkPathEnv = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
 
@@ -59,6 +61,11 @@ describe("AccessibilityServiceManager", function() {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     } else {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = originalSkipChecksumEnv;
+    }
+    if (originalSkipDownloadEnv === undefined) {
+      delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+    } else {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownloadEnv;
     }
   });
   describe("isInstalled", function() {
@@ -352,6 +359,33 @@ describe("AccessibilityServiceManager", function() {
       process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = "/tmp/local-accessibility.apk";
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
+      expect(result.status).toBe("skipped");
+    });
+
+    test("should skip download when preinstalled APK is allowed", async function() {
+      AndroidAccessibilityServiceManager.setExpectedChecksumForTesting("expected-sha");
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
+
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidAccessibilityServiceManager.PACKAGE}`, {
+        stdout: `package:${AndroidAccessibilityServiceManager.PACKAGE}\n`,
+        stderr: ""
+      });
+
+      const localExecAsync = async (command: string, maxBuffer?: number) => {
+        const prefix = "adb -s test-device ";
+        const strippedCommand = command.startsWith(prefix) ? command.slice(prefix.length) : command;
+        return localFakeAdb.executeCommand(strippedCommand, undefined, maxBuffer);
+      };
+
+      const localAdbClient = new AdbClient(testDevice, localExecAsync);
+      AndroidAccessibilityServiceManager.resetInstances();
+      const manager = AndroidAccessibilityServiceManager.getInstance(testDevice, localAdbClient);
+      (manager as any).downloadApk = async () => {
+        throw new Error("download should not be called");
+      };
+
+      const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
     });
 

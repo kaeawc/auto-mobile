@@ -280,6 +280,14 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       };
     }
 
+    if (this.shouldSkipDownloadIfInstalled()) {
+      logger.warn("[ACCESSIBILITY_SERVICE] Skipping APK download/version check (preinstalled APK allowed)");
+      return {
+        status: "skipped",
+        expectedSha256: expectedSha
+      };
+    }
+
     const installedShaResult = await this.getInstalledApkSha256WithDetails();
     const result: AccessibilityVersionCheckResult = {
       status: "compatible",
@@ -715,5 +723,10 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       return true;
     }
     return this.getApkPathOverride() !== null;
+  }
+
+  private shouldSkipDownloadIfInstalled(): boolean {
+    const skipEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+    return Boolean(skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true"));
   }
 }

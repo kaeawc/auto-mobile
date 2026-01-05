@@ -6,14 +6,19 @@ import { BootedDevice } from "../../src/models";
 import * as fs from "fs/promises";
 import * as path from "path";
 import crypto from "crypto";
+import os from "os";
 
 describe("AccessibilityServiceManager", function() {
   let accessibilityServiceClient: AndroidAccessibilityServiceManager;
   let fakeAdb: FakeAdbExecutor;
   let testDevice: BootedDevice;
   let adbClient: AdbClient;
+  let originalApkPathEnv: string | undefined;
+  let originalSkipChecksumEnv: string | undefined;
 
   beforeEach(function() {
+    originalApkPathEnv = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+    originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
 
@@ -45,6 +50,16 @@ describe("AccessibilityServiceManager", function() {
 
   afterEach(function() {
     AndroidAccessibilityServiceManager.setExpectedChecksumForTesting(null);
+    if (originalApkPathEnv === undefined) {
+      delete process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+    } else {
+      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = originalApkPathEnv;
+    }
+    if (originalSkipChecksumEnv === undefined) {
+      delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    } else {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = originalSkipChecksumEnv;
+    }
   });
   describe("isInstalled", function() {
     test("should return true when accessibility service package is installed", async function() {
@@ -333,6 +348,13 @@ describe("AccessibilityServiceManager", function() {
       expect(localFakeAdb.wasCommandExecuted("shell pm uninstall")).toBe(true);
     });
 
+    test("should skip version check when local APK override is set", async function() {
+      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = "/tmp/local-accessibility.apk";
+
+      const result = await accessibilityServiceClient.ensureCompatibleVersion();
+      expect(result.status).toBe("skipped");
+    });
+
     test("should reinstall when installed SHA cannot be determined", async function() {
       AndroidAccessibilityServiceManager.setExpectedChecksumForTesting("expected-sha");
       const executedCommands: string[] = [];
@@ -417,6 +439,21 @@ describe("AccessibilityServiceManager", function() {
       expect(result.status).toBe("failed");
       expect(result.downloadUnavailable).toBe(true);
       expect(result.error).toContain("offline");
+    });
+  });
+
+  describe("downloadApk", () => {
+    test("should copy from local APK override when provided", async function() {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-test-apk-"));
+      const localApkPath = path.join(tempDir, "accessibility-service-debug.apk");
+      const payload = Buffer.alloc(12000, 1);
+      await fs.writeFile(localApkPath, payload);
+
+      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = localApkPath;
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+      const stats = await fs.stat(apkPath);
+      expect(stats.size).toBe(payload.length);
     });
   });
 });

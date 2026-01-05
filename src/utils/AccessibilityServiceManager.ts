@@ -379,13 +379,23 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
     await fs.mkdir(tempDir, { recursive: true });
 
     try {
-      logger.info("Downloading APK", { url: AndroidAccessibilityServiceManager.APK_URL, destination: apkPath });
+      const overridePath = this.getApkPathOverride();
+      if (overridePath) {
+        logger.info("Using local accessibility service APK", { path: overridePath });
+        const stats = await fs.stat(overridePath);
+        if (!stats.isFile()) {
+          throw new Error(`Accessibility APK override is not a file: ${overridePath}`);
+        }
+        await fs.copyFile(overridePath, apkPath);
+      } else {
+        logger.info("Downloading APK", { url: AndroidAccessibilityServiceManager.APK_URL, destination: apkPath });
 
-      // Use curl to download the APK
-      const { stderr } = await execAsync(`curl -L -o "${apkPath}" "${AndroidAccessibilityServiceManager.APK_URL}"`);
+        // Use curl to download the APK
+        const { stderr } = await execAsync(`curl -L -o "${apkPath}" "${AndroidAccessibilityServiceManager.APK_URL}"`);
 
-      if (stderr && !stderr.includes("100")) {
-        logger.warn("Download may have failed", { stderr });
+        if (stderr && !stderr.includes("100")) {
+          logger.warn("Download may have failed", { stderr });
+        }
       }
 
       // Verify the file exists and has reasonable size (should be > 10KB)
@@ -671,6 +681,9 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
   }
 
   private getExpectedChecksum(): string {
+    if (this.shouldSkipChecksum()) {
+      return "";
+    }
     return AndroidAccessibilityServiceManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
   }
 
@@ -685,5 +698,22 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       normalized.includes("name lookup timed out") ||
       normalized.includes("temporary failure in name resolution")
     );
+  }
+
+  private getApkPathOverride(): string | null {
+    const override = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+    if (!override) {
+      return null;
+    }
+    const trimmed = override.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+
+  private shouldSkipChecksum(): boolean {
+    const skipEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
+    if (skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true")) {
+      return true;
+    }
+    return this.getApkPathOverride() !== null;
   }
 }

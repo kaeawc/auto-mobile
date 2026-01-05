@@ -732,6 +732,10 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
   }
 
   private shouldSkipChecksum(): boolean {
+    const explicitSkip = process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+    if (explicitSkip && explicitSkip.toLowerCase() === "true") {
+      return true;
+    }
     const skipEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     if (skipEnv && (skipEnv === "1" || skipEnv.toLowerCase() === "true")) {
       return true;

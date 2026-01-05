@@ -16,11 +16,13 @@ describe("AccessibilityServiceManager", function() {
   let originalApkPathEnv: string | undefined;
   let originalSkipChecksumEnv: string | undefined;
   let originalSkipDownloadEnv: string | undefined;
+  let originalSkipShaEnv: string | undefined;
 
   beforeEach(function() {
     originalApkPathEnv = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+    originalSkipShaEnv = process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
 
@@ -66,6 +68,11 @@ describe("AccessibilityServiceManager", function() {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
     } else {
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownloadEnv;
+    }
+    if (originalSkipShaEnv === undefined) {
+      delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+    } else {
+      process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK = originalSkipShaEnv;
     }
   });
   describe("isInstalled", function() {
@@ -357,6 +364,13 @@ describe("AccessibilityServiceManager", function() {
 
     test("should skip version check when local APK override is set", async function() {
       process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = "/tmp/local-accessibility.apk";
+
+      const result = await accessibilityServiceClient.ensureCompatibleVersion();
+      expect(result.status).toBe("skipped");
+    });
+
+    test("should skip version check when SHA skip flag is true", async function() {
+      process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK = "true";
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");

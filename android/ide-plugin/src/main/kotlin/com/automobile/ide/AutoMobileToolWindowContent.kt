@@ -38,16 +38,12 @@ fun AutoMobileToolWindowContent() {
   var templates by remember { mutableStateOf<List<McpResourceTemplate>>(emptyList()) }
   var navGraphSnippet by remember { mutableStateOf<String?>(null) }
 
-  DisposableEffect(Unit) {
-    onDispose {
-      client.close()
-    }
-  }
+  DisposableEffect(Unit) { onDispose { client.close() } }
 
   IntUiTheme {
     Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp),
+        modifier = Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
       Text("AutoMobile")
       Text("Status: $statusText")
@@ -58,39 +54,43 @@ fun AutoMobileToolWindowContent() {
       }
 
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        DefaultButton(onClick = {
-          scope.launch {
-            statusText = "Connecting..."
-            lastError = null
-            navGraphSnippet = null
-            try {
-              withContext(Dispatchers.IO) {
-                client.ping()
-                resources = client.listResources()
-                templates = client.listResourceTemplates()
+        DefaultButton(
+            onClick = {
+              scope.launch {
+                statusText = "Connecting..."
+                lastError = null
+                navGraphSnippet = null
+                try {
+                  withContext(Dispatchers.IO) {
+                    client.ping()
+                    resources = client.listResources()
+                    templates = client.listResourceTemplates()
+                  }
+                  statusText = "Connected"
+                } catch (e: McpConnectionException) {
+                  statusText = "Not connected"
+                  lastError = e.message
+                }
               }
-              statusText = "Connected"
-            } catch (e: McpConnectionException) {
-              statusText = "Not connected"
-              lastError = e.message
             }
-          }
-        }) {
+        ) {
           Text("Attach to MCP")
         }
-        OutlinedButton(onClick = {
-          scope.launch {
-            lastError = null
-            try {
-              withContext(Dispatchers.IO) {
-                resources = client.listResources()
-                templates = client.listResourceTemplates()
+        OutlinedButton(
+            onClick = {
+              scope.launch {
+                lastError = null
+                try {
+                  withContext(Dispatchers.IO) {
+                    resources = client.listResources()
+                    templates = client.listResourceTemplates()
+                  }
+                } catch (e: McpConnectionException) {
+                  lastError = e.message
+                }
               }
-            } catch (e: McpConnectionException) {
-              lastError = e.message
             }
-          }
-        }) {
+        ) {
           Text("Refresh")
         }
       }
@@ -99,9 +99,7 @@ fun AutoMobileToolWindowContent() {
       Text("Resources: ${resources.size} | Templates: ${templates.size}")
       if (resources.isNotEmpty()) {
         Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-          resources.take(5).forEach { resource ->
-            Text("- ${resource.name} (${resource.uri})")
-          }
+          resources.take(5).forEach { resource -> Text("- ${resource.name} (${resource.uri})") }
           if (resources.size > 5) {
             Text("- ...")
           }
@@ -110,42 +108,36 @@ fun AutoMobileToolWindowContent() {
 
       Spacer(modifier = Modifier.height(12.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        DefaultButton(onClick = {
-          scope.launch {
-            lastError = null
-            try {
-              val result = withContext(Dispatchers.IO) { client.getNavigationGraph() }
-              navGraphSnippet = result.toString().take(500)
-            } catch (e: McpConnectionException) {
-              lastError = e.message
+        DefaultButton(
+            onClick = {
+              scope.launch {
+                lastError = null
+                try {
+                  val result = withContext(Dispatchers.IO) { client.getNavigationGraph() }
+                  navGraphSnippet = result.toString().take(500)
+                } catch (e: McpConnectionException) {
+                  lastError = e.message
+                }
+              }
             }
-          }
-        }) {
+        ) {
           Text("Import Graph")
         }
-        OutlinedButton(onClick = {
-          scope.launch {
-            lastError = "Export not wired yet"
-          }
-        }) {
+        OutlinedButton(onClick = { scope.launch { lastError = "Export not wired yet" } }) {
           Text("Export Graph")
         }
       }
 
       Spacer(modifier = Modifier.height(8.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        DefaultButton(onClick = {
-          scope.launch {
-            lastError = "Feature flags are not wired yet"
-          }
-        }) {
+        DefaultButton(
+            onClick = { scope.launch { lastError = "Feature flags are not wired yet" } }
+        ) {
           Text("Toggle Perf Debug")
         }
-        OutlinedButton(onClick = {
-          scope.launch {
-            lastError = "Feature flags are not wired yet"
-          }
-        }) {
+        OutlinedButton(
+            onClick = { scope.launch { lastError = "Feature flags are not wired yet" } }
+        ) {
           Text("Toggle Traces")
         }
       }

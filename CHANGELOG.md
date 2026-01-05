@@ -1,20 +1,13 @@
-Changelog
-=========
+# Changelog
 
-0.0.2
------
+## [v0.0.2] - 2025-07-01
+### Other
+- Accessibility service with availability checks
+- Active window caching
+- Device session management
+- Improved docs for setup and installation
+- More test coverage
 
-_2025-07-01_
-
-* Accessibility service with availability checks
-* Active window caching
-* Device session management
-* Improved docs for setup and installation
-* More test coverage
-
-0.0.1
------
-
-_2025-06-23_
-
-Initial release!
+## [v0.0.1] - 2025-06-23
+### Other
+- Initial release!

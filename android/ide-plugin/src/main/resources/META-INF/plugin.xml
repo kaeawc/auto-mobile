@@ -10,6 +10,6 @@
   <depends>com.intellij.modules.platform</depends>
 
   <extensions defaultExtensionNs="com.intellij">
-    <toolWindow id="AutoMobile" anchor="right" factoryClass="com.automobile.ide.AutoMobileToolWindowFactory" />
+    <toolWindow id="AutoMobile" anchor="right" icon="/icons/toolWindow.svg" factoryClass="com.automobile.ide.AutoMobileToolWindowFactory" />
   </extensions>
 </idea-plugin>

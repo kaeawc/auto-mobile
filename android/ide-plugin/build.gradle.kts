@@ -30,6 +30,8 @@ dependencies {
 
   intellijPlatform {
     intellijIdea("2024.3")
+    instrumentationTools()
+    pluginVerifier()
   }
 }
 
@@ -49,6 +51,12 @@ intellijPlatform {
       name.set("AutoMobile")
       email.set("support@automobile.dev")
       url.set("https://github.com/kaeawc/auto-mobile")
+    }
+  }
+
+  pluginVerification {
+    ides {
+      recommended()
     }
   }
 }

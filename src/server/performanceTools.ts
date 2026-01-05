@@ -71,10 +71,10 @@ export function registerPerformanceTools(): void {
         const range = getTimestampRange(page.results.map(result => result.timestamp));
         const toolCalls = range
           ? await toolCallRepository.listToolNamesBetween(
-              range.start,
-              range.end,
-              ["listPerformanceAuditResults"]
-            )
+            range.start,
+            range.end,
+            ["listPerformanceAuditResults"]
+          )
           : [];
 
         return createJSONToolResponse({

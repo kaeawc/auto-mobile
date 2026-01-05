@@ -1,0 +1,1682 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mobile interaction automation">
+      
+      
+        <meta name="author" content="Jason Pearson">
+      
+      
+      
+      
+      
+      <link rel="icon" href="../../img/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Vision Fallback for Element Detection - AutoMobile</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vision-fallback-for-element-detection" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="AutoMobile" class="md-header__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AutoMobile
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Vision Fallback for Element Detection
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="AutoMobile" class="md-nav__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    AutoMobile
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Installation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Server
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Server
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Resources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/observation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Observation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-server/interaction-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interaction Loop
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Test Execution
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            Test Execution
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-execution/junitrunner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    JUnitRunner
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-execution/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../test-execution/options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Options
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../batteries-included/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Batteries Included
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Client Support
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Client Support
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/firebender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Firebender 
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/cursor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Cursor
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/goose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Goose
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Contributing
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Contributing
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/local-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Local Development
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kaeawc/auto-mobile/discussions" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    GitHub Discussions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Change Log
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Overview
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-it-works" class="md-nav__link">
+    <span class="md-ellipsis">
+      How It Works
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#default-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Default Configuration
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#enabling-vision-fallback-internal-api" class="md-nav__link">
+    <span class="md-ellipsis">
+      Enabling Vision Fallback (Internal API)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#example-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example Scenarios
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Example Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario-1-element-text-changed" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 1: Element Text Changed
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-2-element-requires-navigation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 2: Element Requires Navigation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-3-element-doesnt-exist" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 3: Element Doesn&rsquo;t Exist
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost-tracking" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cost Tracking
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Cost Tracking">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#cost-calculation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cost Calculation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#caching" class="md-nav__link">
+    <span class="md-ellipsis">
+      Caching
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Limitations
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Limitations">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-limitations" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Limitations
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#when-vision-fallback-wont-help" class="md-nav__link">
+    <span class="md-ellipsis">
+      When Vision Fallback Won&rsquo;t Help
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-key-setup" class="md-nav__link">
+    <span class="md-ellipsis">
+      API Key Setup
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#monitoring-usage" class="md-nav__link">
+    <span class="md-ellipsis">
+      Monitoring Usage
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Monitoring Usage">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#check-cache-stats" class="md-nav__link">
+    <span class="md-ellipsis">
+      Check Cache Stats
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#clear-cache" class="md-nav__link">
+    <span class="md-ellipsis">
+      Clear Cache
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Advanced Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adjust-confidence-threshold" class="md-nav__link">
+    <span class="md-ellipsis">
+      Adjust Confidence Threshold
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#increase-cost-limit" class="md-nav__link">
+    <span class="md-ellipsis">
+      Increase Cost Limit
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#vision-fallback-is-not-enabled" class="md-nav__link">
+    <span class="md-ellipsis">
+      &ldquo;Vision fallback is not enabled&rdquo;
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#anthropic_api_key-not-set" class="md-nav__link">
+    <span class="md-ellipsis">
+      &ldquo;ANTHROPIC_API_KEY not set&rdquo;
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#screenshot-capture-failed" class="md-nav__link">
+    <span class="md-ellipsis">
+      &ldquo;Screenshot capture failed&rdquo;
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#high-costs" class="md-nav__link">
+    <span class="md-ellipsis">
+      High costs
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementation references
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#future-enhancements" class="md-nav__link">
+    <span class="md-ellipsis">
+      Future Enhancements
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#faq" class="md-nav__link">
+    <span class="md-ellipsis">
+      FAQ
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#related-documentation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Related Documentation
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#support" class="md-nav__link">
+    <span class="md-ellipsis">
+      Support
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="vision-fallback-for-element-detection">Vision Fallback for Element Detection<a class="headerlink" href="#vision-fallback-for-element-detection" title="Permanent link">&para;</a></h1>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>Vision fallback is an internal <code>tapOn</code> feature that uses Claude&rsquo;s vision API to help locate UI elements when traditional
+element finding methods fail. It is not exposed via the MCP server or CLI by default; it requires constructing
+<code>TapOnElement</code> with a custom vision configuration.</p>
+<h2 id="how-it-works">How It Works<a class="headerlink" href="#how-it-works" title="Permanent link">&para;</a></h2>
+<p>When element finding fails after all retries (5 attempts), <code>TapOnElement</code> will:</p>
+<ol>
+<li><strong>Screenshot capture</strong>: A screenshot is automatically taken</li>
+<li><strong>Claude analysis</strong>: The screenshot is analyzed using Claude&rsquo;s vision API</li>
+<li><strong>Smart response</strong>: Based on confidence level, Claude provides:</li>
+<li><strong>High confidence</strong>: Step-by-step navigation instructions</li>
+<li><strong>Medium/Low confidence</strong>: Alternative selectors or detailed error explanation</li>
+</ol>
+<h2 id="configuration">Configuration<a class="headerlink" href="#configuration" title="Permanent link">&para;</a></h2>
+<p>Vision fallback is <strong>disabled by default</strong> to avoid unexpected API costs. It is only configurable per
+<code>TapOnElement</code> instance today.</p>
+<h3 id="default-configuration">Default Configuration<a class="headerlink" href="#default-configuration" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">false</span><span class="p">,</span><span class="w">              </span><span class="c1">// Disabled by default</span>
+<span class="w">  </span><span class="nx">provider</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;claude&#39;</span><span class="p">,</span><span class="w">          </span><span class="c1">// Only Claude supported currently</span>
+<span class="w">  </span><span class="nx">confidenceThreshold</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;high&#39;</span><span class="p">,</span><span class="w"> </span><span class="c1">// Reserved for future gating (not enforced yet)</span>
+<span class="w">  </span><span class="nx">maxCostUsd</span><span class="o">:</span><span class="w"> </span><span class="kt">1.0</span><span class="p">,</span><span class="w">            </span><span class="c1">// Warning threshold (does not block calls)</span>
+<span class="w">  </span><span class="nx">cacheResults</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span><span class="w">          </span><span class="c1">// Cache results to avoid repeated calls</span>
+<span class="w">  </span><span class="nx">cacheTtlMinutes</span><span class="o">:</span><span class="w"> </span><span class="kt">60</span><span class="w">         </span><span class="c1">// Cache for 60 minutes</span>
+<span class="p">}</span>
+</code></pre></div>
+<h3 id="enabling-vision-fallback-internal-api">Enabling Vision Fallback (Internal API)<a class="headerlink" href="#enabling-vision-fallback-internal-api" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kd">const</span><span class="w"> </span><span class="nx">tapTool</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">TapOnElement</span><span class="p">(</span>
+<span class="w">  </span><span class="nx">device</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">adb</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">axe</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">webdriver</span><span class="p">,</span>
+<span class="w">  </span><span class="p">{</span>
+<span class="w">    </span><span class="p">...</span><span class="nx">DEFAULT_VISION_CONFIG</span><span class="p">,</span>
+<span class="w">    </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w">  </span><span class="c1">// Enable vision fallback</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">);</span>
+</code></pre></div>
+<p>Note: The MCP server constructs <code>TapOnElement</code> with the default config, so vision fallback is not available through MCP
+tool calls unless you modify the server code.</p>
+<h2 id="example-scenarios">Example Scenarios<a class="headerlink" href="#example-scenarios" title="Permanent link">&para;</a></h2>
+<h3 id="scenario-1-element-text-changed">Scenario 1: Element Text Changed<a class="headerlink" href="#scenario-1-element-text-changed" title="Permanent link">&para;</a></h3>
+<p><strong>Input</strong>: <code>tapOn({ text: "Login" })</code></p>
+<p><strong>Traditional Error</strong>:
+<div class="highlight"><pre><span></span><code>Element not found with provided text &#39;Login&#39;
+</code></pre></div></p>
+<p><strong>With Vision Fallback</strong> (if enabled):
+<div class="highlight"><pre><span></span><code>Element not found. AI suggests trying:
+- text: &quot;Sign In&quot; (Text label changed from &#39;Login&#39; to &#39;Sign In&#39;)
+
+(Cost: $0.0234, Confidence: high)
+</code></pre></div></p>
+<h3 id="scenario-2-element-requires-navigation">Scenario 2: Element Requires Navigation<a class="headerlink" href="#scenario-2-element-requires-navigation" title="Permanent link">&para;</a></h3>
+<p><strong>Input</strong>: <code>tapOn({ text: "Advanced Settings" })</code></p>
+<p><strong>With Vision Fallback</strong>:
+<div class="highlight"><pre><span></span><code>Element not found, but AI suggests these steps:
+1. Scroll down in the settings menu to reveal more options
+2. Look for &quot;Advanced Settings&quot; in the newly visible section
+
+(Cost: $0.0312, Confidence: high)
+</code></pre></div></p>
+<h3 id="scenario-3-element-doesnt-exist">Scenario 3: Element Doesn&rsquo;t Exist<a class="headerlink" href="#scenario-3-element-doesnt-exist" title="Permanent link">&para;</a></h3>
+<p><strong>Input</strong>: <code>tapOn({ text: "Nonexistent Button" })</code></p>
+<p><strong>With Vision Fallback</strong>:
+<div class="highlight"><pre><span></span><code>Element not found. The current screen shows a login form with
+&#39;Username&#39;, &#39;Password&#39;, and &#39;Sign In&#39; elements. The requested
+&#39;Nonexistent Button&#39; is not visible on this screen.
+
+(Cost: $0.0198, Confidence: high)
+</code></pre></div></p>
+<h2 id="cost-tracking">Cost Tracking<a class="headerlink" href="#cost-tracking" title="Permanent link">&para;</a></h2>
+<p>Vision fallback tracks and reports costs for each API call:</p>
+<ul>
+<li><strong>Input tokens</strong>: Screenshot + view hierarchy + prompt (~5,000-10,000 tokens)</li>
+<li><strong>Output tokens</strong>: Analysis response (~500-1,000 tokens)</li>
+<li><strong>Typical cost</strong>: $0.02-0.05 per failed element search</li>
+</ul>
+<h3 id="cost-calculation">Cost Calculation<a class="headerlink" href="#cost-calculation" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Input: $3 per million tokens</li>
+<li>Output: $15 per million tokens</li>
+<li>Vision image: Counts as ~1,500 tokens (varies by resolution)</li>
+</ul>
+<p><strong>Example</strong>:
+- 8,000 input tokens + 800 output tokens = <strong>$0.036</strong></p>
+<h2 id="performance">Performance<a class="headerlink" href="#performance" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Screenshot capture</strong>: ~100-200ms</li>
+<li><strong>Claude API call</strong>: ~2-5 seconds</li>
+<li><strong>Total fallback time</strong>: ~2-5 seconds (only when traditional methods fail)</li>
+</ul>
+<h2 id="caching">Caching<a class="headerlink" href="#caching" title="Permanent link">&para;</a></h2>
+<p>Results are cached to avoid repeated API calls for the same element search:</p>
+<ul>
+<li><strong>Cache key</strong>: Screenshot path + search criteria (text/resourceId)</li>
+<li><strong>TTL</strong>: 60 minutes (configurable)</li>
+<li><strong>Benefit</strong>: Instant response for repeated failures</li>
+</ul>
+<h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
+<h3 id="current-limitations">Current Limitations<a class="headerlink" href="#current-limitations" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>tapOn only</strong>: Currently only integrated into <code>tapOn</code> tool</li>
+<li>
+<p>Additional tools would need explicit integration.</p>
+</li>
+<li>
+<p><strong>Android screenshots</strong>: Works best with clear Android UI screenshots</p>
+</li>
+<li>
+<p>iOS screenshot capture is not implemented yet (vision fallback will fail to read the image).</p>
+</li>
+<li>
+<p><strong>No auto-retry</strong>: Suggestions are informational only</p>
+</li>
+<li>User must manually retry with suggested selectors</li>
+<li>Future: Auto-retry with suggested alternatives</li>
+</ol>
+<h3 id="when-vision-fallback-wont-help">When Vision Fallback Won&rsquo;t Help<a class="headerlink" href="#when-vision-fallback-wont-help" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Element truly doesn&rsquo;t exist on screen</li>
+<li>Screenshot quality is poor</li>
+<li>Custom/non-standard UI elements</li>
+<li>Dynamic content that changes rapidly</li>
+</ul>
+<h2 id="api-key-setup">API Key Setup<a class="headerlink" href="#api-key-setup" title="Permanent link">&para;</a></h2>
+<p>Vision fallback requires an Anthropic API key:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Set API key</span>
+<span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>sk-ant-xxxxx
+
+<span class="c1"># Verify it&#39;s set</span>
+<span class="nb">echo</span><span class="w"> </span><span class="nv">$ANTHROPIC_API_KEY</span>
+</code></pre></div>
+<p>Get an API key at: <a href="https://console.anthropic.com/">https://console.anthropic.com/</a></p>
+<h2 id="monitoring-usage">Monitoring Usage<a class="headerlink" href="#monitoring-usage" title="Permanent link">&para;</a></h2>
+<h3 id="check-cache-stats">Check Cache Stats<a class="headerlink" href="#check-cache-stats" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kd">const</span><span class="w"> </span><span class="nx">visionFallback</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">VisionFallback</span><span class="p">(</span><span class="nx">config</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">stats</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">visionFallback</span><span class="p">.</span><span class="nx">getCacheStats</span><span class="p">();</span>
+
+<span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="sb">`Cache size: </span><span class="si">${</span><span class="nx">stats</span><span class="p">.</span><span class="nx">size</span><span class="si">}</span><span class="sb">`</span><span class="p">);</span>
+<span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="sb">`Cached keys: </span><span class="si">${</span><span class="nx">stats</span><span class="p">.</span><span class="nx">keys</span><span class="p">.</span><span class="nx">join</span><span class="p">(</span><span class="s1">&#39;, &#39;</span><span class="p">)</span><span class="si">}</span><span class="sb">`</span><span class="p">);</span>
+</code></pre></div>
+<h3 id="clear-cache">Clear Cache<a class="headerlink" href="#clear-cache" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nx">visionFallback</span><span class="p">.</span><span class="nx">clearCache</span><span class="p">();</span>
+</code></pre></div>
+<h2 id="advanced-configuration">Advanced Configuration<a class="headerlink" href="#advanced-configuration" title="Permanent link">&para;</a></h2>
+<h3 id="adjust-confidence-threshold">Adjust Confidence Threshold<a class="headerlink" href="#adjust-confidence-threshold" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">confidenceThreshold</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;medium&#39;</span><span class="w">  </span><span class="c1">// More suggestions, possibly lower quality</span>
+<span class="p">}</span>
+</code></pre></div>
+<ul>
+<li><code>'high'</code>: Only suggest when &gt;90% confident</li>
+<li><code>'medium'</code>: Suggest when &gt;70% confident</li>
+<li><code>'low'</code>: Suggest when &gt;50% confident</li>
+</ul>
+<h3 id="increase-cost-limit">Increase Cost Limit<a class="headerlink" href="#increase-cost-limit" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="p">{</span>
+<span class="w">  </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span>
+<span class="w">  </span><span class="nx">maxCostUsd</span><span class="o">:</span><span class="w"> </span><span class="kt">5.0</span><span class="w">  </span><span class="c1">// Allow up to $5 per call</span>
+<span class="p">}</span>
+</code></pre></div>
+<p><strong>Warning</strong>: A single call shouldn&rsquo;t exceed ~$0.10 under normal circumstances. Higher limits protect against edge cases.</p>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="vision-fallback-is-not-enabled">&ldquo;Vision fallback is not enabled&rdquo;<a class="headerlink" href="#vision-fallback-is-not-enabled" title="Permanent link">&para;</a></h3>
+<p>Enable it in the configuration (see above).</p>
+<h3 id="anthropic_api_key-not-set">&ldquo;ANTHROPIC_API_KEY not set&rdquo;<a class="headerlink" href="#anthropic_api_key-not-set" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">ANTHROPIC_API_KEY</span><span class="o">=</span>your-key-here
+</code></pre></div>
+<h3 id="screenshot-capture-failed">&ldquo;Screenshot capture failed&rdquo;<a class="headerlink" href="#screenshot-capture-failed" title="Permanent link">&para;</a></h3>
+<p>Ensure device is connected and accessible:
+<div class="highlight"><pre><span></span><code>adb<span class="w"> </span>devices
+</code></pre></div></p>
+<h3 id="high-costs">High costs<a class="headerlink" href="#high-costs" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Check if caching is enabled (<code>cacheResults: true</code>)</li>
+<li>Reduce <code>maxCostUsd</code> to set limits</li>
+<li>Monitor usage in Anthropic console</li>
+</ul>
+<h2 id="implementation-references">Implementation references<a class="headerlink" href="#implementation-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/TapOnElement.ts#L31-L169"><code>src/features/action/TapOnElement.ts#L31-L169</code></a> for retry count and vision fallback invocation.</li>
+<li><a href="https://github.com/kaeawc/auto-mobile/blob/main/src/vision/VisionFallback.ts#L14-L149"><code>src/vision/VisionFallback.ts#L14-L149</code></a> for default config, caching, and max-cost warnings.</li>
+<li><a href="https://github.com/kaeawc/auto-mobile/blob/main/src/vision/ClaudeVisionClient.ts#L16-L84"><code>src/vision/ClaudeVisionClient.ts#L16-L84</code></a> for Anthropic API usage and token-based cost calculation.</li>
+<li><a href="https://github.com/kaeawc/auto-mobile/blob/main/src/vision/VisionTypes.ts#L1-L70"><code>src/vision/VisionTypes.ts#L1-L70</code></a> for vision config and result types.</li>
+<li><a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/observe/TakeScreenshot.ts#L112-L170"><code>src/features/observe/TakeScreenshot.ts#L112-L170</code></a> for screenshot capture behavior (Android vs iOS).</li>
+</ul>
+<h2 id="future-enhancements">Future Enhancements<a class="headerlink" href="#future-enhancements" title="Permanent link">&para;</a></h2>
+<p>Planned improvements (not yet implemented):</p>
+<ol>
+<li><strong>Auto-retry</strong>: Automatically retry with suggested selectors</li>
+<li><strong>More tools</strong>: Integrate into <code>swipeOn</code>, <code>scrollUntil</code>, etc.</li>
+<li><strong>Local models</strong>: Add Florence-2/PaddleOCR for faster, free fallback</li>
+<li><strong>Set-of-Mark</strong>: Enhanced spatial understanding with visual markers</li>
+<li><strong>Learning</strong>: Track corrections to improve suggestions over time</li>
+</ol>
+<h2 id="faq">FAQ<a class="headerlink" href="#faq" title="Permanent link">&para;</a></h2>
+<p><strong>Q: Will this slow down my tests?</strong>
+A: No. Vision fallback only activates after 5 failed retries (~1.5s), adding 2-5s only when elements can&rsquo;t be found.</p>
+<p><strong>Q: How much will this cost?</strong>
+A: Typically $0.02-0.05 per failed element search. For 100 failed searches: ~$2-5. Caching reduces repeat costs.</p>
+<p><strong>Q: Can I use it offline?</strong>
+A: No, Claude vision API requires internet. Local models (planned) will enable offline use.</p>
+<p><strong>Q: Is my screenshot data stored?</strong>
+A: Screenshots are sent to Anthropic&rsquo;s API per their privacy policy. Results are cached locally only.</p>
+<p><strong>Q: Can I disable it temporarily?</strong>
+A: Yes, set <code>enabled: false</code> in config or remove <code>ANTHROPIC_API_KEY</code> from environment.</p>
+<h2 id="related-documentation">Related Documentation<a class="headerlink" href="#related-documentation" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="./tapon.md">TapOn Tool</a></li>
+<li><a href="./element-finding.md">Element Finding</a></li>
+<li><a href="https://docs.anthropic.com/">Anthropic API Documentation</a></li>
+</ul>
+<h2 id="support">Support<a class="headerlink" href="#support" title="Permanent link">&para;</a></h2>
+<p>Issues with vision fallback? Report at:
+<a href="https://github.com/kaeawc/auto-mobile/issues">https://github.com/kaeawc/auto-mobile/issues</a></p>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Jason Pearson
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["content.code.copy", "content.code.select"], "search": "../../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

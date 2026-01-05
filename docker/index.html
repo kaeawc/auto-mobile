@@ -1,0 +1,1926 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mobile interaction automation">
+      
+      
+        <meta name="author" content="Jason Pearson">
+      
+      
+      
+      
+      
+      <link rel="icon" href="../img/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Docker Setup for AutoMobile - AutoMobile</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#docker-setup-for-automobile" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AutoMobile" class="md-header__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AutoMobile
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Docker Setup for AutoMobile
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AutoMobile" class="md-nav__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    AutoMobile
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Installation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Server
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Server
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Resources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/observation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Observation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/interaction-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interaction Loop
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Test Execution
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            Test Execution
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/junitrunner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    JUnitRunner
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Options
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/batteries-included/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Batteries Included
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Client Support
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Client Support
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/firebender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Firebender 
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/cursor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Cursor
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/goose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Goose
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Contributing
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Contributing
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/local-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Local Development
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kaeawc/auto-mobile/discussions" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    GitHub Discussions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Change Log
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#overview" class="md-nav__link">
+    <span class="md-ellipsis">
+      Overview
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Overview">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pre-built-images" class="md-nav__link">
+    <span class="md-ellipsis">
+      Pre-built Images
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#quick-start" class="md-nav__link">
+    <span class="md-ellipsis">
+      Quick Start
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Quick Start">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#build-the-docker-image" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build the Docker Image
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#run-the-container" class="md-nav__link">
+    <span class="md-ellipsis">
+      Run the Container
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Run the Container">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#using-docker-compose-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Docker Compose (Recommended)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#using-docker-directly" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using Docker Directly
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#container-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Container Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Container Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#privileged-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Privileged Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#network-mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      Network Mode
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#volume-mounts" class="md-nav__link">
+    <span class="md-ellipsis">
+      Volume Mounts
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#using-adb-with-docker" class="md-nav__link">
+    <span class="md-ellipsis">
+      Using ADB with Docker
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Using ADB with Docker">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#connecting-to-physical-devices" class="md-nav__link">
+    <span class="md-ellipsis">
+      Connecting to Physical Devices
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#verifying-device-connection" class="md-nav__link">
+    <span class="md-ellipsis">
+      Verifying Device Connection
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#starting-an-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      Starting an Emulator
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#development-workflow" class="md-nav__link">
+    <span class="md-ellipsis">
+      Development Workflow
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Development Workflow">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#interactive-shell" class="md-nav__link">
+    <span class="md-ellipsis">
+      Interactive Shell
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#running-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Running Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#linting-and-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Linting and Validation
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#building-android-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Building Android Components
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#adb-connection-issues" class="md-nav__link">
+    <span class="md-ellipsis">
+      ADB Connection Issues
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#build-failures" class="md-nav__link">
+    <span class="md-ellipsis">
+      Build Failures
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementation References
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Implementation References">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#large-image-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      Large Image Size
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#production-deployment" class="md-nav__link">
+    <span class="md-ellipsis">
+      Production Deployment
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      Environment Variables
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#advanced-configuration" class="md-nav__link">
+    <span class="md-ellipsis">
+      Advanced Configuration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Advanced Configuration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#custom-android-sdk-components" class="md-nav__link">
+    <span class="md-ellipsis">
+      Custom Android SDK Components
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#persisting-additional-data" class="md-nav__link">
+    <span class="md-ellipsis">
+      Persisting Additional Data
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#platform-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      Platform Support
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Platform Support">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#current-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      Current Support
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#ios-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      iOS Support
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cicd-integration" class="md-nav__link">
+    <span class="md-ellipsis">
+      CI/CD Integration
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="CI/CD Integration">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#github-actions" class="md-nav__link">
+    <span class="md-ellipsis">
+      GitHub Actions
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#gitlab-ci" class="md-nav__link">
+    <span class="md-ellipsis">
+      GitLab CI
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#validation-and-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      Validation and Testing
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Validation and Testing">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#dockerfile-validation" class="md-nav__link">
+    <span class="md-ellipsis">
+      Dockerfile Validation
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#container-structure-tests" class="md-nav__link">
+    <span class="md-ellipsis">
+      Container Structure Tests
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#mcp-stdio-protocol-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      MCP stdio Protocol Testing
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cicd-testing" class="md-nav__link">
+    <span class="md-ellipsis">
+      CI/CD Testing
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next Steps
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="docker-setup-for-automobile">Docker Setup for AutoMobile<a class="headerlink" href="#docker-setup-for-automobile" title="Permanent link">&para;</a></h1>
+<p>This guide covers how to use Docker to run AutoMobile with all required Android development tools pre-installed.</p>
+<h2 id="overview">Overview<a class="headerlink" href="#overview" title="Permanent link">&para;</a></h2>
+<p>The Docker setup provides a complete Android development environment with:</p>
+<ul>
+<li><strong>Bun 1.3.5</strong> - All-in-one JavaScript runtime and package manager</li>
+<li><strong>Java 21</strong> - Required for Android build tools and ktfmt</li>
+<li><strong>Android SDK</strong> - Latest SDK with platform tools and build tools</li>
+<li>Platform Tools (includes ADB)</li>
+<li>Build Tools 35.0.0</li>
+<li>Android API 36 (compile and target SDK)</li>
+<li>Android Emulator and system images</li>
+<li><strong>Development Tools</strong>:</li>
+<li>ripgrep - Fast code search</li>
+<li>ktfmt - Kotlin code formatter</li>
+<li>lychee - Link checker</li>
+<li>shellcheck - Shell script validator</li>
+<li>xmlstarlet - XML processing</li>
+</ul>
+<h3 id="pre-built-images">Pre-built Images<a class="headerlink" href="#pre-built-images" title="Permanent link">&para;</a></h3>
+<p>Official images are published to Docker Hub for linux/amd64. The Dockerfile is x86_64-only; ARM64 is not supported.</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Pull the latest version</span>
+docker<span class="w"> </span>pull<span class="w"> </span>kaeawc/auto-mobile:latest
+
+<span class="c1"># Pull a specific version</span>
+docker<span class="w"> </span>pull<span class="w"> </span>kaeawc/auto-mobile:v0.0.7
+</code></pre></div>
+<p><strong>Available on Docker Hub</strong>: <a href="https://hub.docker.com/r/kaeawc/auto-mobile">https://hub.docker.com/r/kaeawc/auto-mobile</a></p>
+<p>For setup and publishing details, see the <a href="../docker-hub-setup/">Docker Hub Setup Guide</a>.</p>
+<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
+<blockquote>
+<p><strong>Note</strong>: If you&rsquo;re setting up AutoMobile for use with MCP clients (Claude Desktop, Continue.dev, Cline, etc.), see the <a href="../mcp-docker-config/">MCP Client Configuration Guide</a> for specific setup instructions.</p>
+</blockquote>
+<h3 id="build-the-docker-image">Build the Docker Image<a class="headerlink" href="#build-the-docker-image" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>auto-mobile:latest<span class="w"> </span>.
+</code></pre></div>
+<p>Or using docker-compose:</p>
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span>build
+</code></pre></div>
+<h3 id="run-the-container">Run the Container<a class="headerlink" href="#run-the-container" title="Permanent link">&para;</a></h3>
+<h4 id="using-docker-compose-recommended">Using Docker Compose (Recommended)<a class="headerlink" href="#using-docker-compose-recommended" title="Permanent link">&para;</a></h4>
+<p>For production mode:
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span>up<span class="w"> </span>auto-mobile
+</code></pre></div></p>
+<p>For development mode with auto-reload:
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span>up<span class="w"> </span>auto-mobile-dev
+</code></pre></div></p>
+<p><strong>Note</strong>: The checked-in <code>docker-compose.yml</code> uses <code>npm</code> commands, but the image is Bun-based. If you&rsquo;re using the
+provided compose file, update the service commands to <code>bun</code> (or override them) to match the runtime.</p>
+<h4 id="using-docker-directly">Using Docker Directly<a class="headerlink" href="#using-docker-directly" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span>run<span class="w"> </span>-it<span class="w"> </span>--rm<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--privileged<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--network<span class="w"> </span>host<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span>~/.android:/home/automobile/.android<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span>~/.auto-mobile:/home/automobile/.auto-mobile<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-v<span class="w"> </span><span class="k">$(</span><span class="nb">pwd</span><span class="k">)</span>/scratch:/workspace/scratch<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>auto-mobile:latest
+</code></pre></div>
+<h2 id="container-configuration">Container Configuration<a class="headerlink" href="#container-configuration" title="Permanent link">&para;</a></h2>
+<h3 id="privileged-mode">Privileged Mode<a class="headerlink" href="#privileged-mode" title="Permanent link">&para;</a></h3>
+<p><code>--privileged</code> is the simplest option for USB ADB access, but you can also grant narrower access by mounting
+<code>/dev/bus/usb</code> and adding <code>MKNOD</code> capabilities (as shown in <code>docker-compose.yml</code>).</p>
+<h3 id="network-mode">Network Mode<a class="headerlink" href="#network-mode" title="Permanent link">&para;</a></h3>
+<p>Using <code>network_mode: host</code> allows the container to access ADB devices on the host machine without complex port mapping.</p>
+<h3 id="volume-mounts">Volume Mounts<a class="headerlink" href="#volume-mounts" title="Permanent link">&para;</a></h3>
+<p>The docker-compose configuration includes several volume mounts:</p>
+<ol>
+<li><strong>Source Code</strong> (<code>./:/workspace</code>)</li>
+<li>Enables live code changes during development</li>
+<li>
+<p>Comment out for production builds</p>
+</li>
+<li>
+<p><strong>Android SDK</strong> (<code>android-sdk:/opt/android-sdk</code>)</p>
+</li>
+<li>Persists Android SDK between container restarts</li>
+<li>
+<p>Avoids re-downloading SDK components</p>
+</li>
+<li>
+<p><strong>Node Modules</strong> (<code>node-modules:/workspace/node_modules</code>)</p>
+</li>
+<li>Speeds up container startup</li>
+<li>
+<p>Prevents conflicts between host and container binaries</p>
+</li>
+<li>
+<p><strong>ADB Keys</strong> (<code>~/.android:/home/automobile/.android</code>)</p>
+</li>
+<li>Shares ADB authorization keys with host</li>
+<li>
+<p>Devices authorized on host work in container</p>
+</li>
+<li>
+<p><strong>AutoMobile DB</strong> (<code>~/.auto-mobile:/home/automobile/.auto-mobile</code>)</p>
+</li>
+<li>
+<p>Persists the SQLite database used for navigation graphs and audits</p>
+</li>
+<li>
+<p><strong>Scratch Directory</strong> (<code>./scratch:/workspace/scratch</code>)</p>
+</li>
+<li>Outputs and temporary files accessible from host</li>
+</ol>
+<h2 id="using-adb-with-docker">Using ADB with Docker<a class="headerlink" href="#using-adb-with-docker" title="Permanent link">&para;</a></h2>
+<h3 id="connecting-to-physical-devices">Connecting to Physical Devices<a class="headerlink" href="#connecting-to-physical-devices" title="Permanent link">&para;</a></h3>
+<ol>
+<li>Connect your Android device via USB to the host machine</li>
+<li>Ensure ADB is running on the host: <code>adb devices</code></li>
+<li>The container will have access to the device through host networking</li>
+</ol>
+<h3 id="verifying-device-connection">Verifying Device Connection<a class="headerlink" href="#verifying-device-connection" title="Permanent link">&para;</a></h3>
+<p>Inside the container:
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>adb<span class="w"> </span>devices
+</code></pre></div></p>
+<p>Or if running directly:
+<div class="highlight"><pre><span></span><code>docker<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-it<span class="w"> </span>auto-mobile<span class="w"> </span>adb<span class="w"> </span>devices
+</code></pre></div></p>
+<h3 id="starting-an-emulator">Starting an Emulator<a class="headerlink" href="#starting-an-emulator" title="Permanent link">&para;</a></h3>
+<p>The Docker image includes Android emulator support:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># List available system images</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>avdmanager<span class="w"> </span>list
+
+<span class="c1"># Create an AVD</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>avdmanager<span class="w"> </span>create<span class="w"> </span>avd<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-n<span class="w"> </span>test_device<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>-k<span class="w"> </span><span class="s2">&quot;system-images;android-36;google_apis;x86_64&quot;</span>
+
+<span class="c1"># Start the emulator (requires X11 forwarding for GUI)</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>emulator<span class="w"> </span>-avd<span class="w"> </span>test_device<span class="w"> </span>-no-window<span class="w"> </span>-no-audio
+</code></pre></div>
+<h2 id="development-workflow">Development Workflow<a class="headerlink" href="#development-workflow" title="Permanent link">&para;</a></h2>
+<h3 id="interactive-shell">Interactive Shell<a class="headerlink" href="#interactive-shell" title="Permanent link">&para;</a></h3>
+<p>Access the container shell for debugging:</p>
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bash
+</code></pre></div>
+<h3 id="running-tests">Running Tests<a class="headerlink" href="#running-tests" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run all tests</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span><span class="nb">test</span>
+
+<span class="c1"># Run specific test</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span>run<span class="w"> </span><span class="nb">test</span><span class="w"> </span>--<span class="w"> </span>--grep<span class="w"> </span><span class="s2">&quot;test name&quot;</span>
+
+<span class="c1"># Run tests with coverage</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span>run<span class="w"> </span>test:coverage
+</code></pre></div>
+<h3 id="linting-and-validation">Linting and Validation<a class="headerlink" href="#linting-and-validation" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Run linter</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span>run<span class="w"> </span>lint
+
+<span class="c1"># Run build</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span>run<span class="w"> </span>build
+
+<span class="c1"># Validate shell scripts</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>scripts/shellcheck/validate_shell_scripts.sh
+
+<span class="c1"># Validate Kotlin formatting</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>scripts/ktfmt/validate_ktfmt.sh
+</code></pre></div>
+<h2 id="building-android-components">Building Android Components<a class="headerlink" href="#building-android-components" title="Permanent link">&para;</a></h2>
+<p>The container includes full Gradle support for building Android components:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build accessibility service</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;cd android &amp;&amp; ./gradlew :accessibility-service:assembleDebug&quot;</span>
+
+<span class="c1"># Build playground app</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;cd android &amp;&amp; ./gradlew :playground:app:assembleDebug&quot;</span>
+
+<span class="c1"># Run Android unit tests</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bash<span class="w"> </span>-c<span class="w"> </span><span class="s2">&quot;cd android &amp;&amp; ./gradlew :junit-runner:test&quot;</span>
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="adb-connection-issues">ADB Connection Issues<a class="headerlink" href="#adb-connection-issues" title="Permanent link">&para;</a></h3>
+<p>If ADB cannot see devices:</p>
+<ol>
+<li>
+<p><strong>Check host ADB server</strong>:
+   <div class="highlight"><pre><span></span><code>adb<span class="w"> </span>devices
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Restart ADB on host</strong>:
+   <div class="highlight"><pre><span></span><code>adb<span class="w"> </span>kill-server
+adb<span class="w"> </span>start-server
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Verify privileged mode</strong>: Ensure the container runs with <code>--privileged</code></p>
+</li>
+<li>
+<p><strong>Check USB permissions</strong>: The host user must have USB device access</p>
+</li>
+</ol>
+<h3 id="build-failures">Build Failures<a class="headerlink" href="#build-failures" title="Permanent link">&para;</a></h3>
+<p>If builds fail with permission errors:</p>
+<ol>
+<li>
+<p><strong>Reset ownership</strong> (if mounted volumes have wrong permissions):
+   <div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>-u<span class="w"> </span>root<span class="w"> </span>auto-mobile<span class="w"> </span>chown<span class="w"> </span>-R<span class="w"> </span>automobile:automobile<span class="w"> </span>/workspace
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Clear caches</strong>:
+   <div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>bun<span class="w"> </span>run<span class="w"> </span>clean
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>rm<span class="w"> </span>-rf<span class="w"> </span>node_modules
+docker-compose<span class="w"> </span>up<span class="w"> </span>--build
+</code></pre></div></p>
+</li>
+</ol>
+<h2 id="implementation-references">Implementation References<a class="headerlink" href="#implementation-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Dockerfile (tooling + SDK versions, x86_64-only): <a href="https://github.com/kaeawc/auto-mobile/blob/main/Dockerfile#L1-L220">https://github.com/kaeawc/auto-mobile/blob/main/Dockerfile#L1-L220</a></li>
+<li>docker-compose services and mounts: <a href="https://github.com/kaeawc/auto-mobile/blob/main/docker-compose.yml#L1-L90">https://github.com/kaeawc/auto-mobile/blob/main/docker-compose.yml#L1-L90</a></li>
+<li>Docker validation script: <a href="https://github.com/kaeawc/auto-mobile/blob/main/scripts/docker/validate_dockerfile.sh#L1-L71">https://github.com/kaeawc/auto-mobile/blob/main/scripts/docker/validate_dockerfile.sh#L1-L71</a></li>
+<li>Docker CI build/test workflow: <a href="https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/pull_request.yml#L328-L420">https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/pull_request.yml#L328-L420</a></li>
+<li>Docker publish workflow: <a href="https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/merge.yml#L389-L453">https://github.com/kaeawc/auto-mobile/blob/main/.github/workflows/merge.yml#L389-L453</a></li>
+</ul>
+<h3 id="large-image-size">Large Image Size<a class="headerlink" href="#large-image-size" title="Permanent link">&para;</a></h3>
+<p>The Docker image is large (~3-4 GB) due to the Android SDK. To minimize size:</p>
+<ol>
+<li>Use multi-stage builds (advanced)</li>
+<li>Remove unnecessary SDK components</li>
+<li>Use <code>.dockerignore</code> to exclude build artifacts</li>
+</ol>
+<h2 id="production-deployment">Production Deployment<a class="headerlink" href="#production-deployment" title="Permanent link">&para;</a></h2>
+<p>For production deployments:</p>
+<ol>
+<li>
+<p><strong>Build optimized image</strong>:
+   <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>--target<span class="w"> </span>production<span class="w"> </span>-t<span class="w"> </span>auto-mobile:prod<span class="w"> </span>.
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Remove development mounts</strong>:
+   Edit <code>docker-compose.yml</code> and comment out source code volume mount</p>
+</li>
+<li>
+<p><strong>Use specific version tags</strong>:
+   <div class="highlight"><pre><span></span><code>docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>auto-mobile:v0.0.7<span class="w"> </span>.
+</code></pre></div></p>
+</li>
+<li>
+<p><strong>Security considerations</strong>:</p>
+</li>
+<li>Run as non-root user (already configured)</li>
+<li>Limit privileged mode to only when ADB access needed</li>
+<li>Use read-only file systems where possible</li>
+</ol>
+<h2 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
+<p>Customize container behavior with environment variables:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">environment</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANDROID_HOME=/opt/android-sdk</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ANDROID_SDK_ROOT=/opt/android-sdk</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">NODE_ENV=production</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ADB_VENDOR_KEY=/home/automobile/.android/adbkey</span>
+</code></pre></div>
+<h2 id="advanced-configuration">Advanced Configuration<a class="headerlink" href="#advanced-configuration" title="Permanent link">&para;</a></h2>
+<h3 id="custom-android-sdk-components">Custom Android SDK Components<a class="headerlink" href="#custom-android-sdk-components" title="Permanent link">&para;</a></h3>
+<p>To install additional SDK components:</p>
+<div class="highlight"><pre><span></span><code>docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>sdkmanager<span class="w"> </span><span class="s2">&quot;platforms;android-35&quot;</span>
+docker-compose<span class="w"> </span><span class="nb">exec</span><span class="w"> </span>auto-mobile<span class="w"> </span>sdkmanager<span class="w"> </span><span class="s2">&quot;build-tools;34.0.0&quot;</span>
+</code></pre></div>
+<h3 id="persisting-additional-data">Persisting Additional Data<a class="headerlink" href="#persisting-additional-data" title="Permanent link">&para;</a></h3>
+<p>Add more volumes to <code>docker-compose.yml</code>:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">volumes</span><span class="p">:</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">./custom-scripts:/workspace/custom-scripts</span>
+<span class="w">  </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">gradle-cache:/home/automobile/.gradle</span>
+</code></pre></div>
+<h2 id="platform-support">Platform Support<a class="headerlink" href="#platform-support" title="Permanent link">&para;</a></h2>
+<h3 id="current-support">Current Support<a class="headerlink" href="#current-support" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Linux</strong> (x86_64, aarch64): Full support</li>
+<li><strong>macOS</strong> (Intel, Apple Silicon): Partial support</li>
+<li>Physical device access limited by Docker Desktop</li>
+<li>Emulators not recommended</li>
+<li><strong>Windows</strong> (WSL2): Partial support</li>
+<li>Requires WSL2 with USB support</li>
+<li>See <a href="https://learn.microsoft.com/en-us/windows/wsl/connect-usb">WSL USB documentation</a></li>
+</ul>
+<h3 id="ios-support">iOS Support<a class="headerlink" href="#ios-support" title="Permanent link">&para;</a></h3>
+<p>iOS development is <strong>not supported</strong> in Docker because:
+- Xcode and iOS Simulator require macOS
+- Apple hardware is required for iOS development
+- No viable containerization solution exists</p>
+<p>For iOS automation, run AutoMobile natively on macOS.</p>
+<h2 id="cicd-integration">CI/CD Integration<a class="headerlink" href="#cicd-integration" title="Permanent link">&para;</a></h2>
+<h3 id="github-actions">GitHub Actions<a class="headerlink" href="#github-actions" title="Permanent link">&para;</a></h3>
+<p>Example workflow using the Docker image:</p>
+<div class="highlight"><pre><span></span><code><span class="nt">jobs</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">test</span><span class="p">:</span>
+<span class="w">    </span><span class="nt">runs-on</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">ubuntu-latest</span>
+<span class="w">    </span><span class="nt">steps</span><span class="p">:</span>
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">uses</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">actions/checkout@v4</span>
+
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Build Docker image</span>
+<span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker build -t auto-mobile:test .</span>
+
+<span class="w">      </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Run tests</span>
+<span class="w">        </span><span class="nt">run</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker run --rm auto-mobile:test bun test</span>
+</code></pre></div>
+<h3 id="gitlab-ci">GitLab CI<a class="headerlink" href="#gitlab-ci" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="nt">test</span><span class="p">:</span>
+<span class="w">  </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker:latest</span>
+<span class="w">  </span><span class="nt">services</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker:dind</span>
+<span class="w">  </span><span class="nt">script</span><span class="p">:</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker build -t auto-mobile:test .</span>
+<span class="w">    </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">docker run --rm auto-mobile:test bun test</span>
+</code></pre></div>
+<h2 id="validation-and-testing">Validation and Testing<a class="headerlink" href="#validation-and-testing" title="Permanent link">&para;</a></h2>
+<h3 id="dockerfile-validation">Dockerfile Validation<a class="headerlink" href="#dockerfile-validation" title="Permanent link">&para;</a></h3>
+<p>Validate the Dockerfile using hadolint:</p>
+<div class="highlight"><pre><span></span><code>./scripts/docker/validate_dockerfile.sh
+</code></pre></div>
+<p>This checks for:
+- Best practices violations
+- Security issues
+- Performance problems
+- Maintainability concerns</p>
+<h3 id="container-structure-tests">Container Structure Tests<a class="headerlink" href="#container-structure-tests" title="Permanent link">&para;</a></h3>
+<p>Run comprehensive container tests:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Build the image first</span>
+docker<span class="w"> </span>build<span class="w"> </span>-t<span class="w"> </span>auto-mobile:latest<span class="w"> </span>.
+
+<span class="c1"># Run tests</span>
+./scripts/docker/test_container.sh
+</code></pre></div>
+<p>Tests include:
+- Image existence and startup
+- Bun and Java versions
+- Android SDK components
+- Development tools availability
+- MCP stdio protocol communication
+- User configuration
+- Init system (tini) presence</p>
+<h3 id="mcp-stdio-protocol-testing">MCP stdio Protocol Testing<a class="headerlink" href="#mcp-stdio-protocol-testing" title="Permanent link">&para;</a></h3>
+<p>Test the MCP server&rsquo;s stdio communication:</p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Send an initialize request</span>
+<span class="nb">echo</span><span class="w"> </span><span class="s1">&#39;{&quot;jsonrpc&quot;:&quot;2.0&quot;,&quot;id&quot;:1,&quot;method&quot;:&quot;initialize&quot;,&quot;params&quot;:{&quot;protocolVersion&quot;:&quot;2024-11-05&quot;,&quot;capabilities&quot;:{},&quot;clientInfo&quot;:{&quot;name&quot;:&quot;test&quot;,&quot;version&quot;:&quot;1.0.0&quot;}}}&#39;</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>docker<span class="w"> </span>run<span class="w"> </span>-i<span class="w"> </span>--rm<span class="w"> </span>--init<span class="w"> </span>auto-mobile:latest
+</code></pre></div>
+<p>Expected response should be a JSON-RPC message with server capabilities.</p>
+<h3 id="cicd-testing">CI/CD Testing<a class="headerlink" href="#cicd-testing" title="Permanent link">&para;</a></h3>
+<p>The project includes GitHub Actions workflows in <code>.github/workflows/pull_request.yml</code> and <code>.github/workflows/merge.yml</code>
+that lint/build/test Docker images and publish to Docker Hub.</p>
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../mcp-docker-config/">MCP Client Configuration</a> - Configure MCP clients to use Docker</li>
+<li><a href="../installation/">Installation Guide</a> - Native installation</li>
+<li><a href="../">Documentation Home</a> - Using AutoMobile</li>
+<li><a href="../features/mcp-server/">MCP Server Documentation</a> - Server capabilities</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Jason Pearson
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.select"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

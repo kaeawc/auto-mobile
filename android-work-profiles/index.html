@@ -1,0 +1,1591 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mobile interaction automation">
+      
+      
+        <meta name="author" content="Jason Pearson">
+      
+      
+      
+      
+      
+      <link rel="icon" href="../img/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Android Work Profile Testing - AutoMobile</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#android-work-profile-testing" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="AutoMobile" class="md-header__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AutoMobile
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Android Work Profile Testing
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="AutoMobile" class="md-nav__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    AutoMobile
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Installation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Server
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Server
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Resources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/observation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Observation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/mcp-server/interaction-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interaction Loop
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Test Execution
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            Test Execution
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/junitrunner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    JUnitRunner
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/test-execution/options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Options
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/batteries-included/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Batteries Included
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../features/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Client Support
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Client Support
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/firebender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Firebender 
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/cursor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Cursor
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../mcp-clients/goose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Goose
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Contributing
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Contributing
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../contributing/local-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Local Development
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kaeawc/auto-mobile/discussions" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    GitHub Discussions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../security.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Change Log
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#what-is-a-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      What is a Work Profile?
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#automobile-work-profile-support" class="md-nav__link">
+    <span class="md-ellipsis">
+      AutoMobile Work Profile Support
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="AutoMobile Work Profile Support">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#supported-features" class="md-nav__link">
+    <span class="md-ellipsis">
+      Supported Features
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#setting-up-work-profile-on-android-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      Setting Up Work Profile on Android Emulator
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Setting Up Work Profile on Android Emulator">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#prerequisites" class="md-nav__link">
+    <span class="md-ellipsis">
+      Prerequisites
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Steps
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Steps">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-create-or-start-an-emulator" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Create or Start an Emulator
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-set-up-work-profile-using-test-dpc" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Set Up Work Profile Using Test DPC
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-verify-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Verify Work Profile
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-install-apps-to-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Install Apps to Work Profile
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-with-automobile" class="md-nav__link">
+    <span class="md-ellipsis">
+      Testing with AutoMobile
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing with AutoMobile">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#example-install-app-to-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example: Install App to Work Profile
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-launch-app-auto-detected-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example: Launch App (Auto-detected Profile)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#example-list-apps-from-all-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      Example: List Apps from All Profiles
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#testing-scenarios" class="md-nav__link">
+    <span class="md-ellipsis">
+      Testing Scenarios
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Testing Scenarios">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#scenario-1-app-in-foreground" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 1: App in Foreground
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-2-multiple-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 2: Multiple Profiles
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#scenario-3-same-app-in-both-profiles" class="md-nav__link">
+    <span class="md-ellipsis">
+      Scenario 3: Same App in Both Profiles
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#troubleshooting" class="md-nav__link">
+    <span class="md-ellipsis">
+      Troubleshooting
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Troubleshooting">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#work-profile-not-showing-up" class="md-nav__link">
+    <span class="md-ellipsis">
+      Work Profile Not Showing Up
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#app-not-installing-to-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      App Not Installing to Work Profile
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#cannot-launch-app-in-work-profile" class="md-nav__link">
+    <span class="md-ellipsis">
+      Cannot Launch App in Work Profile
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#adb-commands-reference" class="md-nav__link">
+    <span class="md-ellipsis">
+      ADB Commands Reference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#api-version-compatibility" class="md-nav__link">
+    <span class="md-ellipsis">
+      API Version Compatibility
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementation References
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="android-work-profile-testing">Android Work Profile Testing<a class="headerlink" href="#android-work-profile-testing" title="Permanent link">&para;</a></h1>
+<p>This guide explains how to set up and test Android work profiles with AutoMobile.</p>
+<h2 id="what-is-a-work-profile">What is a Work Profile?<a class="headerlink" href="#what-is-a-work-profile" title="Permanent link">&para;</a></h2>
+<p>An Android work profile is a separate user profile on a device that allows organizations to manage work-related apps and data separately from personal apps. Each profile has its own user ID:
+- <strong>User 0</strong>: Primary/Personal profile
+- <strong>User 10+</strong>: Work profiles or other managed profiles</p>
+<h2 id="automobile-work-profile-support">AutoMobile Work Profile Support<a class="headerlink" href="#automobile-work-profile-support" title="Permanent link">&para;</a></h2>
+<p>AutoMobile automatically detects and handles work profiles across all app management features:</p>
+<ul>
+<li><strong>Auto-detection</strong>: Features automatically detect the appropriate user profile</li>
+<li><strong>Priority order</strong>:</li>
+<li>If app is in foreground → use that user profile</li>
+<li>Else if a running work profile exists → use the first running work profile</li>
+<li>Else → use primary user (user 0)</li>
+<li><strong>userId in responses</strong>: App management tools include the <code>userId</code> field indicating which profile was used</li>
+<li><strong>Note</strong>: MCP tool schemas do not currently accept a <code>userId</code> override; selection is automatic</li>
+</ul>
+<h3 id="supported-features">Supported Features<a class="headerlink" href="#supported-features" title="Permanent link">&para;</a></h3>
+<p>App management tools that support work profiles:
+- <code>installApp</code> - Install APKs to the auto-selected profile
+- <code>launchApp</code> - Launch apps in the auto-selected profile
+- <code>terminateApp</code> - Terminate apps in the auto-selected profile
+- <code>listApps</code> - List apps from all profiles with userId and foreground status (recent is a placeholder)</p>
+<h2 id="setting-up-work-profile-on-android-emulator">Setting Up Work Profile on Android Emulator<a class="headerlink" href="#setting-up-work-profile-on-android-emulator" title="Permanent link">&para;</a></h2>
+<h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Android Studio with Android SDK</li>
+<li>Android emulator (API 21+, work profiles supported from Android 5.0)</li>
+<li>ADB installed and in PATH</li>
+</ul>
+<h3 id="steps">Steps<a class="headerlink" href="#steps" title="Permanent link">&para;</a></h3>
+<h4 id="1-create-or-start-an-emulator">1. Create or Start an Emulator<a class="headerlink" href="#1-create-or-start-an-emulator" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># List available AVDs</span>
+emulator<span class="w"> </span>-list-avds
+
+<span class="c1"># Start an emulator</span>
+emulator<span class="w"> </span>-avd<span class="w"> </span>&lt;avd_name&gt;
+</code></pre></div>
+<h4 id="2-set-up-work-profile-using-test-dpc">2. Set Up Work Profile Using Test DPC<a class="headerlink" href="#2-set-up-work-profile-using-test-dpc" title="Permanent link">&para;</a></h4>
+<p>Test DPC (Device Policy Controller) is Google&rsquo;s app for testing enterprise features.</p>
+<p><strong>Option A: Using ADB</strong></p>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install Test DPC from Google Play or download the APK</span>
+adb<span class="w"> </span>install<span class="w"> </span>TestDPC.apk
+
+<span class="c1"># Launch Test DPC</span>
+adb<span class="w"> </span>shell<span class="w"> </span>am<span class="w"> </span>start<span class="w"> </span>-n<span class="w"> </span>com.afwsamples.testdpc/.SetupManagementActivity
+
+<span class="c1"># Follow on-screen prompts to set up work profile</span>
+</code></pre></div>
+<p><strong>Option B: Using Device Settings</strong></p>
+<ol>
+<li>Open <strong>Settings</strong> on the emulator</li>
+<li>Go to <strong>Users &amp; accounts</strong> → <strong>Work profile</strong></li>
+<li>Tap <strong>Set up profile</strong></li>
+<li>Follow the setup wizard</li>
+<li>Install Test DPC when prompted</li>
+</ol>
+<h4 id="3-verify-work-profile">3. Verify Work Profile<a class="headerlink" href="#3-verify-work-profile" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># List all users on device</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>users
+
+<span class="c1"># Expected output:</span>
+<span class="c1"># Users:</span>
+<span class="c1">#     UserInfo{0:Owner:13} running</span>
+<span class="c1">#     UserInfo{10:Work profile:30} running</span>
+</code></pre></div>
+<p>The output shows:
+- <code>0</code> = Personal profile (primary user)
+- <code>10</code> = Work profile (managed profile)</p>
+<h4 id="4-install-apps-to-work-profile">4. Install Apps to Work Profile<a class="headerlink" href="#4-install-apps-to-work-profile" title="Permanent link">&para;</a></h4>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install to work profile (user 10)</span>
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span>your-app.apk
+
+<span class="c1"># Install to personal profile (user 0)</span>
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span><span class="m">0</span><span class="w"> </span>your-app.apk
+
+<span class="c1"># List apps in work profile</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span>
+
+<span class="c1"># List apps in personal profile</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>--user<span class="w"> </span><span class="m">0</span>
+</code></pre></div>
+<h2 id="testing-with-automobile">Testing with AutoMobile<a class="headerlink" href="#testing-with-automobile" title="Permanent link">&para;</a></h2>
+<h3 id="example-install-app-to-work-profile">Example: Install App to Work Profile<a class="headerlink" href="#example-install-app-to-work-profile" title="Permanent link">&para;</a></h3>
+<p>AutoMobile automatically installs to the work profile if it exists:</p>
+<div class="highlight"><pre><span></span><code><span class="c1">// Using MCP tool</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">installApp</span><span class="p">({</span><span class="w"> </span><span class="nx">apkPath</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;/path/to/app.apk&quot;</span><span class="w"> </span><span class="p">});</span>
+<span class="nx">console</span><span class="p">.</span><span class="nx">log</span><span class="p">(</span><span class="nx">result</span><span class="p">.</span><span class="nx">userId</span><span class="p">);</span><span class="w"> </span><span class="c1">// 10 (work profile)</span>
+</code></pre></div>
+<h3 id="example-launch-app-auto-detected-profile">Example: Launch App (Auto-detected Profile)<a class="headerlink" href="#example-launch-app-auto-detected-profile" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Auto-detects (uses foreground profile or a running work profile if present)</span>
+<span class="k">await</span><span class="w"> </span><span class="nx">launchApp</span><span class="p">({</span><span class="w"> </span><span class="nx">packageName</span><span class="o">:</span><span class="w"> </span><span class="s2">&quot;com.example.app&quot;</span><span class="w"> </span><span class="p">});</span>
+</code></pre></div>
+<h3 id="example-list-apps-from-all-profiles">Example: List Apps from All Profiles<a class="headerlink" href="#example-list-apps-from-all-profiles" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// Lists apps from all profiles with detailed info</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">apps</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">listApps</span><span class="p">();</span>
+
+<span class="c1">// Result includes grouped user apps and deduped system apps:</span>
+<span class="c1">// {</span>
+<span class="c1">//   profiles: {</span>
+<span class="c1">//     &quot;0&quot;: [</span>
+<span class="c1">//       { packageName: &quot;com.example.personal&quot;, userId: 0, foreground: false, recent: false }</span>
+<span class="c1">//     ],</span>
+<span class="c1">//     &quot;10&quot;: [</span>
+<span class="c1">//       { packageName: &quot;com.example.work&quot;, userId: 10, foreground: true, recent: false }</span>
+<span class="c1">//     ]</span>
+<span class="c1">//   },</span>
+<span class="c1">//   system: [</span>
+<span class="c1">//     { packageName: &quot;com.android.chrome&quot;, userIds: [0, 10], foreground: false, recent: false }</span>
+<span class="c1">//   ]</span>
+<span class="c1">// }</span>
+</code></pre></div>
+<p>Note: Chrome can be installed in both profiles!</p>
+<h2 id="testing-scenarios">Testing Scenarios<a class="headerlink" href="#testing-scenarios" title="Permanent link">&para;</a></h2>
+<h3 id="scenario-1-app-in-foreground">Scenario 1: App in Foreground<a class="headerlink" href="#scenario-1-app-in-foreground" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Launch app in work profile</span>
+adb<span class="w"> </span>shell<span class="w"> </span>am<span class="w"> </span>start<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span>com.example.app/.MainActivity
+
+<span class="c1"># AutoMobile operations will target user 10 automatically</span>
+</code></pre></div>
+<h3 id="scenario-2-multiple-profiles">Scenario 2: Multiple Profiles<a class="headerlink" href="#scenario-2-multiple-profiles" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Verify multiple profiles</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>users
+
+<span class="c1"># AutoMobile will:</span>
+<span class="c1"># 1. Check foreground app first</span>
+<span class="c1"># 2. Fall back to first work profile (user 10)</span>
+<span class="c1"># 3. Fall back to primary (user 0)</span>
+</code></pre></div>
+<h3 id="scenario-3-same-app-in-both-profiles">Scenario 3: Same App in Both Profiles<a class="headerlink" href="#scenario-3-same-app-in-both-profiles" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Install in both</span>
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span><span class="m">0</span><span class="w"> </span>app.apk
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span>app.apk
+
+<span class="c1"># List all installations</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>-f<span class="w"> </span>com.example.app<span class="w"> </span>--all-users
+
+<span class="c1"># AutoMobile&#39;s listApps will return both with unique userIds</span>
+</code></pre></div>
+<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
+<h3 id="work-profile-not-showing-up">Work Profile Not Showing Up<a class="headerlink" href="#work-profile-not-showing-up" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check if work profile is running</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>users
+
+<span class="c1"># If not running, restart emulator or device</span>
+</code></pre></div>
+<h3 id="app-not-installing-to-work-profile">App Not Installing to Work Profile<a class="headerlink" href="#app-not-installing-to-work-profile" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Check available space</span>
+adb<span class="w"> </span>shell<span class="w"> </span>df
+
+<span class="c1"># Verify user ID exists</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>users
+
+<span class="c1"># Install with explicit user flag</span>
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span>app.apk
+</code></pre></div>
+<h3 id="cannot-launch-app-in-work-profile">Cannot Launch App in Work Profile<a class="headerlink" href="#cannot-launch-app-in-work-profile" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1"># Verify app is installed in work profile</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>your.app
+
+<span class="c1"># Launch manually to test</span>
+adb<span class="w"> </span>shell<span class="w"> </span>am<span class="w"> </span>start<span class="w"> </span>--user<span class="w"> </span><span class="m">10</span><span class="w"> </span>your.app/.MainActivity
+</code></pre></div>
+<h2 id="adb-commands-reference">ADB Commands Reference<a class="headerlink" href="#adb-commands-reference" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="c1"># List all users</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>users
+
+<span class="c1"># Install to specific user</span>
+adb<span class="w"> </span>install<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;<span class="w"> </span>app.apk
+
+<span class="c1"># Uninstall from specific user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>uninstall<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;<span class="w"> </span>com.package.name
+
+<span class="c1"># List packages for user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>list<span class="w"> </span>packages<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;
+
+<span class="c1"># Clear app data for user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>pm<span class="w"> </span>clear<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;<span class="w"> </span>com.package.name
+
+<span class="c1"># Force stop app for user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>am<span class="w"> </span>force-stop<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;<span class="w"> </span>com.package.name
+
+<span class="c1"># Launch app in user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>am<span class="w"> </span>start<span class="w"> </span>--user<span class="w"> </span>&lt;userId&gt;<span class="w"> </span>com.package.name/.MainActivity
+
+<span class="c1"># Get foreground app with user</span>
+adb<span class="w"> </span>shell<span class="w"> </span>dumpsys<span class="w"> </span>activity<span class="w"> </span>activities<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>-E<span class="w"> </span><span class="s2">&quot;(mResumedActivity|mFocusedActivity|topResumedActivity)&quot;</span>
+</code></pre></div>
+<h2 id="api-version-compatibility">API Version Compatibility<a class="headerlink" href="#api-version-compatibility" title="Permanent link">&para;</a></h2>
+<ul>
+<li><strong>Android 5.0+ (API 21+)</strong>: Work profiles supported</li>
+<li><strong>Android 7.0+ (API 24+)</strong>: Enhanced work profile features</li>
+<li><strong>Android 9.0+ (API 28+)</strong>: Improved work profile UI</li>
+</ul>
+<p>AutoMobile&rsquo;s work profile features work on all Android versions that support work profiles (API 21+).</p>
+<h2 id="implementation-references">Implementation References<a class="headerlink" href="#implementation-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>User/profile detection (foreground + running profiles): <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/utils/android-cmdline-tools/AdbClient.ts#L525-L705">https://github.com/kaeawc/auto-mobile/blob/main/src/utils/android-cmdline-tools/AdbClient.ts#L525-L705</a></li>
+<li>Auto-selection for install: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/InstallApp.ts#L1-L84">https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/InstallApp.ts#L1-L84</a></li>
+<li>Auto-selection for launch: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/LaunchApp.ts#L249-L310">https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/LaunchApp.ts#L249-L310</a></li>
+<li>Auto-selection for terminate: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/TerminateApp.ts#L31-L120">https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/TerminateApp.ts#L31-L120</a></li>
+<li>listApps response shape: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/server/observeTools.ts#L90-L130">https://github.com/kaeawc/auto-mobile/blob/main/src/server/observeTools.ts#L90-L130</a></li>
+<li>Installed app model fields (foreground/recent): <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/models/InstalledApp.ts#L1-L61">https://github.com/kaeawc/auto-mobile/blob/main/src/models/InstalledApp.ts#L1-L61</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Jason Pearson
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "..", "features": ["content.code.copy", "content.code.select"], "search": "../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

@@ -1,0 +1,1871 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="Mobile interaction automation">
+      
+      
+        <meta name="author" content="Jason Pearson">
+      
+      
+      
+      
+      
+      <link rel="icon" href="../../img/favicon.ico">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.6.14">
+    
+    
+      
+        <title>Vision Model Research for UI Element Detection - AutoMobile</title>
+      
+    
+    
+      <link rel="stylesheet" href="../../assets/stylesheets/main.342714a4.min.css">
+      
+        
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.06af60db.min.css">
+      
+      
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Inter:300,300i,400,400i,700,700i%7CFira+Code:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Inter";--md-code-font:"Fira Code"}</style>
+      
+    
+    
+    <script>__md_scope=new URL("../..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+    
+  </head>
+  
+  
+    
+    
+      
+    
+    
+    
+    
+    <body dir="ltr" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#vision-model-research-for-ui-element-detection" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+  
+
+<header class="md-header md-header--shadow" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href="../.." title="AutoMobile" class="md-header__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            AutoMobile
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Vision Model Research for UI Element Detection
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+      
+        <form class="md-header__option" data-md-component="palette">
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: light)" data-md-color-scheme="default" data-md-color-primary="white" data-md-color-accent="green"  aria-label="Switch to dark mode"  type="radio" name="__palette" id="__palette_0">
+    
+      <label class="md-header__button md-icon" title="Switch to dark mode" for="__palette_1" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a4 4 0 0 0-4 4 4 4 0 0 0 4 4 4 4 0 0 0 4-4 4 4 0 0 0-4-4m0 10a6 6 0 0 1-6-6 6 6 0 0 1 6-6 6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+    
+    
+    
+    <input class="md-option" data-md-color-media="(prefers-color-scheme: dark)" data-md-color-scheme="slate" data-md-color-primary="black" data-md-color-accent="green"  aria-label="Switch to light mode"  type="radio" name="__palette" id="__palette_1">
+    
+      <label class="md-header__button md-icon" title="Switch to light mode" for="__palette_0" hidden>
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 18c-.89 0-1.74-.2-2.5-.55C11.56 16.5 13 14.42 13 12s-1.44-4.5-3.5-5.45C10.26 6.2 11.11 6 12 6a6 6 0 0 1 6 6 6 6 0 0 1-6 6m8-9.31V4h-4.69L12 .69 8.69 4H4v4.69L.69 12 4 15.31V20h4.69L12 23.31 15.31 20H20v-4.69L23.31 12z"/></svg>
+      </label>
+    
+  
+</form>
+      
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+
+<nav class="md-nav md-nav--primary" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href="../.." title="AutoMobile" class="md-nav__button md-logo" aria-label="AutoMobile" data-md-component="logo">
+      
+  <img src="../../img/auto_mobile_sticker_splash.png" alt="logo">
+
+    </a>
+    AutoMobile
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/kaeawc/auto-mobile" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 6.7.2 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2024 Fonticons, Inc.--><path d="M439.55 236.05 244 40.45a28.87 28.87 0 0 0-40.81 0l-40.66 40.63 51.52 51.52c27.06-9.14 52.68 16.77 43.39 43.68l49.66 49.66c34.23-11.8 61.18 31 35.47 56.69-26.49 26.49-70.21-2.87-56-37.34L240.22 199v121.85c25.3 12.54 22.26 41.85 9.08 55a34.34 34.34 0 0 1-48.55 0c-17.57-17.6-11.07-46.91 11.25-56v-123c-20.8-8.51-24.6-30.74-18.64-45L142.57 101 8.45 235.14a28.86 28.86 0 0 0 0 40.81l195.61 195.6a28.86 28.86 0 0 0 40.8 0l194.69-194.69a28.86 28.86 0 0 0 0-40.81"/></svg>
+  </div>
+  <div class="md-source__repository">
+    AutoMobile
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../.." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../installation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Installation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Features
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            Features
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Server
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Server
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/mcp-server/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/mcp-server/actions/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Actions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/mcp-server/resources/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Resources
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/mcp-server/observation/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Observation
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/mcp-server/interaction-loop/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Interaction Loop
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_3" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_3" id="__nav_3_3_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Test Execution
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_3_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_3">
+            <span class="md-nav__icon md-icon"></span>
+            Test Execution
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/test-execution/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/test-execution/junitrunner/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    JUnitRunner
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/test-execution/ci/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/test-execution/options/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Options
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/batteries-included/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Batteries Included
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../features/cli/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    CLI
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    MCP Client Support
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            MCP Client Support
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Overview
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/firebender/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Firebender 
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/cursor/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Cursor
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../mcp-clients/goose/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Goose
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+    
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    Contributing
+    
+  </span>
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            Contributing
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    How
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../contributing/local-development/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Local Development
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="https://github.com/kaeawc/auto-mobile/discussions" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    GitHub Discussions
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../faq/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    FAQ
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../security.md" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Security
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../changelog/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    Change Log
+    
+  </span>
+  
+
+      </a>
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#executive-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      Executive Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#status-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      Status (Not Yet Implemented)
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#open-source-models-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      Open Source Models Comparison
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Open Source Models Comparison">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-florence-2-microsoft-recommended" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Florence-2 (Microsoft) ⭐ RECOMMENDED
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-omniparser-microsoft" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. OmniParser (Microsoft)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-paddleocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. PaddleOCR
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-tesseract-ocr" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Tesseract OCR
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#5-yolo-series-yolov5-v8-v10-v11" class="md-nav__link">
+    <span class="md-ellipsis">
+      5. YOLO Series (YOLOv5, v8, v10, v11)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#6-set-of-mark-som-prompting" class="md-nav__link">
+    <span class="md-ellipsis">
+      6. Set-of-Mark (SoM) Prompting
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#onnx-runtime-for-local-inference" class="md-nav__link">
+    <span class="md-ellipsis">
+      ONNX Runtime for Local Inference
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#recommended-hybrid-architecture" class="md-nav__link">
+    <span class="md-ellipsis">
+      Recommended Hybrid Architecture
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Recommended Hybrid Architecture">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#tier-1-fast-local-models-0-500ms-0" class="md-nav__link">
+    <span class="md-ellipsis">
+      Tier 1: Fast Local Models (0-500ms, $0)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#tier-2-intelligent-analysis-2-5s-001-005" class="md-nav__link">
+    <span class="md-ellipsis">
+      Tier 2: Intelligent Analysis (2-5s, ~$0.01-0.05)
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#proposed-implementation-not-yet-implemented" class="md-nav__link">
+    <span class="md-ellipsis">
+      Proposed Implementation (Not Yet Implemented)
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Proposed Implementation (Not Yet Implemented)">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#1-start-with-florence-2-phase-1" class="md-nav__link">
+    <span class="md-ellipsis">
+      1. Start with Florence-2 (Phase 1)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#2-add-paddleocr-as-fallback-phase-2" class="md-nav__link">
+    <span class="md-ellipsis">
+      2. Add PaddleOCR as Fallback (Phase 2)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#3-enhance-with-set-of-mark-for-claude-phase-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      3. Enhance with Set-of-Mark for Claude (Phase 3)
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#4-configuration-strategy-selection" class="md-nav__link">
+    <span class="md-ellipsis">
+      4. Configuration &amp; Strategy Selection
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#performance-cost-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      Performance &amp; Cost Comparison
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#license-compatibility-summary" class="md-nav__link">
+    <span class="md-ellipsis">
+      License Compatibility Summary
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#next-steps" class="md-nav__link">
+    <span class="md-ellipsis">
+      Next Steps
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#conclusion" class="md-nav__link">
+    <span class="md-ellipsis">
+      Conclusion
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#implementation-references" class="md-nav__link">
+    <span class="md-ellipsis">
+      Implementation References
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="vision-model-research-for-ui-element-detection">Vision Model Research for UI Element Detection<a class="headerlink" href="#vision-model-research-for-ui-element-detection" title="Permanent link">&para;</a></h1>
+<h2 id="executive-summary">Executive Summary<a class="headerlink" href="#executive-summary" title="Permanent link">&para;</a></h2>
+<p>This research evaluates open source vision models as faster, cheaper alternatives to Claude&rsquo;s vision API for UI element detection. A <strong>hybrid approach</strong> is recommended:</p>
+<ol>
+<li><strong>Tier 1 (Fast &amp; Free)</strong>: Open source models for common tasks (OCR, basic element detection)</li>
+<li><strong>Tier 2 (Intelligent Fallback)</strong>: Claude vision API for complex analysis and navigation suggestions</li>
+</ol>
+<h2 id="status-not-yet-implemented">Status (Not Yet Implemented)<a class="headerlink" href="#status-not-yet-implemented" title="Permanent link">&para;</a></h2>
+<p>This document is research and proposal only. The current codebase uses a Claude-only vision fallback that is invoked
+from <code>tapOn</code> after element search retries, and there is no local-model Tier 1 integration yet.</p>
+<h2 id="open-source-models-comparison">Open Source Models Comparison<a class="headerlink" href="#open-source-models-comparison" title="Permanent link">&para;</a></h2>
+<h3 id="1-florence-2-microsoft-recommended">1. Florence-2 (Microsoft) ⭐ RECOMMENDED<a class="headerlink" href="#1-florence-2-microsoft-recommended" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>: MIT
+<strong>Model Size</strong>: 0.23B (base) / 0.77B (large)
+<strong>Key Features</strong>:
+- Multi-task vision-language model (OCR, object detection, captioning)
+- <code>&lt;OCR_WITH_REGION&gt;</code> mode returns text with bounding boxes
+- Open vocabulary object detection
+- Lightweight for edge deployment
+- State-of-the-art performance despite small size</p>
+<p><strong>Use Cases for AutoMobile</strong>:
+- Text detection and extraction from UI elements
+- Button/widget bounding box detection
+- UI element captioning (&ldquo;Login button&rdquo;, &ldquo;Search field&rdquo;)
+- Fast pre-processing before Claude analysis</p>
+<p><strong>Node.js Integration</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Using Hugging Face Transformers.js</span>
+<span class="k">import</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">pipeline</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;@huggingface/transformers&#39;</span><span class="p">;</span>
+
+<span class="kd">const</span><span class="w"> </span><span class="nx">detector</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">pipeline</span><span class="p">(</span><span class="s1">&#39;image-to-text&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;microsoft/Florence-2-large&#39;</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">result</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">detector</span><span class="p">(</span><span class="s1">&#39;screenshot.png&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">task</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;OCR_WITH_REGION&#39;</span>
+<span class="p">});</span>
+</code></pre></div></p>
+<p><strong>Performance</strong>: ~100-300ms inference on CPU, &lt;50ms on GPU
+<strong>Cost</strong>: Free (local inference)</p>
+<p><strong>Sources</strong>: <a href="https://huggingface.co/microsoft/Florence-2-large">Hugging Face</a>, <a href="https://blog.roboflow.com/florence-2/">Roboflow Guide</a></p>
+<hr />
+<h3 id="2-omniparser-microsoft">2. OmniParser (Microsoft)<a class="headerlink" href="#2-omniparser-microsoft" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>: Mixed (YOLO component AGPL, BLIP-2/Florence MIT) ⚠️
+<strong>Released</strong>: 2024, V2 in Feb 2025
+<strong>Key Features</strong>:
+- Purpose-built for UI screen parsing
+- Detects interactable elements (buttons, inputs, links)
+- Associates UI elements with functional descriptions
+- 39.5% accuracy on ScreenSpot Pro benchmark (V2)
+- Built on YOLOv8 (icon detection) + BLIP-2/Florence (captioning)</p>
+<p><strong>Use Cases for AutoMobile</strong>:
+- Identifying clickable regions in screenshots
+- Generating element descriptions for LLM consumption
+- UI automation grounding</p>
+<p><strong>Licensing Caveat</strong>:
+- Icon detection model inherits AGPL from YOLOv8 (requires open sourcing connected code)
+- Icon captioning models (BLIP-2/Florence) are MIT
+- <strong>Not recommended for commercial use without careful license review</strong></p>
+<p><strong>Performance</strong>: ~200-500ms for full screen parsing
+<strong>Cost</strong>: Free (local inference)</p>
+<p><strong>Sources</strong>: <a href="https://github.com/microsoft/OmniParser">GitHub</a>, <a href="https://microsoft.github.io/OmniParser/">Project Page</a></p>
+<hr />
+<h3 id="3-paddleocr">3. PaddleOCR<a class="headerlink" href="#3-paddleocr" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>: Apache 2.0 ✅
+<strong>Latest Version</strong>: v3.0 (May 2025), PP-OCRv5
+<strong>Key Features</strong>:
+- 80+ language support
+- Ultra-lightweight mobile models (~9.6 MB)
+- PP-StructureV3 for layout analysis
+- 13-point accuracy improvement in v5
+- Optimized for mobile/IoT deployment</p>
+<p><strong>Use Cases for AutoMobile</strong>:
+- Fast text extraction from Android UI
+- Layout analysis (buttons, forms, tables)
+- Edge device deployment
+- Multi-language app testing</p>
+<p><strong>Node.js Integration</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Via ONNX Runtime Node.js</span>
+<span class="k">import</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">ort</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;onnxruntime-node&#39;</span><span class="p">;</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">session</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">ort</span><span class="p">.</span><span class="nx">InferenceSession</span><span class="p">.</span><span class="nx">create</span><span class="p">(</span><span class="s1">&#39;paddleocr_v5.onnx&#39;</span><span class="p">);</span>
+</code></pre></div></p>
+<p><strong>Performance</strong>: &lt;100ms on mobile CPU
+<strong>Cost</strong>: Free (local inference)</p>
+<p><strong>Sources</strong>: <a href="https://github.com/PaddlePaddle/PaddleOCR">GitHub</a>, <a href="https://paddlepaddle.github.io/PaddleOCR/">Documentation</a></p>
+<hr />
+<h3 id="4-tesseract-ocr">4. Tesseract OCR<a class="headerlink" href="#4-tesseract-ocr" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>: Apache 2.0 ✅
+<strong>Latest Version</strong>: 5.x
+<strong>Key Features</strong>:
+- 100+ language support
+- Unicode (UTF-8) support
+- Battle-tested (used by Gmail, Google)
+- Extensive language training data</p>
+<p><strong>Use Cases for AutoMobile</strong>:
+- Baseline OCR for text extraction
+- Fallback when other models fail
+- Specialized language support</p>
+<p><strong>Limitations</strong>:
+- Less accurate than modern deep learning OCR
+- No UI element detection (text only)
+- Slower than PaddleOCR/Florence-2</p>
+<p><strong>Performance</strong>: ~300-800ms per screen
+<strong>Cost</strong>: Free (local inference)</p>
+<p><strong>Sources</strong>: <a href="https://github.com/tesseract-ocr/tesseract">GitHub</a>, <a href="https://en.wikipedia.org/wiki/Tesseract_(software)">Wikipedia</a></p>
+<hr />
+<h3 id="5-yolo-series-yolov5-v8-v10-v11">5. YOLO Series (YOLOv5, v8, v10, v11)<a class="headerlink" href="#5-yolo-series-yolov5-v8-v10-v11" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>:
+- YOLOv5: GPL-3.0 (Ultralytics)
+- YOLOv8/v11: <strong>AGPL-3.0</strong> ⚠️ (requires open sourcing connected code)
+- YOLOv10: GPL-3.0 (THU-MIG)
+- Commercial licenses available from Ultralytics</p>
+<p><strong>Key Features</strong>:
+- Real-time object detection
+- YOLOv11: 22% fewer parameters than v8, higher accuracy
+- Supports detection, segmentation, classification
+- Can be fine-tuned for UI element detection</p>
+<p><strong>Licensing Issues</strong>:
+- AGPL requires open-sourcing any code that connects to the model
+- Not suitable for proprietary/commercial use without enterprise license
+- <strong>Not recommended due to licensing constraints</strong></p>
+<p><strong>Alternative</strong>: Fine-tune Florence-2 or use OmniParser&rsquo;s pre-trained YOLO component (if AGPL acceptable)</p>
+<p><strong>Sources</strong>: <a href="https://docs.ultralytics.com/">Ultralytics Docs</a>, <a href="https://www.ultralytics.com/license">License Guide</a></p>
+<hr />
+<h3 id="6-set-of-mark-som-prompting">6. Set-of-Mark (SoM) Prompting<a class="headerlink" href="#6-set-of-mark-som-prompting" title="Permanent link">&para;</a></h3>
+<p><strong>License</strong>: Open source (Microsoft Research)
+<strong>Type</strong>: Prompting technique, not a model
+<strong>Key Features</strong>:
+- Visual prompting method for GPT-4V and other VLMs
+- Overlays images with alphanumeric markers on regions
+- Uses SAM/SEEM for segmentation
+- Zero-shot outperforms fine-tuned models on RefCOCOg
+- Assigns unique IDs to interactable UI elements</p>
+<p><strong>Use Cases for AutoMobile</strong>:
+- Enhance Claude vision analysis with marked regions
+- Improve element localization accuracy
+- Enable precise reference to screen regions</p>
+<p><strong>Integration Approach</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// 1. Use SAM/SEEM to segment screenshot into regions</span>
+<span class="c1">// 2. Overlay numeric markers (1, 2, 3...) on each region</span>
+<span class="c1">// 3. Send marked image to Claude vision API</span>
+<span class="c1">// 4. Claude responds: &quot;Tap on region 7 for search&quot;</span>
+<span class="c1">// 5. Map region ID back to coordinates</span>
+</code></pre></div></p>
+<p><strong>Performance</strong>: Adds ~500ms for segmentation + marker overlay
+<strong>Cost</strong>: Free for segmentation, Claude API cost for analysis</p>
+<p><strong>Sources</strong>: <a href="https://github.com/microsoft/SoM">GitHub</a>, <a href="https://arxiv.org/abs/2310.11441">Paper</a>, <a href="https://som-gpt4v.github.io/">Project Page</a></p>
+<hr />
+<h2 id="onnx-runtime-for-local-inference">ONNX Runtime for Local Inference<a class="headerlink" href="#onnx-runtime-for-local-inference" title="Permanent link">&para;</a></h2>
+<p><strong>Why ONNX</strong>:
+- Cross-platform deployment (Windows, macOS, Linux, mobile)
+- Hardware acceleration (CPU, GPU, CoreML, DirectML)
+- Node.js/TypeScript support via <code>onnxruntime-node</code> and <code>onnxruntime-web</code>
+- Export from PyTorch/TensorFlow/Keras</p>
+<p><strong>Node.js Integration</strong>:
+<div class="highlight"><pre><span></span><code><span class="k">import</span><span class="w"> </span><span class="o">*</span><span class="w"> </span><span class="kr">as</span><span class="w"> </span><span class="nx">ort</span><span class="w"> </span><span class="kr">from</span><span class="w"> </span><span class="s1">&#39;onnxruntime-node&#39;</span><span class="p">;</span>
+
+<span class="c1">// Load model once at startup</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">session</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">ort</span><span class="p">.</span><span class="nx">InferenceSession</span><span class="p">.</span><span class="nx">create</span><span class="p">(</span><span class="s1">&#39;florence2-base.onnx&#39;</span><span class="p">,</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">executionProviders</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;cuda&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;cpu&#39;</span><span class="p">]</span><span class="w">  </span><span class="c1">// GPU fallback to CPU</span>
+<span class="p">});</span>
+
+<span class="c1">// Run inference</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">tensor</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="ow">new</span><span class="w"> </span><span class="nx">ort</span><span class="p">.</span><span class="nx">Tensor</span><span class="p">(</span><span class="s1">&#39;float32&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">imageData</span><span class="p">,</span><span class="w"> </span><span class="p">[</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="mf">3</span><span class="p">,</span><span class="w"> </span><span class="mf">224</span><span class="p">,</span><span class="w"> </span><span class="mf">224</span><span class="p">]);</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">results</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">session</span><span class="p">.</span><span class="nx">run</span><span class="p">({</span><span class="w"> </span><span class="nx">input</span><span class="o">:</span><span class="w"> </span><span class="kt">tensor</span><span class="w"> </span><span class="p">});</span>
+</code></pre></div></p>
+<p><strong>Model Conversion</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1"># Florence-2 to ONNX</span>
+pip<span class="w"> </span>install<span class="w"> </span>optimum<span class="o">[</span>exporters<span class="o">]</span>
+optimum-cli<span class="w"> </span><span class="nb">export</span><span class="w"> </span>onnx<span class="w"> </span>--model<span class="w"> </span>microsoft/Florence-2-base<span class="w"> </span>florence2-onnx/
+
+<span class="c1"># PaddleOCR (already provides ONNX)</span>
+wget<span class="w"> </span>https://paddleocr.bj.bcebos.com/PP-OCRv5/ppocr_v5_det.onnx
+</code></pre></div></p>
+<p><strong>Sources</strong>: <a href="https://pyimagesearch.com/2025/07/28/run-yolo-model-in-the-browser-with-onnx-webassembly-and-next-js/">PyImageSearch Tutorial</a>, <a href="https://www.npmjs.com/package/onnxruntime-web">ONNX Runtime Web</a></p>
+<hr />
+<h2 id="recommended-hybrid-architecture">Recommended Hybrid Architecture<a class="headerlink" href="#recommended-hybrid-architecture" title="Permanent link">&para;</a></h2>
+<h3 id="tier-1-fast-local-models-0-500ms-0">Tier 1: Fast Local Models (0-500ms, $0)<a class="headerlink" href="#tier-1-fast-local-models-0-500ms-0" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>Element Not Found
+    ↓
+┌─────────────────────────────────────┐
+│ Take Screenshot                     │
+└────────────┬────────────────────────┘
+             ↓
+┌─────────────────────────────────────┐
+│ Florence-2: OCR + Object Detection  │
+│ - Extract all text with bounding boxes│
+│ - Detect UI widgets (buttons, inputs)│
+│ - Generate element descriptions     │
+└────────────┬────────────────────────┘
+             ↓
+    ┌────────┴────────┐
+    │                 │
+    ▼                 ▼
+Found Element?    Not Found
+    │                 │
+    │                 ▼
+    │         ┌───────────────────────┐
+    │         │ PaddleOCR (fallback)  │
+    │         │ - Deep text extraction│
+    │         │ - Layout analysis     │
+    │         └───────┬───────────────┘
+    │                 │
+    ▼                 ▼
+Return alternative   Still not found?
+selectors                │
+                         ▼
+                    Tier 2: Claude
+</code></pre></div>
+<h3 id="tier-2-intelligent-analysis-2-5s-001-005">Tier 2: Intelligent Analysis (2-5s, ~$0.01-0.05)<a class="headerlink" href="#tier-2-intelligent-analysis-2-5s-001-005" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>┌──────────────────────────────────────────┐
+│ Claude Vision API + Set-of-Mark (Optional)│
+│ - Analyze screenshot (+ SoM markers)      │
+│ - Identify element or explain absence    │
+│ - Generate navigation steps (if high conf)│
+│ - Suggest alternative approaches          │
+└────────────────┬─────────────────────────┘
+                 ↓
+         High Confidence?
+         /              \
+       Yes               No
+        │                │
+        ▼                ▼
+  Return steps      Return detailed
+  to user           error + insights
+</code></pre></div>
+<hr />
+<h2 id="proposed-implementation-not-yet-implemented">Proposed Implementation (Not Yet Implemented)<a class="headerlink" href="#proposed-implementation-not-yet-implemented" title="Permanent link">&para;</a></h2>
+<h3 id="1-start-with-florence-2-phase-1">1. Start with Florence-2 (Phase 1)<a class="headerlink" href="#1-start-with-florence-2-phase-1" title="Permanent link">&para;</a></h3>
+<p><strong>Why</strong>:
+- MIT license (no restrictions)
+- Multi-task (OCR + detection + captioning)
+- Small, fast, state-of-the-art
+- Easy integration via Hugging Face</p>
+<p><strong>Implementation</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// src/vision/Florence2Client.ts</span>
+<span class="k">export</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nx">Florence2Client</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">async</span><span class="w"> </span><span class="nx">analyzeUI</span><span class="p">(</span><span class="nx">screenshotPath</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">Florence2Result</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 1. OCR with regions</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">ocrResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">runTask</span><span class="p">(</span><span class="s1">&#39;OCR_WITH_REGION&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">screenshotPath</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 2. Object detection</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">objectsResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">runTask</span><span class="p">(</span><span class="s1">&#39;&lt;OD&gt;&#39;</span><span class="p">,</span><span class="w"> </span><span class="nx">screenshotPath</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 3. Generate element descriptions</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">descriptions</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">runTask</span><span class="p">(</span><span class="s1">&#39;&lt;CAPTION_TO_PHRASE_GROUNDING&gt;&#39;</span><span class="p">,</span>
+<span class="w">      </span><span class="nx">screenshotPath</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;button input field menu&#39;</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nx">textElements</span><span class="o">:</span><span class="w"> </span><span class="kt">ocrResult.regions</span><span class="p">,</span>
+<span class="w">      </span><span class="nx">uiElements</span><span class="o">:</span><span class="w"> </span><span class="kt">objectsResult.bboxes</span><span class="p">,</span>
+<span class="w">      </span><span class="nx">descriptions</span><span class="o">:</span><span class="w"> </span><span class="kt">descriptions.phrases</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<p><strong>Success Criteria</strong>:
+- Finds 80%+ of basic text-based elements
+- &lt;500ms average latency
+- Works offline</p>
+<hr />
+<h3 id="2-add-paddleocr-as-fallback-phase-2">2. Add PaddleOCR as Fallback (Phase 2)<a class="headerlink" href="#2-add-paddleocr-as-fallback-phase-2" title="Permanent link">&para;</a></h3>
+<p><strong>Use When</strong>:
+- Florence-2 misses text (low confidence, complex fonts)
+- Non-English languages
+- Heavily stylized UI</p>
+<p><strong>Implementation</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// Cascade: Florence-2 → PaddleOCR → Claude</span>
+<span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">florence2Confidence</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">0.7</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="kd">const</span><span class="w"> </span><span class="nx">paddleResult</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">paddleOCR</span><span class="p">.</span><span class="nx">detect</span><span class="p">(</span><span class="nx">screenshot</span><span class="p">);</span>
+<span class="w">  </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">paddleResult</span><span class="p">.</span><span class="nx">found</span><span class="p">)</span><span class="w"> </span><span class="k">return</span><span class="w"> </span><span class="nx">paddleResult</span><span class="p">;</span>
+<span class="p">}</span>
+</code></pre></div></p>
+<hr />
+<h3 id="3-enhance-with-set-of-mark-for-claude-phase-3">3. Enhance with Set-of-Mark for Claude (Phase 3)<a class="headerlink" href="#3-enhance-with-set-of-mark-for-claude-phase-3" title="Permanent link">&para;</a></h3>
+<p><strong>Use When</strong>:
+- Open source models fail
+- Need precise element localization
+- Complex navigation required</p>
+<p><strong>Implementation</strong>:
+<div class="highlight"><pre><span></span><code><span class="c1">// src/vision/SetOfMarkPreprocessor.ts</span>
+<span class="k">export</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nx">SetOfMarkPreprocessor</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="k">async</span><span class="w"> </span><span class="nx">addMarkers</span><span class="p">(</span><span class="nx">screenshotPath</span><span class="o">:</span><span class="w"> </span><span class="kt">string</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nb">Promise</span><span class="o">&lt;</span><span class="nx">MarkedImage</span><span class="o">&gt;</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// 1. Segment with SAM/SEEM</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">segments</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">segment</span><span class="p">(</span><span class="nx">screenshotPath</span><span class="p">);</span>
+
+<span class="w">    </span><span class="c1">// 2. Overlay alphanumeric markers</span>
+<span class="w">    </span><span class="kd">const</span><span class="w"> </span><span class="nx">markedImage</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="k">this</span><span class="p">.</span><span class="nx">overlayMarkers</span><span class="p">(</span><span class="nx">screenshotPath</span><span class="p">,</span><span class="w"> </span><span class="nx">segments</span><span class="p">);</span>
+
+<span class="w">    </span><span class="k">return</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="nx">imagePath</span><span class="o">:</span><span class="w"> </span><span class="kt">markedImage</span><span class="p">,</span>
+<span class="w">      </span><span class="nx">regionMap</span><span class="o">:</span><span class="w"> </span><span class="kt">segments.map</span><span class="p">((</span><span class="nx">s</span><span class="p">,</span><span class="w"> </span><span class="nx">i</span><span class="p">)</span><span class="w"> </span><span class="p">=&gt;</span><span class="w"> </span><span class="p">({</span><span class="w"> </span><span class="nx">id</span><span class="o">:</span><span class="w"> </span><span class="kt">i</span><span class="o">+</span><span class="mf">1</span><span class="p">,</span><span class="w"> </span><span class="nx">bounds</span><span class="o">:</span><span class="w"> </span><span class="kt">s.bounds</span><span class="w"> </span><span class="p">}))</span>
+<span class="w">    </span><span class="p">};</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+
+<span class="c1">// Usage with Claude</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">marked</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">somPreprocessor</span><span class="p">.</span><span class="nx">addMarkers</span><span class="p">(</span><span class="nx">screenshot</span><span class="p">);</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">claudeResponse</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="k">await</span><span class="w"> </span><span class="nx">claude</span><span class="p">.</span><span class="nx">analyze</span><span class="p">(</span><span class="nx">marked</span><span class="p">.</span><span class="nx">imagePath</span><span class="p">,</span><span class="w"> </span><span class="nx">searchCriteria</span><span class="p">);</span>
+<span class="c1">// Response: &quot;Tap region 7 to access search&quot;</span>
+<span class="kd">const</span><span class="w"> </span><span class="nx">targetBounds</span><span class="w"> </span><span class="o">=</span><span class="w"> </span><span class="nx">marked</span><span class="p">.</span><span class="nx">regionMap</span><span class="p">[</span><span class="mf">6</span><span class="p">].</span><span class="nx">bounds</span><span class="p">;</span><span class="w">  </span><span class="c1">// 0-indexed</span>
+</code></pre></div></p>
+<hr />
+<h3 id="4-configuration-strategy-selection">4. Configuration &amp; Strategy Selection<a class="headerlink" href="#4-configuration-strategy-selection" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="c1">// src/vision/VisionConfig.ts</span>
+<span class="k">export</span><span class="w"> </span><span class="kd">interface</span><span class="w"> </span><span class="nx">VisionStrategy</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">tier1</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">models</span><span class="o">:</span><span class="w"> </span><span class="kt">Array</span><span class="o">&lt;</span><span class="s1">&#39;florence2&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;paddleocr&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;tesseract&#39;</span><span class="o">&gt;</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">confidenceThreshold</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">timeoutMs</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="w">  </span><span class="nx">tier2</span><span class="o">:</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">useSoM</span><span class="o">:</span><span class="w"> </span><span class="kt">boolean</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">confidenceThreshold</span><span class="o">:</span><span class="w"> </span><span class="s1">&#39;high&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;medium&#39;</span><span class="w"> </span><span class="o">|</span><span class="w"> </span><span class="s1">&#39;low&#39;</span><span class="p">;</span>
+<span class="w">    </span><span class="nx">maxCostUsd</span><span class="o">:</span><span class="w"> </span><span class="kt">number</span><span class="p">;</span>
+<span class="w">  </span><span class="p">};</span>
+<span class="p">}</span>
+
+<span class="c1">// Auto-strategy selection</span>
+<span class="k">export</span><span class="w"> </span><span class="kd">class</span><span class="w"> </span><span class="nx">VisionStrategySelector</span><span class="w"> </span><span class="p">{</span>
+<span class="w">  </span><span class="nx">selectStrategy</span><span class="p">(</span><span class="nx">context</span><span class="o">:</span><span class="w"> </span><span class="kt">SearchContext</span><span class="p">)</span><span class="o">:</span><span class="w"> </span><span class="nx">VisionStrategy</span><span class="w"> </span><span class="p">{</span>
+<span class="w">    </span><span class="c1">// Prefer local models first</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">previousAttempts</span><span class="w"> </span><span class="o">&lt;</span><span class="w"> </span><span class="mf">2</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">tier1</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span><span class="w"> </span><span class="nx">models</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;florence2&#39;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Add PaddleOCR for complex cases</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">containsComplexText</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">tier1</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">models</span><span class="o">:</span><span class="w"> </span><span class="p">[</span><span class="s1">&#39;florence2&#39;</span><span class="p">,</span><span class="w"> </span><span class="s1">&#39;paddleocr&#39;</span><span class="p">]</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+
+<span class="w">    </span><span class="c1">// Escalate to Claude for navigation</span>
+<span class="w">    </span><span class="k">if</span><span class="w"> </span><span class="p">(</span><span class="nx">context</span><span class="p">.</span><span class="nx">needsNavigation</span><span class="p">)</span><span class="w"> </span><span class="p">{</span>
+<span class="w">      </span><span class="k">return</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">tier2</span><span class="o">:</span><span class="w"> </span><span class="p">{</span><span class="w"> </span><span class="nx">enabled</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="p">,</span><span class="w"> </span><span class="nx">useSoM</span><span class="o">:</span><span class="w"> </span><span class="kt">true</span><span class="w"> </span><span class="p">}</span><span class="w"> </span><span class="p">};</span>
+<span class="w">    </span><span class="p">}</span>
+<span class="w">  </span><span class="p">}</span>
+<span class="p">}</span>
+</code></pre></div>
+<hr />
+<h2 id="performance-cost-comparison">Performance &amp; Cost Comparison<a class="headerlink" href="#performance-cost-comparison" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Approach</th>
+<th>Latency</th>
+<th>Cost/Call</th>
+<th>Accuracy</th>
+<th>Use Case</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Florence-2</strong></td>
+<td>100-300ms</td>
+<td>$0</td>
+<td>80-85%</td>
+<td>Text + basic UI detection</td>
+</tr>
+<tr>
+<td><strong>PaddleOCR</strong></td>
+<td>&lt;100ms</td>
+<td>$0</td>
+<td>85-90%</td>
+<td>Text extraction, layout</td>
+</tr>
+<tr>
+<td><strong>Tesseract</strong></td>
+<td>300-800ms</td>
+<td>$0</td>
+<td>70-80%</td>
+<td>Legacy/specialized OCR</td>
+</tr>
+<tr>
+<td><strong>OmniParser</strong></td>
+<td>200-500ms</td>
+<td>$0</td>
+<td>75-80%</td>
+<td>UI parsing (AGPL concern)</td>
+</tr>
+<tr>
+<td><strong>Florence-2 + PaddleOCR</strong></td>
+<td>200-400ms</td>
+<td>$0</td>
+<td>90-92%</td>
+<td>Hybrid local</td>
+</tr>
+<tr>
+<td><strong>Claude + SoM</strong></td>
+<td>2-5s</td>
+<td>$0.01-0.05</td>
+<td>95-98%</td>
+<td>Complex analysis</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Projected Savings</strong>:
+- 80% of cases handled by local models (Tier 1)
+- 15% escalate to Claude (Tier 2)
+- 5% remain unsolved (genuine UI issues)</p>
+<p><strong>Cost Impact</strong>:
+- Before: 100 failed searches × $0.03 = <strong>$3.00</strong>
+- After: 20 failed searches × $0.03 = <strong>$0.60</strong> (80% reduction)
+- Latency: Average 0.5s vs. 3s (6x faster)</p>
+<hr />
+<h2 id="license-compatibility-summary">License Compatibility Summary<a class="headerlink" href="#license-compatibility-summary" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>License</th>
+<th>Commercial Use</th>
+<th>Source Code</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Florence-2</strong></td>
+<td>MIT</td>
+<td>✅ Yes</td>
+<td>Not required</td>
+<td>⭐ Best choice</td>
+</tr>
+<tr>
+<td><strong>PaddleOCR</strong></td>
+<td>Apache 2.0</td>
+<td>✅ Yes</td>
+<td>Not required</td>
+<td>⭐ Best choice</td>
+</tr>
+<tr>
+<td><strong>Tesseract</strong></td>
+<td>Apache 2.0</td>
+<td>✅ Yes</td>
+<td>Not required</td>
+<td>✅ Safe</td>
+</tr>
+<tr>
+<td><strong>Set-of-Mark</strong></td>
+<td>Open (research)</td>
+<td>✅ Yes</td>
+<td>Not required</td>
+<td>✅ Technique only</td>
+</tr>
+<tr>
+<td><strong>OmniParser</strong></td>
+<td>AGPL/MIT mix</td>
+<td>⚠️ Complex</td>
+<td>Required (YOLO part)</td>
+<td>⚠️ License risk</td>
+</tr>
+<tr>
+<td><strong>YOLOv8/v11</strong></td>
+<td>AGPL-3.0</td>
+<td>❌ No*</td>
+<td>Required</td>
+<td>❌ Avoid</td>
+</tr>
+</tbody>
+</table>
+<p>*Enterprise license available from Ultralytics</p>
+<hr />
+<h2 id="next-steps">Next Steps<a class="headerlink" href="#next-steps" title="Permanent link">&para;</a></h2>
+<ol>
+<li><strong>Prototype Florence-2 integration</strong> (1-2 days)</li>
+<li>Set up ONNX Runtime Node.js</li>
+<li>Convert Florence-2 to ONNX</li>
+<li>
+<p>Test OCR + detection accuracy</p>
+</li>
+<li>
+<p><strong>Benchmark against test cases</strong> (1 day)</p>
+</li>
+<li>Collect diverse Android UI screenshots</li>
+<li>Measure accuracy, latency, failure cases</li>
+<li>
+<p>Compare with view hierarchy data</p>
+</li>
+<li>
+<p><strong>Implement hybrid fallback</strong> (2-3 days)</p>
+</li>
+<li>Florence-2 → PaddleOCR → Claude cascade</li>
+<li>Smart strategy selection</li>
+<li>
+<p>Cost/performance tracking</p>
+</li>
+<li>
+<p><strong>Optional: SoM enhancement</strong> (2 days)</p>
+</li>
+<li>Integrate SAM for segmentation</li>
+<li>Marker overlay pipeline</li>
+<li>
+<p>Test with Claude vision API</p>
+</li>
+<li>
+<p><strong>Production integration</strong> (3-4 days)</p>
+</li>
+<li>Add to ElementFinder</li>
+<li>Update all element search tools</li>
+<li>Configuration and testing</li>
+</ol>
+<hr />
+<h2 id="conclusion">Conclusion<a class="headerlink" href="#conclusion" title="Permanent link">&para;</a></h2>
+<p><strong>Recommended Approach</strong>: Hybrid Tier 1 (Florence-2 + PaddleOCR) with Tier 2 (Claude) fallback</p>
+<p><strong>Benefits</strong>:
+- 80% cost reduction vs. Claude-only
+- 6x faster for common cases
+- MIT/Apache licensing (no restrictions)
+- Offline capability
+- Maintains Claude&rsquo;s intelligence for hard cases</p>
+<p><strong>Trade-offs</strong>:
+- More complex implementation
+- Need to manage multiple models
+- Slightly lower accuracy than Claude-first (92% vs 95%)
+- But potentially better than the current Claude-only fallback coverage</p>
+<p>This hybrid approach provides the best balance of speed, cost, accuracy, and licensing compliance.</p>
+<h2 id="implementation-references">Implementation References<a class="headerlink" href="#implementation-references" title="Permanent link">&para;</a></h2>
+<ul>
+<li>Vision fallback orchestration (Claude-only): <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/vision/VisionFallback.ts#L1-L149">https://github.com/kaeawc/auto-mobile/blob/main/src/vision/VisionFallback.ts#L1-L149</a></li>
+<li>Claude vision client: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/vision/ClaudeVisionClient.ts#L1-L230">https://github.com/kaeawc/auto-mobile/blob/main/src/vision/ClaudeVisionClient.ts#L1-L230</a></li>
+<li>tapOn vision fallback invocation: <a href="https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/TapOnElement.ts#L110-L190">https://github.com/kaeawc/auto-mobile/blob/main/src/features/action/TapOnElement.ts#L110-L190</a></li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+    <div class="md-copyright__highlight">
+      Copyright &copy; 2025-2026 Jason Pearson
+    </div>
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      <script id="__config" type="application/json">{"base": "../..", "features": ["content.code.copy", "content.code.select"], "search": "../../assets/javascripts/workers/search.d50fe291.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../../assets/javascripts/bundle.13a4f30d.min.js"></script>
+      
+    
+  </body>
+</html>

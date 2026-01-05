@@ -21,7 +21,7 @@ fi
   ./gradlew -p ide-plugin buildPlugin
 )
 
-PLUGIN_ZIP=$(ls -t "$ROOT_DIR/android/ide-plugin/build/distributions"/*.zip | head -n 1 || true)
+PLUGIN_ZIP=$(find "$ROOT_DIR/android/ide-plugin/build/distributions" -maxdepth 1 -name '*.zip' -print0 2>/dev/null | xargs -0 ls -t 2>/dev/null | head -n 1 || true)
 if [[ -z "$PLUGIN_ZIP" ]]; then
   echo "No plugin zip found in android/ide-plugin/build/distributions"
   exit 1
@@ -122,7 +122,7 @@ restart_ide_linux() {
 
   echo "Restarting IDE via: $ide_cmd"
   pkill -f "studio|idea|intellij|android-studio" || true
-  nohup $ide_cmd >/dev/null 2>&1 &
+  nohup "$ide_cmd" >/dev/null 2>&1 &
 }
 
 restart_ide_windows() {

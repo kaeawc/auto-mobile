@@ -490,4 +490,24 @@ describe("AccessibilityServiceManager", function() {
       expect(stats.size).toBe(payload.length);
     });
   });
+
+  describe("setup", function() {
+    test("should allow repeated setup when service is already available", async function() {
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
+      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidAccessibilityServiceManager.PACKAGE}`, {
+        stdout: `package:${AndroidAccessibilityServiceManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("settings get secure", {
+        stdout: `${AndroidAccessibilityServiceManager.PACKAGE}/${AndroidAccessibilityServiceManager.PACKAGE}.AutomobileAccessibilityService`,
+        stderr: ""
+      });
+
+      const firstResult = await accessibilityServiceClient.setup();
+      expect(firstResult.success).toBe(true);
+
+      const secondResult = await accessibilityServiceClient.setup();
+      expect(secondResult.success).toBe(true);
+    });
+  });
 });

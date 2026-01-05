@@ -547,6 +547,20 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
   }> {
     let apkPath: string | null = null;
     if (this.attemptedAutomatedSetup) {
+      try {
+        const [installed, enabled] = await Promise.all([
+          this.isInstalled(),
+          this.isEnabled()
+        ]);
+        if (installed && enabled) {
+          return {
+            success: true,
+            message: "Accessibility Service was already installed and has been activated",
+          };
+        }
+      } catch (error) {
+        logger.warn(`[ACCESSIBILITY_SERVICE] Failed to re-check service status: ${error}`);
+      }
       return {
         success: false,
         message: "Setup already attempted",

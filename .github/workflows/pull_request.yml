@@ -452,7 +452,7 @@ jobs:
 
           # Run container with timeout, capture both stdout and stderr
           # Give server 30 seconds to respond (more reasonable than 5)
-          RESPONSE=$(echo "$INIT" | timeout 30 docker run -i --rm auto-mobile:test 2>&1 | head -1)
+          RESPONSE=$(echo "$INIT" | timeout 30 docker run --platform=linux/amd64 -i --rm auto-mobile:test 2>&1 | head -1)
 
           echo "Raw response: $RESPONSE"
 

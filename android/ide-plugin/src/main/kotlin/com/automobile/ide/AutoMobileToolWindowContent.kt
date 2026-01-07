@@ -500,6 +500,9 @@ fun AutoMobileToolWindowContent(project: Project) {
       }
 
       Spacer(modifier = Modifier.height(8.dp))
+      TestTimingPanel(project = project, client = client, isConnected = isConnected)
+
+      Spacer(modifier = Modifier.height(8.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         DefaultButton(
             onClick = { scope.launch { lastError = "Feature flags are not wired yet" } }

@@ -501,6 +501,7 @@ jobs:
           # Verify serverInfo has expected fields
           SERVER_NAME=$(echo "$RESPONSE" | jq -r '.result.serverInfo.name')
           SERVER_VERSION=$(echo "$RESPONSE" | jq -r '.result.serverInfo.version')
+          EXPECTED_VERSION=$(jq -r '.version' package.json)
 
           if [ "$SERVER_NAME" != "AutoMobile" ]; then
             echo "ERROR: Expected serverInfo.name='AutoMobile', got '$SERVER_NAME'"
@@ -508,8 +509,8 @@ jobs:
             exit 1
           fi
 
-          if [ "$SERVER_VERSION" != "0.0.1" ]; then
-            echo "ERROR: Expected serverInfo.version='0.0.1', got '$SERVER_VERSION'"
+          if [ "$SERVER_VERSION" != "$EXPECTED_VERSION" ]; then
+            echo "ERROR: Expected serverInfo.version='$EXPECTED_VERSION', got '$SERVER_VERSION'"
             echo "Response: $RESPONSE"
             exit 1
           fi

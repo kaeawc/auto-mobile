@@ -42,13 +42,17 @@ import com.intellij.psi.JavaPsiFacade
 import com.intellij.psi.PsiElement
 import com.intellij.psi.search.GlobalSearchScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.DefaultButton
+import org.jetbrains.jewel.ui.component.Icon
 import org.jetbrains.jewel.ui.component.ListComboBox
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.icon.PathIconKey
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -59,6 +63,7 @@ fun TestTimingPanel(
     project: Project,
     client: AutoMobileClient,
     isConnected: Boolean,
+    onShowNavigationGraph: () -> Unit,
 ) {
   val scope = rememberCoroutineScope()
   var summary by remember { mutableStateOf<TestTimingSummary?>(null) }
@@ -71,7 +76,13 @@ fun TestTimingPanel(
   var filterText by remember { mutableStateOf("") }
   var sortKey by remember { mutableStateOf(TestTimingSortKey.AVG_DURATION) }
   var sortDirection by remember { mutableStateOf(TestTimingSortDirection.DESC) }
+  var selectedEntry by remember { mutableStateOf<TestTimingEntry?>(null) }
+  var autoPollEnabled by remember { mutableStateOf(true) }
+  val pollIntervalMs = 5000L
   val palette = rememberTestTimingPalette()
+  val navigationIcon = remember {
+    PathIconKey("icons/toolWindow.svg", AutoMobileToolWindowFactory::class.java)
+  }
 
   fun parseOptionalInt(label: String, value: String, minValue: Int): Int? {
     val trimmed = value.trim()
@@ -134,9 +145,24 @@ fun TestTimingPanel(
       timings = emptyList()
       status = "Not connected"
       error = null
+      selectedEntry = null
       return@LaunchedEffect
     }
     refreshTestTimings()
+  }
+
+  val queryKey =
+      "${lookbackDaysText.trim()}:${minSamplesText.trim()}:" +
+          "${limitText.trim()}:${sortKey.name}:${sortDirection.name}"
+
+  LaunchedEffect(autoPollEnabled, isConnected, client, queryKey) {
+    if (!autoPollEnabled || !isConnected) {
+      return@LaunchedEffect
+    }
+    while (isActive) {
+      refreshTestTimings()
+      delay(pollIntervalMs)
+    }
   }
 
   val filteredTimings =
@@ -219,6 +245,9 @@ fun TestTimingPanel(
           modifier = Modifier.width(100.dp),
           singleLine = true,
       )
+      OutlinedButton(onClick = { autoPollEnabled = !autoPollEnabled }) {
+        Text(if (autoPollEnabled) "Pause polling" else "Resume polling")
+      }
       DefaultButton(onClick = { scope.launch { refreshTestTimings() } }) {
         Text("Refresh")
       }
@@ -260,6 +289,39 @@ fun TestTimingPanel(
     )
     Text("Click a test row to open source.", color = palette.labelMuted, fontSize = 11.sp)
 
+    selectedEntry?.let { entry ->
+      Column(
+          modifier = Modifier.fillMaxWidth().background(palette.detailBackground).padding(8.dp),
+          verticalArrangement = Arrangement.spacedBy(6.dp),
+      ) {
+        Row(horizontalArrangement = Arrangement.SpaceBetween, modifier = Modifier.fillMaxWidth()) {
+          Text("Selected test", color = palette.labelMuted, fontSize = 11.sp)
+          OutlinedButton(onClick = onShowNavigationGraph) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+              Icon(
+                  navigationIcon,
+                  contentDescription = "Show navigation graph",
+                  modifier = Modifier.width(14.dp).height(14.dp),
+              )
+              Spacer(modifier = Modifier.width(6.dp))
+              Text("Show graph")
+            }
+          }
+        }
+        Text("${entry.testClass}.${entry.testMethod}", maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          Text("Avg: ${formatDuration(entry.averageDurationMs)}")
+          Text("Runs: ${entry.sampleSize}")
+          Text("Success: ${formatRate(entry.successRate)}")
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          Text("Std dev: ${entry.stdDevDurationMs?.let { formatDuration(it) } ?: "-"}")
+          Text("Last run: ${formatTimestamp(entry.lastRun)}")
+          Text("Status: ${formatStatusCounts(entry)}")
+        }
+      }
+    }
+
     if (filteredTimings.isNotEmpty()) {
       Row(
           modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
@@ -278,7 +340,10 @@ fun TestTimingPanel(
               entry = entry,
               maxDuration = maxDuration,
               palette = palette,
-              onOpen = { navigateToTest(project, entry) { message -> error = message } },
+              onOpen = {
+                selectedEntry = entry
+                navigateToTest(project, entry) { message -> error = message }
+              },
           )
         }
       }
@@ -488,6 +553,7 @@ private data class TestTimingPalette(
     val barFill: Color,
     val barTrack: Color,
     val labelMuted: Color,
+    val detailBackground: Color,
     val warning: Color,
     val error: Color,
 )
@@ -499,6 +565,7 @@ private fun rememberTestTimingPalette(): TestTimingPalette {
       barFill = globals.text.info.copy(alpha = 0.9f),
       barTrack = globals.outlines.focused.copy(alpha = 0.2f),
       labelMuted = globals.text.normal.copy(alpha = 0.65f),
+      detailBackground = globals.panelBackground.copy(alpha = 0.65f),
       warning = globals.text.warning,
       error = globals.text.error,
   )
@@ -514,3 +581,8 @@ private const val SUCCESS_COL_WEIGHT = 0.1f
 private const val LAST_RUN_COL_WEIGHT = 0.16f
 private val TIMESTAMP_FORMATTER: DateTimeFormatter =
     DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm")
+
+private fun formatStatusCounts(entry: TestTimingEntry): String {
+  val counts = entry.statusCounts ?: return "-"
+  return "P:${counts.passed} F:${counts.failed} S:${counts.skipped}"
+}

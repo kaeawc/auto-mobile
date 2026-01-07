@@ -230,6 +230,19 @@ fun AutoMobileToolWindowContent(project: Project) {
     lastCurrentScreen = summary.currentScreen
   }
 
+  fun refreshNavigationGraphNow() {
+    if (!isConnected) {
+      return
+    }
+    scope.launch {
+      try {
+        fetchNavigationGraph()
+      } catch (e: Exception) {
+        graphError = e.message
+      }
+    }
+  }
+
   val performanceRangeKey = "${selectedPerformanceRangeIndex}:${customRangeStart}:${customRangeEnd}"
 
   suspend fun refreshPerformanceResults(offset: Int? = null, append: Boolean = false) {
@@ -500,7 +513,12 @@ fun AutoMobileToolWindowContent(project: Project) {
       }
 
       Spacer(modifier = Modifier.height(8.dp))
-      TestTimingPanel(project = project, client = client, isConnected = isConnected)
+      TestTimingPanel(
+          project = project,
+          client = client,
+          isConnected = isConnected,
+          onShowNavigationGraph = { refreshNavigationGraphNow() },
+      )
 
       Spacer(modifier = Modifier.height(8.dp))
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

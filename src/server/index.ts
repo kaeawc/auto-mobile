@@ -32,6 +32,7 @@ import { registerFeatureFlagTools } from "./featureFlagTools";
 import { registerTestTimingTools } from "./testTimingTools";
 import { registerPerformanceTools } from "./performanceTools";
 import { registerVideoRecordingTools } from "./videoRecordingTools";
+import { registerSnapshotTools } from "./snapshotTools";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
 // Import resource registration functions
@@ -101,6 +102,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerFeatureFlagTools();
   registerPerformanceTools();
   registerVideoRecordingTools();
+  registerSnapshotTools();
 
   // Register all resources
   registerObservationResources();

@@ -19,34 +19,6 @@ export const setFeatureFlagSchema = z.object({
 });
 
 export function registerFeatureFlagTools(): void {
-  const service = FeatureFlagService.getInstance();
-
-  ToolRegistry.register(
-    "listFeatureFlags",
-    "List AutoMobile feature flags and their current states.",
-    listFeatureFlagsSchema,
-    async () => {
-      try {
-        const flags = await service.listFlags();
-        return createJSONToolResponse({ flags });
-      } catch (error) {
-        throw new ActionableError(`Failed to list feature flags: ${error}`);
-      }
-    }
-  );
-
-  ToolRegistry.register(
-    "setFeatureFlag",
-    "Enable or disable a feature flag.",
-    setFeatureFlagSchema,
-    async args => {
-      const key = args.key as FeatureFlagKey;
-      try {
-        const flag = await service.setFlag(key, args.enabled, args.config);
-        return createJSONToolResponse(flag);
-      } catch (error) {
-        throw new ActionableError(`Failed to update feature flag: ${error}`);
-      }
-    }
-  );
+  // Feature flag tools have been removed - feature flags should be managed
+  // internally via configuration, not exposed as MCP tool calls
 }

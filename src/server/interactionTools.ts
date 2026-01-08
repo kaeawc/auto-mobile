@@ -64,14 +64,8 @@ export interface TapOnArgs {
   };
   text?: string;
   id?: string;
-  action: "tap" | "doubleTap" | "longPress" | "longPressDrag" | "focus";
+  action: "tap" | "doubleTap" | "longPress" | "focus";
   duration?: number;
-  dragTo?: {
-    x?: number;
-    y?: number;
-    text?: string;
-    elementId?: string;
-  };
   await?: {
     element: {
       id?: string;
@@ -173,16 +167,10 @@ export const tapOnSchema = addDeviceTargetingToSchema(z.object({
   container: tapOnContainerSchema.optional().describe(
     "Container to scope search (elementId or text)"
   ),
-  action: z.enum(["tap", "doubleTap", "longPress", "longPressDrag", "focus"]).describe("Action type"),
+  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).describe("Action type"),
   text: z.string().optional().describe("Text to tap (overrides id)"),
   id: z.string().optional().describe("Element ID to tap"),
   duration: z.number().optional().describe("Long press duration (ms)"),
-  dragTo: z.object({
-    x: z.number().optional().describe("Drag target X"),
-    y: z.number().optional().describe("Drag target Y"),
-    text: z.string().optional().describe("Drag target text"),
-    elementId: z.string().optional().describe("Drag target ID"),
-  }).optional().describe("Drag target for longPressDrag"),
   await: z.object({
     element: z.object({
       id: z.string().optional().describe("Element ID to wait for"),
@@ -462,7 +450,6 @@ export function registerInteractionTools() {
       elementId: args.id,
       action: args.action,
       duration: args.duration,
-      dragTo: args.dragTo,
       await: args.await,
       strictAwait: serverConfig.isStrictAwaitEnabled(),
     }, progress);

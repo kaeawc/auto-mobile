@@ -289,7 +289,7 @@ Planned improvements for YAML validation:
 
 ## Related Documentation
 
-- [Test Plan Format](../test-plans/format.md) - Detailed plan format documentation
-- [Plan Migration](../test-plans/migration.md) - Legacy format migration guide
-- [executePlan Tool](../mcp-tools/executePlan.md) - MCP tool documentation
+- [ExecutePlan Assertions Design](../design-docs/plat/android/executeplan-assertions.md) - Design doc for assertion expectations
+- [MCP Migrations](../design-docs/mcp/migrations.md) - Migration system design
+- [UI Tests Guide](../using/ui-tests.md) - Guide for using AutoMobile for UI testing
 - [JSON Schema](../../schemas/test-plan.schema.json) - Full schema definition

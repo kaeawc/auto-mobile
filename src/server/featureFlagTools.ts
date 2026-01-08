@@ -13,9 +13,9 @@ const featureFlagKeys = FEATURE_FLAG_DEFINITIONS.map(definition => definition.ke
 export const listFeatureFlagsSchema = z.object({});
 
 export const setFeatureFlagSchema = z.object({
-  key: z.enum(featureFlagKeys).describe("Feature flag key"),
-  enabled: z.boolean().describe("Enable or disable the flag"),
-  config: z.record(z.any()).optional().describe("Optional flag configuration"),
+  key: z.enum(featureFlagKeys).describe("Flag key"),
+  enabled: z.boolean().describe("Flag state"),
+  config: z.record(z.any()).optional().describe("Flag config"),
 });
 
 export function registerFeatureFlagTools(): void {

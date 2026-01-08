@@ -700,6 +700,43 @@ describe("AccessibilityServiceManager", function() {
       expect(capabilities.reason).toBeUndefined();
     });
 
+    test("should not cache capabilities when detection errors occur", async function() {
+      let callCount = 0;
+      const fakeExecAsync = async (command: string) => {
+        callCount++;
+        // First call fails, second call succeeds
+        if (callCount <= 2) {
+          throw new Error("ADB transient error");
+        }
+
+        const prefix = "adb -s test-device ";
+        const strippedCommand = command.startsWith(prefix) ? command.slice(prefix.length) : command;
+
+        if (strippedCommand.includes("ro.kernel.qemu")) {
+          return { stdout: "1", stderr: "" };
+        }
+        if (strippedCommand.includes("ro.build.version.sdk")) {
+          return { stdout: "29", stderr: "" };
+        }
+        return { stdout: "", stderr: "" };
+      };
+
+      const testAdb = new AdbClient(testDevice, fakeExecAsync);
+      AndroidAccessibilityServiceManager.resetInstances();
+      const manager = AndroidAccessibilityServiceManager.getInstance(testDevice, testAdb);
+
+      // First call - should fail with error and NOT cache
+      const capabilities1 = await manager.getToggleCapabilities();
+      expect(capabilities1.supportsSettingsToggle).toBe(false);
+      expect(capabilities1.reason).toContain("transient error");
+
+      // Second call - should retry and succeed
+      const capabilities2 = await manager.getToggleCapabilities();
+      expect(capabilities2.supportsSettingsToggle).toBe(true);
+      expect(capabilities2.deviceType).toBe("emulator");
+      expect(capabilities2.apiLevel).toBe(29);
+    });
+
     test("should detect physical device and not support settings toggle", async function() {
       fakeAdb.setCommandResponse("shell getprop ro.kernel.qemu", {
         stdout: "",

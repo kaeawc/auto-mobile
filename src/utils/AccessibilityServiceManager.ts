@@ -698,38 +698,40 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
 
   /**
    * Detect if device is an emulator or physical device
+   * Returns [isEmulator, hadError] tuple to track detection success
    */
-  private async isEmulator(): Promise<boolean> {
+  private async isEmulator(): Promise<[boolean, boolean]> {
     try {
       const result = await this.adb.executeCommand("shell getprop ro.kernel.qemu", undefined, undefined, true);
       const qemuProp = result.stdout.trim();
       // ro.kernel.qemu is "1" on emulators, empty or "0" on physical devices
       if (qemuProp === "1") {
-        return true;
+        return [true, false];
       }
 
       // Fallback: check ro.product.model for common emulator strings
       const modelResult = await this.adb.executeCommand("shell getprop ro.product.model", undefined, undefined, true);
       const model = modelResult.stdout.trim().toLowerCase();
-      return model.includes("emulator") || model.includes("sdk");
+      return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
       logger.warn("[ACCESSIBILITY_SERVICE] Error detecting device type", { error });
-      // Default to physical device on error (more conservative)
-      return false;
+      // Default to physical device on error (more conservative), but mark as errored
+      return [false, true];
     }
   }
 
   /**
    * Get device API level
+   * Returns [apiLevel, hadError] tuple to track detection success
    */
-  private async getApiLevel(): Promise<number | null> {
+  private async getApiLevel(): Promise<[number | null, boolean]> {
     try {
       const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", undefined, undefined, true);
       const apiLevel = parseInt(result.stdout.trim(), 10);
-      return isNaN(apiLevel) ? null : apiLevel;
+      return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
       logger.warn("[ACCESSIBILITY_SERVICE] Error getting API level", { error });
-      return null;
+      return [null, true];
     }
   }
 
@@ -755,14 +757,24 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
 
     logger.info("[ACCESSIBILITY_SERVICE] Detecting toggle capabilities");
 
-    const isEmulator = await this.isEmulator();
-    const apiLevel = await this.getApiLevel();
+    const [isEmulator, emulatorDetectionError] = await this.isEmulator();
+    const [apiLevel, apiLevelDetectionError] = await this.getApiLevel();
     const deviceType = isEmulator ? "emulator" : "physical";
 
     let supportsSettingsToggle = false;
     let reason: string | undefined;
 
-    if (isEmulator) {
+    // If we had detection errors, don't make definitive claims about support
+    const hadDetectionError = emulatorDetectionError || apiLevelDetectionError;
+
+    if (hadDetectionError) {
+      supportsSettingsToggle = false;
+      reason = "Unable to detect device capabilities due to transient error. Retry may succeed.";
+      logger.warn("[ACCESSIBILITY_SERVICE] Detection error - not caching result", {
+        emulatorDetectionError,
+        apiLevelDetectionError
+      });
+    } else if (isEmulator) {
       // Emulators generally support settings-based toggle
       supportsSettingsToggle = true;
       logger.info("[ACCESSIBILITY_SERVICE] Emulator detected - settings toggle supported");
@@ -774,7 +786,7 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
     }
 
     // Additional API level checks could be added here if needed
-    if (apiLevel !== null && apiLevel < 16) {
+    if (!hadDetectionError && apiLevel !== null && apiLevel < 16) {
       supportsSettingsToggle = false;
       reason = `API level ${apiLevel} is too old (requires API 16+)`;
       logger.warn("[ACCESSIBILITY_SERVICE] API level too old for settings toggle", { apiLevel });
@@ -787,9 +799,14 @@ export class AndroidAccessibilityServiceManager implements AccessibilityServiceM
       reason
     };
 
-    // Cache the result
-    this.cachedToggleCapabilities = capabilities;
-    logger.info("[ACCESSIBILITY_SERVICE] Toggle capabilities detected and cached", capabilities);
+    // Only cache if we successfully detected capabilities without errors
+    // This prevents transient errors from creating sticky false negatives
+    if (!hadDetectionError) {
+      this.cachedToggleCapabilities = capabilities;
+      logger.info("[ACCESSIBILITY_SERVICE] Toggle capabilities detected and cached", capabilities);
+    } else {
+      logger.info("[ACCESSIBILITY_SERVICE] Toggle capabilities detected but not cached due to detection errors", capabilities);
+    }
 
     return capabilities;
   }

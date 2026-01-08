@@ -269,6 +269,10 @@ export class CaptureSnapshot {
     snapshotName: string,
     settings: any
   ): Promise<void> {
+    // Ensure snapshot directory exists before writing
+    const snapshotDir = this.storage.getSnapshotPath(snapshotName);
+    await fs.mkdir(snapshotDir, { recursive: true });
+
     const settingsPath = this.storage.getSettingsPath(snapshotName);
     await fs.writeFile(settingsPath, JSON.stringify(settings, null, 2), "utf-8");
     logger.info(`Saved settings to ${settingsPath}`);

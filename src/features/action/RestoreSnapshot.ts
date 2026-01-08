@@ -120,8 +120,10 @@ export class RestoreSnapshot {
     logger.info(`Restoring ADB-based snapshot for device ${this.device.deviceId}`);
 
     try {
-      // Clear current app data if apps were captured
-      if (manifest.packages && manifest.packages.length > 0) {
+      // Clear current app data only if app data was captured
+      // Note: We only clear app data when includeAppData is true to avoid
+      // unintentionally wiping user data when the snapshot opted out of data capture
+      if (manifest.includeAppData && manifest.packages && manifest.packages.length > 0) {
         await this.clearCurrentAppData(manifest.packages);
       }
 

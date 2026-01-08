@@ -5,24 +5,16 @@ devices:
   - A
   - B
 
-# Define reusable step templates
-common-params: &common-launch-params
-  appId: com.example.app
-  coldBoot: false
-
-observe-params: &observe-base
-  includeScreenshot: true
-  includeHierarchy: true
-
 steps:
-  # Use anchor reference
+  # First step defines anchor for common launch params
   - tool: launchApp
-    params:
-      <<: *common-launch-params
+    params: &common-launch-params
+      appId: com.example.app
+      coldBoot: false
       device: A
     label: Launch app on device A with common params
 
-  # Use another anchor reference with override
+  # Use anchor reference with merge and override
   - tool: launchApp
     params:
       <<: *common-launch-params
@@ -30,10 +22,11 @@ steps:
       coldBoot: true
     label: Launch app on device B with cold boot override
 
-  # Use observe anchor
+  # Define observe anchor in first observe step
   - tool: observe
-    params:
-      <<: *observe-base
+    params: &observe-base
+      includeScreenshot: true
+      includeHierarchy: true
       device: A
     label: Observe device A with common settings
 
@@ -49,6 +42,7 @@ steps:
             text: Sync
     label: Critical section for synchronization
 
+  # Reuse observe anchor with merge and override
   - tool: observe
     params:
       <<: *observe-base
@@ -56,6 +50,6 @@ steps:
     label: Observe device B with common settings
 
 metadata:
-  createdAt: "2026-01-08"
+  createdAt: "2026-01-08T00:00:00Z"
   version: "1.0.0"
   description: Test plan demonstrating YAML anchor and merge key compatibility

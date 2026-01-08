@@ -316,6 +316,12 @@ function printReport(report: BenchmarkReport): void {
  */
 function writeReportToFile(report: BenchmarkReport, outputPath: string): void {
   try {
+    // Ensure parent directory exists
+    const dir = path.dirname(outputPath);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
     const reportJson = JSON.stringify(report, null, 2);
     fs.writeFileSync(outputPath, reportJson, "utf-8");
     console.log(`Benchmark report written to: ${outputPath}`);

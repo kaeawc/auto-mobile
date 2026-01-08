@@ -1,152 +1,165 @@
-import Ajv, { type ErrorObject } from "ajv";
-import addFormats from "ajv-formats";
-import yaml from "js-yaml";
-import fs from "fs/promises";
-import path from "path";
-import { fileURLToPath } from "url";
+import { Plan } from "../../models/Plan";
+import { ActionableError } from "../../models";
 
 /**
- * Result of plan validation
- */
-export interface PlanValidationResult {
-  valid: boolean;
-  errors?: ValidationError[];
-  warnings?: string[];
-}
-
-/**
- * Structured validation error
- */
-export interface ValidationError {
-  field: string;
-  message: string;
-  line?: number;
-  column?: number;
-}
-
-/**
- * Validates AutoMobile test plan YAML files against JSON schema
+ * Validates a plan structure and enforces multi-device rules.
  */
 export class PlanValidator {
-  private ajv: Ajv;
-  private schema: any;
-
-  constructor() {
-    this.ajv = new Ajv({
-      allErrors: true,
-      verbose: true,
-      strict: false
-    });
-    addFormats(this.ajv);
-  }
+  // Tools that don't require device labels (exceptions to the rule)
+  private static readonly DEVICE_AGNOSTIC_TOOLS = new Set(["criticalSection"]);
 
   /**
-   * Load the JSON schema for test plans
+   * Validates a plan and throws ActionableError if invalid.
+   * @param plan Plan to validate
+   * @throws ActionableError if validation fails
    */
-  async loadSchema(): Promise<void> {
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-    const schemaPath = path.join(__dirname, "../../../schemas/test-plan.schema.json");
-
-    const schemaContent = await fs.readFile(schemaPath, "utf-8");
-    this.schema = JSON.parse(schemaContent);
-
-    // Add schema to ajv
-    this.ajv.addSchema(this.schema);
-  }
-
-  /**
-   * Validate YAML content against the test plan schema
-   * @param yamlContent YAML string to validate
-   * @returns Validation result with errors if invalid
-   */
-  validateYaml(yamlContent: string): PlanValidationResult {
-    // First, try to parse YAML
-    let parsed: any;
-    try {
-      parsed = yaml.load(yamlContent);
-    } catch (error: any) {
-      return {
-        valid: false,
-        errors: [{
-          field: "root",
-          message: `YAML parsing failed: ${error.message}`,
-          line: error.mark?.line,
-          column: error.mark?.column
-        }]
-      };
+  static validate(plan: Plan): void {
+    // Validate basic structure
+    if (!plan.name || typeof plan.name !== "string") {
+      throw new ActionableError("Plan must have a valid name");
     }
 
-    // Validate against schema
-    const validate = this.ajv.compile(this.schema);
-    const valid = validate(parsed);
-
-    if (valid) {
-      return { valid: true };
+    if (!plan.steps || !Array.isArray(plan.steps)) {
+      throw new ActionableError("Plan must have a steps array");
     }
 
-    // Format validation errors
-    const errors = this.formatErrors(validate.errors || []);
-
-    return {
-      valid: false,
-      errors
-    };
-  }
-
-  /**
-   * Validate a YAML file
-   * @param filePath Path to YAML file
-   * @returns Validation result
-   */
-  async validateFile(filePath: string): Promise<PlanValidationResult> {
-    try {
-      const content = await fs.readFile(filePath, "utf-8");
-      return this.validateYaml(content);
-    } catch (error: any) {
-      return {
-        valid: false,
-        errors: [{
-          field: "file",
-          message: `Failed to read file: ${error.message}`
-        }]
-      };
+    // Validate devices field if present
+    if (plan.devices !== undefined) {
+      this.validateDevicesField(plan);
+      this.validateDeviceLabelsPresent(plan);
     }
   }
 
   /**
-   * Format AJV errors into structured validation errors
+   * Validates the devices field structure.
    */
-  private formatErrors(ajvErrors: ErrorObject[]): ValidationError[] {
-    return ajvErrors.map(err => {
-      let field = err.instancePath || "root";
+  private static validateDevicesField(plan: Plan): void {
+    if (!Array.isArray(plan.devices)) {
+      throw new ActionableError(
+        "Plan 'devices' field must be an array of device labels"
+      );
+    }
 
-      // Remove leading slash
-      if (field.startsWith("/")) {
-        field = field.substring(1);
+    if (plan.devices.length === 0) {
+      throw new ActionableError(
+        "Plan 'devices' array cannot be empty. Remove the field or specify at least one device."
+      );
+    }
+
+    // Check for duplicates
+    const uniqueDevices = new Set(plan.devices);
+    if (uniqueDevices.size !== plan.devices.length) {
+      throw new ActionableError(
+        `Plan 'devices' array contains duplicate labels: [${plan.devices.join(", ")}]`
+      );
+    }
+
+    // Validate each device label
+    for (const device of plan.devices) {
+      if (typeof device !== "string" || device.trim() === "") {
+        throw new ActionableError(
+          `Invalid device label: ${JSON.stringify(device)}. Device labels must be non-empty strings.`
+        );
+      }
+    }
+  }
+
+  /**
+   * Validates that all steps have device labels when devices field is present.
+   * Exception: criticalSection and other device-agnostic tools don't need labels.
+   */
+  private static validateDeviceLabelsPresent(plan: Plan): void {
+    if (!plan.devices || plan.devices.length === 0) {
+      return;
+    }
+
+    const deviceSet = new Set(plan.devices);
+    const missingLabels: Array<{ index: number; tool: string }> = [];
+    const invalidLabels: Array<{ index: number; tool: string; device: string }> = [];
+
+    for (let i = 0; i < plan.steps.length; i++) {
+      const step = plan.steps[i];
+
+      // Skip device-agnostic tools
+      if (this.DEVICE_AGNOSTIC_TOOLS.has(step.tool)) {
+        continue;
       }
 
-      // Replace /steps/0 with steps[0]
-      field = field.replace(/\/(\d+)/g, "[$1]").replace(/\//g, ".");
+      // Check if device parameter exists
+      const device = step.params?.device;
 
-      let message = err.message || "Validation error";
-
-      // Enhanced error messages
-      if (err.keyword === "additionalProperties") {
-        const prop = (err.params as any).additionalProperty;
-        message = `Unknown property '${prop}'. This might be a legacy field - check the migration guide.`;
-      } else if (err.keyword === "required") {
-        const missing = (err.params as any).missingProperty;
-        message = `Missing required property '${missing}'`;
-      } else if (err.keyword === "enum") {
-        const allowed = (err.params as any).allowedValues;
-        message = `Must be one of: ${allowed.join(", ")}`;
+      if (device === undefined || device === null || device === "") {
+        missingLabels.push({ index: i, tool: step.tool });
+        continue;
       }
 
-      return {
-        field: field || "root",
-        message
-      };
-    });
+      // Validate device label is in the declared devices list
+      if (!deviceSet.has(device)) {
+        invalidLabels.push({ index: i, tool: step.tool, device });
+      }
+    }
+
+    // Report all validation errors
+    const errors: string[] = [];
+
+    if (missingLabels.length > 0) {
+      const steps = missingLabels
+        .map(m => `step ${m.index} (${m.tool})`)
+        .join(", ");
+      errors.push(
+        `Plan declares 'devices' field but the following steps are missing 'device' parameter: ${steps}`
+      );
+    }
+
+    if (invalidLabels.length > 0) {
+      const steps = invalidLabels
+        .map(m => `step ${m.index} (${m.tool}): device="${m.device}"`)
+        .join(", ");
+      errors.push(
+        `Plan declares devices [${plan.devices.join(", ")}] but the following steps use invalid device labels: ${steps}`
+      );
+    }
+
+    if (errors.length > 0) {
+      throw new ActionableError(errors.join("\n"));
+    }
+  }
+
+  /**
+   * Checks if a plan uses multi-device features (devices field or device labels).
+   * This determines if the plan requires the devices field to be declared.
+   */
+  static hasMultiDeviceFeatures(plan: Plan): boolean {
+    // Check if devices field is present
+    if (plan.devices && plan.devices.length > 0) {
+      return true;
+    }
+
+    // Check if any step uses device parameter or criticalSection
+    for (const step of plan.steps) {
+      if (step.tool === "criticalSection") {
+        return true;
+      }
+      if (step.params?.device !== undefined) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Validates that if a plan uses multi-device features, it must declare devices.
+   */
+  static validateMultiDeviceRequirements(plan: Plan): void {
+    const hasFeatures = this.hasMultiDeviceFeatures(plan);
+
+    // If plan uses device labels or criticalSection, it must declare devices
+    if (hasFeatures && (!plan.devices || plan.devices.length === 0)) {
+      throw new ActionableError(
+        "Plan uses multi-device features (device labels or criticalSection) but does not declare 'devices' field. " +
+          "Add a 'devices' array at the top level of your plan."
+      );
+    }
   }
 }

@@ -27,7 +27,7 @@ export interface ValidationError {
 /**
  * Validates AutoMobile test plan YAML files against JSON schema
  */
-export class PlanValidator {
+export class PlanSchemaValidator {
   private ajv: Ajv;
   private schema: any;
 
@@ -46,9 +46,37 @@ export class PlanValidator {
   async loadSchema(): Promise<void> {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
-    const schemaPath = path.join(__dirname, "../../../schemas/test-plan.schema.json");
 
-    const schemaContent = await fs.readFile(schemaPath, "utf-8");
+    // Try multiple paths to support different execution contexts:
+    // 1. From source: src/utils/plan/PlanSchemaValidator.ts -> schemas/
+    // 2. From dist: dist/src/utils/plan/PlanSchemaValidator.js -> dist/schemas/
+    // 3. From npm package root
+    const possiblePaths = [
+      path.join(__dirname, "../../../schemas/test-plan.schema.json"),  // From source
+      path.join(__dirname, "../../../../schemas/test-plan.schema.json"), // From dist (one more level up)
+      path.join(process.cwd(), "schemas/test-plan.schema.json"),        // From cwd
+      path.join(process.cwd(), "dist/schemas/test-plan.schema.json"),   // From cwd/dist
+    ];
+
+    let schemaContent: string | null = null;
+    let schemaPath: string | null = null;
+
+    for (const tryPath of possiblePaths) {
+      try {
+        schemaContent = await fs.readFile(tryPath, "utf-8");
+        schemaPath = tryPath;
+        break;
+      } catch {
+        // Try next path
+      }
+    }
+
+    if (!schemaContent || !schemaPath) {
+      throw new Error(
+        `Could not find test-plan.schema.json. Tried paths:\n${possiblePaths.join("\n")}`
+      );
+    }
+
     this.schema = JSON.parse(schemaContent);
 
     // Add schema to ajv

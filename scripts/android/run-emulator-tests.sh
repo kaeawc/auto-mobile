@@ -258,27 +258,48 @@ else
 
   echo "Installing accessibility service APK..."
 
-  # First, try to uninstall any existing version to avoid signature conflicts
-  # This is especially important in CI where AVDs are cached and may have old versions
-  echo "Checking for existing accessibility service installation..."
-  PACKAGE_NAME="dev.jasonpearson.automobile.accessibilityservice"
-  if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
-    echo "Existing package found, uninstalling to avoid signature conflicts..."
-    adb uninstall "$PACKAGE_NAME" || print_warning "Uninstall failed, proceeding with install anyway"
-  else
-    echo "No existing package found"
-  fi
+  # Try to install with -r (replace) first
+  # This should work now that we have a shared debug keystore
+  echo "Running: adb install -r '$APK_PATH'"
   echo ""
 
-  echo "Running: adb install '$APK_PATH'"
-  echo ""
+  set +e
+  install_output=$(adb install -r "$APK_PATH" 2>&1)
+  install_exit=$?
+  set -e
 
-  if adb install "$APK_PATH"; then
-    print_success "APK installed successfully"
+  echo "$install_output"
+
+  if [ $install_exit -eq 0 ]; then
+    print_success "APK installed successfully (replaced existing)"
   else
-    APK_INSTALL_EXIT=$?
-    print_error "APK installation failed with exit code $APK_INSTALL_EXIT"
-    exit "$APK_INSTALL_EXIT"
+    # Check if failure was due to signature mismatch
+    if echo "$install_output" | grep -q "INSTALL_FAILED_UPDATE_INCOMPATIBLE"; then
+      print_warning "Signature mismatch detected - uninstalling old version and retrying"
+      echo ""
+
+      PACKAGE_NAME="dev.jasonpearson.automobile.accessibilityservice"
+      echo "Uninstalling existing package..."
+      if adb uninstall "$PACKAGE_NAME"; then
+        print_success "Old package uninstalled"
+      else
+        print_warning "Uninstall failed, but proceeding with fresh install"
+      fi
+      echo ""
+
+      echo "Running: adb install '$APK_PATH'"
+      if adb install "$APK_PATH"; then
+        print_success "APK installed successfully (clean install)"
+      else
+        APK_INSTALL_EXIT=$?
+        print_error "APK installation failed with exit code $APK_INSTALL_EXIT"
+        exit "$APK_INSTALL_EXIT"
+      fi
+    else
+      # Other failure - fail immediately
+      print_error "APK installation failed with exit code $install_exit"
+      exit "$install_exit"
+    fi
   fi
 fi
 

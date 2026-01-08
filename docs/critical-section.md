@@ -447,5 +447,3 @@ bun test test/server/CriticalSectionCoordinator.test.ts
 ## See Also
 
 - [critical-section-example.yaml](./critical-section-example.yaml) - Complete working example
-- [Plan Execution](./plan-execution.md) - Overview of plan execution
-- [Multi-Device Plans](./multi-device-plans.md) - Multi-device testing guide

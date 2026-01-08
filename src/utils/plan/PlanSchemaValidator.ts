@@ -4,6 +4,7 @@ import yaml from "js-yaml";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
+import { logger } from "../logger";
 
 /**
  * Result of plan validation
@@ -47,34 +48,60 @@ export class PlanSchemaValidator {
     const __filename = fileURLToPath(import.meta.url);
     const __dirname = path.dirname(__filename);
 
+    logger.info(`[PlanSchemaValidator] Loading schema from: ${__dirname}`);
+    logger.info(`[PlanSchemaValidator] Current working directory: ${process.cwd()}`);
+    logger.info(`[PlanSchemaValidator] GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`);
+
     // Try multiple paths to support different execution contexts:
-    // 1. From source: src/utils/plan/PlanSchemaValidator.ts -> schemas/
-    // 2. From dist: dist/src/utils/plan/PlanSchemaValidator.js -> dist/schemas/
-    // 3. From npm package root
     const possiblePaths = [
-      path.join(__dirname, "../../../schemas/test-plan.schema.json"),  // From source
-      path.join(__dirname, "../../../../schemas/test-plan.schema.json"), // From dist (one more level up)
-      path.join(process.cwd(), "schemas/test-plan.schema.json"),        // From cwd
-      path.join(process.cwd(), "dist/schemas/test-plan.schema.json"),   // From cwd/dist
+      // From source: src/utils/plan/PlanSchemaValidator.ts -> schemas/
+      path.join(__dirname, "../../../schemas/test-plan.schema.json"),
+      // From dist: dist/src/utils/plan/PlanSchemaValidator.js -> dist/schemas/
+      path.join(__dirname, "../../../../schemas/test-plan.schema.json"),
+      // From cwd (project root)
+      path.join(process.cwd(), "schemas/test-plan.schema.json"),
+      // From cwd/dist
+      path.join(process.cwd(), "dist/schemas/test-plan.schema.json"),
+      // From subdirectory - traverse up to find project root
+      path.join(process.cwd(), "../../schemas/test-plan.schema.json"),
+      path.join(process.cwd(), "../../../schemas/test-plan.schema.json"),
+      path.join(process.cwd(), "../../../../schemas/test-plan.schema.json"),
+      // From GitHub Actions workspace
+      path.join(process.env.GITHUB_WORKSPACE || "", "schemas/test-plan.schema.json"),
+      // From package root (when installed as npm package)
+      path.join(__dirname, "../../../../../schemas/test-plan.schema.json"),
     ];
 
     let schemaContent: string | null = null;
     let schemaPath: string | null = null;
+    const attemptedPaths: string[] = [];
 
     for (const tryPath of possiblePaths) {
       try {
-        schemaContent = await fs.readFile(tryPath, "utf-8");
-        schemaPath = tryPath;
+        const resolvedPath = path.resolve(tryPath);
+        attemptedPaths.push(resolvedPath);
+        schemaContent = await fs.readFile(resolvedPath, "utf-8");
+        schemaPath = resolvedPath;
+        logger.info(`[PlanSchemaValidator] ✓ Schema found at: ${schemaPath}`);
         break;
-      } catch {
+      } catch (error: any) {
+        logger.debug(`[PlanSchemaValidator] ✗ Schema not found at: ${path.resolve(tryPath)} (${error.code})`);
         // Try next path
       }
     }
 
     if (!schemaContent || !schemaPath) {
-      throw new Error(
-        `Could not find test-plan.schema.json. Tried paths:\n${possiblePaths.join("\n")}`
-      );
+      const errorMessage = [
+        "Could not find test-plan.schema.json.",
+        `Current working directory: ${process.cwd()}`,
+        `Module directory: ${__dirname}`,
+        `GITHUB_WORKSPACE: ${process.env.GITHUB_WORKSPACE || "not set"}`,
+        "Tried paths:",
+        ...attemptedPaths.map(p => `  - ${p}`)
+      ].join("\n");
+
+      logger.error(`[PlanSchemaValidator] ${errorMessage}`);
+      throw new Error(errorMessage);
     }
 
     this.schema = JSON.parse(schemaContent);

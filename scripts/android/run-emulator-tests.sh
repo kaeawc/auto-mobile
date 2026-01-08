@@ -257,10 +257,23 @@ else
   echo ""
 
   echo "Installing accessibility service APK..."
-  echo "Running: adb install -r '$APK_PATH'"
+
+  # First, try to uninstall any existing version to avoid signature conflicts
+  # This is especially important in CI where AVDs are cached and may have old versions
+  echo "Checking for existing accessibility service installation..."
+  PACKAGE_NAME="dev.jasonpearson.automobile.accessibilityservice"
+  if adb shell pm list packages | grep -q "$PACKAGE_NAME"; then
+    echo "Existing package found, uninstalling to avoid signature conflicts..."
+    adb uninstall "$PACKAGE_NAME" || print_warning "Uninstall failed, proceeding with install anyway"
+  else
+    echo "No existing package found"
+  fi
   echo ""
 
-  if adb install -r "$APK_PATH"; then
+  echo "Running: adb install '$APK_PATH'"
+  echo ""
+
+  if adb install "$APK_PATH"; then
     print_success "APK installed successfully"
   else
     APK_INSTALL_EXIT=$?

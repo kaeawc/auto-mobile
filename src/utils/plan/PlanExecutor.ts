@@ -180,8 +180,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
               enhancedParams.platform = platform;
             }
 
-            // Inject deviceId if provided and not already set - this ensures the tool uses the correct device
-            if (deviceId && !enhancedParams.deviceId && !enhancedParams.device) {
+            // Inject deviceId if provided and not already set - BUT only if sessionUuid is NOT being used
+            // When sessionUuid is present, we rely on session-based device routing through the device pool
+            // instead of hard-coding a specific deviceId. This enables parallel test execution where
+            // each session gets its own device from the pool.
+            if (deviceId && !sessionUuid && !enhancedParams.deviceId && !enhancedParams.device) {
               enhancedParams.deviceId = deviceId;
               logger.info(`[PlanExecutor] Injecting deviceId ${deviceId} into ${step.tool}`);
             }
@@ -589,7 +592,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
             if (platform && !enhancedParams.platform) {
               enhancedParams.platform = platform;
             }
-            if (deviceId && !enhancedParams.deviceId && !enhancedParams.device) {
+            // Only inject deviceId if sessionUuid is not being used (see comment in executeSequential)
+            if (deviceId && !sessionUuid && !enhancedParams.deviceId && !enhancedParams.device) {
               enhancedParams.deviceId = deviceId;
             }
             if (sessionUuid && !enhancedParams.sessionUuid) {

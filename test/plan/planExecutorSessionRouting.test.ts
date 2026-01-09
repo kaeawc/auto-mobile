@@ -1,7 +1,8 @@
-import { describe, expect, test, mock, beforeEach } from "bun:test";
+import { describe, expect, test, mock, beforeEach, afterEach } from "bun:test";
 import { DefaultPlanExecutor } from "../../src/utils/plan/PlanExecutor";
 import { Plan } from "../../src/models/Plan";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { DaemonState } from "../../src/daemon/daemonState";
 import { z } from "zod";
 
 describe("PlanExecutor - Session-based Device Routing", () => {
@@ -11,7 +12,22 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     planExecutor = new DefaultPlanExecutor();
   });
 
-  test("should NOT inject deviceId when sessionUuid is provided (single-device plan)", async () => {
+  afterEach(() => {
+    // Clean up daemon state if initialized
+    const daemonState = DaemonState.getInstance();
+    if (daemonState.isInitialized()) {
+      daemonState.reset();
+    }
+  });
+
+  test("should inject deviceId when sessionUuid is provided BUT daemon not initialized", async () => {
+    // This test verifies the edge case from PR review: when sessionUuid is provided but
+    // daemon is not initialized, we should still inject deviceId to preserve device targeting
+    // and prevent fallback to auto-selection.
+
+    // Ensure daemon is NOT initialized
+    expect(DaemonState.getInstance().isInitialized()).toBe(false);
+
     // Register a mock tool to capture the params it receives
     const capturedParams: any[] = [];
     const mockHandler = mock(async (params: any) => {
@@ -27,28 +43,94 @@ describe("PlanExecutor - Session-based Device Routing", () => {
     });
 
     ToolRegistry.register(
-      "testSessionRoutingTool",
-      "Test tool for session routing",
+      "testDaemonNotInitializedTool",
+      "Test tool for daemon not initialized case",
       testToolSchema,
       mockHandler
     );
 
     // Mark it as requiring a device so params get injected
-    const tool = ToolRegistry.getTool("testSessionRoutingTool")!;
+    const tool = ToolRegistry.getTool("testDaemonNotInitializedTool")!;
     (tool as any).requiresDevice = true;
 
     const plan: Plan = {
-      name: "Test Session Routing",
+      name: "Test Daemon Not Initialized",
       mcpVersion: "1.0",
       steps: [
         {
-          tool: "testSessionRoutingTool",
+          tool: "testDaemonNotInitializedTool",
+          params: {
+            testParam: "value1",
+          },
+        },
+      ],
+    };
+
+    const deviceId = "emulator-5554";
+    const sessionUuid = "test-session-uuid-123";
+
+    await planExecutor.executePlan(
+      plan,
+      0,
+      "android",
+      deviceId, // Should be injected because daemon is not initialized
+      sessionUuid
+    );
+
+    // Verify BOTH deviceId and sessionUuid were injected
+    expect(mockHandler).toHaveBeenCalledTimes(1);
+    expect(capturedParams.length).toBe(1);
+    expect(capturedParams[0]).toHaveProperty("deviceId", deviceId);
+    expect(capturedParams[0]).toHaveProperty("sessionUuid", sessionUuid);
+    expect(capturedParams[0]).toHaveProperty("platform", "android");
+  });
+
+  test("should NOT inject deviceId when sessionUuid is provided AND daemon is initialized", async () => {
+    // Initialize daemon with minimal setup
+    const daemonState = DaemonState.getInstance();
+    daemonState.initialize(
+      {} as any, // sessionManager - not used in this test
+      {} as any  // devicePool - not used in this test
+    );
+
+    expect(daemonState.isInitialized()).toBe(true);
+
+    // Register a mock tool
+    const capturedParams: any[] = [];
+    const mockHandler = mock(async (params: any) => {
+      capturedParams.push({ ...params });
+      return { success: true };
+    });
+
+    const testToolSchema = z.object({
+      platform: z.string().optional(),
+      deviceId: z.string().optional(),
+      sessionUuid: z.string().optional(),
+      testParam: z.string().optional(),
+    });
+
+    ToolRegistry.register(
+      "testDaemonInitializedTool",
+      "Test tool for daemon initialized case",
+      testToolSchema,
+      mockHandler
+    );
+
+    const tool = ToolRegistry.getTool("testDaemonInitializedTool")!;
+    (tool as any).requiresDevice = true;
+
+    const plan: Plan = {
+      name: "Test Daemon Initialized",
+      mcpVersion: "1.0",
+      steps: [
+        {
+          tool: "testDaemonInitializedTool",
           params: {
             testParam: "value1",
           },
         },
         {
-          tool: "testSessionRoutingTool",
+          tool: "testDaemonInitializedTool",
           params: {
             testParam: "value2",
           },
@@ -56,23 +138,19 @@ describe("PlanExecutor - Session-based Device Routing", () => {
       ],
     };
 
-    // Execute plan with BOTH deviceId and sessionUuid
-    // In this scenario, sessionUuid should take precedence and deviceId should NOT be injected into steps
     const deviceId = "emulator-5554";
-    const sessionUuid = "test-session-uuid-123";
+    const sessionUuid = "test-session-uuid-456";
 
     await planExecutor.executePlan(
       plan,
-      0, // startStep
-      "android", // platform
-      deviceId, // deviceId - should NOT be injected into steps when sessionUuid is present
-      sessionUuid // sessionUuid - should be injected
+      0,
+      "android",
+      deviceId, // Should NOT be injected because daemon is initialized and sessionUuid present
+      sessionUuid
     );
 
-    // Verify the tool was called twice (once per step)
+    // Verify sessionUuid was injected but deviceId was NOT
     expect(mockHandler).toHaveBeenCalledTimes(2);
-
-    // Verify that sessionUuid was injected but deviceId was NOT
     expect(capturedParams.length).toBe(2);
 
     // First step

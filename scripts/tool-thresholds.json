@@ -1,0 +1,69 @@
+{
+  "version": "1.0.0",
+  "metadata": {
+    "generatedAt": "2026-01-09",
+    "description": "MCP tool call throughput thresholds with 20% regression tolerance",
+    "baseline": {
+      "description": "Initial baseline measurements from mocked execution",
+      "sampleSize": 20,
+      "generatedBy": "benchmark-mcp-tools.ts"
+    },
+    "regressionTolerance": "20%"
+  },
+  "thresholds": {
+    "listDevices": {
+      "p50": 65.0,
+      "p95": 80.0,
+      "p99": 85.0,
+      "mean": 67.0
+    },
+    "getForegroundApp": {
+      "p50": 65.0,
+      "p95": 80.0,
+      "p99": 85.0,
+      "mean": 67.0
+    },
+    "pressButton": {
+      "p50": 65.0,
+      "p95": 80.0,
+      "p99": 85.0,
+      "mean": 67.0
+    },
+    "observe": {
+      "p50": 350.0,
+      "p95": 500.0,
+      "p99": 520.0,
+      "mean": 360.0
+    },
+    "tapOn": {
+      "p50": 350.0,
+      "p95": 500.0,
+      "p99": 520.0,
+      "mean": 360.0
+    },
+    "inputText": {
+      "p50": 350.0,
+      "p95": 500.0,
+      "p99": 520.0,
+      "mean": 360.0
+    },
+    "swipe": {
+      "p50": 350.0,
+      "p95": 500.0,
+      "p99": 520.0,
+      "mean": 360.0
+    },
+    "launchApp": {
+      "p50": 1250.0,
+      "p95": 1500.0,
+      "p99": 1520.0,
+      "mean": 1260.0
+    },
+    "installApp": {
+      "p50": 1250.0,
+      "p95": 1500.0,
+      "p99": 1520.0,
+      "mean": 1260.0
+    }
+  }
+}

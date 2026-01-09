@@ -21,7 +21,8 @@ object ValidTools {
         "getTestTimings",
         "debugSearch", "bugReport",
         "doctor",
-        "daemon_available_devices", "daemon_session_info", "daemon_release_session"
+        "daemon_available_devices", "daemon_session_info", "daemon_release_session",
+        "biometricAuth", "clipboard"
     )
 
     val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")

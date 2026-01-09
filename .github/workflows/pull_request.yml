@@ -129,29 +129,29 @@ jobs:
     if: needs.detect-changes.outputs.ide_plugin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
       run:
-        working-directory: android
+        working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v4
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":ide-plugin:build -x test"
-          gradle-project-directory: "android"
+          gradle-tasks: "build -x test"
+          gradle-project-directory: "android/ide-plugin"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 
       - name: "Build Plugin ZIP"
         shell: bash
-        working-directory: android
+        working-directory: android/ide-plugin
         run: |
-          ./gradlew :ide-plugin:buildPlugin --stacktrace --continue
+          ./gradlew buildPlugin --stacktrace --continue
 
       - name: "Verify Plugin"
         shell: bash
-        working-directory: android
+        working-directory: android/ide-plugin
         run: |
-          ./gradlew :ide-plugin:verifyPlugin --stacktrace --continue
+          ./gradlew verifyPlugin --stacktrace --continue
 
       - name: "Upload IDE Plugin ZIP"
         uses: actions/upload-artifact@v4.4.0
@@ -167,15 +167,15 @@ jobs:
     if: needs.detect-changes.outputs.ide_plugin_changed == 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     defaults:
       run:
-        working-directory: android
+        working-directory: android/ide-plugin
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v4
 
       - uses: ./.github/actions/gradle-task-run
         with:
-          gradle-tasks: ":ide-plugin:test"
-          gradle-project-directory: "android"
+          gradle-tasks: "test"
+          gradle-project-directory: "android/ide-plugin"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
 

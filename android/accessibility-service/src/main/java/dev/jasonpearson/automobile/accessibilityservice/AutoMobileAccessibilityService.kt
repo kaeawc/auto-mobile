@@ -289,7 +289,7 @@ class AutoMobileAccessibilityService : AccessibilityService() {
               onRequestImeAction = { requestId, action -> performImeAction(requestId, action) },
               onRequestSelectAll = { requestId -> performSelectAll(requestId) },
               onRequestAction = { requestId, action, resourceId ->
-                performAction(requestId, action, resourceId)
+                performNodeAction(requestId, action, resourceId)
               },
               onSetRecompositionTracking = { enabled -> setRecompositionTrackingEnabled(enabled) },
           )
@@ -1222,7 +1222,7 @@ class AutoMobileAccessibilityService : AccessibilityService() {
    * Perform accessibility node action (click, long_click, or focus) on an element identified by
    * resource-id. Designed for TalkBack mode where coordinate-based taps may be intercepted.
    */
-  private fun performAction(requestId: String?, action: String, resourceId: String?) {
+  private fun performNodeAction(requestId: String?, action: String, resourceId: String?) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performAction: action='$action', resourceId='$resourceId'")
     perfProvider.serial("performAction")
@@ -1321,40 +1321,6 @@ class AutoMobileAccessibilityService : AccessibilityService() {
         broadcastActionResult(requestId, action, false, e.message, errorTime - startTime)
       }
     }
-  }
-
-  /**
-   * Find a node by its resource-id. Searches the entire accessibility tree for the first node with
-   * matching viewIdResourceName.
-   */
-  private fun findNodeByResourceId(
-      root: android.view.accessibility.AccessibilityNodeInfo?,
-      resourceId: String,
-  ): android.view.accessibility.AccessibilityNodeInfo? {
-    if (root == null) return null
-
-    // Check if this node matches
-    if (root.viewIdResourceName == resourceId) {
-      return root
-    }
-
-    // Recursively search children
-    for (i in 0 until root.childCount) {
-      val child = root.getChild(i)
-      if (child != null) {
-        val found = findNodeByResourceId(child, resourceId)
-        if (found != null) {
-          // Recycle all other children
-          for (j in i + 1 until root.childCount) {
-            root.getChild(j)?.recycle()
-          }
-          return found
-        }
-        child.recycle()
-      }
-    }
-
-    return null
   }
 
   /** Find the next focusable node after the given node in document order. */

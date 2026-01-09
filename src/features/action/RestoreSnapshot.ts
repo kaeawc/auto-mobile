@@ -285,7 +285,7 @@ export class RestoreSnapshot {
       let timedOut = false;
 
       const result = await Promise.race([
-        this.adb.executeCommand(`restore ${backupFilePath}`),
+        this.adb.executeCommand(`restore "${backupFilePath}"`),
         new Promise<{ stdout: string; stderr: string; timedOut: true }>(resolve => {
           timeoutHandle = this.timer.setTimeout(() => {
             timedOut = true;
@@ -308,6 +308,10 @@ export class RestoreSnapshot {
       // adb restore doesn't provide clear success/failure output, so we assume success
       return { success: true, timedOut: false };
     } catch (error) {
+      // Clear timeout to avoid keeping process alive
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
       logger.error(`Restore failed: ${error}`);
       return { success: false, timedOut: false };
     }

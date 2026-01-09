@@ -475,7 +475,7 @@ export class CaptureSnapshot {
       // -f: file path, -noapk: don't backup APK files, -obb: include OBB files
       // -shared: include shared storage, -all: backup all data
       const packageList = packages.join(" ");
-      const command = `backup -f ${backupFilePath} -noapk ${packageList}`;
+      const command = `backup -f "${backupFilePath}" -noapk ${packageList}`;
 
       // Execute backup with timeout using timer
       let timeoutHandle: NodeJS.Timeout | null = null;
@@ -503,6 +503,10 @@ export class CaptureSnapshot {
 
       return { timedOut: false };
     } catch (error) {
+      // Clear timeout to avoid keeping process alive
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
       logger.error(`Backup failed: ${error}`);
       return { timedOut: false };
     }

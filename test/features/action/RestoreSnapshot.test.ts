@@ -29,8 +29,8 @@ describe("RestoreSnapshot", () => {
     fakeAdb = new FakeAdbClient();
     fakeTimer = new FakeTimer();
 
-    // Create temporary directory for tests
-    testBasePath = path.join(os.tmpdir(), `snapshot-restore-test-${Date.now()}`);
+    // Create secure temporary directory for tests
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-restore-test-"));
     storage = new SnapshotStorage(testBasePath);
 
     // Create RestoreSnapshot instance with fakes
@@ -91,7 +91,7 @@ describe("RestoreSnapshot", () => {
       await storage.saveManifest(manifest);
 
       // Setup restore command result
-      fakeAdb.setCommandResult(`restore ${backupFilePath}`, "");
+      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       const result = await restoreSnapshot.execute({
         snapshotName,
@@ -102,7 +102,7 @@ describe("RestoreSnapshot", () => {
       expect(result.restoredAt).toBeDefined();
 
       // Verify restore command was called
-      expect(fakeAdb.wasCommandExecuted(`restore ${backupFilePath}`)).toBe(true);
+      expect(fakeAdb.wasCommandExecuted(`restore "${backupFilePath}"`)).toBe(true);
 
       // Verify timer was used for timeout
       expect(fakeTimer.getPendingTimeoutCount()).toBe(0); // Should be cleared after completion
@@ -247,7 +247,7 @@ describe("RestoreSnapshot", () => {
       // Setup clear commands
       fakeAdb.setCommandResult("shell pm clear com.example.app1", "Success");
       fakeAdb.setCommandResult("shell pm clear com.example.app2", "Success");
-      fakeAdb.setCommandResult(`restore ${backupFilePath}`, "");
+      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       await restoreSnapshot.execute({
         snapshotName,
@@ -295,7 +295,7 @@ describe("RestoreSnapshot", () => {
       // Save manifest
       await storage.saveManifest(manifest);
 
-      fakeAdb.setCommandResult(`restore ${backupFilePath}`, "");
+      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       await restoreSnapshot.execute({
         snapshotName,
@@ -375,7 +375,7 @@ describe("RestoreSnapshot", () => {
       // Save manifest
       await storage.saveManifest(manifest);
 
-      fakeAdb.setCommandResult(`restore ${backupFilePath}`, "");
+      fakeAdb.setCommandResult(`restore "${backupFilePath}"`, "");
 
       const startTime = Date.now();
 

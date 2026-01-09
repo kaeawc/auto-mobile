@@ -29,8 +29,8 @@ describe("CaptureSnapshot", () => {
     fakeAdb = new FakeAdbClient();
     fakeTimer = new FakeTimer();
 
-    // Create temporary directory for tests
-    testBasePath = path.join(os.tmpdir(), `snapshot-test-${Date.now()}`);
+    // Create secure temporary directory for tests
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-test-"));
     storage = new SnapshotStorage(testBasePath);
 
     // Create CaptureSnapshot instance with fakes
@@ -73,7 +73,7 @@ describe("CaptureSnapshot", () => {
 
       // Simulate successful backup
       fakeAdb.setCommandResult(
-        `backup -f ${backupFilePath} -noapk com.example.app`,
+        `backup -f "${backupFilePath}" -noapk com.example.app`,
         "Success"
       );
 

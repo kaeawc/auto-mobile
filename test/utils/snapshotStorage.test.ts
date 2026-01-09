@@ -9,8 +9,8 @@ describe("SnapshotStorage", () => {
   let testBasePath: string;
 
   beforeEach(async () => {
-    // Create a temporary directory for tests
-    testBasePath = path.join(os.tmpdir(), `snapshot-test-${Date.now()}`);
+    // Create a secure temporary directory for tests
+    testBasePath = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-test-"));
     storage = new SnapshotStorage(testBasePath);
     await storage.ensureSnapshotsDirectory();
   });

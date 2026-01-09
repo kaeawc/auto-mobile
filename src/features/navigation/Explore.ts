@@ -11,6 +11,7 @@ import { SwipeOnElement } from "../action/SwipeOnElement";
 import { ElementParser } from "../utility/ElementParser";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
+import { createHash } from "crypto";
 
 /**
  * Exploration strategies for explore
@@ -669,11 +670,9 @@ export class Explore extends BaseVisualChange {
 
           // Mark edge as failed
           this.markEdgeTraversed(
-            targetEdge.from,
-            targetEdge.to,
+            targetEdge,
             null,
             false,
-            targetEdge.timestamp,
             "Element not found on screen"
           );
 
@@ -1594,11 +1593,9 @@ export class Explore extends BaseVisualChange {
 
     // Mark edge as traversed with result
     this.markEdgeTraversed(
-      expectedEdge.from,
-      expectedEdge.to,
+      expectedEdge,
       actualScreen,
       success,
-      expectedEdge.timestamp,
       success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
       elementConfidence
     );
@@ -1697,10 +1694,46 @@ export class Explore extends BaseVisualChange {
 
   /**
    * Generate edge key for tracking
-   * Uses timestamp to ensure uniqueness for multiple edges between same screens
+   * Uses hash of the action/interaction to ensure uniqueness for multiple edges between same screens
+   * Format: {from}->{action_hash}->{to}
    */
-  private getEdgeKey(from: string, to: string, timestamp: number): string {
-    return `${from}->${to}@${timestamp}`;
+  private getEdgeKey(edge: NavigationEdge): string {
+    const actionHash = this.hashEdgeAction(edge);
+    return `${edge.from}->${actionHash}->${edge.to}`;
+  }
+
+  /**
+   * Create a deterministic hash of the edge's action/interaction
+   * This ensures the same interaction always produces the same hash
+   */
+  private hashEdgeAction(edge: NavigationEdge): string {
+    // For edges without interactions (back button, unknown), use edge type
+    if (!edge.interaction) {
+      return createHash("sha256")
+        .update(`${edge.edgeType}`)
+        .digest("hex")
+        .substring(0, 8);
+    }
+
+    // Create a stable representation of the interaction, excluding timestamps
+    const stableData = {
+      toolName: edge.interaction.toolName,
+      // Sort args keys for stability, exclude any timestamp-like fields
+      args: Object.keys(edge.interaction.args)
+        .filter(k => !k.toLowerCase().includes("timestamp"))
+        .sort()
+        .reduce((acc, key) => {
+          acc[key] = edge.interaction!.args[key];
+          return acc;
+        }, {} as Record<string, any>),
+      // Include edge type for additional uniqueness
+      edgeType: edge.edgeType
+    };
+
+    return createHash("sha256")
+      .update(JSON.stringify(stableData))
+      .digest("hex")
+      .substring(0, 8); // Use first 8 chars for readability
   }
 
   /**
@@ -1717,11 +1750,9 @@ export class Explore extends BaseVisualChange {
    * Mark edge as traversed with validation result
    */
   private markEdgeTraversed(
-    fromScreen: string,
-    expectedTo: string,
+    edge: NavigationEdge,
     actualTo: string | null,
     success: boolean,
-    edgeTimestamp: number,
     error?: string,
     matchConfidence?: number
   ): void {
@@ -1729,13 +1760,13 @@ export class Explore extends BaseVisualChange {
       return;
     }
 
-    const edgeKey = this.getEdgeKey(fromScreen, expectedTo, edgeTimestamp);
+    const edgeKey = this.getEdgeKey(edge);
     this.graphTraversalState.traversedEdges.add(edgeKey);
 
     const validationResult: EdgeValidationResult = {
       edgeKey,
-      fromScreen,
-      expectedTo,
+      fromScreen: edge.from,
+      expectedTo: edge.to,
       actualTo,
       success,
       timestamp: Date.now(),
@@ -1747,12 +1778,12 @@ export class Explore extends BaseVisualChange {
 
     // Remove from pending edges
     this.graphTraversalState.pendingEdges = this.graphTraversalState.pendingEdges.filter(
-      edge => this.getEdgeKey(edge.from, edge.to, edge.timestamp) !== edgeKey
+      e => this.getEdgeKey(e) !== edgeKey
     );
 
     logger.info(
       `[Explore] Edge ${edgeKey} validation: ${success ? "SUCCESS" : "FAILED"}` +
-        (actualTo && actualTo !== expectedTo ? ` (went to ${actualTo})` : "")
+        (actualTo && actualTo !== edge.to ? ` (went to ${actualTo})` : "")
     );
   }
 

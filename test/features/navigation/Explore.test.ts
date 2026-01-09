@@ -682,11 +682,25 @@ describe("Explore", () => {
       const state = (explore as any).graphTraversalState;
       expect(state.traversedEdges.size).toBe(0);
 
-      const edgeTimestamp = Date.now();
-      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true, edgeTimestamp, undefined, 0.95);
+      // Create a mock edge with interaction
+      const mockEdge = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: Date.now(),
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Submit Button" },
+          timestamp: Date.now()
+        }
+      };
+
+      (explore as any).markEdgeTraversed(mockEdge, "Screen2", true, undefined, 0.95);
 
       expect(state.traversedEdges.size).toBe(1);
-      const edgeKey = `Screen1->Screen2@${edgeTimestamp}`;
+
+      // Get the actual edge key generated
+      const edgeKey = (explore as any).getEdgeKey(mockEdge);
       expect(state.traversedEdges.has(edgeKey)).toBe(true);
 
       const validation = state.edgeValidationResults.get(edgeKey);
@@ -703,18 +717,28 @@ describe("Explore", () => {
 
       const state = (explore as any).graphTraversalState;
 
-      const edgeTimestamp = Date.now();
+      // Create a mock edge with interaction
+      const mockEdge = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: Date.now(),
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Navigate Button" },
+          timestamp: Date.now()
+        }
+      };
+
       (explore as any).markEdgeTraversed(
-        "Screen1",
-        "Screen2",
+        mockEdge,
         "Screen3",
         false,
-        edgeTimestamp,
         "Navigation diverged",
         0.8
       );
 
-      const edgeKey = `Screen1->Screen2@${edgeTimestamp}`;
+      const edgeKey = (explore as any).getEdgeKey(mockEdge);
       const validation = state.edgeValidationResults.get(edgeKey);
       expect(validation?.success).toBe(false);
       expect(validation?.expectedTo).toBe("Screen2");
@@ -725,18 +749,69 @@ describe("Explore", () => {
     test("should generate edge keys correctly", async () => {
       explore = new Explore(device, mockAdb);
 
-      const timestamp1 = 1000;
-      const timestamp2 = 2000;
+      // Create edges with same interaction
+      const edge1 = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: 1000,
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Button A" },
+          timestamp: 1000
+        }
+      };
 
-      const key1 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp1);
-      const key2 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp1);
-      const key3 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp2);
-      const key4 = (explore as any).getEdgeKey("Screen2", "Screen1", timestamp1);
+      const edge2 = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: 2000, // Different timestamp
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Button A" }, // Same interaction
+          timestamp: 2000
+        }
+      };
 
-      expect(key1).toBe("Screen1->Screen2@1000");
-      expect(key1).toBe(key2); // Same timestamp = same key
-      expect(key1).not.toBe(key3); // Different timestamp = different key
-      expect(key1).not.toBe(key4); // Different screens = different key
+      const edge3 = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: 1000,
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Button B" }, // Different interaction
+          timestamp: 1000
+        }
+      };
+
+      const edge4 = {
+        from: "Screen2",
+        to: "Screen1",
+        timestamp: 1000,
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Button A" },
+          timestamp: 1000
+        }
+      };
+
+      const key1 = (explore as any).getEdgeKey(edge1);
+      const key2 = (explore as any).getEdgeKey(edge2);
+      const key3 = (explore as any).getEdgeKey(edge3);
+      const key4 = (explore as any).getEdgeKey(edge4);
+
+      // Same interaction = same key (deterministic)
+      expect(key1).toBe(key2);
+      // Different interaction = different key
+      expect(key1).not.toBe(key3);
+      // Different screens = different key
+      expect(key1).not.toBe(key4);
+
+      // Verify format: from->hash->to
+      expect(key1).toMatch(/^Screen1->[a-f0-9]{8}->Screen2$/);
     });
 
     test("should include graph traversal metrics in result", async () => {
@@ -759,8 +834,18 @@ describe("Explore", () => {
       await (explore as any).initializeGraphTraversal();
 
       // Mark some edges as traversed
-      const edgeTimestamp = Date.now();
-      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true, edgeTimestamp);
+      const mockEdge = {
+        from: "Screen1",
+        to: "Screen2",
+        timestamp: Date.now(),
+        edgeType: "tool" as const,
+        interaction: {
+          toolName: "tapOn",
+          args: { text: "Test Button" },
+          timestamp: Date.now()
+        }
+      };
+      (explore as any).markEdgeTraversed(mockEdge, "Screen2", true);
       (explore as any).markNodeVisited("Screen1");
       (explore as any).markNodeVisited("Screen2");
 

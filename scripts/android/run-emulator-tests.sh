@@ -305,64 +305,6 @@ fi
 
 echo ""
 
-print_section "DAEMON WARM-UP"
-
-echo "Starting AutoMobile daemon to avoid first-test timeout..."
-echo "This ensures the daemon is fully initialized before tests run."
-echo ""
-
-# Set CI environment variable to enable optimized daemon startup
-export AUTOMOBILE_CI=1
-echo "CI mode enabled - daemon will await device discovery on startup"
-echo ""
-
-# Go to project root to access the built auto-mobile CLI
-cd ..
-
-# Build the TypeScript project if dist doesn't exist
-if [ ! -f "dist/src/index.js" ]; then
-  echo "Building auto-mobile..."
-  bun run build
-fi
-
-# Warm up the daemon by calling daemon_available_devices
-# This starts the daemon, initializes device pool, and waits for devices to be discovered
-# In CI mode, daemon waits for device discovery, so we should see devices quickly
-echo "Warming up daemon with device check..."
-MAX_RETRIES=30
-RETRY_DELAY=1  # Reduced from 2s - in CI, devices should be discovered quickly
-DAEMON_READY=false
-
-for i in $(seq 1 $MAX_RETRIES); do
-  echo "Attempt $i/$MAX_RETRIES: Checking daemon and device pool..."
-
-  # Call daemon_available_devices and capture output (no platform param - it's daemon-level)
-  RESULT=$(bun dist/src/index.js --cli daemon_available_devices 2>&1) || true
-  echo "$RESULT"
-
-  # Check if we have at least 1 available device (device pool is initialized)
-  if echo "$RESULT" | grep -q '"availableDevices": [1-9]'; then
-    print_success "Daemon is ready and devices are available"
-    DAEMON_READY=true
-    break
-  elif echo "$RESULT" | grep -q '"availableDevices": 0'; then
-    echo "Device pool not yet initialized (0 devices), waiting ${RETRY_DELAY}s..."
-    sleep $RETRY_DELAY
-  else
-    echo "Daemon not ready yet, waiting ${RETRY_DELAY}s..."
-    sleep $RETRY_DELAY
-  fi
-done
-
-if [ "$DAEMON_READY" = false ]; then
-  print_warning "Daemon warm-up: No devices found after $MAX_RETRIES attempts, proceeding anyway..."
-fi
-
-# Return to android directory for test execution
-cd android
-
-echo ""
-
 print_section "RUNNING TEST SCRIPT"
 
 echo "Working directory: $(pwd)"

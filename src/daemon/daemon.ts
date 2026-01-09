@@ -77,19 +77,11 @@ export class Daemon {
     await this.socketServer.start();
     logger.info("Unix socket server started");
 
-    // Initialize device pool with discovered devices
-    // In CI environments (AUTOMOBILE_CI=1), await device discovery to ensure deterministic warmup
-    // This eliminates the race condition where tests start before devices are discovered
-    if (process.env.AUTOMOBILE_CI === "1") {
-      logger.info("CI mode detected - awaiting device pool initialization...");
-      await this.initializeDevicePool();
-      logger.info("Device pool initialization complete");
-    } else {
-      // In local dev, keep async to avoid blocking daemon startup
-      this.initializeDevicePool().catch(error => {
-        logger.error(`Failed to initialize device pool in background: ${error}`);
-      });
-    }
+    // Initialize device pool with discovered devices (async in background)
+    // Don't await to avoid blocking daemon startup
+    this.initializeDevicePool().catch(error => {
+      logger.error(`Failed to initialize device pool in background: ${error}`);
+    });
 
     // Write PID file
     await this.writePidFile();

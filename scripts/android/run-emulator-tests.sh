@@ -311,6 +311,11 @@ echo "Starting AutoMobile daemon to avoid first-test timeout..."
 echo "This ensures the daemon is fully initialized before tests run."
 echo ""
 
+# Set CI environment variable to enable optimized daemon startup
+export AUTOMOBILE_CI=1
+echo "CI mode enabled - daemon will await device discovery on startup"
+echo ""
+
 # Go to project root to access the built auto-mobile CLI
 cd ..
 
@@ -322,10 +327,10 @@ fi
 
 # Warm up the daemon by calling daemon_available_devices
 # This starts the daemon, initializes device pool, and waits for devices to be discovered
-# The device pool initialization is async, so we need to wait until devices are actually available
+# In CI mode, daemon waits for device discovery, so we should see devices quickly
 echo "Warming up daemon with device check..."
 MAX_RETRIES=30
-RETRY_DELAY=2
+RETRY_DELAY=1  # Reduced from 2s - in CI, devices should be discovered quickly
 DAEMON_READY=false
 
 for i in $(seq 1 $MAX_RETRIES); do

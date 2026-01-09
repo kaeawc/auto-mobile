@@ -44,7 +44,10 @@ export class DevicePool {
   private readonly MAX_DEVICE_ERRORS = 5;
 
   // Device wait configuration for parallel test execution
-  private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
+  // In CI, use shorter timeout since devices should be discovered during daemon startup
+  private readonly DEVICE_WAIT_TIMEOUT_MS = process.env.AUTOMOBILE_CI === "1"
+    ? 30000  // 30 seconds in CI
+    : 60000; // 60 seconds in local dev
   private readonly DEVICE_WAIT_INTERVAL_MS = 1000; // Check every 1 second
 
   constructor(sessionManager: SessionManager, timer: Timer = defaultTimer) {

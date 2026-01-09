@@ -181,4 +181,57 @@ class TestPlanValidatorTest {
         assertFalse("Empty steps array should fail validation", result.valid)
         assertTrue("Should have errors for empty steps", result.errors.isNotEmpty())
     }
+
+    @Test
+    fun `detects invalid tool name`() {
+        val yaml = """
+            name: test-plan
+            steps:
+              - tool: invalidTool
+        """.trimIndent()
+
+        val result = TestPlanValidator.validateYaml(yaml)
+        assertFalse("YAML with invalid tool should fail validation", result.valid)
+
+        val toolError = result.errors.find { it.message.contains("Unknown tool") && it.message.contains("invalidTool") }
+        assertNotNull("Should report unknown tool", toolError)
+    }
+
+    @Test
+    fun `accepts valid tool name`() {
+        val yaml = """
+            name: test-plan
+            steps:
+              - tool: observe
+              - tool: tapOn
+                params:
+                  selector:
+                    testTag: button
+              - tool: launchApp
+                params:
+                  appId: com.example.app
+        """.trimIndent()
+
+        val result = TestPlanValidator.validateYaml(yaml)
+        assertTrue("YAML with valid tools should pass validation: ${result.errors}", result.valid)
+    }
+
+    @Test
+    fun `detects multiple invalid tool names`() {
+        val yaml = """
+            name: test-plan
+            steps:
+              - tool: invalidTool1
+              - tool: observe
+              - tool: invalidTool2
+        """.trimIndent()
+
+        val result = TestPlanValidator.validateYaml(yaml)
+        assertFalse("YAML with invalid tools should fail validation", result.valid)
+
+        val tool1Error = result.errors.find { it.message.contains("invalidTool1") }
+        val tool2Error = result.errors.find { it.message.contains("invalidTool2") }
+        assertNotNull("Should report first invalid tool", tool1Error)
+        assertNotNull("Should report second invalid tool", tool2Error)
+    }
 }

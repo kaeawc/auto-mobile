@@ -116,9 +116,86 @@ class ConvertDeprecatedFieldQuickFix(
 }
 
 /**
+ * Quick fix to fix an invalid tool name with a suggestion
+ */
+class FixToolNameQuickFix(
+    private val currentName: String,
+    private val suggestedName: String
+) : LocalQuickFix {
+    override fun getFamilyName(): String = "Change tool to '$suggestedName'"
+
+    override fun applyFix(project: Project, descriptor: ProblemDescriptor) {
+        val element = descriptor.psiElement
+        val keyValue = PsiTreeUtil.getParentOfType(element, YAMLKeyValue::class.java) ?: return
+
+        val generator = YAMLElementGenerator.getInstance(project)
+        val newKeyValue = generator.createYamlKeyValue("tool", suggestedName)
+
+        keyValue.replace(newKeyValue)
+    }
+}
+
+/**
  * Factory to create quick fixes based on validation errors
  */
 object TestPlanQuickFixFactory {
+
+    // Valid AutoMobile tool names (should match TestPlanValidator.VALID_TOOLS)
+    private val VALID_TOOLS = setOf(
+        "launchApp", "terminateApp", "listApps", "installApp",
+        "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
+        "inputText", "clearText", "selectAllText", "imeAction",
+        "pressButton", "pressKey", "homeScreen", "recentApps", "openLink", "navigateTo",
+        "observe", "rawViewHierarchy",
+        "listDevices", "startDevice", "killDevice", "setActiveDevice",
+        "rotate", "shake", "openSystemTray", "setLocale", "setTimeZone",
+        "setTextDirection", "set24HourFormat", "getCalendarSystem",
+        "enableDemoMode", "disableDemoMode",
+        "executePlan", "criticalSection",
+        "getDeepLinks",
+        "getNavigationGraph", "explore", "identifyInteractions",
+        "listPerformanceAuditResults",
+        "captureDeviceSnapshot", "restoreDeviceSnapshot", "listSnapshots", "deleteSnapshot",
+        "startVideoRecording", "stopVideoRecording", "listVideoRecordings", "deleteVideoRecording",
+        "listDeviceImages",
+        "getTestTimings",
+        "debugSearch", "bugReport",
+        "doctor",
+        "daemon_available_devices", "daemon_session_info", "daemon_release_session"
+    )
+
+    /**
+     * Find similar tool names using Levenshtein distance
+     */
+    private fun findSimilarTools(toolName: String, maxDistance: Int = 3): List<String> {
+        return VALID_TOOLS
+            .map { validTool -> validTool to levenshteinDistance(toolName.lowercase(), validTool.lowercase()) }
+            .filter { (_, distance) -> distance <= maxDistance }
+            .sortedBy { (_, distance) -> distance }
+            .take(3)
+            .map { (tool, _) -> tool }
+    }
+
+    /**
+     * Calculate Levenshtein distance between two strings
+     */
+    private fun levenshteinDistance(s1: String, s2: String): Int {
+        val costs = IntArray(s2.length + 1) { it }
+        for (i in 1..s1.length) {
+            var lastValue = i
+            for (j in 1..s2.length) {
+                val newValue = if (s1[i - 1] == s2[j - 1]) {
+                    costs[j - 1]
+                } else {
+                    minOf(costs[j - 1], lastValue, costs[j]) + 1
+                }
+                costs[j - 1] = lastValue
+                lastValue = newValue
+            }
+            costs[s2.length] = lastValue
+        }
+        return costs[s2.length]
+    }
 
     /**
      * Create quick fixes for a validation error
@@ -141,6 +218,18 @@ object TestPlanQuickFixFactory {
             }
             error.field.endsWith(".description") && error.severity == ValidationSeverity.WARNING -> {
                 fixes.add(RenameFieldQuickFix("description", "label"))
+            }
+        }
+
+        // Handle unknown tool names
+        if (error.message.contains("Unknown tool")) {
+            val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
+            val toolName = toolMatch?.groupValues?.getOrNull(1)
+            if (toolName != null) {
+                val similarTools = findSimilarTools(toolName)
+                similarTools.forEach { suggestedTool ->
+                    fixes.add(FixToolNameQuickFix(toolName, suggestedTool))
+                }
             }
         }
 

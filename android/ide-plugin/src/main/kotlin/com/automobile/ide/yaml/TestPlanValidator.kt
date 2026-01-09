@@ -44,6 +44,49 @@ object TestPlanValidator {
     // Deprecated fields that should generate warnings instead of errors
     private val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")
 
+    // Valid AutoMobile tool names (extracted from src/server/*Tools.ts)
+    private val VALID_TOOLS = setOf(
+        // App management
+        "launchApp", "terminateApp", "listApps", "installApp",
+        // UI interactions
+        "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
+        // Input
+        "inputText", "clearText", "selectAllText", "imeAction",
+        // Navigation
+        "pressButton", "pressKey", "homeScreen", "recentApps", "openLink", "navigateTo",
+        // Observation
+        "observe", "rawViewHierarchy",
+        // Device management
+        "listDevices", "startDevice", "killDevice", "setActiveDevice",
+        // Device configuration
+        "rotate", "shake", "openSystemTray", "setLocale", "setTimeZone",
+        "setTextDirection", "set24HourFormat", "getCalendarSystem",
+        // Demo mode
+        "enableDemoMode", "disableDemoMode",
+        // Testing
+        "executePlan", "criticalSection",
+        // Deep links
+        "getDeepLinks",
+        // Navigation graph
+        "getNavigationGraph", "explore", "identifyInteractions",
+        // Performance
+        "listPerformanceAuditResults",
+        // Snapshots
+        "captureDeviceSnapshot", "restoreDeviceSnapshot", "listSnapshots", "deleteSnapshot",
+        // Video recording
+        "startVideoRecording", "stopVideoRecording", "listVideoRecordings", "deleteVideoRecording",
+        // Device images
+        "listDeviceImages",
+        // Testing tools
+        "getTestTimings",
+        // Debugging
+        "debugSearch", "bugReport",
+        // Doctor
+        "doctor",
+        // Daemon
+        "daemon_available_devices", "daemon_session_info", "daemon_release_session"
+    )
+
     /**
      * Load the JSON schema from resources
      */
@@ -118,19 +161,99 @@ object TestPlanValidator {
             com.fasterxml.jackson.databind.ObjectMapper().readTree(jsonString)
         )
 
-        if (validationMessages.isEmpty()) {
+        // Validate tool names
+        val toolNameErrors = validateToolNames(parsedObject, yamlContent)
+
+        if (validationMessages.isEmpty() && toolNameErrors.isEmpty()) {
             return TestPlanValidationResult(valid = true)
         }
 
         // Format validation errors
         val errors = validationMessages.map { msg ->
             formatError(msg, yamlContent)
-        }
+        }.toMutableList()
+
+        // Add tool name validation errors
+        errors.addAll(toolNameErrors)
 
         return TestPlanValidationResult(
             valid = false,
             errors = errors
         )
+    }
+
+    /**
+     * Validate that all tool names in steps are valid AutoMobile tools
+     */
+    private fun validateToolNames(parsedObject: Any?, yamlContent: String): List<TestPlanValidationError> {
+        val errors = mutableListOf<TestPlanValidationError>()
+
+        if (parsedObject !is Map<*, *>) {
+            return errors
+        }
+
+        val steps = parsedObject["steps"]
+        if (steps !is List<*>) {
+            return errors
+        }
+
+        steps.forEachIndexed { index, step ->
+            if (step is Map<*, *>) {
+                val toolName = step["tool"] as? String
+                if (toolName != null && toolName.isNotEmpty() && !VALID_TOOLS.contains(toolName)) {
+                    val lineInfo = findToolNameLine(yamlContent, index, toolName)
+                    errors.add(
+                        TestPlanValidationError(
+                            field = "steps[$index].tool",
+                            message = "Unknown tool '$toolName'. Must be one of the valid AutoMobile tools.",
+                            severity = ValidationSeverity.ERROR,
+                            line = lineInfo?.line,
+                            column = lineInfo?.column
+                        )
+                    )
+                }
+            }
+        }
+
+        return errors
+    }
+
+    /**
+     * Find the line number of a tool name in a specific step
+     */
+    private fun findToolNameLine(yamlContent: String, stepIndex: Int, toolName: String): LineInfo? {
+        val lines = yamlContent.split("\n")
+        var inSteps = false
+        var currentStepIndex = -1
+
+        lines.forEachIndexed { lineIndex, line ->
+            // Check if we're entering the steps section
+            if (line.trim().startsWith("steps:")) {
+                inSteps = true
+                return@forEachIndexed
+            }
+
+            // Count step entries
+            if (inSteps && line.trim().startsWith("- ")) {
+                currentStepIndex++
+            }
+
+            // If we're at the right step, look for the tool line
+            if (currentStepIndex == stepIndex) {
+                val toolPattern = Regex("^\\s*tool:\\s*[\"']?$toolName[\"']?\\s*$")
+                if (toolPattern.find(line) != null) {
+                    val column = line.indexOf("tool") + 1
+                    return LineInfo(line = lineIndex + 1, column = column)
+                }
+            }
+
+            // Stop if we've passed the target step
+            if (currentStepIndex > stepIndex) {
+                return@forEachIndexed
+            }
+        }
+
+        return null
     }
 
     /**

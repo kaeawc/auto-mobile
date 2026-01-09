@@ -82,6 +82,20 @@ class TestPlanInspection : LocalInspectionTool() {
      * Find the PSI element that corresponds to the validation error
      */
     private fun findTargetElement(file: YAMLFile, error: TestPlanValidationError): PsiElement? {
+        // For tool name errors, try to find the specific tool value element
+        if (error.message.contains("Unknown tool")) {
+            val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
+            val toolName = toolMatch?.groupValues?.getOrNull(1)
+            if (toolName != null) {
+                // Find the 'tool' key and then get its value
+                val toolKeyValue = findKeyValue(file, "tool")
+                if (toolKeyValue != null) {
+                    // Get the value element (the tool name itself)
+                    return toolKeyValue.value
+                }
+            }
+        }
+
         // Try to find the element by field name
         val fieldName = error.field.substringAfterLast('.').substringAfterLast(']')
 

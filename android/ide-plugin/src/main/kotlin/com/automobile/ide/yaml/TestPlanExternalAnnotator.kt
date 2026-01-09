@@ -92,6 +92,20 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
                 val lineEndOffset = document.getLineEndOffset(lineIndex)
                 val lineText = document.getText(TextRange(lineStartOffset, lineEndOffset))
 
+                // For tool name errors, highlight the tool value (e.g., "bop") not the key "tool"
+                if (error.message.contains("Unknown tool")) {
+                    val toolMatch = Regex("Unknown tool '([^']+)'").find(error.message)
+                    val toolName = toolMatch?.groupValues?.getOrNull(1)
+                    if (toolName != null) {
+                        val toolIndex = lineText.indexOf(toolName)
+                        if (toolIndex >= 0) {
+                            val startOffset = lineStartOffset + toolIndex
+                            val endOffset = startOffset + toolName.length
+                            return TextRange(startOffset, endOffset)
+                        }
+                    }
+                }
+
                 // Find the field name in the line
                 val fieldName = error.field.substringAfterLast('.').substringAfterLast(']')
                 val fieldIndex = lineText.indexOf(fieldName)

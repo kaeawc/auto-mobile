@@ -130,9 +130,10 @@ export class Clipboard {
               error: "Text is required for copy action"
             };
           }
-          // Escape text for shell command
-          const escapedText = text.replace(/"/g, '\\"');
-          const result = await this.adb.executeCommand(`shell cmd clipboard set "${escapedText}"`);
+          // Escape text for shell command using single quotes (safer than double quotes)
+          // In single-quoted strings, only single quotes need escaping: ' becomes '\''
+          const escapedText = text.replace(/'/g, "'\\''");
+          const result = await this.adb.executeCommand(`shell cmd clipboard set '${escapedText}'`);
 
           // Check if cmd clipboard is supported
           if (result.includes("No shell command implementation")) {

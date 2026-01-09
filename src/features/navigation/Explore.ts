@@ -12,6 +12,7 @@ import { ElementParser } from "../utility/ElementParser";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { createHash } from "crypto";
+import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
 /**
  * Exploration strategies for explore
@@ -205,9 +206,10 @@ export class Explore extends BaseVisualChange {
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    axe: AxeClient | null = null
+    axe: AxeClient | null = null,
+    timer: Timer = defaultTimer
   ) {
-    super(device, adb, axe);
+    super(device, adb, axe, timer);
     this.navigationManager = NavigationGraphManager.getInstance();
     this.exploredElements = new Map();
     this.elementParser = new ElementParser();
@@ -1769,7 +1771,7 @@ export class Explore extends BaseVisualChange {
       expectedTo: edge.to,
       actualTo,
       success,
-      timestamp: Date.now(),
+      timestamp: this.timer.now(),
       error,
       matchConfidence
     };

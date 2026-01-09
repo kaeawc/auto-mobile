@@ -3,16 +3,22 @@ import { Explore } from "../../../src/features/navigation/Explore";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { BootedDevice, Element, ObserveResult } from "../../../src/models";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("Explore", () => {
   let explore: Explore;
   let device: BootedDevice;
   let mockAdb: any;
   let mockObserveScreen: any;
+  let fakeTimer: FakeTimer;
 
   beforeEach(() => {
     // Reset singleton
     NavigationGraphManager.resetInstance();
+
+    // Create fake timer
+    fakeTimer = new FakeTimer();
+    fakeTimer.setManualMode();
 
     // Create fake device
     device = {
@@ -676,7 +682,7 @@ describe("Explore", () => {
     });
 
     test("should mark edges as traversed with validation results", async () => {
-      explore = new Explore(device, mockAdb);
+      explore = new Explore(device, mockAdb, null, fakeTimer);
       await (explore as any).initializeGraphTraversal();
 
       const state = (explore as any).graphTraversalState;
@@ -712,7 +718,7 @@ describe("Explore", () => {
     });
 
     test("should record failed edge validation", async () => {
-      explore = new Explore(device, mockAdb);
+      explore = new Explore(device, mockAdb, null, fakeTimer);
       await (explore as any).initializeGraphTraversal();
 
       const state = (explore as any).graphTraversalState;
@@ -747,7 +753,7 @@ describe("Explore", () => {
     });
 
     test("should generate edge keys correctly", async () => {
-      explore = new Explore(device, mockAdb);
+      explore = new Explore(device, mockAdb, null, fakeTimer);
 
       // Create edges with same interaction
       const edge1 = {
@@ -828,7 +834,7 @@ describe("Explore", () => {
         applicationId: "com.test.app"
       });
 
-      explore = new Explore(device, mockAdb);
+      explore = new Explore(device, mockAdb, null, fakeTimer);
       (explore as any).observeScreen = mockObserveScreen;
 
       await (explore as any).initializeGraphTraversal();
@@ -837,12 +843,12 @@ describe("Explore", () => {
       const mockEdge = {
         from: "Screen1",
         to: "Screen2",
-        timestamp: Date.now(),
+        timestamp: fakeTimer.now(),
         edgeType: "tool" as const,
         interaction: {
           toolName: "tapOn",
           args: { text: "Test Button" },
-          timestamp: Date.now()
+          timestamp: fakeTimer.now()
         }
       };
       (explore as any).markEdgeTraversed(mockEdge, "Screen2", true);

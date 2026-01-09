@@ -1273,12 +1273,12 @@ describe("Offscreen Node Filtering", function() {
     test("should find accessibility-focused element from top-level field", function() {
       const hierarchy = {
         "accessibility-focused-element": {
-          text: "Focused Button",
+          "text": "Focused Button",
           "resource-id": "com.app:id/button",
           "content-desc": "Submit",
-          bounds: { left: 100, top: 200, right: 300, bottom: 250 }
+          "bounds": { left: 100, top: 200, right: 300, bottom: 250 }
         },
-        hierarchy: {
+        "hierarchy": {
           bounds: "[0,0][1080,2400]",
           node: [
             { text: "Other Button", bounds: "[0,100][500,200]" }
@@ -1305,7 +1305,7 @@ describe("Offscreen Node Filtering", function() {
               text: "Container",
               bounds: "[0,300][500,600]",
               node: [
-                { text: "Button 2", "accessibility-focused": "true", bounds: "[10,310][490,350]" },
+                { "text": "Button 2", "accessibility-focused": "true", "bounds": "[10,310][490,350]" },
                 { text: "Button 3", bounds: "[10,360][490,400]" }
               ]
             }
@@ -1348,10 +1348,10 @@ describe("Offscreen Node Filtering", function() {
           text: "Top-level Focused",
           bounds: { left: 100, top: 200, right: 300, bottom: 250 }
         },
-        hierarchy: {
+        "hierarchy": {
           bounds: "[0,0][1080,2400]",
           node: [
-            { text: "Hierarchy Focused", "accessibility-focused": "true", bounds: "[0,100][500,200]" }
+            { "text": "Hierarchy Focused", "accessibility-focused": "true", "bounds": "[0,100][500,200]" }
           ]
         }
       };
@@ -1381,7 +1381,7 @@ describe("Offscreen Node Filtering", function() {
             hierarchy: {
               bounds: "[0,0][500,300]",
               node: [
-                { text: "Popup Button", "accessibility-focused": "true", bounds: "[10,10][490,50]" }
+                { "text": "Popup Button", "accessibility-focused": "true", "bounds": "[10,10][490,50]" }
               ]
             }
           }

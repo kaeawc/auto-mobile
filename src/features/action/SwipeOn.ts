@@ -751,19 +751,6 @@ export class SwipeOn extends BaseVisualChange {
       );
     });
 
-    // Clear accessibility focus before scrolling (when TalkBack is enabled)
-    if (isTalkBackEnabled) {
-      try {
-        await perf.track("clearAccessibilityFocus", async () => {
-          await this.accessibilityService.clearAccessibilityFocus();
-          logger.info("[SwipeOn] Cleared accessibility focus before scrolling");
-        });
-      } catch (error) {
-        logger.warn(`[SwipeOn] Failed to clear accessibility focus: ${error}`);
-        // Continue anyway - this is not a critical failure
-      }
-    }
-
     // First check if element is already visible
     foundElement = await perf.track("initialSearch", () =>
       this.findElementInHierarchy(options.lookFor!, lastObservation.viewHierarchy!, options.container)
@@ -792,6 +779,19 @@ export class SwipeOn extends BaseVisualChange {
         duration: 0,
         observation: lastObservation
       };
+    }
+
+    // Clear accessibility focus before scrolling (only when focusTarget is requested)
+    if (isTalkBackEnabled && options.focusTarget) {
+      try {
+        await perf.track("clearAccessibilityFocus", async () => {
+          await this.accessibilityService.clearAccessibilityFocus();
+          logger.info("[SwipeOn] Cleared accessibility focus before scrolling (focusTarget requested)");
+        });
+      } catch (error) {
+        logger.warn(`[SwipeOn] Failed to clear accessibility focus: ${error}`);
+        // Continue anyway - this is not a critical failure
+      }
     }
 
     // Scroll until element is found

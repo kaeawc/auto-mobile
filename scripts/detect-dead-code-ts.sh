@@ -92,8 +92,8 @@ if [ $TS_PRUNE_EXIT -eq 0 ] || [ -s "$TS_PRUNE_OUTPUT" ]; then
             linenum="${BASH_REMATCH[2]}"
             name="${BASH_REMATCH[3]}"
 
-            # Remove optional (used in module) suffix
-            name=$(echo "$name" | sed 's/ *(.*)$//')
+            # Remove optional (used in module) suffix using parameter expansion
+            name="${name%% \(*\)}"
             # Trim whitespace from name
             name=$(echo "$name" | xargs)
 
@@ -382,7 +382,7 @@ if [ -n "$OUTPUT_DIR" ]; then
                 count=$(jq -r "[.[] | select(.type == \"$type\")] | length" "$ISSUES_JSON")
                 if [ "$count" -gt 0 ]; then
                     # Capitalize first letter
-                    type_cap="$(tr '[:lower:]' '[:upper:]' <<< ${type:0:1})${type:1}"
+                    type_cap="$(tr '[:lower:]' '[:upper:]' <<< "${type:0:1}")${type:1}"
                     echo "### $type_cap ($count)"
                     echo ""
                     jq -r ".[] | select(.type == \"$type\") | \"- \`\(.location)\` - \(.name)\"" "$ISSUES_JSON"

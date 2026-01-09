@@ -673,6 +673,7 @@ export class Explore extends BaseVisualChange {
             targetEdge.to,
             null,
             false,
+            targetEdge.timestamp,
             "Element not found on screen"
           );
 
@@ -1597,6 +1598,7 @@ export class Explore extends BaseVisualChange {
       expectedEdge.to,
       actualScreen,
       success,
+      expectedEdge.timestamp,
       success ? undefined : `Expected ${expectedEdge.to}, got ${actualScreen}`,
       elementConfidence
     );
@@ -1695,9 +1697,10 @@ export class Explore extends BaseVisualChange {
 
   /**
    * Generate edge key for tracking
+   * Uses timestamp to ensure uniqueness for multiple edges between same screens
    */
-  private getEdgeKey(from: string, to: string): string {
-    return `${from}->${to}`;
+  private getEdgeKey(from: string, to: string, timestamp: number): string {
+    return `${from}->${to}@${timestamp}`;
   }
 
   /**
@@ -1718,6 +1721,7 @@ export class Explore extends BaseVisualChange {
     expectedTo: string,
     actualTo: string | null,
     success: boolean,
+    edgeTimestamp: number,
     error?: string,
     matchConfidence?: number
   ): void {
@@ -1725,7 +1729,7 @@ export class Explore extends BaseVisualChange {
       return;
     }
 
-    const edgeKey = this.getEdgeKey(fromScreen, expectedTo);
+    const edgeKey = this.getEdgeKey(fromScreen, expectedTo, edgeTimestamp);
     this.graphTraversalState.traversedEdges.add(edgeKey);
 
     const validationResult: EdgeValidationResult = {
@@ -1743,7 +1747,7 @@ export class Explore extends BaseVisualChange {
 
     // Remove from pending edges
     this.graphTraversalState.pendingEdges = this.graphTraversalState.pendingEdges.filter(
-      edge => this.getEdgeKey(edge.from, edge.to) !== edgeKey
+      edge => this.getEdgeKey(edge.from, edge.to, edge.timestamp) !== edgeKey
     );
 
     logger.info(
@@ -1754,13 +1758,15 @@ export class Explore extends BaseVisualChange {
 
   /**
    * Select next edge to traverse in validate mode
+   * Only selects edges from the current screen to avoid false divergence
    */
   private selectNextEdgeToTraverse(currentScreen: string): NavigationEdge | null {
     if (!this.graphTraversalState) {
       return null;
     }
 
-    // First priority: untraversed edges from current screen
+    // Only select untraversed edges from current screen
+    // Do not attempt to navigate to other screens, as this causes false divergence
     const untraversedFromCurrent = this.graphTraversalState.pendingEdges.filter(
       edge => edge.from === currentScreen
     );
@@ -1769,12 +1775,7 @@ export class Explore extends BaseVisualChange {
       return untraversedFromCurrent[0];
     }
 
-    // Second priority: any untraversed edge (will require navigation to source)
-    if (this.graphTraversalState.pendingEdges.length > 0) {
-      return this.graphTraversalState.pendingEdges[0];
-    }
-
-    // No more edges to traverse
+    // No edges from current screen - exploration is complete or stuck
     return null;
   }
 

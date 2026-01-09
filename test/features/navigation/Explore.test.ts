@@ -682,12 +682,14 @@ describe("Explore", () => {
       const state = (explore as any).graphTraversalState;
       expect(state.traversedEdges.size).toBe(0);
 
-      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true, undefined, 0.95);
+      const edgeTimestamp = Date.now();
+      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true, edgeTimestamp, undefined, 0.95);
 
       expect(state.traversedEdges.size).toBe(1);
-      expect(state.traversedEdges.has("Screen1->Screen2")).toBe(true);
+      const edgeKey = `Screen1->Screen2@${edgeTimestamp}`;
+      expect(state.traversedEdges.has(edgeKey)).toBe(true);
 
-      const validation = state.edgeValidationResults.get("Screen1->Screen2");
+      const validation = state.edgeValidationResults.get(edgeKey);
       expect(validation).toBeDefined();
       expect(validation?.success).toBe(true);
       expect(validation?.expectedTo).toBe("Screen2");
@@ -701,16 +703,19 @@ describe("Explore", () => {
 
       const state = (explore as any).graphTraversalState;
 
+      const edgeTimestamp = Date.now();
       (explore as any).markEdgeTraversed(
         "Screen1",
         "Screen2",
         "Screen3",
         false,
+        edgeTimestamp,
         "Navigation diverged",
         0.8
       );
 
-      const validation = state.edgeValidationResults.get("Screen1->Screen2");
+      const edgeKey = `Screen1->Screen2@${edgeTimestamp}`;
+      const validation = state.edgeValidationResults.get(edgeKey);
       expect(validation?.success).toBe(false);
       expect(validation?.expectedTo).toBe("Screen2");
       expect(validation?.actualTo).toBe("Screen3");
@@ -720,13 +725,18 @@ describe("Explore", () => {
     test("should generate edge keys correctly", async () => {
       explore = new Explore(device, mockAdb);
 
-      const key1 = (explore as any).getEdgeKey("Screen1", "Screen2");
-      const key2 = (explore as any).getEdgeKey("Screen1", "Screen2");
-      const key3 = (explore as any).getEdgeKey("Screen2", "Screen1");
+      const timestamp1 = 1000;
+      const timestamp2 = 2000;
 
-      expect(key1).toBe("Screen1->Screen2");
-      expect(key1).toBe(key2);
-      expect(key1).not.toBe(key3);
+      const key1 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp1);
+      const key2 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp1);
+      const key3 = (explore as any).getEdgeKey("Screen1", "Screen2", timestamp2);
+      const key4 = (explore as any).getEdgeKey("Screen2", "Screen1", timestamp1);
+
+      expect(key1).toBe("Screen1->Screen2@1000");
+      expect(key1).toBe(key2); // Same timestamp = same key
+      expect(key1).not.toBe(key3); // Different timestamp = different key
+      expect(key1).not.toBe(key4); // Different screens = different key
     });
 
     test("should include graph traversal metrics in result", async () => {
@@ -749,7 +759,8 @@ describe("Explore", () => {
       await (explore as any).initializeGraphTraversal();
 
       // Mark some edges as traversed
-      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true);
+      const edgeTimestamp = Date.now();
+      (explore as any).markEdgeTraversed("Screen1", "Screen2", "Screen2", true, edgeTimestamp);
       (explore as any).markNodeVisited("Screen1");
       (explore as any).markNodeVisited("Screen2");
 

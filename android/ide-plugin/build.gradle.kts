@@ -8,6 +8,15 @@ plugins {
   id("org.jetbrains.compose") version "1.8.0"
 }
 
+repositories {
+  google()
+  mavenCentral()
+  maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
+  intellijPlatform {
+    defaultRepositories()
+  }
+}
+
 java {
   toolchain {
     languageVersion.set(JavaLanguageVersion.of(libs.versions.build.java.target.get()))

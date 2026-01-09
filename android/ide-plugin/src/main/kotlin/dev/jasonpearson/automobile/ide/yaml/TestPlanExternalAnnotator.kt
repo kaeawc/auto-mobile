@@ -89,8 +89,9 @@ class TestPlanExternalAnnotator : ExternalAnnotator<PsiFile, TestPlanValidationR
         val document = file.viewProvider.document ?: return TextRange(0, 0)
 
         // If we have line/column information, use it
-        if (error.line != null && error.line > 0) {
-            val lineIndex = error.line - 1
+        val line = error.line
+        if (line != null && line > 0) {
+            val lineIndex = line - 1
             if (lineIndex < document.lineCount) {
                 val lineStartOffset = document.getLineStartOffset(lineIndex)
                 val lineEndOffset = document.getLineEndOffset(lineIndex)

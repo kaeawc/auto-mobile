@@ -1,4 +1,4 @@
-import { AdbClient } from "../android-cmdline-tools/AdbClient";
+import { AdbExecutor } from "../android-cmdline-tools/interfaces/AdbExecutor";
 import { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
 
 /**
@@ -14,28 +14,28 @@ export interface AccessibilityDetector {
   /**
    * Check if accessibility services are enabled on the device
    *
-   * @param deviceId - The device identifier
-   * @param adb - ADB client for executing shell commands
+   * @param deviceId - The device identifier (for caching)
+   * @param adb - ADB executor for executing shell commands
    * @param featureFlags - Feature flag service for override support (optional)
    * @returns Promise resolving to true if accessibility is enabled
    */
   isAccessibilityEnabled(
     deviceId: string,
-    adb: AdbClient,
+    adb: AdbExecutor,
     featureFlags?: FeatureFlagService
   ): Promise<boolean>;
 
   /**
    * Get the detected accessibility service type
    *
-   * @param deviceId - The device identifier
-   * @param adb - ADB client for executing shell commands
+   * @param deviceId - The device identifier (for caching)
+   * @param adb - ADB executor for executing shell commands
    * @param featureFlags - Feature flag service for override support (optional)
    * @returns Promise resolving to the detected service type
    */
   detectMethod(
     deviceId: string,
-    adb: AdbClient,
+    adb: AdbExecutor,
     featureFlags?: FeatureFlagService
   ): Promise<AccessibilityService>;
 

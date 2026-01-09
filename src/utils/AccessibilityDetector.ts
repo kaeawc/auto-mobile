@@ -1,8 +1,8 @@
-import { AdbClient } from "./android-cmdline-tools/AdbClient";
 import { logger } from "./logger";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { AccessibilityDetector as IAccessibilityDetector, AccessibilityService } from "./interfaces/AccessibilityDetector";
 import { SystemTimer, type Timer } from "./SystemTimer";
+import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 
 export type { AccessibilityService };
 
@@ -38,14 +38,14 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   /**
    * Check if accessibility services are enabled on the device
    *
-   * @param deviceId - The device identifier
-   * @param adb - ADB client for executing shell commands
+   * @param deviceId - The device identifier (for caching)
+   * @param adb - ADB executor for executing shell commands
    * @param featureFlags - Feature flag service for override support
    * @returns Promise resolving to true if accessibility is enabled
    */
   async isAccessibilityEnabled(
     deviceId: string,
-    adb: AdbClient,
+    adb: AdbExecutor,
     featureFlags?: FeatureFlagService
   ): Promise<boolean> {
     // Check feature flag override first
@@ -101,14 +101,14 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
   /**
    * Get the detected accessibility service type
    *
-   * @param deviceId - The device identifier
-   * @param adb - ADB client for executing shell commands
+   * @param deviceId - The device identifier (for caching)
+   * @param adb - ADB executor for executing shell commands
    * @param featureFlags - Feature flag service for override support
    * @returns Promise resolving to the detected service type
    */
   async detectMethod(
     deviceId: string,
-    adb: AdbClient,
+    adb: AdbExecutor,
     featureFlags?: FeatureFlagService
   ): Promise<AccessibilityService> {
     // Check feature flag override
@@ -159,17 +159,17 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
    * Internal method to detect accessibility state using ADB
    * Method 1 from design doc: Query enabled_accessibility_services setting
    *
-   * @param deviceId - The device identifier
-   * @param adb - ADB client for executing shell commands
+   * @param deviceId - The device identifier (for logging)
+   * @param adb - ADB executor for executing shell commands
    * @returns Promise resolving to accessibility state
    */
   private async detectAccessibilityState(
     deviceId: string,
-    adb: AdbClient
+    adb: AdbExecutor
   ): Promise<{ enabled: boolean; service: AccessibilityService }> {
     try {
       // Query enabled accessibility services
-      const result = await adb.shell(deviceId, "settings get secure enabled_accessibility_services");
+      const result = await adb.executeCommand("shell settings get secure enabled_accessibility_services");
 
       const output = result.stdout.trim();
 

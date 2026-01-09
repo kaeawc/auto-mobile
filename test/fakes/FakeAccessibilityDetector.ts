@@ -1,5 +1,5 @@
 import type { AccessibilityDetector, AccessibilityService } from "../../src/utils/interfaces/AccessibilityDetector";
-import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
@@ -55,7 +55,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
 
   async isAccessibilityEnabled(
     deviceId: string,
-    _adb: AdbClient,
+    _adb: AdbExecutor,
     _featureFlags?: FeatureFlagService
   ): Promise<boolean> {
     this.detectionCallCount++;
@@ -65,7 +65,7 @@ export class FakeAccessibilityDetector implements AccessibilityDetector {
 
   async detectMethod(
     deviceId: string,
-    _adb: AdbClient,
+    _adb: AdbExecutor,
     _featureFlags?: FeatureFlagService
   ): Promise<AccessibilityService> {
     const result = this.detectionResults.get(deviceId) || this.defaultResult;

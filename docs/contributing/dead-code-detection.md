@@ -12,6 +12,25 @@ Dead code accumulates naturally as projects evolve:
 
 This technical debt increases maintenance burden, confuses developers, and bloats bundle sizes. Automated detection helps identify and remove this code systematically.
 
+## Requirements
+
+The detection script requires:
+- `bash` - Shell interpreter
+- `jq` - JSON processor for parsing tool output
+- `npx` - For running ts-prune and knip
+
+Install jq:
+```bash
+# macOS
+brew install jq
+
+# Linux (Ubuntu/Debian)
+sudo apt-get install jq
+
+# Linux (CentOS/RHEL)
+sudo yum install jq
+```
+
 ## Tools
 
 We use two complementary tools for comprehensive coverage:

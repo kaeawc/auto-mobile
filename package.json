@@ -19,7 +19,7 @@
     "estimate-context": "bun scripts/estimate-context-usage.ts",
     "benchmark-context": "bun scripts/benchmark-context-thresholds.ts",
     "validate:yaml": "bun scripts/validate-yaml.ts",
-    "dead-code:ts": "bun scripts/detect-dead-code-ts.ts",
+    "dead-code:ts": "bash scripts/detect-dead-code-ts.sh",
     "dead-code:ts:prune": "npx ts-prune",
     "dead-code:ts:knip": "npx knip",
     "prepublishOnly": "cp README.md README.md.backup && bun scripts/npm/transform-readme.js",

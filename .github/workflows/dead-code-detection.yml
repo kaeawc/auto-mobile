@@ -24,6 +24,11 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v4
 
+      - name: "Install jq"
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y jq
+
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Dead Code Detection"

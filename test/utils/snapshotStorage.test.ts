@@ -218,4 +218,11 @@ describe("SnapshotStorage", () => {
       expect(settingsPath).toBe(path.join(testBasePath, "test-snapshot", "settings.json"));
     });
   });
+
+  describe("getBackupFilePath", () => {
+    it("should return correct backup file path", () => {
+      const backupFilePath = storage.getBackupFilePath("test-snapshot");
+      expect(backupFilePath).toBe(path.join(testBasePath, "test-snapshot", "app_data", "backup.ab"));
+    });
+  });
 });

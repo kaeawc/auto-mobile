@@ -394,11 +394,14 @@ async function main() {
 
   if (report.totalIssues === 0) {
     console.log("✅ No dead code detected!");
+    process.exit(0);
+  } else if (options.threshold !== undefined && report.totalIssues <= options.threshold) {
+    console.log(`✅ Found ${report.totalIssues} dead code issue(s), but within threshold of ${options.threshold}`);
+    process.exit(0);
   } else {
     console.log(`⚠️  Found ${report.totalIssues} dead code issue(s)`);
+    process.exit(2);
   }
-
-  process.exit(report.totalIssues > 0 ? 2 : 0);
 }
 
 main();

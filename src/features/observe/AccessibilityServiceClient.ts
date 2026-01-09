@@ -10,6 +10,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { NavigationGraphManager, NavigationEvent } from "../navigation/NavigationGraphManager";
 import { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 import { throwIfAborted } from "../../utils/toolUtils";
+import { ElementParser } from "../utility/ElementParser";
 
 /**
  * Generate a cryptographically secure random suffix for request IDs.
@@ -1469,6 +1470,25 @@ export class AccessibilityServiceClient implements AccessibilityService {
      * @param node - The accessibility service node
      * @returns Converted node in XML-like format
      */
+  /**
+   * Convert AccessibilityNode to Element type
+   * @param node - Accessibility node from WebSocket message
+   * @returns Converted Element or null if conversion fails
+   */
+  private convertAccessibilityNodeToElement(node: AccessibilityNode): Element | null {
+    try {
+      // First convert to intermediate format
+      const converted = this.convertAccessibilityNode(node);
+
+      // Then parse to Element using ElementParser
+      const elementParser = new ElementParser();
+      return elementParser.parseNodeBounds(converted);
+    } catch (error) {
+      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to convert node to Element: ${error}`);
+      return null;
+    }
+  }
+
   private convertAccessibilityNode(node: AccessibilityNode | AccessibilityNode[]): any {
     // Handle array of nodes
     if (Array.isArray(node)) {

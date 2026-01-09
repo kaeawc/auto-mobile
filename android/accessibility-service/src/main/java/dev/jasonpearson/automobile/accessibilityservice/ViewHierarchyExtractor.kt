@@ -1491,12 +1491,17 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
 
       // Check if this node is accessibility-focusable
-      // A node is focusable if it supports ACTION_ACCESSIBILITY_FOCUS
+      // A node is focusable if it supports ACTION_ACCESSIBILITY_FOCUS or ACTION_CLEAR_ACCESSIBILITY_FOCUS
+      // The currently focused node typically has ACTION_CLEAR_ACCESSIBILITY_FOCUS instead
       val isFocusable = node.actionList?.any {
-        it.id == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS
+        it.id == AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS ||
+        it.id == AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS
       } ?: false
 
-      if (isFocusable) {
+      // Also include nodes that are currently accessibility focused
+      val isCurrentlyFocused = node.isAccessibilityFocused
+
+      if (isFocusable || isCurrentlyFocused) {
         // Extract element info for focusable elements
         val elementInfo = extractSimpleElementInfo(node, accessibilityFocusedNode)
         if (elementInfo != null) {

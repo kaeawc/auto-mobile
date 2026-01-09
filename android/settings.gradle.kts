@@ -36,6 +36,10 @@ include(":auto-mobile-sdk")
 
 include(":junit-runner")
 
+include(":test-plan-validation")
+
+include(":ide-plugin")
+
 include(":playground:analytics")
 
 include(":playground:app")

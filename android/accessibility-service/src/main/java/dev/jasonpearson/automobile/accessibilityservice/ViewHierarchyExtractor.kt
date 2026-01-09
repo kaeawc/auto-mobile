@@ -7,6 +7,7 @@ import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.accessibilityservice.models.ElementBounds
 import dev.jasonpearson.automobile.accessibilityservice.models.ScreenDimensions
+import dev.jasonpearson.automobile.accessibilityservice.models.TraversalOrderResult
 import dev.jasonpearson.automobile.accessibilityservice.models.UIElementInfo
 import dev.jasonpearson.automobile.accessibilityservice.models.ViewHierarchy
 import dev.jasonpearson.automobile.accessibilityservice.models.WindowHierarchy
@@ -1334,22 +1335,20 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       UIElementInfo(
           className = focusedNode.className?.toString(),
-          packageName = focusedNode.packageName?.toString(),
           resourceId = focusedNode.viewIdResourceName,
           text = focusedNode.text?.toString(),
           contentDesc = focusedNode.contentDescription?.toString(),
-          isClickable = focusedNode.isClickable,
-          isLongClickable = focusedNode.isLongClickable,
-          isEnabled = focusedNode.isEnabled,
-          isFocusable = focusedNode.isFocusable,
-          isFocused = focusedNode.isFocused,
-          isAccessibilityFocused = focusedNode.isAccessibilityFocused,
-          isCheckable = focusedNode.isCheckable,
-          isChecked = focusedNode.isChecked,
-          isEditable = focusedNode.isEditable,
-          isScrollable = focusedNode.isScrollable,
-          isPassword = focusedNode.isPassword,
-          isSelected = focusedNode.isSelected,
+          clickable = focusedNode.isClickable.toString(),
+          longClickable = focusedNode.isLongClickable.toString(),
+          enabled = focusedNode.isEnabled.toString(),
+          focusable = focusedNode.isFocusable.toString(),
+          focused = focusedNode.isFocused.toString(),
+          accessibilityFocused = focusedNode.isAccessibilityFocused.toString(),
+          checkable = focusedNode.isCheckable.toString(),
+          checked = focusedNode.isChecked.toString(),
+          scrollable = focusedNode.isScrollable.toString(),
+          password = focusedNode.isPassword.toString(),
+          selected = focusedNode.isSelected.toString(),
           bounds = elementBounds,
           testTag = testTag,
           stateDescription = stateDescription,
@@ -1542,19 +1541,18 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val testTag = extractTestTag(extrasMap)
 
       // Check if this node is the focused one
-      val isAccessibilityFocused = accessibilityFocusedNode != null &&
+      val isAccessibilityFocusedBool = accessibilityFocusedNode != null &&
           isSameNode(node, accessibilityFocusedNode)
 
       UIElementInfo(
           className = node.className?.toString(),
-          packageName = node.packageName?.toString(),
           resourceId = node.viewIdResourceName,
           text = node.text?.toString(),
           contentDesc = node.contentDescription?.toString(),
-          isClickable = node.isClickable,
-          isEnabled = node.isEnabled,
-          isFocusable = node.isFocusable,
-          isAccessibilityFocused = isAccessibilityFocused,
+          clickable = node.isClickable.toString(),
+          enabled = node.isEnabled.toString(),
+          focusable = node.isFocusable.toString(),
+          accessibilityFocused = isAccessibilityFocusedBool.toString(),
           bounds = elementBounds,
           testTag = testTag,
       )

@@ -18,7 +18,9 @@ import android.util.Log
 import android.view.Display
 import android.view.WindowManager
 import android.view.accessibility.AccessibilityEvent
+import android.view.accessibility.AccessibilityNodeInfo
 import dev.jasonpearson.automobile.accessibilityservice.models.RecompositionSnapshot
+import dev.jasonpearson.automobile.accessibilityservice.models.UIElementInfo
 import dev.jasonpearson.automobile.accessibilityservice.models.ScreenDimensions
 import dev.jasonpearson.automobile.accessibilityservice.models.ViewHierarchy
 import dev.jasonpearson.automobile.accessibilityservice.perf.PerfProvider

@@ -12,7 +12,8 @@ import com.intellij.openapi.project.Project
 @Service(Service.Level.PROJECT)
 class TestPlanValidationService(private val project: Project) : Disposable {
 
-    private val listener = TestPlanDocumentListener(project)
+    private val validationTrigger = IntellijValidationTrigger(project)
+    private val listener = TestPlanDocumentListener(validationTrigger)
 
     init {
         // Register document listener for real-time validation updates

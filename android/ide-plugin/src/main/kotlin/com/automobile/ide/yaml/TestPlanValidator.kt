@@ -225,6 +225,7 @@ object TestPlanValidator {
         val lines = yamlContent.split("\n")
         var inSteps = false
         var currentStepIndex = -1
+        var inTargetStep = false
 
         lines.forEachIndexed { lineIndex, line ->
             // Check if we're entering the steps section
@@ -233,22 +234,24 @@ object TestPlanValidator {
                 return@forEachIndexed
             }
 
-            // Count step entries
+            // Count step entries (YAML list items starting with -)
             if (inSteps && line.trim().startsWith("- ")) {
                 currentStepIndex++
+                inTargetStep = (currentStepIndex == stepIndex)
             }
 
             // If we're at the right step, look for the tool line
-            if (currentStepIndex == stepIndex) {
-                val toolPattern = Regex("^\\s*tool:\\s*[\"']?$toolName[\"']?\\s*$")
+            if (inTargetStep) {
+                // Match both inline (- tool: asdf) and separate line (  tool: asdf)
+                val toolPattern = Regex("(?:^\\s*-\\s+)?tool:\\s*[\"']?${Regex.escape(toolName)}[\"']?\\s*$")
                 if (toolPattern.find(line) != null) {
                     val column = line.indexOf("tool") + 1
                     return LineInfo(line = lineIndex + 1, column = column)
                 }
             }
 
-            // Stop if we've passed the target step
-            if (currentStepIndex > stepIndex) {
+            // Stop if we've passed the target step and hit another list item
+            if (inTargetStep && line.trim().startsWith("- ") && currentStepIndex > stepIndex) {
                 return@forEachIndexed
             }
         }

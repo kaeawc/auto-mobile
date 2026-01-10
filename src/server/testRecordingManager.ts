@@ -51,13 +51,12 @@ const buildElementKey = (event: InteractionEvent): string | null => {
     return null;
   }
   const resourceId = element["resource-id"] ?? "";
-  const text = element.text ?? "";
   const contentDesc = element["content-desc"] ?? "";
   const className = element["class"] ?? "";
-  if (!resourceId && !text && !contentDesc && !className) {
+  if (!resourceId && !contentDesc && !className) {
     return null;
   }
-  return `${resourceId}|${text}|${contentDesc}|${className}`;
+  return `${resourceId}|${contentDesc}|${className}`;
 };
 
 const recordInteraction = (session: RecordingSession, event: InteractionEvent): void => {

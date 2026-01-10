@@ -1,4 +1,4 @@
-name: "Update Accessibility Service SHA256"
+name: "Nightly"
 
 on:
   workflow_dispatch:

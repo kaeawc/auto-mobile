@@ -742,7 +742,7 @@ if [[ -n "$baseline_path" ]]; then
 
     threshold_value=$(jq -n --argjson base "$baseline_value" --argjson mult "$threshold_effective" '$base * $mult')
     regression_value=$(jq -n --argjson actual "$actual_value" --argjson base "$baseline_value" \
-      '$((($actual - $base) / $base) * 100)')
+      '(($actual - $base) / $base) * 100')
     metric_passed=$(jq -n --argjson actual "$actual_value" --argjson threshold "$threshold_value" '$actual <= $threshold')
 
     regressions=$(jq --arg metric "$key" \

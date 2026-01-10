@@ -81,8 +81,8 @@ function formatToolParamError(toolName: string, error: unknown): string {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
-  // Plan execution lock disabled temporarily for parallel test debugging
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  // Plan execution lock with per-session scope to prevent interference during executePlan
+  // Each test thread gets its own sessionUuid, enabling parallel execution on different devices
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
   void FeatureFlagService.getInstance()
     .initialize()
@@ -190,18 +190,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         : undefined;
     const sessionUuid = typeof rawSessionUuid === "string" ? rawSessionUuid : undefined;
 
-    // TEMPORARILY DISABLED: Allow tool calls during executePlan for debugging
-    // const decision = planExecutionLock.evaluate({
-    //   toolName: name,
-    //   sessionId,
-    //   sessionUuid,
-    // });
-    // if (decision.blocked) {
-    //   logger.warn(
-    //     `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${sessionUuid ?? "none"})`
-    //   );
-    //   throw new ActionableError(decision.reason ?? "plan execution in progress");
-    // }
+    // Check if tool call should be blocked due to active executePlan in this session
+    const decision = planExecutionLock.evaluate({
+      toolName: name,
+      sessionId,
+      sessionUuid,
+    });
+    if (decision.blocked) {
+      logger.warn(
+        `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${sessionUuid ?? "none"})`
+      );
+      throw new ActionableError(decision.reason ?? "plan execution in progress");
+    }
 
     // Parse and validate the parameters
     let parsedParams;

@@ -292,6 +292,9 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable {
   private val writeLock = Any()
   @Volatile private var closed = false
 
+  // Unique session UUID for this client/thread to enable per-thread plan execution locking
+  private val sessionUuid: String = UUID.randomUUID().toString()
+
   private val channel: SocketChannel = connect()
   private val reader: BufferedReader
   private val writer: BufferedWriter
@@ -426,7 +429,11 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable {
   }
 
   private fun buildJsonParams(toolName: String, arguments: JsonObject): JsonObject {
-    return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to arguments))
+    // Include sessionUuid in tool arguments to enable per-thread plan execution locking
+    val argumentsWithSession = JsonObject(arguments.toMutableMap().apply {
+      put("sessionUuid", JsonPrimitive(sessionUuid))
+    })
+    return JsonObject(mapOf("name" to JsonPrimitive(toolName), "arguments" to argumentsWithSession))
   }
 
   private fun failPendingRequests(message: String) {

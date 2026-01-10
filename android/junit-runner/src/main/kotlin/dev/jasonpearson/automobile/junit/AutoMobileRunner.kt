@@ -321,11 +321,18 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
 
   override fun runChild(method: FrameworkMethod, notifier: RunNotifier) {
     val autoMobileTest = method.getAnnotation(AutoMobileTest::class.java)
+    val className = klass.simpleName
 
     if (autoMobileTest != null) {
+      MemoryMonitor.onTestStart(className, method.name)
       runAutoMobileTest(method, autoMobileTest, notifier)
     } else {
-      super.runChild(method, notifier)
+      MemoryMonitor.onTestStart(className, method.name)
+      try {
+        super.runChild(method, notifier)
+      } finally {
+        MemoryMonitor.onTestFinish(className, method.name, true)
+      }
     }
   }
 
@@ -336,6 +343,8 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
   ) {
     val description = describeChild(method)
     notifier.fireTestStarted(description)
+    var success = true
+    var failureMessage: String? = null
 
     try {
       if (annotation.cleanupAfter && annotation.appId.isBlank()) {
@@ -360,15 +369,20 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
             append("\n\nFull test output written to: ${result.logFile.absolutePath}")
           }
         }
+        success = false
+        failureMessage = result.errorMessage.ifBlank { "AutoMobile test failed" }
         val failure = Failure(description, AutoMobileTestException(errorMessage))
         notifier.fireTestFailure(failure)
       }
     } catch (e: Exception) {
       println("Error running AutoMobile test ${method.name}: ${e.message}")
+      success = false
+      failureMessage = e.message
       val failure = Failure(description, e)
       notifier.fireTestFailure(failure)
     } finally {
       notifier.fireTestFinished(description)
+      MemoryMonitor.onTestFinish(klass.simpleName, method.name, success, failureMessage)
     }
   }
 
@@ -494,7 +508,6 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
               performanceMeasurements = PerformanceTracker.getMeasurements(),
           )
       PerformanceTracker.measure("Log file write", logWriteStart)
-      PerformanceTracker.clear()
 
       if (debugMode) {
         println("Test output written to: ${logFile.absolutePath}")
@@ -531,6 +544,8 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
           errorMessage = e.message ?: "Unknown error",
           executionTimeMs = executionTime,
       )
+    } finally {
+      PerformanceTracker.clear()
     }
   }
 

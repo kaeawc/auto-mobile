@@ -73,8 +73,9 @@ export class Daemon {
 
     // Initialize device pool BEFORE starting socket server
     // This ensures clients connecting via socket will see initialized device pool
+    // Wait up to 10 seconds - emulators should already be running
     logger.info("Initializing device pool...");
-    await this.initializeDevicePoolWithTimeout(60000);
+    await this.initializeDevicePoolWithTimeout(10000);
 
     // Start Unix socket server AFTER device pool is ready
     logger.info(`Daemon host: "${this.host}", port: ${this.port}`);

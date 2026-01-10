@@ -376,8 +376,17 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Trust native memory tooling"
-        run: bun pm trust memwatch-next heapdump
+      - name: "Setup Node for native addons"
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18.20.5"
+
+      - name: "Trust heapdump"
+        run: bun pm trust heapdump
+
+      - name: "Trust memwatch-next"
+        continue-on-error: true
+        run: bun pm trust memwatch-next
 
       - name: "Rebuild native dependencies"
         run: bun install --frozen-lockfile

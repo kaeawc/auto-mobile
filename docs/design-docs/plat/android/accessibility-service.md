@@ -153,6 +153,10 @@ AutoMobile manages accessibility service versions automatically:
 - Validates downloaded APKs via SHA256 checksum
 - Supports local APK overrides for development
 
+When device setup uses `skipAccessibilityDownload`, AutoMobile still validates the installed service checksum.
+If the version is incompatible, it surfaces a warning/error advising you to rerun without
+`skipAccessibilityDownload` to upgrade or install the matching APK manually.
+
 ## Troubleshooting
 
 - **Settings toggle fails with permission denied**: Physical devices often require root, device owner status, or special shell permissions. Enable the service manually in Settings if you cannot grant those permissions.

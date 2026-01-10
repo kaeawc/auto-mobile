@@ -109,6 +109,9 @@ async function main(): Promise<void> {
   const memwatch = memwatchModule
     ? ((memwatchModule as { default?: typeof memwatchModule }).default ?? memwatchModule)
     : null;
+  const heapdump = heapdumpModule
+    ? ((heapdumpModule as { default?: typeof heapdumpModule }).default ?? heapdumpModule)
+    : null;
 
   const argv = process.argv.slice(2);
   const stressArgs = parseStressArgs(argv);
@@ -126,7 +129,7 @@ async function main(): Promise<void> {
       leakDetected = true;
       leakEvents.push(info);
       if (!snapshotPromise) {
-        snapshotPromise = writeHeapSnapshot(heapdumpModule, leakArgs.snapshotDir, "memwatch-leak");
+        snapshotPromise = writeHeapSnapshot(heapdump, leakArgs.snapshotDir, "memwatch-leak");
       }
       console.error("[memory-leaks] Memory leak detected:", info);
     });
@@ -200,7 +203,7 @@ async function main(): Promise<void> {
 
     if (!passed && leakArgs.failOnLeak) {
       if (!snapshotPromise) {
-        snapshotPromise = writeHeapSnapshot(heapdumpModule, leakArgs.snapshotDir, "threshold");
+        snapshotPromise = writeHeapSnapshot(heapdump, leakArgs.snapshotDir, "threshold");
       }
       await snapshotPromise;
       console.error("[memory-leaks] Memory leak detection failed.");
@@ -211,7 +214,7 @@ async function main(): Promise<void> {
   } catch (error) {
     console.error(`[memory-leaks] Unexpected error: ${error}`);
     if (!snapshotPromise) {
-      snapshotPromise = writeHeapSnapshot(heapdumpModule, leakArgs.snapshotDir, "error");
+      snapshotPromise = writeHeapSnapshot(heapdump, leakArgs.snapshotDir, "error");
     }
     await snapshotPromise;
     process.exitCode = 1;

@@ -35,23 +35,18 @@ AutoMobileNotifications.post(
 )
 ```
 
+**SDK requirement:** the app-under-test must include the AutoMobile SDK
+in its debug build so the broadcast receiver is available to the MCP
+server. Third-party apps without SDK integration cannot post
+notifications that appear as the app-under-test.
+
 Implementation notes:
 
 - Use `NotificationManager` / `NotificationCompat` with a known channel ID.
 - When `style == bigPicture`, load from `imagePath` on device storage
-  (e.g., `/sdcard/Download/automobile/`) or decode base64 payload.
+  (e.g., `/sdcard/Download/automobile/`). The MCP tool pushes a host file
+  into this directory before invoking the SDK receiver.
 - Actions should target a test-only activity or broadcast receiver.
-
-## Fallback path (emulator only)
-
-Use `cmd notification` for basic text notifications when SDK hooks are
-not available (does not look like app-under-test).
-
-- `adb -s <device> shell cmd notification post -S bigtext -t "Title" <tag> "Body"`
-- Validate command support with `adb -s <device> shell cmd notification help`
-
-This path should be flagged as `supported: partial` and discouraged
-in tool descriptions.
 
 ## ADB validation (API 35)
 
@@ -59,12 +54,8 @@ Status:
 
 - API 29 not validated yet (no local AVD available).
 
-Confirmed commands:
+Verification commands (after posting via MCP tool):
 
-- Post basic notification:
-  - `adb -s <device> shell cmd notification post -t "Test Title" automobiledoc "Test Body"`
-- Post big text notification:
-  - `adb -s <device> shell cmd notification post -S bigtext -t "Big Title" automobiledoc "Big Body"`
 - Inspect via system tray UI dump:
   - `adb -s <device> shell cmd statusbar expand-notifications`
   - `adb -s <device> shell uiautomator dump /sdcard/notification_dump.xml`
@@ -83,7 +74,6 @@ Observed results:
 
 1. Implement SDK notification hook (debug-only).
 2. Add MCP `postNotification` tool that targets SDK by default.
-3. Provide emulator-only fallback using `cmd notification`.
 
 ## Risks
 

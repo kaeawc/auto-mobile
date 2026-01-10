@@ -1,24 +1,14 @@
-import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { createMcpServer } from "../../../src/server/index";
 import { ToolRegistry } from "../../../src/server/toolRegistry";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { FakeToolRegistry } from "../../fakes/FakeToolRegistry";
+import { z } from "zod";
 
 describe("MCP Tools List", () => {
   let fixture: McpTestFixture;
-
-  beforeEach(async () => {
-    fixture = new McpTestFixture();
-    await fixture.setup();
-  });
-
-  afterEach(async () => {
-    if (fixture) {
-      await fixture.teardown();
-    }
-  });
 
   test("given no tools are registered, endpoint should return an empty list", async function() {
 
@@ -50,7 +40,6 @@ describe("MCP Tools List", () => {
       await client.connect(clientTransport);
 
       // Send list_tools request
-      const { z } = await import("zod");
       const listToolsResponseSchema = z.object({
         tools: z.array(z.object({
           name: z.string(),
@@ -77,11 +66,22 @@ describe("MCP Tools List", () => {
     }
   });
 
-  test("given a tool is registered, endpoint should return a list with that tool", async function() {
+  describe("with default registry", () => {
+    beforeAll(async () => {
+      fixture = new McpTestFixture();
+      await fixture.setup();
+    });
+
+    afterAll(async () => {
+      if (fixture) {
+        await fixture.teardown();
+      }
+    });
+
+    test("given a tool is registered, endpoint should return a list with that tool", async function() {
     const { client } = fixture.getContext();
 
     // Send list_tools request
-    const { z } = await import("zod");
     const listToolsResponseSchema = z.object({
       tools: z.array(z.object({
         name: z.string(),
@@ -115,5 +115,6 @@ describe("MCP Tools List", () => {
     const toolNames = result.tools.map(tool => tool.name);
     expect(toolNames).toContain("observe");
     expect(toolNames).toContain("tapOn");
+    });
   });
 });

@@ -8,6 +8,7 @@ export type KeepScreenAwakeState = {
   applied: boolean;
   method?: "svc" | "settings";
   skipReason?: "disabled" | "emulator" | "unsupported" | "detection_failed" | "failed";
+  svcWasEnabled?: boolean;
   originalStayOnWhilePluggedIn?: string | null;
   originalScreenOffTimeout?: string | null;
   appliedSettings?: {
@@ -50,8 +51,9 @@ export class KeepScreenAwakeManager {
 
     await this.wakeDevice();
 
+    const svcWasEnabled = await this.readSvcStayonEnabled();
     if (await this.tryEnableSvcStayon()) {
-      return { applied: true, method: "svc" };
+      return { applied: true, method: "svc", svcWasEnabled };
     }
 
     const settingsResult = await this.applySettingsFallback();
@@ -75,6 +77,13 @@ export class KeepScreenAwakeManager {
     }
 
     if (state.method === "svc") {
+      if (state.svcWasEnabled === undefined) {
+        logger.warn(`[KeepScreenAwake] Skipping svc stayon restore on ${this.device.deviceId}: prior state unknown`);
+        return;
+      }
+      if (state.svcWasEnabled) {
+        return;
+      }
       try {
         await this.adb.executeCommand("shell svc power stayon false");
       } catch (error) {
@@ -191,6 +200,32 @@ export class KeepScreenAwakeManager {
       originalScreenOffTimeout,
       appliedSettings
     };
+  }
+
+  private async readSvcStayonEnabled(): Promise<boolean | undefined> {
+    const value = await this.readSetting("global", "stay_on_while_plugged_in");
+    return this.parseStayOnWhilePluggedIn(value);
+  }
+
+  private parseStayOnWhilePluggedIn(value?: string | null): boolean | undefined {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === null) {
+      return false;
+    }
+    const normalized = value.trim().toLowerCase();
+    if (normalized === "true") {
+      return true;
+    }
+    if (normalized === "false") {
+      return false;
+    }
+    const parsed = Number.parseInt(normalized, 10);
+    if (Number.isNaN(parsed)) {
+      return undefined;
+    }
+    return parsed !== 0;
   }
 
   private async readSetting(

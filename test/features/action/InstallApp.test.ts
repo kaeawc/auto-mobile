@@ -62,6 +62,8 @@ describe("InstallApp", () => {
     expect(result.success).toBe(true);
     expect(result.upgrade).toBe(false);
     expect(result.userId).toBe(10);
+    expect(result.packageName).toBe("com.example.app");
+    expect(result.warning).toBeUndefined();
     expect(fakeHost.wasCommandExecuted("aapt2")).toBe(true);
     expect(fakeAdb.wasCommandExecuted("install --user 10 -r")).toBe(true);
 
@@ -77,7 +79,64 @@ describe("InstallApp", () => {
     ]);
   });
 
-  test("throws when no aapt tool is available", async () => {
+  test("falls back to package diffing when aapt is unavailable", async () => {
+    class SequencedFakeAdbExecutor extends FakeAdbExecutor {
+      private listPackagesResponses: ExecResult[] = [];
+
+      setListPackagesResponses(responses: ExecResult[]): void {
+        this.listPackagesResponses = [...responses];
+      }
+
+      override async executeCommand(
+        command: string,
+        timeoutMs?: number,
+        maxBuffer?: number,
+        noRetry?: boolean,
+        signal?: AbortSignal
+      ): Promise<ExecResult> {
+        if (command.includes("shell pm list packages --user 0")) {
+          const response = this.listPackagesResponses.shift();
+          if (response) {
+            await super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+            return response;
+          }
+        }
+        return super.executeCommand(command, timeoutMs, maxBuffer, noRetry, signal);
+      }
+    }
+
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const sequencedAdb = new SequencedFakeAdbExecutor();
+
+    fakeLocator.setTool(null);
+    sequencedAdb.setListPackagesResponses([
+      createExecResult("package:com.example.before\n"),
+      createExecResult("package:com.example.before\npackage:com.example.new\n")
+    ]);
+    sequencedAdb.setCommandResponse(`install --user 0 -r \"${apkPath}\"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(
+      device,
+      sequencedAdb,
+      fakeHost,
+      fakeLocator,
+      () => perf
+    );
+
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(true);
+    expect(result.upgrade).toBe(false);
+    expect(result.userId).toBe(0);
+    expect(result.packageName).toBe("com.example.new");
+    expect(result.warning).toContain("aapt2");
+    expect(fakeHost.wasCommandExecuted("aapt2")).toBe(false);
+    expect(sequencedAdb.wasCommandExecuted("shell pm list packages --user 0")).toBe(true);
+    expect(sequencedAdb.wasCommandExecuted("install --user 0 -r")).toBe(true);
+  });
+
+  test("returns a warning when aapt is unavailable and install fails", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);
 
@@ -91,6 +150,9 @@ describe("InstallApp", () => {
       () => perf
     );
 
-    await expect(installApp.execute(apkPath)).rejects.toThrow("aapt2 or aapt");
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(false);
+    expect(result.warning).toContain("aapt2");
   });
 });

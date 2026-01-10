@@ -43,7 +43,7 @@ export class InstallApp {
     apkPath: string,
     userId?: number,
     signal?: AbortSignal
-  ): Promise<{ success: boolean; upgrade: boolean; userId: number }> {
+  ): Promise<{ success: boolean; upgrade: boolean; userId: number; packageName?: string; warning?: string }> {
     const perf = this.createPerformanceTracker();
     perf.serial("installApp");
 
@@ -51,11 +51,16 @@ export class InstallApp {
       apkPath = path.resolve(process.cwd(), apkPath);
     }
 
+    const warnings: string[] = [];
+
     // Extract package name from APK
-    const packageName = await perf.track("extractPackageName", async () => {
+    const packageNameResult = await perf.track("extractPackageName", async () => {
       return this.extractPackageName(apkPath, signal);
     });
-    const normalizedPackageName = packageName.trim();
+    if (packageNameResult.warning) {
+      warnings.push(packageNameResult.warning);
+    }
+    let packageName = packageNameResult.packageName?.trim();
 
     // Auto-detect target user if not specified
     const targetUserId = await perf.track("detectTargetUser", async () => {
@@ -64,9 +69,11 @@ export class InstallApp {
       }
 
       // Check if app is in foreground and get its user
-      const foregroundApp = await this.adb.getForegroundApp(signal);
-      if (foregroundApp && foregroundApp.packageName === normalizedPackageName) {
-        return foregroundApp.userId;
+      if (packageName) {
+        const foregroundApp = await this.adb.getForegroundApp(signal);
+        if (foregroundApp && foregroundApp.packageName === packageName) {
+          return foregroundApp.userId;
+        }
       }
 
       // Get list of users and prefer work profile
@@ -82,34 +89,68 @@ export class InstallApp {
       return 0;
     });
 
-    // Check if app is already installed for this user
-    const isInstalled = await perf.track("checkInstalled", async () => {
-      const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${normalizedPackageName} | grep -c ${normalizedPackageName}`;
-      const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
-      return parseInt(isInstalledOutput.trim(), 10) > 0;
-    });
+    let isInstalled = false;
+    if (packageName) {
+      // Check if app is already installed for this user
+      isInstalled = await perf.track("checkInstalled", async () => {
+        const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
+        const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
+        return parseInt(isInstalledOutput.trim(), 10) > 0;
+      });
+    }
+
+    let beforePackages: Set<string> | null = null;
+    if (!packageName) {
+      beforePackages = await perf.track("listPackagesBefore", async () => {
+        return this.listPackagesForUser(targetUserId, signal);
+      });
+    }
 
     const success = await perf.track("adbInstall", async () => {
       const installOutput = await this.adb.executeCommand(`install --user ${targetUserId} -r "${apkPath}"`, undefined, undefined, undefined, signal);
       return installOutput.includes("Success");
     });
 
+    if (!packageName && beforePackages) {
+      const afterPackages = success ? await perf.track("listPackagesAfter", async () => {
+        return this.listPackagesForUser(targetUserId, signal);
+      }) : beforePackages;
+      const newPackages = this.diffPackages(beforePackages, afterPackages);
+
+      if (newPackages.length === 1) {
+        packageName = newPackages[0];
+      } else if (newPackages.length > 1) {
+        warnings.push("Installed APK but multiple new packages were detected; unable to determine the package name reliably.");
+      } else if (success) {
+        warnings.push("Installed APK but package name could not be determined from the device package list.");
+        isInstalled = true;
+      }
+    }
+
     perf.end();
+    const warning = warnings.length > 0 ? warnings.join(" ") : undefined;
     return {
       success: success,
       upgrade: isInstalled && success,
-      userId: targetUserId
+      userId: targetUserId,
+      packageName: packageName,
+      warning: warning
     };
   }
 
-  private async extractPackageName(apkPath: string, signal?: AbortSignal): Promise<string> {
+  private async extractPackageName(
+    apkPath: string,
+    signal?: AbortSignal
+  ): Promise<{ packageName?: string; warning?: string }> {
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
     const tool = await this.buildToolsLocator.findAaptTool();
     if (!tool) {
-      throw new Error("Unable to locate aapt2 or aapt. Install Android SDK build-tools and ensure they are on PATH or under ANDROID_HOME.");
+      return {
+        warning: "aapt2 was not found. Install Android SDK build-tools (aapt2) for reliable package detection."
+      };
     }
 
     const result = await this.hostExecutor.executeCommand(tool.path, ["dump", "badging", apkPath]);
@@ -119,6 +160,43 @@ export class InstallApp {
       throw new Error(`Failed to extract package name from ${tool.tool} output.`);
     }
 
-    return match[1];
+    return { packageName: match[1] };
+  }
+
+  private async listPackagesForUser(userId: number, signal?: AbortSignal): Promise<Set<string>> {
+    if (signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
+
+    const result = await this.adb.executeCommand(
+      `shell pm list packages --user ${userId}`,
+      undefined,
+      undefined,
+      true,
+      signal
+    );
+    const packages = new Set<string>();
+    for (const line of result.stdout.split("\n")) {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith("package:")) {
+        continue;
+      }
+      const packageName = trimmed.slice("package:".length).trim();
+      if (packageName) {
+        packages.add(packageName);
+      }
+    }
+
+    return packages;
+  }
+
+  private diffPackages(before: Set<string>, after: Set<string>): string[] {
+    const newPackages: string[] = [];
+    for (const packageName of after) {
+      if (!before.has(packageName)) {
+        newPackages.push(packageName);
+      }
+    }
+    return newPackages.sort();
   }
 }

@@ -47,8 +47,15 @@ internal object DaemonSocketClientManager {
       return existing
     }
 
-    // Ensure daemon is running (only once across all threads)
+    val socketPath = DaemonSocketPaths.socketPath()
+
+    // Ensure daemon is running (restart if socket disappeared after crash/exit)
     synchronized(clientLock) {
+      // Reset daemonEnsured if socket doesn't exist (daemon crashed/exited)
+      if (!File(socketPath).exists()) {
+        daemonEnsured = false
+      }
+
       if (!daemonEnsured) {
         ensureDaemonRunning()
         daemonEnsured = true
@@ -56,7 +63,7 @@ internal object DaemonSocketClientManager {
     }
 
     // Create new client for this thread
-    val newClient = DaemonSocketClient(DaemonSocketPaths.socketPath())
+    val newClient = DaemonSocketClient(socketPath)
     threadLocalClient.set(newClient)
     return newClient
   }

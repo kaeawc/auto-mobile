@@ -91,6 +91,9 @@ class HierarchyDebouncer(
   // Last emitted hierarchy (for quick access)
   @Volatile private var lastHierarchy: ViewHierarchy? = null
 
+  // Flag to disable all filtering and optimizations (for rawViewHierarchy)
+  @Volatile var disableAllFiltering: Boolean = false
+
   /**
    * Called when an accessibility event is received that might change the hierarchy. Handles
    * debouncing and decides whether to extract based on animation detection.
@@ -132,7 +135,8 @@ class HierarchyDebouncer(
    * Perform an immediate extraction (bypasses debounce and animation mode). This is async - returns
    * immediately after launching the extraction.
    */
-  fun extractNow() {
+  fun extractNow(disableAllFiltering: Boolean = false) {
+    this.disableAllFiltering = disableAllFiltering
     debounceJob?.cancel()
     inAnimationMode = false
     scope.launch { extractAndCompare() }

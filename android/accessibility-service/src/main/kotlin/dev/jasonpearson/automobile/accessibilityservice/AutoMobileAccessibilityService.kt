@@ -267,7 +267,7 @@ class AutoMobileAccessibilityService : AccessibilityService() {
           WebSocketServer(
               port = 8765,
               scope = serviceScope,
-              onRequestHierarchy = { extractHierarchyNow() },
+              onRequestHierarchy = { disableAllFiltering -> extractHierarchyNow(disableAllFiltering) },
               onRequestHierarchyIfStale = { sinceTimestamp ->
                 hierarchyDebouncer.extractIfStale(sinceTimestamp)
               },
@@ -543,12 +543,15 @@ class AutoMobileAccessibilityService : AccessibilityService() {
       return null
     }
 
+    // Read disableAllFiltering flag from hierarchyDebouncer
+    val disableAllFiltering = hierarchyDebouncer.disableAllFiltering
+
     // Use multi-window extraction if windows are available, otherwise fall back to single window
     return if (!allWindows.isNullOrEmpty()) {
-      Log.d(TAG, "Extracting from ${allWindows.size} windows")
-      viewHierarchyExtractor.extractFromAllWindows(allWindows, rootNode, null, screenDimensions)
+      Log.d(TAG, "Extracting from ${allWindows.size} windows (disableAllFiltering: $disableAllFiltering)")
+      viewHierarchyExtractor.extractFromAllWindows(allWindows, rootNode, null, screenDimensions, true, disableAllFiltering)
     } else {
-      viewHierarchyExtractor.extractFromActiveWindow(rootNode, null, screenDimensions)
+      viewHierarchyExtractor.extractFromActiveWindow(rootNode, null, screenDimensions, true, disableAllFiltering)
     }
   }
 
@@ -556,9 +559,9 @@ class AutoMobileAccessibilityService : AccessibilityService() {
    * Extract hierarchy immediately and broadcast, bypassing the debouncer. Used for explicit
    * WebSocket requests where we need fresh data immediately.
    */
-  private fun extractHierarchyNow() {
-    Log.d(TAG, "extractHierarchyNow")
-    hierarchyDebouncer.extractNow()
+  private fun extractHierarchyNow(disableAllFiltering: Boolean = false) {
+    Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
+    hierarchyDebouncer.extractNow(disableAllFiltering)
   }
 
   /** Writes the hierarchy to a file for synchronous access */
@@ -661,6 +664,12 @@ class AutoMobileAccessibilityService : AccessibilityService() {
     try {
       val jsonString =
           perfProvider.track("serializeHierarchy") { jsonCompact.encodeToString(hierarchy) }
+
+      // Debug: Check if text labels are in the serialized hierarchy
+      val hasTapText = jsonString.contains("\"text\":\"Tap\"")
+      val hasDiscoverText = jsonString.contains("\"text\":\"Discover\"")
+      Log.d(TAG, "[BROADCAST] Hierarchy contains: Tap=$hasTapText, Discover=$hasDiscoverText, size=${jsonString.length}")
+
       val messageBuilder: (kotlinx.serialization.json.JsonElement?) -> String = { perfTiming ->
         buildString {
           append(

@@ -109,7 +109,10 @@ object TestPlanSchemaStore {
             return rootSchema!!
         }
 
-        val schemaStream = javaClass.classLoader.getResourceAsStream("schemas/test-plan.schema.json")
+        val schemaStream = getResourceStream(
+            "test-plan.schema.json",
+            "schemas/test-plan.schema.json"
+        )
         if (schemaStream == null) {
             rootSchema = JsonObject(emptyMap())
             return rootSchema!!
@@ -119,6 +122,17 @@ object TestPlanSchemaStore {
         val schemaElement = json.parseToJsonElement(schemaJson)
         rootSchema = schemaElement.jsonObject
         return rootSchema!!
+    }
+
+    private fun getResourceStream(vararg paths: String): java.io.InputStream? {
+        val classLoader = javaClass.classLoader
+        for (path in paths) {
+            val stream = classLoader.getResourceAsStream(path)
+            if (stream != null) {
+                return stream
+            }
+        }
+        return null
     }
 
     private fun JsonObject.objectValue(key: String): JsonObject? = this[key]?.asObjectOrNull()

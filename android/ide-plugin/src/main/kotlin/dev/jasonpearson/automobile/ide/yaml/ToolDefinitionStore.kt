@@ -22,7 +22,10 @@ object ToolDefinitionStore {
     }
 
     private fun loadToolDefinitions(): Map<String, ToolDefinition> {
-        val stream = javaClass.classLoader.getResourceAsStream("schemas/tool-definitions.json")
+        val stream = getResourceStream(
+            "tool-definitions.json",
+            "schemas/tool-definitions.json"
+        )
             ?: return emptyMap()
         val jsonText = stream.bufferedReader().use { it.readText() }
         val parsed = json.parseToJsonElement(jsonText)
@@ -42,4 +45,15 @@ object ToolDefinitionStore {
     private fun JsonElement.stringValue(): String? = (this as? kotlinx.serialization.json.JsonPrimitive)?.content
 
     private fun JsonElement.asObjectOrNull(): JsonObject? = this as? JsonObject
+
+    private fun getResourceStream(vararg paths: String): java.io.InputStream? {
+        val classLoader = javaClass.classLoader
+        for (path in paths) {
+            val stream = classLoader.getResourceAsStream(path)
+            if (stream != null) {
+                return stream
+            }
+        }
+        return null
+    }
 }

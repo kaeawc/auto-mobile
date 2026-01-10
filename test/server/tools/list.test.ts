@@ -79,42 +79,42 @@ describe("MCP Tools List", () => {
     });
 
     test("given a tool is registered, endpoint should return a list with that tool", async function() {
-    const { client } = fixture.getContext();
+      const { client } = fixture.getContext();
 
-    // Send list_tools request
-    const listToolsResponseSchema = z.object({
-      tools: z.array(z.object({
-        name: z.string(),
-        description: z.string(),
-        inputSchema: z.object({}).passthrough()
-      }))
-    });
+      // Send list_tools request
+      const listToolsResponseSchema = z.object({
+        tools: z.array(z.object({
+          name: z.string(),
+          description: z.string(),
+          inputSchema: z.object({}).passthrough()
+        }))
+      });
 
-    const result = await client.request({
-      method: "tools/list",
-      params: {}
-    }, listToolsResponseSchema);
+      const result = await client.request({
+        method: "tools/list",
+        params: {}
+      }, listToolsResponseSchema);
 
-    // Verify tools list contains registered tools
-    expect(typeof result).toBe("object");
-    expect(result).toHaveProperty("tools");
-    expect(Array.isArray(result.tools)).toBe(true);
-    expect(result.tools.length).toBeGreaterThan(0);
+      // Verify tools list contains registered tools
+      expect(typeof result).toBe("object");
+      expect(result).toHaveProperty("tools");
+      expect(Array.isArray(result.tools)).toBe(true);
+      expect(result.tools.length).toBeGreaterThan(0);
 
-    // Verify each tool has required properties
-    result.tools.forEach(tool => {
-      expect(tool).toHaveProperty("name");
-      expect(tool).toHaveProperty("description");
-      expect(tool).toHaveProperty("inputSchema");
-      expect(typeof tool.name).toBe("string");
-      expect(typeof tool.description).toBe("string");
-      expect(typeof tool.inputSchema).toBe("object");
-    });
+      // Verify each tool has required properties
+      result.tools.forEach(tool => {
+        expect(tool).toHaveProperty("name");
+        expect(tool).toHaveProperty("description");
+        expect(tool).toHaveProperty("inputSchema");
+        expect(typeof tool.name).toBe("string");
+        expect(typeof tool.description).toBe("string");
+        expect(typeof tool.inputSchema).toBe("object");
+      });
 
-    // Verify we have some expected tools (like observe, etc.)
-    const toolNames = result.tools.map(tool => tool.name);
-    expect(toolNames).toContain("observe");
-    expect(toolNames).toContain("tapOn");
+      // Verify we have some expected tools (like observe, etc.)
+      const toolNames = result.tools.map(tool => tool.name);
+      expect(toolNames).toContain("observe");
+      expect(toolNames).toContain("tapOn");
     });
   });
 });

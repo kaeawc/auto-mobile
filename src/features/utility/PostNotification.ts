@@ -15,7 +15,7 @@ export interface PostNotificationAction {
 export interface PostNotificationOptions {
   title: string;
   body: string;
-  style?: "default" | "bigText" | "bigPicture";
+  imageType?: "normal" | "bigPicture";
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
@@ -50,16 +50,16 @@ export class PostNotification {
         };
       }
 
-      const style = options.style ?? "default";
+      const imageType = options.imageType ?? "normal";
 
       let imagePath = options.imagePath;
-      if (style === "bigPicture") {
+      if (imageType === "bigPicture") {
         if (!imagePath) {
           return {
             success: false,
             supported: false,
-            style,
-            error: "imagePath is required for bigPicture style notifications."
+            imageType,
+            error: "imagePath is required for bigPicture imageType notifications."
           };
         }
 
@@ -68,7 +68,7 @@ export class PostNotification {
           return {
             success: false,
             supported: false,
-            style,
+            imageType,
             error: prepared.error
           };
         }
@@ -80,7 +80,7 @@ export class PostNotification {
           ...options,
           imagePath
         },
-        style,
+        imageType,
         signal
       );
       return sdkResult;
@@ -97,7 +97,7 @@ export class PostNotification {
 
   private async trySdkPost(
     options: PostNotificationOptions,
-    style: "default" | "bigText" | "bigPicture",
+    imageType: "normal" | "bigPicture",
     signal?: AbortSignal
   ): Promise<PostNotificationResult> {
     const appId = await this.getActiveAppId();
@@ -105,11 +105,12 @@ export class PostNotification {
       return {
         success: false,
         supported: false,
-        style,
+        imageType,
         error: "Unable to determine the active app for SDK notifications."
       };
     }
 
+    const style = imageType === "bigPicture" ? "bigPicture" : "default";
     const extras = this.buildBroadcastExtras(options, style);
     const component = `${appId}/${NOTIFICATION_RECEIVER}`;
     const command = `shell am broadcast -n ${component} -a ${NOTIFICATION_ACTION} ${extras.join(" ")}`.trim();
@@ -122,7 +123,7 @@ export class PostNotification {
         return {
           success: false,
           supported: false,
-          style,
+          imageType,
           appId,
           error: "AutoMobile notification receiver not found in the target app."
         };
@@ -134,7 +135,7 @@ export class PostNotification {
           success: true,
           supported: true,
           method: "sdk",
-          style,
+          imageType,
           appId,
           channelId: options.channelId
         };
@@ -144,7 +145,7 @@ export class PostNotification {
         success: false,
         supported: true,
         method: "sdk",
-        style,
+        imageType,
         appId,
         channelId: options.channelId,
         error: resultCode === null
@@ -157,7 +158,7 @@ export class PostNotification {
         success: false,
         supported: true,
         method: "sdk",
-        style,
+        imageType,
         appId,
         channelId: options.channelId,
         error: `SDK notification broadcast failed: ${error instanceof Error ? error.message : String(error)}`
@@ -167,7 +168,7 @@ export class PostNotification {
 
   private buildBroadcastExtras(
     options: PostNotificationOptions,
-    style: "default" | "bigText" | "bigPicture"
+    style: "default" | "bigPicture"
   ): string[] {
     const extras: string[] = [];
 

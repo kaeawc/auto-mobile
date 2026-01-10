@@ -66,12 +66,12 @@ describe("PostNotification", () => {
     expect(result.error).toContain("receiver not found");
   });
 
-  test("requires imagePath for bigPicture style", async () => {
+  test("requires imagePath for bigPicture imageType", async () => {
     const postNotification = new PostNotification(device, fakeAdb as any, fakeWindow as any);
     const result = await postNotification.execute({
       title: "Big",
       body: "Picture",
-      style: "bigPicture"
+      imageType: "bigPicture"
     });
 
     expect(result.success).toBe(false);
@@ -96,7 +96,7 @@ describe("PostNotification", () => {
     expect(result.method).toBe("sdk");
   });
 
-  test("pushes host image for bigPicture style", async () => {
+  test("pushes host image for bigPicture imageType", async () => {
     const tmpDir = await mkdtemp(path.join(os.tmpdir(), "automobile-notif-"));
     const imagePath = path.join(tmpDir, "image.png");
     await writeFile(imagePath, "fake-image-content");
@@ -110,7 +110,7 @@ describe("PostNotification", () => {
     const result = await postNotification.execute({
       title: "Picture",
       body: "Body",
-      style: "bigPicture",
+      imageType: "bigPicture",
       imagePath
     });
 

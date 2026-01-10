@@ -18,18 +18,11 @@ export const postNotificationSchema = addDeviceTargetingToSchema(
   z.object({
     title: z.string().min(1).describe("Notification title"),
     body: z.string().min(1).describe("Notification body"),
-    style: z.enum(["default", "bigText", "bigPicture"]).optional().describe("Notification style"),
-    imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile (bigPicture only)"),
+    imageType: z.enum(["normal", "bigPicture"]).optional().describe("Notification image type (default: normal)"),
+    imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture"),
     actions: z.array(actionSchema).optional().describe("Action buttons to include"),
     channelId: z.string().optional().describe("Notification channel ID (Android only)"),
     platform: z.enum(["android", "ios"]).describe("Platform")
-  }).superRefine((value, ctx) => {
-    if (value.style === "bigPicture" && !value.imagePath) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "imagePath is required when style is bigPicture"
-      });
-    }
   })
 );
 
@@ -40,7 +33,7 @@ export function registerNotificationTools() {
       const result = await postNotification.execute({
         title: args.title,
         body: args.body,
-        style: args.style,
+        imageType: args.imageType,
         imagePath: args.imagePath,
         actions: args.actions,
         channelId: args.channelId

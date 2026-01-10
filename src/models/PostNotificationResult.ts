@@ -5,7 +5,7 @@ export interface PostNotificationResult {
   success: boolean;
   supported: boolean;
   method?: "sdk";
-  style?: "default" | "bigText" | "bigPicture";
+  imageType?: "normal" | "bigPicture";
   appId?: string;
   channelId?: string;
   warning?: string;

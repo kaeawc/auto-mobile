@@ -11,7 +11,7 @@ rich content (title, body, big text, big image, actions).
 postNotification({
   title: string,
   body: string,
-  style?: "default" | "bigText" | "bigPicture",
+  imageType?: "normal" | "bigPicture",
   imagePath?: string,
   actions?: Array<{ label: string, actionId: string }>,
   channelId?: string
@@ -43,7 +43,7 @@ notifications that appear as the app-under-test.
 Implementation notes:
 
 - Use `NotificationManager` / `NotificationCompat` with a known channel ID.
-- When `style == bigPicture`, load from `imagePath` on device storage
+- When `imageType == bigPicture`, load from `imagePath` on device storage
   (e.g., `/sdcard/Download/automobile/`). The MCP tool pushes a host file
   into this directory before invoking the SDK receiver.
 - Actions should target a test-only activity or broadcast receiver.
@@ -65,7 +65,6 @@ Verification commands (after posting via MCP tool):
 Observed results:
 
 - Notifications appear with provided titles/bodies.
-- Big text style renders expanded content in the shade.
 - The uiautomator dump includes the notification text for matching.
 - Multi-word titles appear truncated in the grouped list view (first token),
   but full text is present in the dump.

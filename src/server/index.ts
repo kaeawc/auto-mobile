@@ -188,17 +188,18 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
         : undefined;
     const sessionUuid = typeof rawSessionUuid === "string" ? rawSessionUuid : undefined;
 
-    const decision = planExecutionLock.evaluate({
-      toolName: name,
-      sessionId,
-      sessionUuid,
-    });
-    if (decision.blocked) {
-      logger.warn(
-        `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${sessionUuid ?? "none"})`
-      );
-      throw new ActionableError(decision.reason ?? "plan execution in progress");
-    }
+    // TEMPORARILY DISABLED: Allow tool calls during executePlan for debugging
+    // const decision = planExecutionLock.evaluate({
+    //   toolName: name,
+    //   sessionId,
+    //   sessionUuid,
+    // });
+    // if (decision.blocked) {
+    //   logger.warn(
+    //     `[MCP] Rejecting tool ${name} due to active executePlan (scope=${decision.scope}, sessionId=${sessionId ?? "none"}, sessionUuid=${sessionUuid ?? "none"})`
+    //   );
+    //   throw new ActionableError(decision.reason ?? "plan execution in progress");
+    // }
 
     // Parse and validate the parameters
     let parsedParams;

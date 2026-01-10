@@ -511,7 +511,9 @@ export class LaunchApp extends BaseVisualChange {
       const matchesUser = userId === undefined || foregroundApp.userId === userId;
       const isForeground = matchesPackage && matchesUser;
       logger.info(`[LaunchApp] Foreground app match (adb): ${isForeground}`);
-      return isForeground;
+      if (isForeground) {
+        return true;
+      }
     }
 
     switch (mode) {

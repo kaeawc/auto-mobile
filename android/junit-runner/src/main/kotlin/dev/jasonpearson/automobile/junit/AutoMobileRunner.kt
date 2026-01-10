@@ -328,10 +328,19 @@ class AutoMobileRunner(private val klass: Class<*>) : BlockJUnit4ClassRunner(kla
       runAutoMobileTest(method, autoMobileTest, notifier)
     } else {
       MemoryMonitor.onTestStart(className, method.name)
+      val outcomeNotifier = OutcomeTrackingRunNotifier(notifier)
       try {
-        super.runChild(method, notifier)
+        super.runChild(method, outcomeNotifier)
+      } catch (e: Exception) {
+        outcomeNotifier.recordFailure(e.message)
+        throw e
       } finally {
-        MemoryMonitor.onTestFinish(className, method.name, true)
+        MemoryMonitor.onTestFinish(
+            className,
+            method.name,
+            outcomeNotifier.wasSuccessful(),
+            outcomeNotifier.failureMessage(),
+        )
       }
     }
   }
@@ -958,6 +967,55 @@ private class SynchronizedRunNotifier(private val delegate: RunNotifier) : RunNo
   }
 
   @Synchronized
+  override fun removeListener(listener: org.junit.runner.notification.RunListener) {
+    delegate.removeListener(listener)
+  }
+}
+
+private class OutcomeTrackingRunNotifier(private val delegate: RunNotifier) : RunNotifier() {
+  @Volatile private var failed = false
+  @Volatile private var failureMessage: String? = null
+
+  fun wasSuccessful(): Boolean {
+    return !failed
+  }
+
+  fun failureMessage(): String? {
+    return failureMessage
+  }
+
+  fun recordFailure(message: String?) {
+    if (!failed) {
+      failed = true
+      failureMessage = message
+    }
+  }
+
+  override fun fireTestStarted(description: org.junit.runner.Description) {
+    delegate.fireTestStarted(description)
+  }
+
+  override fun fireTestFinished(description: org.junit.runner.Description) {
+    delegate.fireTestFinished(description)
+  }
+
+  override fun fireTestFailure(failure: Failure) {
+    recordFailure(failure.message)
+    delegate.fireTestFailure(failure)
+  }
+
+  override fun fireTestAssumptionFailed(failure: Failure) {
+    delegate.fireTestAssumptionFailed(failure)
+  }
+
+  override fun fireTestIgnored(description: org.junit.runner.Description) {
+    delegate.fireTestIgnored(description)
+  }
+
+  override fun addListener(listener: org.junit.runner.notification.RunListener) {
+    delegate.addListener(listener)
+  }
+
   override fun removeListener(listener: org.junit.runner.notification.RunListener) {
     delegate.removeListener(listener)
   }

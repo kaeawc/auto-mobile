@@ -121,6 +121,29 @@ describe("DeviceSessionManager", () => {
     expect(setupCalled).toBe(true);
   });
 
+  test("should verify compatibility when accessibility is already enabled", async () => {
+    let setupCalled = false;
+    AndroidAccessibilityServiceManager.getInstance = () =>
+      ({
+        isInstalled: async () => true,
+        isEnabled: async () => true,
+        enable: async () => {},
+        setup: async () => {
+          setupCalled = true;
+          return { success: true, message: "ok" };
+        }
+      } as any);
+    AccessibilityServiceClient.getInstance = () =>
+      ({
+        isConnected: () => false
+      } as any);
+
+    const manager = DeviceSessionManager.createInstance(fakeAdb, fakeDeviceUtils);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(setupCalled).toBe(true);
+  });
+
   test("should skip accessibility checks when websocket is connected", async () => {
     let managerTouched = false;
     AndroidAccessibilityServiceManager.getInstance = () => {

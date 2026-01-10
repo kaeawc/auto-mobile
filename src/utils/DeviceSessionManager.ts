@@ -343,7 +343,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
       if (isInstalled && isEnabled) {
         logger.info(`[DeviceSessionManager] Accessibility service already enabled for ${deviceId}`);
-        return;
+        if (skipAccessibilityDownload) {
+          return;
+        }
+        logger.info(`[DeviceSessionManager] Accessibility service enabled for ${deviceId}, verifying version compatibility`);
       }
 
       if (!isInstalled && skipAccessibilityDownload) {
@@ -355,7 +358,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
         logger.info(`[DeviceSessionManager] Accessibility service installed but not enabled for ${deviceId}, enabling now`);
         try {
           await manager.enable();
-          return;
+          if (skipAccessibilityDownload) {
+            return;
+          }
+          logger.info(`[DeviceSessionManager] Accessibility service enabled for ${deviceId}, verifying version compatibility`);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMessage}`);

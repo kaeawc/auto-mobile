@@ -1807,7 +1807,7 @@ export class AccessibilityServiceClient implements AccessibilityService {
         const uuid = `sync_${Date.now()}_${generateSecureId()}`;
         await perf.track("sendBroadcast", async () => {
           await this.adb.executeCommand(
-            `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid}"`,
+            `shell "am broadcast -a dev.jasonpearson.automobile.EXTRACT_HIERARCHY --es uuid ${uuid} --ez disableAllFiltering ${disableAllFiltering}"`,
             undefined,
             undefined,
             undefined,

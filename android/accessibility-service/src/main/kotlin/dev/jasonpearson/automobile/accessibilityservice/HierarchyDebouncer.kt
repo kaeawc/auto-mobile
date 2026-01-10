@@ -60,7 +60,7 @@ class HierarchyDebouncer(
     private val perfProvider: PerfProvider = PerfProvider.instance,
     private val quickDebounceMs: Long = 5L,
     private val animationSkipWindowMs: Long = 100L,
-    private val extractHierarchy: () -> ViewHierarchy?,
+    private val extractHierarchy: (disableAllFiltering: Boolean) -> ViewHierarchy?,
 ) {
   companion object {
     private const val TAG = "HierarchyDebouncer"
@@ -90,9 +90,6 @@ class HierarchyDebouncer(
 
   // Last emitted hierarchy (for quick access)
   @Volatile private var lastHierarchy: ViewHierarchy? = null
-
-  // Flag to disable all filtering and optimizations (for rawViewHierarchy)
-  @Volatile var disableAllFiltering: Boolean = false
 
   /**
    * Called when an accessibility event is received that might change the hierarchy. Handles
@@ -136,10 +133,9 @@ class HierarchyDebouncer(
    * immediately after launching the extraction.
    */
   fun extractNow(disableAllFiltering: Boolean = false) {
-    this.disableAllFiltering = disableAllFiltering
     debounceJob?.cancel()
     inAnimationMode = false
-    scope.launch { extractAndCompare() }
+    scope.launch { extractAndCompare(disableAllFiltering = disableAllFiltering) }
   }
 
   /**
@@ -149,12 +145,18 @@ class HierarchyDebouncer(
    *
    * @param skipFlowEmit If true, skips emitting to the flow. Use this when the caller will
    *   broadcast the hierarchy directly to avoid race conditions with flow-based async broadcasts.
+   * @param disableAllFiltering If true, disables filtering/optimization for this extraction.
    * @return The extracted hierarchy, or null if extraction failed.
    */
-  fun extractNowBlocking(skipFlowEmit: Boolean = false): ViewHierarchy? {
+  fun extractNowBlocking(
+      skipFlowEmit: Boolean = false,
+      disableAllFiltering: Boolean = false,
+  ): ViewHierarchy? {
     debounceJob?.cancel()
     inAnimationMode = false
-    kotlinx.coroutines.runBlocking { extractAndCompare(skipFlowEmit) }
+    kotlinx.coroutines.runBlocking {
+      extractAndCompare(skipFlowEmit = skipFlowEmit, disableAllFiltering = disableAllFiltering)
+    }
     return lastHierarchy
   }
 
@@ -282,7 +284,10 @@ class HierarchyDebouncer(
    * @param skipFlowEmit If true, skips emitting to the flow. Use this when the caller will
    *   broadcast directly to avoid race conditions.
    */
-  private suspend fun extractAndCompare(skipFlowEmit: Boolean = false) {
+  private suspend fun extractAndCompare(
+      skipFlowEmit: Boolean = false,
+      disableAllFiltering: Boolean = false,
+  ) {
     val startTime = timeProvider.currentTimeMillis()
 
     // Variables to hold results for emission after perf block closes
@@ -294,7 +299,7 @@ class HierarchyDebouncer(
     perfProvider.independentRoot("hierarchyDebouncer")
     try {
       perfProvider.startOperation("extractHierarchy")
-      val hierarchy = extractHierarchy()
+      val hierarchy = extractHierarchy(disableAllFiltering)
       perfProvider.endOperation("extractHierarchy")
 
       if (hierarchy == null) {

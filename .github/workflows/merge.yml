@@ -2,9 +2,8 @@ name: "On Merge"
 
 on:
   workflow_dispatch:
-  push:
-    branches:
-      - main
+  schedule:
+    - cron: "0 0 * * *"
 
 permissions:
   checks: write

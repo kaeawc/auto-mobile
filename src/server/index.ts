@@ -81,6 +81,8 @@ function formatToolParamError(toolName: string, error: unknown): string {
 }
 
 export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
+  // Plan execution lock disabled temporarily for parallel test debugging
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const planExecutionLock = options.planExecutionLock ?? createDefaultPlanExecutionLock();
   void FeatureFlagService.getInstance()
     .initialize()

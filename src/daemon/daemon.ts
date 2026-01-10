@@ -531,7 +531,7 @@ export class Daemon {
    * Waits for device discovery with configurable timeout
    */
   private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
-    const timeoutPromise = new Promise<void>((resolve) => {
+    const timeoutPromise = new Promise<void>(resolve => {
       setTimeout(() => {
         logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
         resolve();

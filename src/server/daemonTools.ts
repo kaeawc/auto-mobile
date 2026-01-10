@@ -48,7 +48,7 @@ export function registerDaemonTools(): void {
         });
       } catch (error) {
         logger.error(`[daemon_available_devices] ERROR: ${error}`);
-        logger.error(`[daemon_available_devices] Stack: ${error instanceof Error ? error.stack : 'no stack'}`);
+        logger.error(`[daemon_available_devices] Stack: ${error instanceof Error ? error.stack : "no stack"}`);
         throw error;
       }
     }

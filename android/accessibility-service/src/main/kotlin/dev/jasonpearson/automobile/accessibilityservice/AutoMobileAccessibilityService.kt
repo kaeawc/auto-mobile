@@ -1893,15 +1893,29 @@ class AutoMobileAccessibilityService : AccessibilityService() {
         resolvedAlias = computeCertificateAlias(certBytes)
       }
 
+      val wasInstalled = isCaCertInstalled(certBytes)
+      if (wasInstalled == false) {
+        error = "CA certificate is not installed"
+        return
+      }
+
       perfProvider.startOperation("removeCert")
       try {
         devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
-        success = true
       } finally {
         perfProvider.endOperation("removeCert")
       }
+      val isInstalled = isCaCertInstalled(certBytes)
+      success = isInstalled == false
       if (success) {
         resolvedAlias?.let { deleteCaCertFromStorage(it) }
+      } else {
+        error =
+            if (isInstalled == null) {
+              "Unable to confirm CA certificate removal"
+            } else {
+              "CA certificate still installed after uninstall"
+            }
       }
     } catch (e: Exception) {
       error = "Failed to remove CA certificate: ${e.message}"
@@ -1912,6 +1926,16 @@ class AutoMobileAccessibilityService : AccessibilityService() {
       kotlinx.coroutines.runBlocking {
         broadcastCaCertResult(requestId, "remove", success, resolvedAlias, error, totalTime)
       }
+    }
+  }
+
+  private fun isCaCertInstalled(certBytes: ByteArray): Boolean? {
+    return try {
+      val installedCerts = devicePolicyManager.getInstalledCaCerts(deviceAdminComponent)
+      installedCerts.any { it.contentEquals(certBytes) }
+    } catch (e: Exception) {
+      Log.w(TAG, "Unable to query installed CA certificates", e)
+      null
     }
   }
 

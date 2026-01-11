@@ -44,7 +44,7 @@ In cases where the agent needs to determine what to do next, the [observe](obser
 
 #### Advanced Device Management
 
-- 📱 `listDevices` (deprecated; use `automobile:devices/booted`) lists all connected devices (physical and emulators).
+- 📋 Device inventory and pool status are exposed via the `automobile:devices/booted` resource.
 - 🚀 `startDevice` starts a device with the specified device image.
 - ❌ `killDevice` terminates a running device.
 - 🔧 `setActiveDevice` sets the active device for subsequent operations.
@@ -66,6 +66,6 @@ In cases where the agent needs to determine what to do next, the [observe](obser
 
 #### Daemon & Session Management
 
-- 🔢 `daemon_available_devices` (deprecated; use `automobile:devices/booted`) queries number of available devices in daemon pool.
+- 📋 Device pool status is exposed via the `automobile:devices/booted` resource.
 - 📋 `daemon_session_info` gets information about an existing session.
 - 🔓 `daemon_release_session` releases a session and frees its device.

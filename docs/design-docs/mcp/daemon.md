@@ -20,6 +20,8 @@ The daemon runs as a background process that:
 
 ## Device Pooling
 
+Pool status and per-device assignments are available via the `automobile:devices/booted` resource.
+
 ### Session Acquisition
 
 Tests request a device from the pool:
@@ -66,9 +68,6 @@ The daemon listens on a Unix socket at:
 ```
 
 ## MCP Tools
-
-### `daemon_available_devices`
-Deprecated; use `automobile:devices/booted` for pool status and device assignment info.
 
 ### `daemon_session_info`
 Get information about an active session.

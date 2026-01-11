@@ -539,6 +539,43 @@ export async function runDaemonCommand(
         break;
       }
 
+      case "available-devices": {
+        const formatPoolStats = (stats?: { idle: number; assigned: number; error: number; total: number }) => (
+          JSON.stringify({
+            availableDevices: stats?.idle ?? 0,
+            totalDevices: stats?.total ?? 0,
+            assignedDevices: stats?.assigned ?? 0,
+            errorDevices: stats?.error ?? 0,
+          })
+        );
+
+        // Check if running in daemon process
+        if (DaemonState.getInstance().isInitialized()) {
+          // Running inside daemon process
+          const pool = DaemonState.getInstance().getDevicePool();
+          console.log(formatPoolStats(pool.getStats()));
+        } else {
+          // Running from CLI - query daemon via socket
+          const client = new DaemonClient();
+          try {
+            await client.connect();
+            const result = await client.readResource("automobile:devices/booted");
+            const content = result?.contents?.[0]?.text;
+            if (!content) {
+              console.log(formatPoolStats());
+            } else {
+              const data = JSON.parse(content);
+              console.log(formatPoolStats(data?.poolStatus));
+            }
+            await client.close();
+          } catch (error) {
+            throw new ActionableError(
+              `Failed to query available devices: ${error instanceof Error ? error.message : String(error)}`
+            );
+          }
+        }
+        break;
+      }
       case "session-info": {
         if (args.length === 0) {
           throw new ActionableError("session-info requires a session ID argument");
@@ -624,6 +661,7 @@ export async function runDaemonCommand(
         console.log("  restart               Restart the daemon");
         console.log("  health                Check daemon health");
         console.log("  diagnose              Run full diagnostics");
+        console.log("  available-devices     Query device pool status");
         console.log("  session-info <id>     Get information about a session");
         console.log("  release-session <id>  Release a session and free its device");
         process.exit(1);

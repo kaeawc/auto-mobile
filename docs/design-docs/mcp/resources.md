@@ -36,6 +36,8 @@ Returns booted device inventory across Android and iOS, including:
 
 **URI Template**: `automobile:devices/booted/{platform}`
 
+This resource replaces the removed `listDevices` and `daemon_available_devices` tools.
+
 ### Test Timing History
 
 **URI**: `

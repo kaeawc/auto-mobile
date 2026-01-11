@@ -1,11 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { promises as fs } from "fs";
+import * as path from "path";
+import * as os from "os";
 import type { BootedDevice, DeviceSnapshotConfig, DeviceSnapshotManifest } from "../../src/models";
 import {
   captureDeviceSnapshot,
+  listDeviceSnapshots,
   resetDeviceSnapshotManagerDependencies,
   restoreDeviceSnapshot,
   setDeviceSnapshotManagerDependencies,
 } from "../../src/server/deviceSnapshotManager";
+import { DeviceSnapshotStore } from "../../src/utils/DeviceSnapshotStore";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceSnapshotRepository } from "../fakes/FakeDeviceSnapshotRepository";
 import { FakeDeviceSnapshotConfigRepository } from "../fakes/FakeDeviceSnapshotConfigRepository";
@@ -176,5 +181,96 @@ describe("deviceSnapshotManager", () => {
 
     const updated = await repository.getSnapshot("restore-me");
     expect(updated?.lastAccessedAt).toBe(nowIso);
+  });
+
+  test("restoreDeviceSnapshot migrates legacy manifest when missing from repository", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-"));
+    try {
+      const legacyStore = new DeviceSnapshotStore(tempRoot);
+      await legacyStore.ensureSnapshotsDirectory();
+
+      const snapshotName = "legacy-snapshot";
+      const snapshotDir = legacyStore.getSnapshotPath(snapshotName);
+      await fs.mkdir(snapshotDir, { recursive: true });
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const legacyManifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: TEST_DEVICE.deviceId,
+        deviceName: TEST_DEVICE.name,
+        platform: TEST_DEVICE.platform,
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+
+      await fs.writeFile(
+        path.join(snapshotDir, "manifest.json"),
+        JSON.stringify(legacyManifest, null, 2)
+      );
+
+      await setDeviceSnapshotManagerDependencies({
+        snapshotStore: legacyStore as any,
+      });
+
+      const { result, manifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+        snapshotName,
+      });
+
+      expect(result.snapshotType).toBe("adb");
+      expect(manifest.snapshotName).toBe(snapshotName);
+      expect(restoreCalls[0]?.snapshotName).toBe(snapshotName);
+      expect(restoreCalls[0]?.manifest.snapshotName).toBe(snapshotName);
+
+      const record = await repository.getSnapshot(snapshotName);
+      expect(record).not.toBeNull();
+      expect(record?.createdAt).toBe(timestamp);
+      expect(record?.sizeBytes).toBeGreaterThan(0);
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test("listDeviceSnapshots imports legacy manifest entries", async () => {
+    const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-archive-"));
+    try {
+      const legacyStore = new DeviceSnapshotStore(tempRoot);
+      await legacyStore.ensureSnapshotsDirectory();
+
+      const snapshotName = "legacy-archive-snapshot";
+      const snapshotDir = legacyStore.getSnapshotPath(snapshotName);
+      await fs.mkdir(snapshotDir, { recursive: true });
+
+      const timestamp = new Date(fakeTimer.now()).toISOString();
+      const legacyManifest: DeviceSnapshotManifest = {
+        snapshotName,
+        timestamp,
+        deviceId: TEST_DEVICE.deviceId,
+        deviceName: TEST_DEVICE.name,
+        platform: TEST_DEVICE.platform,
+        snapshotType: "adb",
+        includeAppData: true,
+        includeSettings: true,
+      };
+
+      await fs.writeFile(
+        path.join(snapshotDir, "manifest.json"),
+        JSON.stringify(legacyManifest, null, 2)
+      );
+
+      await setDeviceSnapshotManagerDependencies({
+        snapshotStore: legacyStore as any,
+      });
+
+      const { snapshots, count } = await listDeviceSnapshots();
+      const firstSnapshot = snapshots[0] as { snapshotName?: string };
+
+      expect(count).toBe(1);
+      expect(firstSnapshot.snapshotName).toBe(snapshotName);
+      expect(await repository.getSnapshot(snapshotName)).not.toBeNull();
+    } finally {
+      await fs.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 });

@@ -1,3 +1,6 @@
+import { promises as fs } from "fs";
+import type { Dirent } from "fs";
+import * as path from "path";
 import { ActionableError, BootedDevice, DeviceSnapshotConfig, DeviceSnapshotConfigInput, DeviceSnapshotManifest } from "../models";
 import { DeviceSnapshotRepository, type DeviceSnapshotRecord } from "../db/deviceSnapshotRepository";
 import { DeviceSnapshotConfigRepository } from "../db/deviceSnapshotConfigRepository";
@@ -66,6 +69,7 @@ export interface DeviceSnapshotManagerDependencies {
 }
 
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
+const LEGACY_MANIFEST_FILENAME = "manifest.json";
 
 async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDependencies> {
   if (!moduleDependencies) {
@@ -158,6 +162,169 @@ function buildArchiveEntry(record: DeviceSnapshotRecord): Record<string, unknown
     sizeBytes: record.sizeBytes,
     sizeLabel: formatSnapshotSize(record.sizeBytes),
   };
+}
+
+function isLegacyManifest(value: unknown): value is DeviceSnapshotManifest {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+
+  const manifest = value as DeviceSnapshotManifest;
+  return typeof manifest.snapshotName === "string"
+    && typeof manifest.timestamp === "string"
+    && typeof manifest.deviceId === "string"
+    && typeof manifest.deviceName === "string"
+    && (manifest.platform === "android" || manifest.platform === "ios")
+    && (manifest.snapshotType === "adb" || manifest.snapshotType === "vm")
+    && typeof manifest.includeAppData === "boolean"
+    && typeof manifest.includeSettings === "boolean";
+}
+
+function normalizeLegacyManifest(
+  snapshotName: string,
+  manifest: DeviceSnapshotManifest
+): DeviceSnapshotManifest {
+  if (manifest.snapshotName === snapshotName) {
+    return manifest;
+  }
+
+  return {
+    ...manifest,
+    snapshotName,
+  };
+}
+
+function resolveLegacyTimestamp(timestamp: string, fallback: string): string {
+  return Number.isNaN(Date.parse(timestamp)) ? fallback : timestamp;
+}
+
+async function readLegacyManifest(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore
+): Promise<DeviceSnapshotManifest | null> {
+  const manifestPath = path.join(
+    snapshotStore.getSnapshotPath(snapshotName),
+    LEGACY_MANIFEST_FILENAME
+  );
+
+  try {
+    const manifestJson = await fs.readFile(manifestPath, "utf-8");
+    const parsed = JSON.parse(manifestJson) as unknown;
+    if (!isLegacyManifest(parsed)) {
+      logger.warn(`[DeviceSnapshot] Legacy manifest for '${snapshotName}' is invalid`);
+      return null;
+    }
+
+    return normalizeLegacyManifest(snapshotName, parsed);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.warn(
+        `[DeviceSnapshot] Failed to read legacy manifest for '${snapshotName}': ${error}`
+      );
+    }
+    return null;
+  }
+}
+
+async function importLegacySnapshot(
+  snapshotName: string,
+  manifest: DeviceSnapshotManifest,
+  snapshotStore: DeviceSnapshotStore,
+  snapshotRepository: DeviceSnapshotRepository,
+  now: () => Date
+): Promise<DeviceSnapshotRecord | null> {
+  const sizeBytes = await snapshotStore.getSnapshotSizeBytes(snapshotName);
+  const fallbackTimestamp = now().toISOString();
+  const createdAt = resolveLegacyTimestamp(manifest.timestamp, fallbackTimestamp);
+
+  const record: DeviceSnapshotRecord = {
+    snapshotName,
+    deviceId: manifest.deviceId,
+    deviceName: manifest.deviceName,
+    platform: manifest.platform,
+    snapshotType: manifest.snapshotType,
+    includeAppData: manifest.includeAppData,
+    includeSettings: manifest.includeSettings,
+    createdAt,
+    lastAccessedAt: createdAt,
+    sizeBytes,
+    manifest,
+  };
+
+  try {
+    await snapshotRepository.insertSnapshot(record);
+    return record;
+  } catch (error) {
+    logger.warn(
+      `[DeviceSnapshot] Failed to import legacy snapshot '${snapshotName}': ${error}`
+    );
+    return snapshotRepository.getSnapshot(snapshotName);
+  }
+}
+
+async function hydrateLegacySnapshot(
+  snapshotName: string,
+  snapshotStore: DeviceSnapshotStore,
+  snapshotRepository: DeviceSnapshotRepository,
+  now: () => Date
+): Promise<DeviceSnapshotRecord | null> {
+  const manifest = await readLegacyManifest(snapshotName, snapshotStore);
+  if (!manifest) {
+    return null;
+  }
+
+  return importLegacySnapshot(snapshotName, manifest, snapshotStore, snapshotRepository, now);
+}
+
+async function importLegacySnapshotArchive(
+  snapshotRepository: DeviceSnapshotRepository,
+  snapshotStore: DeviceSnapshotStore,
+  now: () => Date,
+  existingSnapshots: Set<string>
+): Promise<boolean> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(snapshotStore.getBasePath(), { withFileTypes: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code !== "ENOENT") {
+      logger.warn(`[DeviceSnapshot] Failed to scan legacy snapshots: ${error}`);
+    }
+    return false;
+  }
+
+  let imported = false;
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+
+    const snapshotName = entry.name;
+    if (existingSnapshots.has(snapshotName)) {
+      continue;
+    }
+
+    const manifest = await readLegacyManifest(snapshotName, snapshotStore);
+    if (!manifest) {
+      continue;
+    }
+
+    const record = await importLegacySnapshot(
+      snapshotName,
+      manifest,
+      snapshotStore,
+      snapshotRepository,
+      now
+    );
+    if (record) {
+      existingSnapshots.add(snapshotName);
+      imported = true;
+    }
+  }
+
+  return imported;
 }
 
 async function notifySnapshotResources(): Promise<void> {
@@ -353,7 +520,15 @@ export async function restoreDeviceSnapshot(
   const { snapshotRepository, snapshotStore, timer, now, createRestoreAction } =
     await getDeviceSnapshotDependencies();
 
-  const record = await snapshotRepository.getSnapshot(args.snapshotName);
+  let record = await snapshotRepository.getSnapshot(args.snapshotName);
+  if (!record) {
+    record = await hydrateLegacySnapshot(
+      args.snapshotName,
+      snapshotStore,
+      snapshotRepository,
+      now
+    );
+  }
   if (!record) {
     throw new ActionableError(`Snapshot '${args.snapshotName}' not found`);
   }
@@ -382,10 +557,22 @@ export async function listDeviceSnapshots(): Promise<{
   count: number;
   totalSizeBytes: number;
 }> {
-  const { snapshotRepository } = await getDeviceSnapshotDependencies();
-  const records = await snapshotRepository.listSnapshots({
+  const { snapshotRepository, snapshotStore, now } = await getDeviceSnapshotDependencies();
+  const initialRecords = await snapshotRepository.listSnapshots({
     orderByCreatedAt: "desc",
   });
+  const existingSnapshotNames = new Set(
+    initialRecords.map(record => record.snapshotName)
+  );
+  const importedLegacy = await importLegacySnapshotArchive(
+    snapshotRepository,
+    snapshotStore,
+    now,
+    existingSnapshotNames
+  );
+  const records = importedLegacy
+    ? await snapshotRepository.listSnapshots({ orderByCreatedAt: "desc" })
+    : initialRecords;
 
   const snapshots = records.map(buildArchiveEntry);
   const totalSizeBytes = records.reduce(

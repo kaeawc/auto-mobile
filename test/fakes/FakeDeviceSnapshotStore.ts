@@ -1,9 +1,25 @@
+import * as os from "os";
+import * as path from "path";
+
 export class FakeDeviceSnapshotStore {
+  private basePath: string;
   private sizes = new Map<string, number>();
   private existing = new Set<string>();
   private deleted = new Set<string>();
   private generatedNames: string[] = [];
   private nameCounter = 0;
+
+  constructor(basePath?: string) {
+    this.basePath = basePath ?? path.join(os.tmpdir(), "auto-mobile-fake-snapshots");
+  }
+
+  getBasePath(): string {
+    return this.basePath;
+  }
+
+  getSnapshotPath(snapshotName: string): string {
+    return path.join(this.basePath, snapshotName);
+  }
 
   setSnapshotSize(snapshotName: string, sizeBytes: number): void {
     this.sizes.set(snapshotName, sizeBytes);

@@ -72,36 +72,46 @@ export class VideoRecordingSocketServer {
 
   private handleConnection(socket: Socket): void {
     let buffer = "";
+    let pending = Promise.resolve();
 
-    socket.on("data", async data => {
+    socket.on("data", data => {
       buffer += data.toString();
       const lines = buffer.split("\n");
       buffer = lines.pop() || "";
 
       for (const line of lines) {
-        if (!line.trim()) {
-          continue;
-        }
-        try {
-          const request = JSON.parse(line) as VideoRecordingSocketRequest;
-          const response = await this.handleRequest(request);
-          socket.write(JSON.stringify(response) + "\n");
-        } catch (error) {
-          logger.error(`Video recording socket request error: ${error}`);
-          const errorResponse: VideoRecordingSocketResponse = {
-            id: "unknown",
-            type: "video_recording_response",
-            success: false,
-            error: error instanceof Error ? error.message : String(error),
-          };
-          socket.write(JSON.stringify(errorResponse) + "\n");
-        }
+        pending = pending
+          .then(() => this.processLine(socket, line))
+          .catch(error => {
+            logger.error(`Video recording socket request error: ${error}`);
+          });
       }
     });
 
     socket.on("error", error => {
       logger.error(`Video recording socket connection error: ${error}`);
     });
+  }
+
+  private async processLine(socket: Socket, line: string): Promise<void> {
+    if (!line.trim()) {
+      return;
+    }
+
+    try {
+      const request = JSON.parse(line) as VideoRecordingSocketRequest;
+      const response = await this.handleRequest(request);
+      socket.write(JSON.stringify(response) + "\n");
+    } catch (error) {
+      logger.error(`Video recording socket request error: ${error}`);
+      const errorResponse: VideoRecordingSocketResponse = {
+        id: "unknown",
+        type: "video_recording_response",
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      socket.write(JSON.stringify(errorResponse) + "\n");
+    }
   }
 
   private async handleRequest(

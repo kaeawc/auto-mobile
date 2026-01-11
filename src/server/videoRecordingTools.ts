@@ -124,6 +124,44 @@ function selectLatestRecording(records: VideoRecordingRecord[]): VideoRecordingR
     })[0];
 }
 
+async function stopRecordingById(recordingId: string) {
+  const results: Array<Record<string, unknown>> = [];
+  const evictedRecordingIds: string[] = [];
+  const activeRecords = await listActiveVideoRecordings();
+  const matching = activeRecords.find(record => record.recordingId === recordingId);
+
+  try {
+    const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(recordingId);
+    const codec = metadata.codec ?? "unknown";
+    const durationMs = metadata.durationMs ?? 0;
+    const sizeBytes = metadata.sizeBytes ?? 0;
+
+    results.push({
+      recordingId: metadata.recordingId,
+      filePath: metadata.filePath,
+      durationMs,
+      sizeBytes,
+      codec,
+      metadata: { ...metadata, durationMs, sizeBytes, codec },
+      deviceId: matching?.deviceId,
+      platform: matching?.platform,
+    });
+
+    for (const evictedId of evicted) {
+      evictedRecordingIds.push(evictedId);
+    }
+  } catch (error) {
+    throw new ActionableError(`Failed to stop video recording: ${error}`);
+  }
+
+  return createJSONToolResponse({
+    action: "stop",
+    count: results.length,
+    recordings: results,
+    evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
+  });
+}
+
 export function registerVideoRecordingTools(): void {
   const videoRecordingHandler = async (
     device: BootedDevice,
@@ -182,45 +220,13 @@ export function registerVideoRecordingTools(): void {
     }
 
     if (args.action === "stop") {
+      if (args.recordingId) {
+        return stopRecordingById(args.recordingId);
+      }
+
       const results: Array<Record<string, unknown>> = [];
       const failures: Array<Record<string, unknown>> = [];
       const evictedRecordingIds: string[] = [];
-      if (args.recordingId) {
-        const activeRecords = await listActiveVideoRecordings();
-        const matching = activeRecords.find(record => record.recordingId === args.recordingId);
-
-        try {
-          const { metadata, evictedRecordingIds: evicted } = await stopVideoRecording(args.recordingId);
-          const codec = metadata.codec ?? "unknown";
-          const durationMs = metadata.durationMs ?? 0;
-          const sizeBytes = metadata.sizeBytes ?? 0;
-
-          results.push({
-            recordingId: metadata.recordingId,
-            filePath: metadata.filePath,
-            durationMs,
-            sizeBytes,
-            codec,
-            metadata: { ...metadata, durationMs, sizeBytes, codec },
-            deviceId: matching?.deviceId,
-            platform: matching?.platform,
-          });
-
-          for (const evictedId of evicted) {
-            evictedRecordingIds.push(evictedId);
-          }
-        } catch (error) {
-          throw new ActionableError(`Failed to stop video recording: ${error}`);
-        }
-
-        return createJSONToolResponse({
-          action: "stop",
-          count: results.length,
-          recordings: results,
-          evictedRecordingIds: evictedRecordingIds.length > 0 ? evictedRecordingIds : undefined,
-        });
-      }
-
       const targetDevices = await resolveTargetDevices(device, args);
       const activeRecords = await listActiveVideoRecordings({ platform: device.platform });
 
@@ -284,10 +290,26 @@ export function registerVideoRecordingTools(): void {
     throw new ActionableError(`Unsupported videoRecording action: ${args.action}`);
   };
 
+  const videoRecordingNonDeviceHandler = async (args: VideoRecordingArgs) => {
+    if (args.action === "stop" && args.recordingId) {
+      return stopRecordingById(args.recordingId);
+    }
+
+    throw new ActionableError(
+      "Video recording start/stop requires a connected device unless recordingId is provided."
+    );
+  };
+
   ToolRegistry.registerDeviceAware(
     "videoRecording",
     "Start or stop a low-overhead video recording for the active device.",
     videoRecordingSchema,
-    videoRecordingHandler
+    videoRecordingHandler,
+    false,
+    false,
+    {
+      shouldEnsureDevice: args => !(args.action === "stop" && args.recordingId),
+      nonDeviceHandler: videoRecordingNonDeviceHandler,
+    }
   );
 }

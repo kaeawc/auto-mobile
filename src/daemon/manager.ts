@@ -18,7 +18,7 @@ import {
   runSocketDiagnostics,
   formatSocketDiagnostics,
 } from "./debugTools";
-import { DaemonClient } from "./client";
+import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import { DaemonState } from "./daemonState";
 
 /**
@@ -31,6 +31,15 @@ import { DaemonState } from "./daemonState";
  * - Restart daemon
  */
 export class DaemonManager {
+  private readonly clientFactory: DaemonClientFactory;
+
+  constructor(clientFactory: DaemonClientFactory = () => new DaemonClient()) {
+    this.clientFactory = clientFactory;
+  }
+
+  createClient(): DaemonClientLike {
+    return this.clientFactory();
+  }
   /**
    * Find all running auto-mobile daemon processes (including those from other worktrees)
    */
@@ -377,11 +386,16 @@ export class DaemonManager {
 /**
  * Run daemon management command
  */
+export interface RunDaemonCommandOptions {
+  clientFactory?: DaemonClientFactory;
+}
+
 export async function runDaemonCommand(
   command: string,
-  args: string[]
+  args: string[],
+  options: RunDaemonCommandOptions = {}
 ): Promise<void> {
-  const manager = new DaemonManager();
+  const manager = new DaemonManager(options.clientFactory);
 
   try {
     switch (command) {
@@ -556,7 +570,7 @@ export async function runDaemonCommand(
           console.log(formatPoolStats(pool.getStats()));
         } else {
           // Running from CLI - query daemon via socket
-          const client = new DaemonClient();
+          const client = manager.createClient();
           try {
             await client.connect();
             const result = await client.readResource("automobile:devices/booted");
@@ -600,7 +614,7 @@ export async function runDaemonCommand(
           }));
         } else {
           // Running from CLI - query daemon via socket
-          const client = new DaemonClient();
+          const client = manager.createClient();
           try {
             await client.connect();
             const result = await client.callTool("daemon_session_info", { sessionId });
@@ -637,7 +651,7 @@ export async function runDaemonCommand(
           console.log(`Device ${deviceId} is now available`);
         } else {
           // Running from CLI - query daemon via socket
-          const client = new DaemonClient();
+          const client = manager.createClient();
           try {
             await client.connect();
             await client.callTool("daemon_release_session", { sessionId });

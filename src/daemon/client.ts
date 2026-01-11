@@ -255,3 +255,12 @@ export class DaemonClient {
     this.pendingRequests.clear();
   }
 }
+
+export interface DaemonClientLike {
+  connect(): Promise<void>;
+  close(): Promise<void>;
+  callTool(toolName: string, params: Record<string, any>): Promise<any>;
+  readResource(uri: string): Promise<any>;
+}
+
+export type DaemonClientFactory = () => DaemonClientLike;

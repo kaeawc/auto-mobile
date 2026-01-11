@@ -286,8 +286,21 @@ function calculateDurationMs(startedAt: string, endedAt: string): number | undef
 }
 
 function toMetadata(record: VideoRecordingRecord): VideoRecordingMetadata {
-  const { deviceId, platform, status, ...metadata } = record;
-  return metadata;
+  return {
+    recordingId: record.recordingId,
+    fileName: record.fileName,
+    filePath: record.filePath,
+    format: record.format,
+    sizeBytes: record.sizeBytes,
+    durationMs: record.durationMs,
+    codec: record.codec,
+    outputName: record.outputName,
+    createdAt: record.createdAt,
+    startedAt: record.startedAt,
+    endedAt: record.endedAt,
+    lastAccessedAt: record.lastAccessedAt,
+    config: record.config,
+  };
 }
 
 async function notifyVideoRecordingResources(recordingIds: string[]): Promise<void> {

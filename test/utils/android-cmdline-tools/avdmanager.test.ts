@@ -912,9 +912,10 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         // Should not reach here
         expect(true).toBe(false);
       } catch (error: any) {
-        // Error should be thrown with JAXB message in it
-        expect(error.message).toContain("Failed to list AVDs");
-        expect(error.message).toContain("javax/xml/bind/annotation/XmlSchema");
+        // Error should be actionable with JAXB guidance
+        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        expect(error.message).toContain("javax.xml.bind");
+        expect(error.message).toContain("cmdline-tools/latest");
       }
     });
 
@@ -940,8 +941,9 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
         expect(true).toBe(false);
       } catch (error: any) {
-        expect(error.message).toContain("Failed to list AVDs");
-        expect(error.message).toContain("javax.xml.bind.annotation.XmlSchema");
+        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        expect(error.message).toContain("javax.xml.bind");
+        expect(error.message).toContain("cmdline-tools/latest");
       }
     });
 
@@ -987,8 +989,41 @@ Caused by: java.lang.ClassNotFoundException: javax.xml.bind.annotation.XmlSchema
         await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
         expect(true).toBe(false);
       } catch (error: any) {
-        expect(error.message).toContain("Failed to list AVDs");
-        expect(error.message).toContain("javax/xml/bind/annotation/XmlSchema");
+        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        expect(error.message).toContain("javax.xml.bind");
+        expect(error.message).toContain("cmdline-tools/latest");
+      }
+    });
+
+    test("should detect old tools location without JAXB error output", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      const oldToolsLocation = {
+        path: "/opt/android-sdk/tools",
+        source: "typical" as const,
+        version: "26.1.1",
+        available_tools: ["avdmanager", "sdkmanager"]
+      };
+
+      mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from("Some other failure"));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      try {
+        await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
+        expect(true).toBe(false);
+      } catch (error: any) {
+        expect(error.message).toContain("Detected deprecated Android SDK Tools");
+        expect(error.message).toContain("cmdline-tools/latest");
       }
     });
 
@@ -1047,8 +1082,9 @@ Additional error context`;
         await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
         expect(true).toBe(false);
       } catch (error: any) {
-        expect(error.message).toContain("Failed to list AVDs");
-        expect(error.message).toContain("javax/xml/bind/annotation/XmlSchema");
+        expect(error.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+        expect(error.message).toContain("javax.xml.bind");
+        expect(error.message).toContain("cmdline-tools/latest");
       }
     });
   });

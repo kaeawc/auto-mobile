@@ -16,7 +16,7 @@ object ValidTools {
         "getNavigationGraph", "explore", "identifyInteractions",
         "listPerformanceAuditResults",
         "captureDeviceSnapshot", "restoreDeviceSnapshot", "listSnapshots", "deleteSnapshot",
-        "startVideoRecording", "stopVideoRecording", "listVideoRecordings", "deleteVideoRecording",
+        "videoRecording",
         "listDeviceImages",
         "getTestTimings",
         "debugSearch", "bugReport",

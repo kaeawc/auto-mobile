@@ -76,10 +76,7 @@ object TestPlanToolCategories {
             "deleteSnapshot"
         ),
         "Video recording" to setOf(
-            "startVideoRecording",
-            "stopVideoRecording",
-            "listVideoRecordings",
-            "deleteVideoRecording"
+            "videoRecording"
         ),
         "Testing" to setOf(
             "getTestTimings"

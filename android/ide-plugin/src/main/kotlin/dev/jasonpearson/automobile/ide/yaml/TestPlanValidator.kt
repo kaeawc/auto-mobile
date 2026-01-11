@@ -74,7 +74,7 @@ object TestPlanValidator {
         // Snapshots
         "captureDeviceSnapshot", "restoreDeviceSnapshot", "listSnapshots", "deleteSnapshot",
         // Video recording
-        "startVideoRecording", "stopVideoRecording", "listVideoRecordings", "deleteVideoRecording",
+        "videoRecording",
         // Device images
         "listDeviceImages",
         // Testing tools

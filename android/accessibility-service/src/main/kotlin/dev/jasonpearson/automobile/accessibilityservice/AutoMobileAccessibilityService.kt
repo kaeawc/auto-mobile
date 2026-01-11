@@ -3,9 +3,11 @@ package dev.jasonpearson.automobile.accessibilityservice
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
+import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
 import android.content.ClipboardManager
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
@@ -32,6 +34,8 @@ import dev.jasonpearson.automobile.accessibilityservice.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.accessibilityservice.perf.TimeProvider
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.ByteArrayOutputStream
+import java.io.File
+import java.security.MessageDigest
 import kotlin.coroutines.resume
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -78,6 +82,12 @@ class AutoMobileAccessibilityService : AccessibilityService() {
   private val navigationEventAccumulator = NavigationEventAccumulator()
   private val clipboardManager by lazy {
     getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+  }
+  private val devicePolicyManager by lazy {
+    getSystemService(Context.DEVICE_POLICY_SERVICE) as DevicePolicyManager
+  }
+  private val deviceAdminComponent by lazy {
+    ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
   private var lastWindowClassName: String? = null
 
@@ -313,6 +323,13 @@ class AutoMobileAccessibilityService : AccessibilityService() {
               onRequestClipboard = { requestId, action, text ->
                 performClipboard(requestId, action, text)
               },
+              onRequestInstallCaCert = { requestId, certificate ->
+                performInstallCaCertificate(requestId, certificate)
+              },
+              onRequestRemoveCaCert = { requestId, alias, certificate ->
+                performRemoveCaCertificate(requestId, alias, certificate)
+              },
+              onGetDeviceOwnerStatus = { requestId -> performGetDeviceOwnerStatus(requestId) },
               onSetRecompositionTracking = { enabled -> setRecompositionTrackingEnabled(enabled) },
               onGetCurrentFocus = { requestId -> handleGetCurrentFocus(requestId) },
               onGetTraversalOrder = { requestId -> handleGetTraversalOrder(requestId) },
@@ -1735,6 +1752,257 @@ class AutoMobileAccessibilityService : AccessibilityService() {
     }
   }
 
+  /** Install a CA certificate via DevicePolicyManager (device owner only). */
+  private fun performInstallCaCertificate(requestId: String?, certificate: String) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performInstallCaCertificate")
+    perfProvider.serial("installCaCert")
+
+    var success = false
+    var alias: String? = null
+    var error: String? = null
+
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        error = "CA certificate install requires API 21+"
+        return
+      }
+
+      val deviceOwnerError = validateDeviceOwnerStatus()
+      if (deviceOwnerError != null) {
+        error = deviceOwnerError
+        return
+      }
+
+      perfProvider.startOperation("decodeCert")
+      val certBytes = decodeCertificateBytes(certificate)
+      perfProvider.endOperation("decodeCert")
+      if (certBytes == null) {
+        error = "Certificate payload is empty or invalid"
+        return
+      }
+
+      alias = computeCertificateAlias(certBytes)
+
+      perfProvider.startOperation("persistCert")
+      val stored = writeCaCertToStorage(alias, certBytes)
+      perfProvider.endOperation("persistCert")
+      if (!stored) {
+        error = "Failed to persist certificate for alias: $alias"
+        return
+      }
+
+      perfProvider.startOperation("installCert")
+      try {
+        devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
+        success = true
+      } finally {
+        perfProvider.endOperation("installCert")
+      }
+      if (!success) {
+        deleteCaCertFromStorage(alias)
+      }
+    } catch (e: Exception) {
+      error = "Failed to install CA certificate: ${e.message}"
+      Log.e(TAG, "Error installing CA certificate", e)
+    } finally {
+      if (!success && alias != null) {
+        deleteCaCertFromStorage(alias)
+      }
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastCaCertResult(requestId, "install", success, alias, error, totalTime)
+      }
+    }
+  }
+
+  /** Remove a CA certificate via DevicePolicyManager (device owner only). */
+  private fun performRemoveCaCertificate(
+      requestId: String?,
+      alias: String?,
+      certificate: String?,
+  ) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performRemoveCaCertificate")
+    perfProvider.serial("removeCaCert")
+
+    var success = false
+    var resolvedAlias: String? = alias
+    var error: String? = null
+
+    try {
+      if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP) {
+        error = "CA certificate removal requires API 21+"
+        return
+      }
+
+      val deviceOwnerError = validateDeviceOwnerStatus()
+      if (deviceOwnerError != null) {
+        error = deviceOwnerError
+        return
+      }
+
+      perfProvider.startOperation("resolveCert")
+      val certBytes =
+          when {
+            !alias.isNullOrBlank() -> {
+              val stored = readCaCertFromStorage(alias)
+              stored ?: certificate?.let { decodeCertificateBytes(it) }
+            }
+            !certificate.isNullOrBlank() -> decodeCertificateBytes(certificate)
+            else -> null
+          }
+      perfProvider.endOperation("resolveCert")
+
+      if (certBytes == null) {
+        error =
+            if (!alias.isNullOrBlank()) {
+              "No stored certificate found for alias: $alias"
+            } else {
+              "Certificate payload is required for removal"
+            }
+        return
+      }
+
+      if (resolvedAlias.isNullOrBlank()) {
+        resolvedAlias = computeCertificateAlias(certBytes)
+      }
+
+      perfProvider.startOperation("removeCert")
+      try {
+        devicePolicyManager.uninstallCaCert(deviceAdminComponent, certBytes)
+        success = true
+      } finally {
+        perfProvider.endOperation("removeCert")
+      }
+      if (success) {
+        resolvedAlias?.let { deleteCaCertFromStorage(it) }
+      }
+    } catch (e: Exception) {
+      error = "Failed to remove CA certificate: ${e.message}"
+      Log.e(TAG, "Error removing CA certificate", e)
+    } finally {
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastCaCertResult(requestId, "remove", success, resolvedAlias, error, totalTime)
+      }
+    }
+  }
+
+  /** Report device owner status for the accessibility service package. */
+  private fun performGetDeviceOwnerStatus(requestId: String?) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performGetDeviceOwnerStatus")
+    perfProvider.serial("deviceOwnerStatus")
+
+    var isDeviceOwner = false
+    var isAdminActive = false
+    var error: String? = null
+
+    try {
+      isDeviceOwner = devicePolicyManager.isDeviceOwnerApp(packageName)
+      isAdminActive = devicePolicyManager.isAdminActive(deviceAdminComponent)
+    } catch (e: Exception) {
+      error = "Failed to read device owner status: ${e.message}"
+      Log.e(TAG, "Error reading device owner status", e)
+    } finally {
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastDeviceOwnerStatusResult(
+            requestId,
+            isDeviceOwner,
+            isAdminActive,
+            error,
+            totalTime,
+        )
+      }
+    }
+  }
+
+  private fun validateDeviceOwnerStatus(): String? {
+    if (!devicePolicyManager.isDeviceOwnerApp(packageName)) {
+      return "Device owner is not active for $packageName"
+    }
+    if (!devicePolicyManager.isAdminActive(deviceAdminComponent)) {
+      return "Device admin receiver is not active for $packageName"
+    }
+    return null
+  }
+
+  private fun decodeCertificateBytes(certificate: String): ByteArray? {
+    val trimmed = certificate.trim()
+    if (trimmed.isEmpty()) {
+      return null
+    }
+
+    val pemHeader = "-----BEGIN CERTIFICATE-----"
+    val pemFooter = "-----END CERTIFICATE-----"
+    val normalized =
+        if (trimmed.contains(pemHeader)) {
+          trimmed
+              .replace(pemHeader, "")
+              .replace(pemFooter, "")
+              .replace("\\s".toRegex(), "")
+        } else {
+          trimmed.replace("\\s".toRegex(), "")
+        }
+
+    return try {
+      Base64.decode(normalized, Base64.DEFAULT)
+    } catch (e: IllegalArgumentException) {
+      Log.w(TAG, "Failed to decode certificate payload", e)
+      null
+    }
+  }
+
+  private fun computeCertificateAlias(certBytes: ByteArray): String {
+    val digest = MessageDigest.getInstance("SHA-256").digest(certBytes)
+    return digest.joinToString("") { "%02x".format(it) }
+  }
+
+  private fun writeCaCertToStorage(alias: String, certBytes: ByteArray): Boolean {
+    val dir = File(filesDir, "ca_certs")
+    if (!dir.exists() && !dir.mkdirs()) {
+      Log.w(TAG, "Failed to create CA cert storage directory: ${dir.absolutePath}")
+      return false
+    }
+
+    val certFile = File(dir, "$alias.der")
+    return try {
+      certFile.writeBytes(certBytes)
+      true
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to write CA cert file: ${certFile.absolutePath}", e)
+      false
+    }
+  }
+
+  private fun readCaCertFromStorage(alias: String): ByteArray? {
+    val certFile = File(File(filesDir, "ca_certs"), "$alias.der")
+    if (!certFile.exists()) {
+      return null
+    }
+    return try {
+      certFile.readBytes()
+    } catch (e: Exception) {
+      Log.w(TAG, "Failed to read CA cert file: ${certFile.absolutePath}", e)
+      null
+    }
+  }
+
+  private fun deleteCaCertFromStorage(alias: String) {
+    val certFile = File(File(filesDir, "ca_certs"), "$alias.der")
+    if (!certFile.exists()) {
+      return
+    }
+    if (!certFile.delete()) {
+      Log.w(TAG, "Failed to delete CA cert file: ${certFile.absolutePath}")
+    }
+  }
+
   /** Find the next focusable node after the given node in document order. */
   private fun findNextFocusableNode(
       root: android.view.accessibility.AccessibilityNodeInfo?,
@@ -2106,6 +2374,101 @@ class AutoMobileAccessibilityService : AccessibilityService() {
       Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting clipboard result", e)
+    }
+  }
+
+  private fun escapeJsonString(value: String): String {
+    return value
+        .replace("\\", "\\\\")
+        .replace("\"", "\\\"")
+        .replace("\n", "\\n")
+        .replace("\r", "\\r")
+        .replace("\t", "\\t")
+  }
+
+  /** Broadcast CA certificate result to WebSocket clients */
+  private suspend fun broadcastCaCertResult(
+      requestId: String?,
+      action: String,
+      success: Boolean,
+      alias: String?,
+      error: String?,
+      totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping CA cert result broadcast")
+      return
+    }
+
+    try {
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"ca_cert_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"$requestId"""")
+          }
+          append(""","action":"$action"""")
+          append(""","success":$success""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          if (alias != null) {
+            append(""","alias":"${escapeJsonString(alias)}"""")
+          }
+          if (error != null) {
+            append(""","error":"${escapeJsonString(error)}"""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+      Log.d(TAG, "Broadcasted ca_cert_result to ${webSocketServer.getConnectionCount()} clients")
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting ca_cert_result", e)
+    }
+  }
+
+  /** Broadcast device owner status result to WebSocket clients */
+  private suspend fun broadcastDeviceOwnerStatusResult(
+      requestId: String?,
+      isDeviceOwner: Boolean,
+      isAdminActive: Boolean,
+      error: String?,
+      totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping device owner status broadcast")
+      return
+    }
+
+    try {
+      val success = error == null
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"device_owner_status_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"$requestId"""")
+          }
+          append(""","success":$success""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          append(""","packageName":"${escapeJsonString(packageName)}"""")
+          append(""","isDeviceOwner":$isDeviceOwner""")
+          append(""","isAdminActive":$isAdminActive""")
+          if (error != null) {
+            append(""","error":"${escapeJsonString(error)}"""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+      Log.d(
+          TAG,
+          "Broadcasted device_owner_status_result to ${webSocketServer.getConnectionCount()} clients",
+      )
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting device owner status result", e)
     }
   }
 

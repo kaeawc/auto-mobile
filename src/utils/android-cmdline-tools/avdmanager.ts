@@ -121,6 +121,22 @@ function resolveAndroidSdkRoot(
     candidates.add(typicalPath);
   }
 
+  // Two-pass search: First pass prioritizes SDK roots with system-images
+  // This ensures we pick a complete SDK (with system-images) over an incomplete one
+  // (e.g., Homebrew with only platforms/platform-tools/build-tools)
+
+  // Pass 1: Only accept candidates with system-images
+  for (const candidate of candidates) {
+    if (!dependencies.existsSync(candidate)) {
+      continue;
+    }
+    const hasSystemImages = dependencies.existsSync(join(candidate, "system-images"));
+    if (hasSystemImages) {
+      return candidate;
+    }
+  }
+
+  // Pass 2: Fall back to candidates with 2+ markers (backward compatibility)
   for (const candidate of candidates) {
     if (looksLikeAndroidSdkRoot(candidate, dependencies)) {
       return candidate;

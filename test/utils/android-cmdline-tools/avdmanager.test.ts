@@ -616,6 +616,87 @@ id: pixel_4
         expect(mockDeps.existsSync("/Users/test/Library/Android/sdk/system-images")).toBe(true);
         expect(mockDeps.existsSync("/opt/homebrew/share/android-commandlinetools/system-images")).toBe(false);
       });
+
+      test("two-pass search: should prefer SDK with system-images even when it appears later in candidate list", async () => {
+        const mockDeps = createDependencies();
+        const originalSpawn = mockDeps.spawn;
+        const fakeTimer = createFakeTimer();
+
+        // Simulate a scenario where Homebrew location (no system-images) would be checked
+        // before $ANDROID_HOME (has system-images) due to candidate insertion order
+        const pathChecks = new Map<string, boolean>([
+          // Homebrew location - appears early, has markers but NO system-images
+          ["/opt/homebrew/share/android-commandlinetools", true],
+          ["/opt/homebrew/share/android-commandlinetools/cmdline-tools", true],
+          ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest", true],
+          ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin", true],
+          ["/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/avdmanager", true],
+          ["/opt/homebrew/share/android-commandlinetools/system-images", false], // No system-images!
+          ["/opt/homebrew/share/android-commandlinetools/platforms", true],
+          ["/opt/homebrew/share/android-commandlinetools/platform-tools", true],
+          ["/opt/homebrew/share/android-commandlinetools/build-tools", true],
+          // Proper SDK location - appears later, HAS system-images
+          ["/Users/test/Library/Android/sdk", true],
+          ["/Users/test/Library/Android/sdk/cmdline-tools", true],
+          ["/Users/test/Library/Android/sdk/cmdline-tools/latest", true],
+          ["/Users/test/Library/Android/sdk/cmdline-tools/latest/bin", true],
+          ["/Users/test/Library/Android/sdk/cmdline-tools/latest/bin/avdmanager", true],
+          ["/Users/test/Library/Android/sdk/system-images", true], // Has system-images!
+          ["/Users/test/Library/Android/sdk/platforms", true],
+          ["/Users/test/Library/Android/sdk/platform-tools", true],
+          ["/Users/test/Library/Android/sdk/build-tools", true]
+        ]);
+
+        mockDeps.existsSync = (path: string) => pathChecks.get(path) ?? false;
+
+        // Mock detectAndroidCommandLineTools to return Homebrew location
+        // Note: location.path should be the cmdline-tools/latest directory, not the avdmanager executable
+        mockDeps.detectAndroidCommandLineTools = async () => [
+          {
+            path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+            source: "homebrew"
+          }
+        ];
+
+        mockDeps.getBestAndroidToolsLocation = async () => ({
+          path: "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest",
+          source: "homebrew"
+        });
+
+        // Set ANDROID_HOME to proper SDK location
+        const originalAndroidHome = process.env.ANDROID_HOME;
+        process.env.ANDROID_HOME = "/Users/test/Library/Android/sdk";
+
+        let usedEnv: NodeJS.ProcessEnv | undefined;
+        mockDeps.spawn = (command: string, args: string[], options?: any) => {
+          // Capture the environment used
+          usedEnv = options?.env;
+          const child: any = originalSpawn(command, args, options);
+          fakeTimer.setTimeout(() => {
+            // Simulate successful avdmanager output
+            child.triggerStdout(Buffer.from("Available Android Virtual Devices:\n"));
+            child.triggerClose(0);
+          }, 0);
+          return child;
+        };
+
+        try {
+          await resolveWithFakeTimer(fakeTimer, avdmanager.listDeviceImages(mockDeps));
+
+          // The two-pass search should have picked the SDK with system-images
+          // even though Homebrew location appears earlier in candidates
+          expect(usedEnv).toBeDefined();
+          expect(usedEnv?.ANDROID_HOME).toBe("/Users/test/Library/Android/sdk");
+          expect(usedEnv?.ANDROID_SDK_ROOT).toBe("/Users/test/Library/Android/sdk");
+        } finally {
+          // Restore original environment
+          if (originalAndroidHome) {
+            process.env.ANDROID_HOME = originalAndroidHome;
+          } else {
+            delete process.env.ANDROID_HOME;
+          }
+        }
+      });
     });
 
     describe("without system-images (backward compatibility)", () => {

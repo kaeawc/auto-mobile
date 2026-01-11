@@ -177,6 +177,7 @@ export class TestRecordingSocketServer {
             success: true,
             recordingId: result.recordingId,
             startedAt: result.startedAt,
+            stoppedAt: result.stoppedAt,
             deviceId: result.deviceId,
             platform: result.platform,
             planName: result.planName,

@@ -13,6 +13,7 @@ export interface TestRecordingResponse {
   success: boolean;
   recordingId?: string;
   startedAt?: string;
+  stoppedAt?: string;
   deviceId?: string;
   platform?: Platform;
   planName?: string;

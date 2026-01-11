@@ -85,6 +85,7 @@ If provisioning succeeds, `DevicePolicyManager.isDeviceOwnerApp` will return tru
 The accessibility service WebSocket interface supports CA certificate operations when device owner is active:
 
 - `install_ca_cert` with a PEM or base64-encoded DER payload. Returns an alias (SHA-256 fingerprint).
+- `install_ca_cert_from_path` with a device file path (e.g., `/sdcard/Download/automobile/ca_certs/...`).
 - `remove_ca_cert` with the alias (or certificate payload) to uninstall.
 - `get_device_owner_status` to report device owner and admin activation state.
 

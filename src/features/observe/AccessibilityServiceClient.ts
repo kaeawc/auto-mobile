@@ -1,5 +1,7 @@
 import WebSocket from "ws";
 import fs from "fs/promises";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { randomBytes } from "crypto";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
@@ -21,6 +23,11 @@ import { ElementParser } from "../utility/ElementParser";
 function generateSecureId(): string {
   return randomBytes(4).toString("hex");
 }
+
+const quoteForAdbArg = (value: string): string => {
+  const escaped = value.replace(/\\/g, "\\\\").replace(/\"/g, "\\\"");
+  return `"${escaped}"`;
+};
 
 /**
  * Interface for accessibility service node format
@@ -549,6 +556,7 @@ export class AccessibilityServiceClient implements AccessibilityService {
   private static readonly PACKAGE_NAME = "dev.jasonpearson.automobile.accessibilityservice";
   private static readonly WEBSOCKET_PORT = 8765;
   private static readonly WEBSOCKET_URL = `ws://localhost:${AccessibilityServiceClient.WEBSOCKET_PORT}/ws`;
+  private static readonly DEVICE_CERT_DIR = "/sdcard/Download/automobile/ca_certs";
 
   // Singleton instances per device
   private static instances: Map<string, AccessibilityServiceClient> = new Map();
@@ -2997,6 +3005,7 @@ export class AccessibilityServiceClient implements AccessibilityService {
 
   /**
    * Request installation of a CA certificate from a host file path.
+   * Pushes the file to the device before requesting installation.
    */
   async requestInstallCaCertificateFromFile(
     certificatePath: string,
@@ -3004,10 +3013,95 @@ export class AccessibilityServiceClient implements AccessibilityService {
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11yCaCertResult> {
     const startTime = Date.now();
+    const resolvedPath = this.resolveCertificatePath(certificatePath);
+
+    if (!resolvedPath) {
+      return {
+        success: false,
+        action: "install",
+        totalTimeMs: Date.now() - startTime,
+        error: "certificatePath must be a valid host file path"
+      };
+    }
 
     try {
-      const payload = await this.loadCertificatePayloadFromFile(certificatePath);
-      return await this.requestInstallCaCertificate(payload, timeoutMs, perf);
+      const stats = await fs.stat(resolvedPath);
+      if (!stats.isFile()) {
+        return {
+          success: false,
+          action: "install",
+          totalTimeMs: Date.now() - startTime,
+          error: `Certificate path is not a file: ${resolvedPath}`
+        };
+      }
+
+      if (stats.size === 0) {
+        return {
+          success: false,
+          action: "install",
+          totalTimeMs: Date.now() - startTime,
+          error: `Certificate file is empty: ${resolvedPath}`
+        };
+      }
+
+      const devicePath = await perf.track("pushCertificate", async () => {
+        return this.pushCertificateToDevice(resolvedPath);
+      });
+
+      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
+      if (!connected) {
+        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for CA cert install");
+        return {
+          success: false,
+          action: "install",
+          totalTimeMs: Date.now() - startTime,
+          error: "Failed to connect to accessibility service"
+        };
+      }
+
+      const requestId = `ca_cert_install_${Date.now()}_${generateSecureId()}`;
+      this.pendingCaCertRequestId = requestId;
+
+      const caCertPromise = new Promise<A11yCaCertResult>(resolve => {
+        this.pendingCaCertResolve = resolve;
+
+        this.timer.setTimeout(() => {
+          if (this.pendingCaCertResolve === resolve) {
+            this.pendingCaCertResolve = null;
+            this.pendingCaCertRequestId = null;
+            resolve({
+              success: false,
+              action: "install",
+              totalTimeMs: Date.now() - startTime,
+              error: `CA cert install timeout after ${timeoutMs}ms`
+            });
+          }
+        }, timeoutMs);
+      });
+
+      await perf.track("sendRequest", async () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket not connected");
+        }
+        const message = JSON.stringify({
+          type: "install_ca_cert_from_path",
+          requestId,
+          devicePath
+        });
+        this.ws.send(message);
+        logger.debug(`[ACCESSIBILITY_SERVICE] Sent CA cert install request (requestId: ${requestId}, devicePath: ${devicePath})`);
+      });
+
+      const result = await perf.track("waitForCaCertInstall", () => caCertPromise);
+      const clientDuration = Date.now() - startTime;
+
+      if (result.success) {
+        logger.info(`[ACCESSIBILITY_SERVICE] CA cert install completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? "unknown"}`);
+      } else {
+        logger.warn(`[ACCESSIBILITY_SERVICE] CA cert install failed after ${clientDuration}ms: ${result.error}`);
+      }
+
+      return result;
     } catch (error) {
       return {
         success: false,
@@ -3184,23 +3278,48 @@ export class AccessibilityServiceClient implements AccessibilityService {
     }
   }
 
-  private async loadCertificatePayloadFromFile(certificatePath: string): Promise<string> {
+  private resolveCertificatePath(certificatePath: string): string | null {
     const trimmedPath = certificatePath.trim();
     if (!trimmedPath) {
-      throw new Error("certificatePath must be a non-empty string");
+      return null;
     }
 
-    const data = await fs.readFile(trimmedPath);
-    if (data.length === 0) {
-      throw new Error(`Certificate file is empty: ${trimmedPath}`);
+    if (trimmedPath.startsWith("file://")) {
+      try {
+        return fileURLToPath(trimmedPath);
+      } catch (error) {
+        logger.warn(`[ACCESSIBILITY_SERVICE] Failed to parse certificate file URL: ${error}`);
+        return null;
+      }
     }
 
-    const text = data.toString("utf8");
-    if (text.includes("-----BEGIN CERTIFICATE-----")) {
-      return text;
+    if (trimmedPath.startsWith("content://") || trimmedPath.startsWith("/sdcard")) {
+      return null;
     }
 
-    return data.toString("base64");
+    return path.resolve(trimmedPath);
+  }
+
+  private async pushCertificateToDevice(sourcePath: string): Promise<string> {
+    const deviceDir = AccessibilityServiceClient.DEVICE_CERT_DIR;
+    await this.adb.executeCommand(`shell mkdir -p ${deviceDir}`, undefined, undefined, true);
+
+    const devicePath = this.buildDeviceCertificatePath(sourcePath);
+    await this.adb.executeCommand(
+      `push ${quoteForAdbArg(sourcePath)} ${quoteForAdbArg(devicePath)}`,
+      undefined,
+      undefined,
+      true
+    );
+
+    return devicePath;
+  }
+
+  private buildDeviceCertificatePath(sourcePath: string): string {
+    const ext = path.extname(sourcePath) || ".crt";
+    const base = path.basename(sourcePath, ext);
+    const fileName = `${base}_${Date.now()}_${generateSecureId()}${ext}`;
+    return `${AccessibilityServiceClient.DEVICE_CERT_DIR}/${fileName}`;
   }
 
   /**

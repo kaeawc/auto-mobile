@@ -326,6 +326,9 @@ class AutoMobileAccessibilityService : AccessibilityService() {
               onRequestInstallCaCert = { requestId, certificate ->
                 performInstallCaCertificate(requestId, certificate)
               },
+              onRequestInstallCaCertFromPath = { requestId, devicePath ->
+                performInstallCaCertificateFromPath(requestId, devicePath)
+              },
               onRequestRemoveCaCert = { requestId, alias, certificate ->
                 performRemoveCaCertificate(requestId, alias, certificate)
               },
@@ -1794,13 +1797,12 @@ class AutoMobileAccessibilityService : AccessibilityService() {
 
       perfProvider.startOperation("installCert")
       try {
-        devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
-        success = true
+        success = devicePolicyManager.installCaCert(deviceAdminComponent, certBytes)
       } finally {
         perfProvider.endOperation("installCert")
       }
       if (!success) {
-        deleteCaCertFromStorage(alias)
+        error = "DevicePolicyManager.installCaCert returned false"
       }
     } catch (e: Exception) {
       error = "Failed to install CA certificate: ${e.message}"
@@ -1815,6 +1817,28 @@ class AutoMobileAccessibilityService : AccessibilityService() {
         broadcastCaCertResult(requestId, "install", success, alias, error, totalTime)
       }
     }
+  }
+
+  /** Install a CA certificate from a device file path (device owner only). */
+  private fun performInstallCaCertificateFromPath(requestId: String?, devicePath: String) {
+    val startTime = System.currentTimeMillis()
+    val payload = readCertificatePayloadFromPath(devicePath)
+    if (payload == null) {
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastCaCertResult(
+            requestId,
+            "install",
+            false,
+            null,
+            "Certificate file is empty or unreadable: $devicePath",
+            totalTime,
+        )
+      }
+      return
+    }
+
+    performInstallCaCertificate(requestId, payload)
   }
 
   /** Remove a CA certificate via DevicePolicyManager (device owner only). */
@@ -1956,6 +1980,40 @@ class AutoMobileAccessibilityService : AccessibilityService() {
       Log.w(TAG, "Failed to decode certificate payload", e)
       null
     }
+  }
+
+  private fun readCertificatePayloadFromPath(devicePath: String): String? {
+    val certFile = File(devicePath)
+    if (!certFile.exists() || !certFile.isFile) {
+      Log.w(TAG, "Certificate file not found at $devicePath")
+      return null
+    }
+
+    val bytes =
+        try {
+          certFile.readBytes()
+        } catch (e: Exception) {
+          Log.w(TAG, "Failed to read certificate file at $devicePath", e)
+          return null
+        }
+
+    if (bytes.isEmpty()) {
+      Log.w(TAG, "Certificate file is empty at $devicePath")
+      return null
+    }
+
+    val text = bytes.toString(Charsets.UTF_8)
+    val normalized = text.trim()
+    if (normalized.contains("-----BEGIN CERTIFICATE-----")) {
+      return normalized
+    }
+
+    val compact = normalized.replace("\\s".toRegex(), "")
+    if (compact.isNotEmpty() && compact.matches(Regex("^[A-Za-z0-9+/=]+$"))) {
+      return compact
+    }
+
+    return Base64.encodeToString(bytes, Base64.NO_WRAP)
   }
 
   private fun computeCertificateAlias(certBytes: ByteArray): String {

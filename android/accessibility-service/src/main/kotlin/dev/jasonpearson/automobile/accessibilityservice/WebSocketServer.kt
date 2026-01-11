@@ -46,6 +46,7 @@ data class WebSocketRequest(
     // Certificate parameters
     val certificate: String? = null,
     val alias: String? = null,
+    val devicePath: String? = null,
     // Action parameters (IME or node actions)
     val action: String? =
         null, // IME action: done, next, search, send, go, previous; node action: long_click
@@ -110,6 +111,9 @@ class WebSocketServer(
     private val onRequestInstallCaCert: ((requestId: String?, certificate: String) -> Unit)? = null,
     private val onRequestRemoveCaCert:
         ((requestId: String?, alias: String?, certificate: String?) -> Unit)? =
+        null,
+    private val onRequestInstallCaCertFromPath:
+        ((requestId: String?, devicePath: String) -> Unit)? =
         null,
     private val onGetDeviceOwnerStatus: ((requestId: String?) -> Unit)? = null,
     private val onSetRecompositionTracking: ((enabled: Boolean) -> Unit)? = null,
@@ -448,6 +452,15 @@ class WebSocketServer(
             onRequestInstallCaCert?.invoke(request.requestId, certificate)
           } else {
             Log.w(TAG, "install_ca_cert request missing certificate")
+          }
+        }
+        "install_ca_cert_from_path" -> {
+          Log.d(TAG, "Received install_ca_cert_from_path request (requestId: ${request.requestId})")
+          val devicePath = request.devicePath
+          if (!devicePath.isNullOrBlank()) {
+            onRequestInstallCaCertFromPath?.invoke(request.requestId, devicePath)
+          } else {
+            Log.w(TAG, "install_ca_cert_from_path request missing devicePath")
           }
         }
         "remove_ca_cert" -> {

@@ -175,13 +175,15 @@ function mergeConfigInput(
   defaults: VideoRecordingConfigInput,
   overrides: VideoRecordingConfigInput
 ): VideoRecordingConfigInput {
-  const merged: VideoRecordingConfigInput = { ...defaults };
-  for (const [key, value] of Object.entries(overrides)) {
-    if (value !== undefined) {
-      (merged as Record<string, unknown>)[key] = value;
-    }
-  }
-  return merged;
+  return {
+    qualityPreset: overrides.qualityPreset ?? defaults.qualityPreset,
+    targetBitrateKbps: overrides.targetBitrateKbps ?? defaults.targetBitrateKbps,
+    maxThroughputMbps: overrides.maxThroughputMbps ?? defaults.maxThroughputMbps,
+    fps: overrides.fps ?? defaults.fps,
+    maxArchiveSizeMb: overrides.maxArchiveSizeMb ?? defaults.maxArchiveSizeMb,
+    format: overrides.format ?? defaults.format,
+    resolution: overrides.resolution ?? defaults.resolution,
+  };
 }
 
 function configToInput(config: VideoRecordingConfig): VideoRecordingConfigInput {

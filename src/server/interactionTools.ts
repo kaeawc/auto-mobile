@@ -18,11 +18,14 @@ import { Clipboard } from "../features/action/Clipboard";
 import { ActionableError, BootedDevice, ViewHierarchyResult } from "../models";
 import { serverConfig } from "../utils/ServerConfig";
 import { ObserveScreen } from "../features/observe/ObserveScreen";
+import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { ElementUtils } from "../features/utility/ElementUtils";
+import { AdbClient } from "../utils/android-cmdline-tools/AdbClient";
 
 // Type definitions for better TypeScript support
 export interface ClearTextArgs {
@@ -38,7 +41,17 @@ export interface PressButtonArgs {
   platform: Platform;
 }
 
-export interface OpenSystemTrayArgs {
+export interface SystemTrayNotificationArgs {
+  title?: string;
+  body?: string;
+  appId?: string;
+  tapActionLabel?: string;
+}
+
+export interface SystemTrayArgs {
+  action: "open" | "find" | "tap" | "dismiss" | "clearAll";
+  notification?: SystemTrayNotificationArgs;
+  awaitTimeout?: number;
   platform: Platform;
 }
 
@@ -262,9 +275,70 @@ export const pressButtonSchema = addDeviceTargetingToSchema(z.object({
   platform: z.enum(["android", "ios"]).describe("Platform")
 }));
 
-export const openSystemTraySchema = addDeviceTargetingToSchema(z.object({
+const systemTrayNotificationSchema = z.object({
+  title: z.string().optional().describe("Notification title (case-insensitive, partial match)"),
+  body: z.string().optional().describe("Notification body (case-insensitive, partial match)"),
+  appId: z.string().optional().describe("Notification app package ID (Android only)"),
+  tapActionLabel: z.string().optional().describe("Notification action button label to tap (tap only)")
+});
+
+const systemTraySchemaBase = z.object({
+  action: z.enum(["open", "find", "tap", "dismiss", "clearAll"]).describe("System tray action"),
+  notification: systemTrayNotificationSchema.optional().describe("Notification match criteria"),
+  awaitTimeout: z.number().int().nonnegative().optional().describe("Wait timeout ms (default: 5000)"),
   platform: z.enum(["android", "ios"]).describe("Platform")
-}));
+});
+
+export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
+  const notification = value.notification;
+  const hasCriteria = Boolean(notification?.title || notification?.body || notification?.appId || notification?.tapActionLabel);
+
+  if (value.action === "open") {
+    return;
+  }
+
+  if (!notification || !hasCriteria) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "notification with title/body/appId/tapActionLabel is required for this action"
+    });
+    return;
+  }
+
+  if (value.action === "tap") {
+    const hasTapTarget = Boolean(notification.title || notification.body || notification.tapActionLabel);
+    if (!hasTapTarget) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "tap action requires notification.title, notification.body, or notification.tapActionLabel"
+      });
+    }
+  }
+
+  if (value.action === "dismiss") {
+    const hasDismissTarget = Boolean(notification.title || notification.body);
+    if (!hasDismissTarget) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "dismiss action requires notification.title or notification.body"
+      });
+    }
+  }
+
+  if (value.action === "clearAll" && !notification.appId) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "clearAll action requires notification.appId"
+    });
+  }
+
+  if (notification.tapActionLabel && value.action !== "tap") {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "notification.tapActionLabel is only valid for tap action"
+    });
+  }
+});
 
 export const pressKeySchema = addDeviceTargetingToSchema(z.object({
   key: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"])
@@ -342,6 +416,9 @@ const SYSTEM_TRAY_CLASS_HINTS = [
   "QuickSettings",
   "StatusBarExpanded"
 ];
+const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
+const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
+const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 
 const getNodeProperties = (node: any): Record<string, any> | null => {
   if (!node || typeof node !== "object") {
@@ -428,6 +505,226 @@ const isSystemTrayOpen = (viewHierarchy?: ViewHierarchyResult): boolean => {
   }
 
   return false;
+};
+
+type SystemTrayMatchType = "exact" | "partial";
+
+interface SystemTrayTextMatch {
+  text: string;
+  matchType: SystemTrayMatchType;
+}
+
+interface SystemTrayMatchResult {
+  matched: boolean;
+  matches: {
+    title?: SystemTrayTextMatch;
+    body?: SystemTrayTextMatch;
+    app?: SystemTrayTextMatch;
+    action?: SystemTrayTextMatch;
+  };
+}
+
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => {
+  return awaitTimeout ?? DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS;
+};
+
+const parseAppLabelFromDumpsys = (stdout: string): string | null => {
+  const lines = stdout.split("\n").map(line => line.trim()).filter(Boolean);
+  const parseLine = (line: string): string | null => {
+    const match = line.match(/application-label(?:-[^:]+)?:\s*(?:'([^']+)'|"([^"]+)"|(.+))/);
+    if (!match) {
+      return null;
+    }
+    const label = match[1] ?? match[2] ?? match[3];
+    return label ? label.trim() : null;
+  };
+
+  for (const line of lines) {
+    if (line.startsWith("application-label:")) {
+      const label = parseLine(line);
+      if (label) {
+        return label;
+      }
+    }
+  }
+
+  for (const line of lines) {
+    if (line.startsWith("application-label-")) {
+      const label = parseLine(line);
+      if (label) {
+        return label;
+      }
+    }
+  }
+
+  return null;
+};
+
+const resolveAppLabel = async (device: BootedDevice, appId: string): Promise<string | null> => {
+  if (device.platform !== "android") {
+    return null;
+  }
+
+  try {
+    const adb = new AdbClient(device);
+    const result = await adb.executeCommand(`shell dumpsys package ${appId}`, undefined, undefined, true);
+    return parseAppLabelFromDumpsys(result.stdout);
+  } catch (error) {
+    return null;
+  }
+};
+
+const findTextMatch = (
+  elementUtils: ElementUtils,
+  viewHierarchy: ViewHierarchyResult,
+  text: string
+): SystemTrayTextMatch | null => {
+  const exactMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, false, false);
+  if (exactMatch) {
+    return { text, matchType: "exact" };
+  }
+
+  const partialMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, true, false);
+  if (partialMatch) {
+    return { text, matchType: "partial" };
+  }
+
+  return null;
+};
+
+const findFirstTextMatch = (
+  elementUtils: ElementUtils,
+  viewHierarchy: ViewHierarchyResult,
+  texts: string[]
+): SystemTrayTextMatch | null => {
+  const candidates = texts.map(text => text.trim()).filter(Boolean);
+  for (const text of candidates) {
+    const exactMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, false, false);
+    if (exactMatch) {
+      return { text, matchType: "exact" };
+    }
+  }
+
+  for (const text of candidates) {
+    const partialMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, true, false);
+    if (partialMatch) {
+      return { text, matchType: "partial" };
+    }
+  }
+
+  return null;
+};
+
+const buildNotificationMatch = (
+  viewHierarchy: ViewHierarchyResult,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[]
+): SystemTrayMatchResult => {
+  const elementUtils = new ElementUtils();
+  const matches: SystemTrayMatchResult["matches"] = {};
+  let matched = true;
+
+  if (criteria.title) {
+    const titleMatch = findTextMatch(elementUtils, viewHierarchy, criteria.title);
+    if (!titleMatch) {
+      matched = false;
+    } else {
+      matches.title = titleMatch;
+    }
+  }
+
+  if (criteria.body) {
+    const bodyMatch = findTextMatch(elementUtils, viewHierarchy, criteria.body);
+    if (!bodyMatch) {
+      matched = false;
+    } else {
+      matches.body = bodyMatch;
+    }
+  }
+
+  if (criteria.tapActionLabel) {
+    const actionMatch = findTextMatch(elementUtils, viewHierarchy, criteria.tapActionLabel);
+    if (!actionMatch) {
+      matched = false;
+    } else {
+      matches.action = actionMatch;
+    }
+  }
+
+  if (criteria.appId) {
+    const appMatch = findFirstTextMatch(elementUtils, viewHierarchy, appMatchTexts);
+    if (!appMatch) {
+      matched = false;
+    } else {
+      matches.app = appMatch;
+    }
+  }
+
+  return { matched, matches };
+};
+
+const ensureSystemTrayOpen = async (
+  device: BootedDevice,
+  progress?: ProgressCallback
+): Promise<{ observation?: import("../models").ObserveResult; opened: boolean; skipped: boolean }> => {
+  let observation: import("../models").ObserveResult | undefined;
+
+  if (device.platform === "android") {
+    const observeScreen = new ObserveScreen(device);
+    observation = await observeScreen.execute();
+    if (isSystemTrayOpen(observation.viewHierarchy)) {
+      return { observation, opened: false, skipped: true };
+    }
+  }
+
+  const swipeOn = new SwipeOn(device);
+
+  const options: import("../models").SwipeOnOptions = {
+    direction: "down",
+    includeSystemInsets: true,
+    duration: 100
+  };
+
+  const result = await swipeOn.execute(options, progress);
+  return {
+    observation: result.observation ?? observation,
+    opened: true,
+    skipped: false
+  };
+};
+
+const waitForNotificationMatch = async (
+  device: BootedDevice,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[],
+  awaitTimeoutMs: number,
+  progress?: ProgressCallback
+): Promise<{ observation: import("../models").ObserveResult; match: SystemTrayMatchResult | null }> => {
+  const observeScreen = new ObserveScreen(device);
+  let { observation } = await ensureSystemTrayOpen(device, progress);
+  if (!observation) {
+    observation = await observeScreen.execute();
+  }
+
+  const startTime = Date.now();
+  while (true) {
+    const viewHierarchy = observation.viewHierarchy;
+    if (viewHierarchy) {
+      const match = buildNotificationMatch(viewHierarchy, criteria, appMatchTexts);
+      if (match.matched) {
+        return { observation, match };
+      }
+    }
+
+    if (Date.now() - startTime >= awaitTimeoutMs) {
+      return { observation, match: null };
+    }
+
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
+    observation = await observeScreen.execute();
+  }
 };
 
 // Register tools
@@ -521,40 +818,196 @@ export function registerInteractionTools() {
     }
   };
 
-  // Open system tray handler
-  const openSystemTrayHandler = async (device: BootedDevice, args: OpenSystemTrayArgs, progress?: ProgressCallback) => {
+  // System tray handler
+  const systemTrayHandler = async (device: BootedDevice, args: SystemTrayArgs, progress?: ProgressCallback) => {
     try {
-      if (args.platform === "android") {
-        const observeScreen = new ObserveScreen(device);
-        const observation = await observeScreen.execute();
-
-        if (isSystemTrayOpen(observation.viewHierarchy)) {
-          return createJSONToolResponse({
-            message: "System tray already open; no swipe needed",
-            observation,
-            success: true,
-            skipped: true
-          });
-        }
+      if (args.platform === "ios") {
+        return createJSONToolResponse({
+          success: false,
+          message: "systemTray is not supported on iOS yet.",
+          action: args.action
+        });
       }
 
-      const swipeOn = new SwipeOn(device);
+      if (args.action === "open") {
+        const result = await ensureSystemTrayOpen(device, progress);
+        return createJSONToolResponse({
+          message: result.skipped
+            ? "System tray already open; no swipe needed"
+            : "Opened system tray by swiping down from the status bar",
+          observation: result.observation,
+          success: true,
+          skipped: result.skipped
+        });
+      }
 
-      const options: import("../models").SwipeOnOptions = {
-        direction: "down",
-        includeSystemInsets: true, // to access status bar area
-        duration: 100
-      };
+      const notification = args.notification ?? {};
+      const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
+      let appLabel: string | null = null;
+      let appMatchTexts: string[] = [];
 
-      const result = await swipeOn.execute(options, progress);
+      if (notification.appId) {
+        const listInstalledApps = new ListInstalledApps(device);
+        const installedApps = await listInstalledApps.execute();
+        if (!installedApps.includes(notification.appId)) {
+          throw new ActionableError(`App ${notification.appId} is not installed.`);
+        }
 
-      return createJSONToolResponse({
-        message: "Opened system tray by swiping down from the status bar",
-        observation: result.observation,
-        ...result
-      });
+        appLabel = await resolveAppLabel(device, notification.appId);
+        appMatchTexts = [appLabel, notification.appId].filter(Boolean) as string[];
+      }
+
+      if (args.action === "find") {
+        const { observation, match } = await waitForNotificationMatch(
+          device,
+          notification,
+          appMatchTexts,
+          awaitTimeoutMs,
+          progress
+        );
+
+        if (!match) {
+          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        return createJSONToolResponse({
+          message: "Found notification in system tray",
+          match: match.matches,
+          observation,
+          success: true
+        });
+      }
+
+      if (args.action === "tap") {
+        const { observation, match } = await waitForNotificationMatch(
+          device,
+          notification,
+          appMatchTexts,
+          awaitTimeoutMs,
+          progress
+        );
+
+        if (!match) {
+          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        const tapTarget = notification.tapActionLabel || notification.title || notification.body;
+        if (!tapTarget) {
+          throw new ActionableError("No notification tap target was resolved.");
+        }
+
+        const tapOn = new TapOnElement(device);
+        const tapResult = await tapOn.execute({
+          text: tapTarget,
+          action: "tap"
+        }, progress);
+
+        return createJSONToolResponse({
+          message: notification.tapActionLabel
+            ? `Tapped notification action "${notification.tapActionLabel}"`
+            : "Tapped notification",
+          match: match.matches,
+          observation: tapResult.observation ?? observation,
+          ...tapResult
+        });
+      }
+
+      if (args.action === "dismiss") {
+        const { observation, match } = await waitForNotificationMatch(
+          device,
+          notification,
+          appMatchTexts,
+          awaitTimeoutMs,
+          progress
+        );
+
+        if (!match) {
+          throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        const dismissTarget = notification.title || notification.body;
+        if (!dismissTarget) {
+          throw new ActionableError("No notification dismiss target was resolved.");
+        }
+
+        const swipeOn = new SwipeOn(device);
+        const swipeResult = await swipeOn.execute({
+          direction: "left",
+          container: { text: dismissTarget }
+        }, progress);
+
+        return createJSONToolResponse({
+          message: "Dismissed notification",
+          match: match.matches,
+          observation: swipeResult.observation ?? observation,
+          ...swipeResult
+        });
+      }
+
+      if (args.action === "clearAll") {
+        const appId = notification.appId;
+        if (!appId) {
+          throw new ActionableError("clearAll requires notification.appId.");
+        }
+
+        if (appMatchTexts.length === 0) {
+          appMatchTexts = [appId];
+        }
+
+        const elementUtils = new ElementUtils();
+        const observeScreen = new ObserveScreen(device);
+        const swipeOn = new SwipeOn(device);
+        const startTime = Date.now();
+        let clearedCount = 0;
+        let lastMatch: SystemTrayTextMatch | null = null;
+        let lastObservation = (await ensureSystemTrayOpen(device, progress)).observation;
+
+        if (!lastObservation) {
+          lastObservation = await observeScreen.execute();
+        }
+
+        while (clearedCount < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS) {
+          const viewHierarchy = lastObservation.viewHierarchy;
+          const match = viewHierarchy
+            ? findFirstTextMatch(elementUtils, viewHierarchy, appMatchTexts)
+            : null;
+
+          if (!match) {
+            if (clearedCount > 0 || Date.now() - startTime >= awaitTimeoutMs) {
+              break;
+            }
+            await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
+            lastObservation = await observeScreen.execute();
+            continue;
+          }
+
+          lastMatch = match;
+          const swipeResult = await swipeOn.execute({
+            direction: "left",
+            container: { text: match.text }
+          }, progress);
+
+          clearedCount += 1;
+          lastObservation = swipeResult.observation ?? await observeScreen.execute();
+          await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
+        }
+
+        return createJSONToolResponse({
+          message: clearedCount > 0
+            ? `Cleared ${clearedCount} notification(s) for ${appId}`
+            : `No matching notifications found for ${appId}`,
+          clearedCount,
+          appId,
+          appLabel,
+          matchText: lastMatch?.text,
+          observation: lastObservation,
+          success: true
+        });
+      }
+
+      throw new ActionableError(`Unsupported systemTray action: ${args.action}`);
     } catch (error) {
-      throw new ActionableError(`Failed to open system tray: ${error}`);
+      throw new ActionableError(`Failed to execute system tray action: ${error}`);
     }
   };
 
@@ -857,10 +1310,10 @@ export function registerInteractionTools() {
   );
 
   ToolRegistry.registerDeviceAware(
-    "openSystemTray",
-    "Open system notification tray",
-    openSystemTraySchema,
-    openSystemTrayHandler,
+    "systemTray",
+    "System tray actions for notifications (open/find/tap/dismiss/clearAll)",
+    systemTraySchema,
+    systemTrayHandler,
     true // Supports progress notifications
   );
 

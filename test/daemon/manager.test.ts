@@ -1,6 +1,6 @@
-import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
 import { runDaemonCommand } from "../../src/daemon/manager";
-import { DaemonState } from "../../src/daemon/daemonState";
+import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
 
 class FakeDaemonClient implements DaemonClientLike {
@@ -28,18 +28,6 @@ class FakeDaemonClient implements DaemonClientLike {
 }
 
 describe("Daemon manager available-devices", () => {
-  beforeEach(() => {
-    if (DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().reset();
-    }
-  });
-
-  afterEach(() => {
-    if (DaemonState.getInstance().isInitialized()) {
-      DaemonState.getInstance().reset();
-    }
-  });
-
   test("queries the booted devices resource when daemon is not initialized", async () => {
     const result = {
       contents: [
@@ -63,7 +51,16 @@ describe("Daemon manager available-devices", () => {
 
     try {
       await runDaemonCommand("available-devices", [], {
-        clientFactory: () => fakeClient
+        clientFactory: () => fakeClient,
+        stateProvider: () => ({
+          isInitialized: () => false,
+          getDevicePool: () => {
+            throw new Error("Device pool unavailable");
+          },
+          getSessionManager: () => {
+            throw new Error("Session manager unavailable");
+          }
+        } satisfies DaemonStateLike)
       });
     } finally {
       logSpy.mockRestore();
@@ -76,6 +73,47 @@ describe("Daemon manager available-devices", () => {
       totalDevices: 3,
       assignedDevices: 1,
       errorDevices: 0
+    }));
+  });
+
+  test("uses daemon state pool stats when initialized", async () => {
+    const fakeClient = new FakeDaemonClient({});
+    const output: string[] = [];
+    const logSpy = spyOn(console, "log").mockImplementation((...args) => {
+      output.push(args.join(" "));
+    });
+
+    const fakeState: DaemonStateLike = {
+      isInitialized: () => true,
+      getDevicePool: () => ({
+        getStats: () => ({
+          idle: 1,
+          assigned: 2,
+          error: 1,
+          total: 4
+        })
+      } as any),
+      getSessionManager: () => ({
+        getSession: () => null,
+        releaseSession: async () => null
+      } as any)
+    };
+
+    try {
+      await runDaemonCommand("available-devices", [], {
+        clientFactory: () => fakeClient,
+        stateProvider: () => fakeState
+      });
+    } finally {
+      logSpy.mockRestore();
+    }
+
+    expect(fakeClient.readResourceCalls).toHaveLength(0);
+    expect(output).toContain(JSON.stringify({
+      availableDevices: 1,
+      totalDevices: 4,
+      assignedDevices: 2,
+      errorDevices: 1
     }));
   });
 });

@@ -19,7 +19,7 @@ import {
   formatSocketDiagnostics,
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
-import { DaemonState } from "./daemonState";
+import { DaemonState, type DaemonStateLike } from "./daemonState";
 
 /**
  * Daemon Manager
@@ -32,13 +32,22 @@ import { DaemonState } from "./daemonState";
  */
 export class DaemonManager {
   private readonly clientFactory: DaemonClientFactory;
+  private readonly stateProvider: () => DaemonStateLike;
 
-  constructor(clientFactory: DaemonClientFactory = () => new DaemonClient()) {
+  constructor(
+    clientFactory: DaemonClientFactory = () => new DaemonClient(),
+    stateProvider: () => DaemonStateLike = () => DaemonState.getInstance()
+  ) {
     this.clientFactory = clientFactory;
+    this.stateProvider = stateProvider;
   }
 
   createClient(): DaemonClientLike {
     return this.clientFactory();
+  }
+
+  getDaemonState(): DaemonStateLike {
+    return this.stateProvider();
   }
   /**
    * Find all running auto-mobile daemon processes (including those from other worktrees)
@@ -388,6 +397,7 @@ export class DaemonManager {
  */
 export interface RunDaemonCommandOptions {
   clientFactory?: DaemonClientFactory;
+  stateProvider?: () => DaemonStateLike;
 }
 
 export async function runDaemonCommand(
@@ -395,7 +405,7 @@ export async function runDaemonCommand(
   args: string[],
   options: RunDaemonCommandOptions = {}
 ): Promise<void> {
-  const manager = new DaemonManager(options.clientFactory);
+  const manager = new DaemonManager(options.clientFactory, options.stateProvider);
 
   try {
     switch (command) {
@@ -564,9 +574,10 @@ export async function runDaemonCommand(
         );
 
         // Check if running in daemon process
-        if (DaemonState.getInstance().isInitialized()) {
+        const daemonState = manager.getDaemonState();
+        if (daemonState.isInitialized()) {
           // Running inside daemon process
-          const pool = DaemonState.getInstance().getDevicePool();
+          const pool = daemonState.getDevicePool();
           console.log(formatPoolStats(pool.getStats()));
         } else {
           // Running from CLI - query daemon via socket
@@ -597,10 +608,11 @@ export async function runDaemonCommand(
         const sessionId = args[0];
 
         // Check if running in daemon process
-        if (DaemonState.getInstance().isInitialized()) {
+        const daemonState = manager.getDaemonState();
+        if (daemonState.isInitialized()) {
           // Running inside daemon process
-          const manager = DaemonState.getInstance().getSessionManager();
-          const session = manager.getSession(sessionId);
+          const sessionManager = daemonState.getSessionManager();
+          const session = sessionManager.getSession(sessionId);
           if (!session) {
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
@@ -636,16 +648,17 @@ export async function runDaemonCommand(
         const sessionId = args[0];
 
         // Check if running in daemon process
-        if (DaemonState.getInstance().isInitialized()) {
+        const daemonState = manager.getDaemonState();
+        if (daemonState.isInitialized()) {
           // Running inside daemon process
-          const manager = DaemonState.getInstance().getSessionManager();
-          const pool = DaemonState.getInstance().getDevicePool();
-          const session = manager.getSession(sessionId);
+          const sessionManager = daemonState.getSessionManager();
+          const pool = daemonState.getDevicePool();
+          const session = sessionManager.getSession(sessionId);
           if (!session) {
             throw new ActionableError(`Session not found: ${sessionId}`);
           }
           const deviceId = session.assignedDevice;
-          manager.releaseSession(sessionId);
+          sessionManager.releaseSession(sessionId);
           pool.releaseDevice(deviceId);
           console.log(`Session ${sessionId} released`);
           console.log(`Device ${deviceId} is now available`);

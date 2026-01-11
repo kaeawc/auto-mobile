@@ -46,6 +46,7 @@ import { registerNavigationResources } from "./navigationResources";
 import { registerTestTimingResources } from "./testTimingResources";
 import { registerPerformanceResources } from "./performanceResources";
 import { registerVideoRecordingResources } from "./videoRecordingResources";
+import { registerLocalizationResources } from "./localizationResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
 
@@ -124,6 +125,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerTestTimingResources();
   registerPerformanceResources();
   registerVideoRecordingResources();
+  registerLocalizationResources();
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server

@@ -117,26 +117,6 @@ mcp_read() {
   return 1
 }
 
-mcp_call() {
-  local fd_in="$1"
-  local fd_out="$2"
-  local tool="$3"
-  local args_json="$4"
-  local timeout_sec="$5"
-  local request_id
-  request_id=$(mcp_next_id)
-
-  local request
-  request=$(jq -c -n \
-    --argjson id "$request_id" \
-    --arg tool "$tool" \
-    --argjson args "$args_json" \
-    '{jsonrpc:"2.0", id:$id, method:"tools/call", params:{name:$tool, arguments:$args}}')
-
-  mcp_send "$fd_in" "$request"
-  mcp_read "$fd_out" "$timeout_sec"
-}
-
 mcp_read_resource() {
   local fd_in="$1"
   local fd_out="$2"

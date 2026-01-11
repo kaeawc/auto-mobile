@@ -229,7 +229,7 @@ export function registerDeviceTools() {
   // Register with the tool registry
   ToolRegistry.register(
     "listDevices",
-    "List connected devices",
+    "Deprecated: use automobile:devices/booted resource to list booted devices",
     listDevicesSchema,
     listBootedDevicesHandler
   );

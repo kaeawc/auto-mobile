@@ -67,8 +67,8 @@ The daemon listens on a Unix socket at:
 
 ## MCP Tools
 
-### `listDevices`
-List connected devices; when the daemon is active, responses include `poolStatus` with pool counts.
+### `daemon_available_devices`
+Deprecated; use `automobile:devices/booted` for pool status and device assignment info.
 
 ### `daemon_session_info`
 Get information about an active session.

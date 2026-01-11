@@ -549,7 +549,10 @@ export async function createAvd(params: CreateAvdParams, dependencies = createDe
     const detectionOutput = getCommandOutputForDetection(result);
     const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
     if (compatibilityMessage) {
-      throw new ActionableError(compatibilityMessage);
+      return {
+        success: false,
+        message: compatibilityMessage
+      };
     }
 
     return {
@@ -557,9 +560,6 @@ export async function createAvd(params: CreateAvdParams, dependencies = createDe
       message: `AVD creation failed: ${getCommandFailureSummary(result)}`
     };
   } catch (error) {
-    if (error instanceof ActionableError) {
-      throw error;
-    }
     const message = `Failed to create AVD ${params.name}: ${(error as Error).message}`;
     dependencies.logger.error(message);
     return { success: false, message };
@@ -590,14 +590,11 @@ export async function deleteAvd(name: string, dependencies = createDefaultDepend
     const detectionOutput = getCommandOutputForDetection(result);
     const compatibilityMessage = getIncompatibleAvdManagerMessage(avdmanagerPath, detectionOutput);
     if (compatibilityMessage) {
-      throw new ActionableError(compatibilityMessage);
+      return { success: false, message: compatibilityMessage };
     }
 
     return { success: false, message: `AVD deletion failed: ${getCommandFailureSummary(result)}` };
   } catch (error) {
-    if (error instanceof ActionableError) {
-      throw error;
-    }
     const message = `Failed to delete AVD ${name}: ${(error as Error).message}`;
     dependencies.logger.error(message);
     return { success: false, message };

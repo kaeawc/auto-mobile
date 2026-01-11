@@ -15,7 +15,7 @@ import { HomeScreen } from "../features/action/HomeScreen";
 import { Rotate } from "../features/action/Rotate";
 import { OpenURL } from "../features/action/OpenURL";
 import { Clipboard } from "../features/action/Clipboard";
-import { ActionableError, BootedDevice, ViewHierarchyResult } from "../models";
+import { ActionableError, BootedDevice, Element, ViewHierarchyResult } from "../models";
 import { serverConfig } from "../utils/ServerConfig";
 import { ObserveScreen } from "../features/observe/ObserveScreen";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
@@ -416,9 +416,29 @@ const SYSTEM_TRAY_CLASS_HINTS = [
   "QuickSettings",
   "StatusBarExpanded"
 ];
+const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
+  "notification_row",
+  "status_bar_notification",
+  "notification_container",
+  "notification_content",
+  "notification_main_column",
+  "notification_template"
+];
+const NOTIFICATION_ROW_CLASS_HINTS = [
+  "ExpandableNotificationRow",
+  "NotificationRow",
+  "StatusBarNotification",
+  "NotificationContentView"
+];
+const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
+  ...SYSTEM_TRAY_RESOURCE_ID_HINTS,
+  "notification_shelf",
+  "notification_stack_scroll"
+];
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
+const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
 
 const getNodeProperties = (node: any): Record<string, any> | null => {
   if (!node || typeof node !== "object") {
@@ -524,6 +544,24 @@ interface SystemTrayMatchResult {
   };
 }
 
+interface SystemTrayNotificationCandidate {
+  node: any;
+  depth: number;
+  element?: Element;
+}
+
+interface SystemTrayNotificationMatch {
+  candidate: SystemTrayNotificationCandidate;
+  match: SystemTrayMatchResult;
+  subHierarchy: ViewHierarchyResult;
+}
+
+interface SystemTrayElementMatch {
+  text: string;
+  matchType: SystemTrayMatchType;
+  element: Element;
+}
+
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 
 const resolveSystemTrayAwaitTimeout = (awaitTimeout?: number): number => {
@@ -576,6 +614,76 @@ const resolveAppLabel = async (device: BootedDevice, appId: string): Promise<str
   }
 };
 
+const createSubHierarchy = (node: any): ViewHierarchyResult => {
+  return {
+    hierarchy: {
+      node
+    }
+  };
+};
+
+const getNotificationCriteriaCount = (criteria: SystemTrayNotificationArgs): number => {
+  return [criteria.title, criteria.body, criteria.appId, criteria.tapActionLabel].filter(Boolean).length;
+};
+
+const nodeHasNotificationRowHint = (node: any): boolean => {
+  const props = getNodeProperties(node);
+  if (!props) {
+    return false;
+  }
+
+  const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+  const className = String(props.className ?? props.class ?? "").toLowerCase();
+  const packageName = String(props.packageName ?? props.package ?? "").toLowerCase();
+  const isSystemUi = packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
+
+  if (!isSystemUi) {
+    return false;
+  }
+
+  if (NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES.some(hint => resourceId.includes(hint))) {
+    return false;
+  }
+
+  const matchesResourceId = NOTIFICATION_ROW_RESOURCE_ID_HINTS.some(hint => resourceId.includes(hint));
+  const matchesClassName = NOTIFICATION_ROW_CLASS_HINTS.some(hint => className.includes(hint.toLowerCase()));
+
+  return matchesResourceId || matchesClassName;
+};
+
+const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
+  const candidates: SystemTrayNotificationCandidate[] = [];
+  const elementUtils = new ElementUtils();
+
+  const visit = (node: any, depth: number): void => {
+    if (!node) {
+      return;
+    }
+
+    if (nodeHasNotificationRowHint(node)) {
+      const element = elementUtils.parseNodeBounds(node) ?? undefined;
+      candidates.push({ node, depth, element });
+      return;
+    }
+
+    const children = node.node;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        visit(child, depth + 1);
+      }
+    } else if (children && typeof children === "object") {
+      visit(children, depth + 1);
+    }
+  };
+
+  const rootNodes = getHierarchyRoots(viewHierarchy);
+  for (const rootNode of rootNodes) {
+    visit(rootNode, 0);
+  }
+
+  return candidates;
+};
+
 const findTextMatch = (
   elementUtils: ElementUtils,
   viewHierarchy: ViewHierarchyResult,
@@ -611,6 +719,47 @@ const findFirstTextMatch = (
     const partialMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, true, false);
     if (partialMatch) {
       return { text, matchType: "partial" };
+    }
+  }
+
+  return null;
+};
+
+const findElementMatch = (
+  elementUtils: ElementUtils,
+  viewHierarchy: ViewHierarchyResult,
+  text: string
+): SystemTrayElementMatch | null => {
+  const exactMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, false, false);
+  if (exactMatch) {
+    return { text, matchType: "exact", element: exactMatch };
+  }
+
+  const partialMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, true, false);
+  if (partialMatch) {
+    return { text, matchType: "partial", element: partialMatch };
+  }
+
+  return null;
+};
+
+const findFirstElementMatch = (
+  elementUtils: ElementUtils,
+  viewHierarchy: ViewHierarchyResult,
+  texts: string[]
+): SystemTrayElementMatch | null => {
+  const candidates = texts.map(text => text.trim()).filter(Boolean);
+  for (const text of candidates) {
+    const exactMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, false, false);
+    if (exactMatch) {
+      return { text, matchType: "exact", element: exactMatch };
+    }
+  }
+
+  for (const text of candidates) {
+    const partialMatch = elementUtils.findElementByText(viewHierarchy, text, undefined, true, false);
+    if (partialMatch) {
+      return { text, matchType: "partial", element: partialMatch };
     }
   }
 
@@ -665,6 +814,93 @@ const buildNotificationMatch = (
   return { matched, matches };
 };
 
+const getMatchCounts = (matches: SystemTrayMatchResult["matches"]): { exact: number; partial: number } => {
+  const values = Object.values(matches);
+  let exact = 0;
+  let partial = 0;
+  for (const match of values) {
+    if (!match) {
+      continue;
+    }
+    if (match.matchType === "exact") {
+      exact += 1;
+    } else {
+      partial += 1;
+    }
+  }
+  return { exact, partial };
+};
+
+const getCandidateArea = (candidate: SystemTrayNotificationCandidate): number => {
+  const bounds = candidate.element?.bounds;
+  if (!bounds) {
+    return 0;
+  }
+  return Math.max(0, bounds.right - bounds.left) * Math.max(0, bounds.bottom - bounds.top);
+};
+
+const selectBestNotificationMatch = (
+  matches: SystemTrayNotificationMatch[]
+): SystemTrayNotificationMatch | null => {
+  if (matches.length === 0) {
+    return null;
+  }
+
+  return matches
+    .slice()
+    .sort((left, right) => {
+      const leftCounts = getMatchCounts(left.match.matches);
+      const rightCounts = getMatchCounts(right.match.matches);
+      if (leftCounts.exact !== rightCounts.exact) {
+        return rightCounts.exact - leftCounts.exact;
+      }
+      if (leftCounts.partial !== rightCounts.partial) {
+        return rightCounts.partial - leftCounts.partial;
+      }
+      const leftArea = getCandidateArea(left.candidate);
+      const rightArea = getCandidateArea(right.candidate);
+      if (leftArea !== rightArea) {
+        return rightArea - leftArea;
+      }
+      return left.candidate.depth - right.candidate.depth;
+    })[0];
+};
+
+const findNotificationMatches = (
+  viewHierarchy: ViewHierarchyResult,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[]
+): SystemTrayNotificationMatch[] => {
+  const elementUtils = new ElementUtils();
+  const candidates = collectNotificationCandidates(viewHierarchy);
+  const criteriaCount = getNotificationCriteriaCount(criteria);
+  const fallbackCandidates = criteriaCount <= 1
+    ? getHierarchyRoots(viewHierarchy).map(node => ({
+      node,
+      depth: 0,
+      element: elementUtils.parseNodeBounds(node) ?? undefined
+    }))
+    : [];
+  const searchCandidates = candidates.length > 0 ? candidates : fallbackCandidates;
+
+  return searchCandidates
+    .map(candidate => {
+      const subHierarchy = createSubHierarchy(candidate.node);
+      const match = buildNotificationMatch(subHierarchy, criteria, appMatchTexts);
+      return { candidate, match, subHierarchy };
+    })
+    .filter(entry => entry.match.matched);
+};
+
+const findBestNotificationMatch = (
+  viewHierarchy: ViewHierarchyResult,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[]
+): SystemTrayNotificationMatch | null => {
+  const matches = findNotificationMatches(viewHierarchy, criteria, appMatchTexts);
+  return selectBestNotificationMatch(matches);
+};
+
 const ensureSystemTrayOpen = async (
   device: BootedDevice,
   progress?: ProgressCallback
@@ -701,7 +937,7 @@ const waitForNotificationMatch = async (
   appMatchTexts: string[],
   awaitTimeoutMs: number,
   progress?: ProgressCallback
-): Promise<{ observation: import("../models").ObserveResult; match: SystemTrayMatchResult | null }> => {
+): Promise<{ observation: import("../models").ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const observeScreen = new ObserveScreen(device);
   let { observation } = await ensureSystemTrayOpen(device, progress);
   if (!observation) {
@@ -712,8 +948,8 @@ const waitForNotificationMatch = async (
   while (true) {
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy) {
-      const match = buildNotificationMatch(viewHierarchy, criteria, appMatchTexts);
-      if (match.matched) {
+      const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
+      if (match) {
         return { observation, match };
       }
     }
@@ -725,6 +961,89 @@ const waitForNotificationMatch = async (
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
     observation = await observeScreen.execute();
   }
+};
+
+const resolveNotificationTapElement = (
+  match: SystemTrayNotificationMatch,
+  criteria: SystemTrayNotificationArgs
+): SystemTrayElementMatch | null => {
+  const elementUtils = new ElementUtils();
+  const subHierarchy = match.subHierarchy;
+
+  if (criteria.tapActionLabel) {
+    const actionMatch = findElementMatch(elementUtils, subHierarchy, criteria.tapActionLabel);
+    if (actionMatch) {
+      return actionMatch;
+    }
+  }
+
+  if (criteria.title) {
+    const titleMatch = findElementMatch(elementUtils, subHierarchy, criteria.title);
+    if (titleMatch) {
+      return titleMatch;
+    }
+  }
+
+  if (criteria.body) {
+    const bodyMatch = findElementMatch(elementUtils, subHierarchy, criteria.body);
+    if (bodyMatch) {
+      return bodyMatch;
+    }
+  }
+
+  return null;
+};
+
+const resolveNotificationSwipeElement = (
+  match: SystemTrayNotificationMatch,
+  criteria: SystemTrayNotificationArgs,
+  appMatchTexts: string[]
+): Element | null => {
+  if (match.candidate.element) {
+    return match.candidate.element;
+  }
+
+  const elementUtils = new ElementUtils();
+  const subHierarchy = match.subHierarchy;
+
+  if (criteria.title) {
+    const titleMatch = findElementMatch(elementUtils, subHierarchy, criteria.title);
+    if (titleMatch) {
+      return titleMatch.element;
+    }
+  }
+
+  if (criteria.body) {
+    const bodyMatch = findElementMatch(elementUtils, subHierarchy, criteria.body);
+    if (bodyMatch) {
+      return bodyMatch.element;
+    }
+  }
+
+  if (criteria.appId) {
+    const appMatch = findFirstElementMatch(elementUtils, subHierarchy, appMatchTexts);
+    if (appMatch) {
+      return appMatch.element;
+    }
+  }
+
+  return null;
+};
+
+const tapElementWithAdb = async (device: BootedDevice, element: Element): Promise<void> => {
+  const elementUtils = new ElementUtils();
+  const center = elementUtils.getElementCenter(element);
+  const adb = new AdbClient(device);
+  await adb.executeCommand(`shell input tap ${center.x} ${center.y}`);
+};
+
+const swipeElementWithAdb = async (device: BootedDevice, element: Element): Promise<void> => {
+  const elementUtils = new ElementUtils();
+  const { startX, startY, endX, endY } = elementUtils.getSwipeWithinBounds("left", element.bounds);
+  const adb = new AdbClient(device);
+  await adb.executeCommand(
+    `shell input swipe ${Math.floor(startX)} ${Math.floor(startY)} ${Math.floor(endX)} ${Math.floor(endY)} ${SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS}`
+  );
 };
 
 // Register tools
@@ -872,14 +1191,14 @@ export function registerInteractionTools() {
 
         return createJSONToolResponse({
           message: "Found notification in system tray",
-          match: match.matches,
+          match: match.match.matches,
           observation,
           success: true
         });
       }
 
       if (args.action === "tap") {
-        const { observation, match } = await waitForNotificationMatch(
+        const { match } = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -891,29 +1210,31 @@ export function registerInteractionTools() {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        const tapTarget = notification.tapActionLabel || notification.title || notification.body;
-        if (!tapTarget) {
-          throw new ActionableError("No notification tap target was resolved.");
+        const tapMatch = resolveNotificationTapElement(match, notification);
+        if (!tapMatch) {
+          throw new ActionableError("No notification tap target was resolved within the matched notification.");
         }
 
-        const tapOn = new TapOnElement(device);
-        const tapResult = await tapOn.execute({
-          text: tapTarget,
-          action: "tap"
-        }, progress);
+        await tapElementWithAdb(device, tapMatch.element);
+        const observeScreen = new ObserveScreen(device);
+        const nextObservation = await observeScreen.execute();
 
         return createJSONToolResponse({
           message: notification.tapActionLabel
             ? `Tapped notification action "${notification.tapActionLabel}"`
             : "Tapped notification",
-          match: match.matches,
-          observation: tapResult.observation ?? observation,
-          ...tapResult
+          match: match.match.matches,
+          tapTarget: {
+            text: tapMatch.text,
+            matchType: tapMatch.matchType
+          },
+          observation: nextObservation,
+          success: true
         });
       }
 
       if (args.action === "dismiss") {
-        const { observation, match } = await waitForNotificationMatch(
+        const { match } = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -925,22 +1246,20 @@ export function registerInteractionTools() {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        const dismissTarget = notification.title || notification.body;
-        if (!dismissTarget) {
-          throw new ActionableError("No notification dismiss target was resolved.");
+        const swipeElement = resolveNotificationSwipeElement(match, notification, appMatchTexts);
+        if (!swipeElement) {
+          throw new ActionableError("No notification dismiss target was resolved within the matched notification.");
         }
 
-        const swipeOn = new SwipeOn(device);
-        const swipeResult = await swipeOn.execute({
-          direction: "left",
-          container: { text: dismissTarget }
-        }, progress);
+        await swipeElementWithAdb(device, swipeElement);
+        const observeScreen = new ObserveScreen(device);
+        const nextObservation = await observeScreen.execute();
 
         return createJSONToolResponse({
           message: "Dismissed notification",
-          match: match.matches,
-          observation: swipeResult.observation ?? observation,
-          ...swipeResult
+          match: match.match.matches,
+          observation: nextObservation,
+          success: true
         });
       }
 
@@ -954,12 +1273,10 @@ export function registerInteractionTools() {
           appMatchTexts = [appId];
         }
 
-        const elementUtils = new ElementUtils();
         const observeScreen = new ObserveScreen(device);
-        const swipeOn = new SwipeOn(device);
         const startTime = Date.now();
         let clearedCount = 0;
-        let lastMatch: SystemTrayTextMatch | null = null;
+        let lastMatchText: string | undefined;
         let lastObservation = (await ensureSystemTrayOpen(device, progress)).observation;
 
         if (!lastObservation) {
@@ -969,7 +1286,7 @@ export function registerInteractionTools() {
         while (clearedCount < SYSTEM_TRAY_CLEAR_MAX_ITERATIONS) {
           const viewHierarchy = lastObservation.viewHierarchy;
           const match = viewHierarchy
-            ? findFirstTextMatch(elementUtils, viewHierarchy, appMatchTexts)
+            ? selectBestNotificationMatch(findNotificationMatches(viewHierarchy, notification, appMatchTexts))
             : null;
 
           if (!match) {
@@ -981,14 +1298,15 @@ export function registerInteractionTools() {
             continue;
           }
 
-          lastMatch = match;
-          const swipeResult = await swipeOn.execute({
-            direction: "left",
-            container: { text: match.text }
-          }, progress);
+          const swipeElement = resolveNotificationSwipeElement(match, notification, appMatchTexts);
+          if (!swipeElement) {
+            throw new ActionableError("Matched notification but could not resolve a swipe target.");
+          }
 
+          lastMatchText = match.match.matches.app?.text;
+          await swipeElementWithAdb(device, swipeElement);
           clearedCount += 1;
-          lastObservation = swipeResult.observation ?? await observeScreen.execute();
+          lastObservation = await observeScreen.execute();
           await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
         }
 
@@ -999,7 +1317,7 @@ export function registerInteractionTools() {
           clearedCount,
           appId,
           appLabel,
-          matchText: lastMatch?.text,
+          matchText: lastMatchText,
           observation: lastObservation,
           success: true
         });

@@ -317,6 +317,70 @@ Available Packages:
       expect(result.success).toBe(false);
       expect(result.message).toContain("AVD creation failed");
     });
+
+    test("should return compatibility message for deprecated tools", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      const oldToolsLocation = {
+        path: "/opt/android-sdk/tools",
+        source: "typical" as const,
+        version: "26.1.1",
+        available_tools: ["avdmanager", "sdkmanager"]
+      };
+
+      mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from("Some failure"));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      const params = {
+        name: "legacy_avd",
+        package: "system-images;android-33;google_apis;arm64-v8a"
+      };
+
+      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Detected deprecated Android SDK Tools");
+      expect(result.message).toContain("cmdline-tools/latest");
+    });
+
+    test("should return compatibility message for JAXB error output", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      const jaxbError = `Exception in thread "main" java.lang.NoClassDefFoundError: javax/xml/bind/annotation/XmlSchema`;
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from(jaxbError));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      const params = {
+        name: "jaxb_avd",
+        package: "system-images;android-33;google_apis;arm64-v8a"
+      };
+
+      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.createAvd(params, mockDeps));
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+      expect(result.message).toContain("javax.xml.bind");
+      expect(result.message).toContain("cmdline-tools/latest");
+    });
   });
 
   describe("deleteAvd", () => {
@@ -337,6 +401,60 @@ Available Packages:
 
       expect(result.success).toBe(true);
       expect(result.message).toContain("deleted successfully");
+    });
+
+    test("should return compatibility message for deprecated tools", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      const oldToolsLocation = {
+        path: "/opt/android-sdk/tools",
+        source: "typical" as const,
+        version: "26.1.1",
+        available_tools: ["avdmanager", "sdkmanager"]
+      };
+
+      mockDeps.getBestAndroidToolsLocation = () => oldToolsLocation;
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from("Some failure"));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.deleteAvd("legacy_avd", mockDeps));
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Detected deprecated Android SDK Tools");
+      expect(result.message).toContain("cmdline-tools/latest");
+    });
+
+    test("should return compatibility message for JAXB error output", async () => {
+      const mockDeps = createDependencies();
+      const originalSpawn = mockDeps.spawn;
+      const fakeTimer = createFakeTimer();
+
+      const jaxbError = `Exception in thread "main" java.lang.NoClassDefFoundError: javax/xml/bind/annotation/XmlSchema`;
+
+      mockDeps.spawn = (command: string, args: string[], options?: any) => {
+        const child: any = originalSpawn(command, args, options);
+        fakeTimer.setTimeout(() => {
+          child.triggerStderr(Buffer.from(jaxbError));
+          child.triggerClose(1);
+        }, 0);
+        return child;
+      };
+
+      const result = await resolveWithFakeTimer(fakeTimer, avdmanager.deleteAvd("jaxb_avd", mockDeps));
+
+      expect(result.success).toBe(false);
+      expect(result.message).toContain("Android SDK tools are outdated and incompatible with Java 11+.");
+      expect(result.message).toContain("javax.xml.bind");
+      expect(result.message).toContain("cmdline-tools/latest");
     });
   });
 

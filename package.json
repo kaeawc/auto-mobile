@@ -111,7 +111,7 @@
     "@typescript-eslint/eslint-plugin": "^8.46.2",
     "@typescript-eslint/parser": "^8.46.2",
     "@typescript-eslint/utils": "^8.46.2",
-    "esbuild": "^0.25.9",
+    "esbuild": "^0.27.2",
     "eslint": "^9.38.0",
     "eslint-plugin": "^1.0.1",
     "eslint-plugin-import": "^2.31.0",

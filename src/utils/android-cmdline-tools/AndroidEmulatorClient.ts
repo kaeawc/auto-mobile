@@ -3,6 +3,7 @@ import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
 import { AdbClient } from "./AdbClient";
+import { AdbExecutor } from "./interfaces/AdbExecutor";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 
@@ -870,19 +871,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * Wake up the emulator and dismiss the lock screen after boot.
    * This ensures the device is immediately usable for automation.
    * @param device - The booted device to wake and unlock
+   * @param adb - Optional AdbExecutor for testing (defaults to new AdbClient)
    */
-  private async wakeAndUnlock(device: BootedDevice): Promise<void> {
-    const adb = new AdbClient(device);
+  private async wakeAndUnlock(device: BootedDevice, adb?: AdbExecutor): Promise<void> {
+    const executor = adb ?? new AdbClient(device);
 
     try {
       // Check wakefulness state
-      const wakefulness = await adb.getWakefulness();
+      const wakefulness = await executor.getWakefulness();
       logger.info(`[WakeAndUnlock] Device wakefulness state: ${wakefulness}`);
 
       if (wakefulness !== "Awake") {
         // Send KEYCODE_WAKEUP to wake the device
         logger.info("[WakeAndUnlock] Device not awake, sending KEYCODE_WAKEUP");
-        await adb.executeCommand("shell input keyevent KEYCODE_WAKEUP");
+        await executor.executeCommand("shell input keyevent KEYCODE_WAKEUP");
 
         // Small delay to allow the screen to turn on
         await this.sleep(500);
@@ -890,10 +892,10 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       // Dismiss the lock screen / keyguard
       logger.info("[WakeAndUnlock] Dismissing keyguard");
-      await adb.executeCommand("shell wm dismiss-keyguard");
+      await executor.executeCommand("shell wm dismiss-keyguard");
 
       // Verify the device is now awake
-      const finalWakefulness = await adb.getWakefulness();
+      const finalWakefulness = await executor.getWakefulness();
       logger.info(`[WakeAndUnlock] Final wakefulness state: ${finalWakefulness}`);
     } catch (error) {
       // Log but don't fail - the device is still ready, just might need manual interaction

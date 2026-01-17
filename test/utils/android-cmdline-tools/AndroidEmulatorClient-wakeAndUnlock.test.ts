@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
 import { AndroidEmulatorClient } from "../../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
 import { AdbClient } from "../../../src/utils/android-cmdline-tools/AdbClient";
 import { ExecResult } from "../../../src/models";
@@ -42,6 +42,12 @@ describe("AndroidEmulatorClient wakeAndUnlock", () => {
       executedCommands.push(command);
       return createExecResult("", "");
     });
+  });
+
+  afterEach(() => {
+    // Restore spies to avoid leaking into other tests
+    adbGetWakefulnessSpy.mockRestore();
+    adbExecuteCommandSpy.mockRestore();
   });
 
   test("should wake device and dismiss keyguard when device is Asleep", async () => {

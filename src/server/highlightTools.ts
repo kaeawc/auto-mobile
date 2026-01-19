@@ -316,7 +316,7 @@ export function registerHighlightTools() {
 
   ToolRegistry.registerDeviceAware(
     "highlight",
-    "Draw a visual highlight around a UI element on the device screen for debugging.",
+    "Draw a visual highlight around a UI element on the device screen for debugging. Provide either 'shape' OR a selector ('id' or 'text'), but not both.",
     highlightSchema,
     highlightHandler,
     false,

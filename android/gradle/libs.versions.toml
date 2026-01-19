@@ -14,7 +14,7 @@ build-android-agp = "9.0.0"
 build-kotlin = "2.3.0"
 build-kotlin-language = "2.0"              # Used in all Kotlin modules
 build-kotlin-coroutines = "1.10.2"
-build-kotlin-datetime = "0.7.1"
+build-kotlin-datetime = "0.7.1-0.6.x-compat"
 
 # Java versions
 build-java-target = "21"                   # Used in root build.gradle.kts and playground

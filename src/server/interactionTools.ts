@@ -215,19 +215,24 @@ const tapOnBaseSchema = z.object({
   platform: z.enum(["android", "ios"]).describe("Platform")
 }).strict();
 
-const tapOnByIdSchema = addDeviceTargetingToSchema(
+const tapOnSelectorSchema = addDeviceTargetingToSchema(
   tapOnBaseSchema.extend({
-    id: z.string().describe("Element resource ID / accessibility identifier")
+    id: z.string().optional().describe("Element resource ID / accessibility identifier"),
+    text: z.string().optional().describe("Element text")
   }).strict()
 );
 
-const tapOnByTextSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend({
-    text: z.string().describe("Element text")
-  }).strict()
-);
+export const tapOnSchema = tapOnSelectorSchema.superRefine((value, ctx) => {
+  const hasId = Boolean(value.id);
+  const hasText = Boolean(value.text);
 
-export const tapOnSchema = z.union([tapOnByIdSchema, tapOnByTextSchema]);
+  if (hasId === hasText) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "Provide exactly one of id or text"
+    });
+  }
+});
 
 const tapOnResultSchema = z.object({
   success: z.boolean(),

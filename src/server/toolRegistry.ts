@@ -17,8 +17,10 @@ import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
 import { isDebugModeEnabled } from "../utils/debug";
 
+const ROOT_SELECTOR_TOOLS = new Set(["tapOn", "debugSearch"]);
+
 function applyInputSchemaOverrides(toolName: string, schema: any): any {
-  if (toolName !== "tapOn") {
+  if (!ROOT_SELECTOR_TOOLS.has(toolName)) {
     return schema;
   }
 
@@ -26,16 +28,16 @@ function applyInputSchemaOverrides(toolName: string, schema: any): any {
     return schema;
   }
 
-  const hasId = Boolean(schema.properties?.id);
+  const hasElementId = Boolean(schema.properties?.elementId);
   const hasText = Boolean(schema.properties?.text);
-  if (!hasId || !hasText || schema.oneOf) {
+  if (!hasElementId || !hasText || schema.oneOf) {
     return schema;
   }
 
   return {
     ...schema,
     oneOf: [
-      { required: ["id"] },
+      { required: ["elementId"] },
       { required: ["text"] }
     ]
   };

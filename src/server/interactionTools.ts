@@ -36,8 +36,11 @@ import { ElementUtils } from "../features/utility/ElementUtils";
 import { AdbClient } from "../utils/android-cmdline-tools/AdbClient";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import {
+  createElementIdTextSelectorSchema,
   elementContainerSchema,
-  elementSelectionStrategySchema
+  elementIdTextFieldsSchema,
+  elementSelectionStrategySchema,
+  validateElementIdTextSelector
 } from "./elementSelectorSchemas";
 import {
   elementSchema,
@@ -95,7 +98,7 @@ export interface TapOnArgs {
     elementId?: string;
     text?: string;
   };
-  id?: string;
+  elementId?: string;
   text?: string;
   selectionStrategy?: ElementSelectionStrategy;
   action: "tap" | "doubleTap" | "longPress" | "focus";
@@ -216,22 +219,11 @@ const tapOnBaseSchema = z.object({
 }).strict();
 
 const tapOnSelectorSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend({
-    id: z.string().optional().describe("Element resource ID / accessibility identifier"),
-    text: z.string().optional().describe("Element text")
-  }).strict()
+  tapOnBaseSchema.extend(elementIdTextFieldsSchema.shape).strict()
 );
 
 export const tapOnSchema = tapOnSelectorSchema.superRefine((value, ctx) => {
-  const hasId = Boolean(value.id);
-  const hasText = Boolean(value.text);
-
-  if (hasId === hasText) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      message: "Provide exactly one of id or text"
-    });
-  }
+  validateElementIdTextSelector(value, ctx);
 });
 
 const tapOnResultSchema = z.object({
@@ -280,23 +272,15 @@ const swipeOnResultSchema = z.object({
 }).passthrough();
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
-  z.union([
-    z.object({
-      text: z.string().describe(`${label} text`)
-    }).strict(),
-    z.object({
-      elementId: z.string().describe(`${label} ID`)
-    }).strict()
-  ]).describe(`${label} element`);
+  createElementIdTextSelectorSchema({
+    elementId: `${label} ID`,
+    text: `${label} text`
+  }).describe(`${label} element`);
 
-const swipeOnLookForSchema = z.union([
-  z.object({
-    elementId: z.string().describe("ID of the element to look for")
-  }).strict(),
-  z.object({
-    text: z.string().describe("Text to look for")
-  }).strict()
-]);
+const swipeOnLookForSchema = createElementIdTextSelectorSchema({
+  elementId: "ID of the element to look for",
+  text: "Text to look for"
+});
 
 export const dragAndDropSchema = addDeviceTargetingToSchema(z.object({
   source: dragAndDropSelectorSchema("Source"),
@@ -315,14 +299,7 @@ export const dragAndDropSchema = addDeviceTargetingToSchema(z.object({
 
 export const swipeOnSchema = addDeviceTargetingToSchema(z.object({
   includeSystemInsets: z.boolean().optional().describe("Include system bars (default false)"),
-  container: z.object({
-    elementId: z.string().optional().describe("Container resource ID"),
-    text: z.string().optional().describe("Container text")
-  })
-    .refine(
-      value => [value.elementId, value.text].filter(Boolean).length === 1,
-      "container must specify exactly one of elementId or text"
-    )
+  container: elementContainerSchema
     .optional()
     .describe(
       "Container to swipe within (elementId or text). REQUIRED for lists. Omit for full-screen swipes."
@@ -342,14 +319,7 @@ export const swipeOnSchema = addDeviceTargetingToSchema(z.object({
   platform: z.enum(["android", "ios"]).describe("Platform")
 }));
 
-const pinchOnContainerSchema = z.union([
-  z.object({
-    elementId: z.string().describe("Container ID")
-  }).strict(),
-  z.object({
-    text: z.string().describe("Container text")
-  }).strict()
-]);
+const pinchOnContainerSchema = elementContainerSchema;
 
 export const pinchOnSchema = addDeviceTargetingToSchema(z.object({
   direction: z.enum(["in", "out"]).describe("Pinch direction (in=zoom out, out=zoom in)"),
@@ -1519,7 +1489,7 @@ export function registerInteractionTools() {
     const result = await tapOnTextCommand.execute({
       container: args.container,
       text: args.text,
-      elementId: args.id,
+      elementId: args.elementId,
       selectionStrategy: args.selectionStrategy,
       action: args.action,
       duration: args.duration,

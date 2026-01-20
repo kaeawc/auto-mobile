@@ -17,6 +17,30 @@ import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
 import { isDebugModeEnabled } from "../utils/debug";
 
+function applyInputSchemaOverrides(toolName: string, schema: any): any {
+  if (toolName !== "tapOn") {
+    return schema;
+  }
+
+  if (!schema || schema.type !== "object") {
+    return schema;
+  }
+
+  const hasId = Boolean(schema.properties?.id);
+  const hasText = Boolean(schema.properties?.text);
+  if (!hasId || !hasText || schema.oneOf) {
+    return schema;
+  }
+
+  return {
+    ...schema,
+    oneOf: [
+      { required: ["id"] },
+      { required: ["text"] }
+    ]
+  };
+}
+
 // Progress notification interface
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -441,7 +465,7 @@ class ToolRegistryClass {
     return this.getAllTools().map(tool => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: toJSONSchema(tool.schema),
+      inputSchema: applyInputSchemaOverrides(tool.name, toJSONSchema(tool.schema)),
       ...(tool.outputSchema ? { outputSchema: toJSONSchema(tool.outputSchema) } : {})
     }));
   }

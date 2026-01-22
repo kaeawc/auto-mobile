@@ -40,6 +40,7 @@ untrack_child_pid() {
 }
 
 # Global timeout handler - logs diagnostics and exits
+# shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via trap
 global_timeout_handler() {
   local elapsed_ms=$(( $(get_time_ms) - script_start_ms ))
 

@@ -95,4 +95,28 @@ describe("ToolRegistry iOS session context", () => {
     expect(response).toEqual({ success: true });
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
   });
+
+  test("allows operation when setActiveDevice was called with an iOS device", async () => {
+    fakeDeviceSessionManager.setConnectedDevices([iosDeviceA, iosDeviceB]);
+    // Simulate setActiveDevice having been called
+    fakeDeviceSessionManager.setCurrentDevice(iosDeviceA, "ios");
+
+    ToolRegistry.registerDeviceAware(
+      "iosActiveDeviceTool",
+      "Tool allows operation after setActiveDevice was called",
+      z.object({
+        platform: z.enum(["ios", "android"]).optional(),
+        sessionUuid: z.string().optional(),
+      }),
+      async () => ({ success: true })
+    );
+
+    const tool = ToolRegistry.getTool("iosActiveDeviceTool");
+    expect(tool).toBeDefined();
+
+    // Should succeed without sessionUuid because setActiveDevice was called
+    const response = await tool!.handler({ platform: "ios" });
+    expect(response).toEqual({ success: true });
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+  });
 });

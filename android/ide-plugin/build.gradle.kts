@@ -27,9 +27,9 @@ dependencies {
   // Shared validation module
   implementation(project(":test-plan-validation"))
 
-  // Kotlin ecosystem
-  implementation(libs.kotlinx.coroutines)
-  implementation(libs.kotlinx.serialization)
+  // Kotlin ecosystem (provided by IntelliJ platform, don't bundle)
+  compileOnly(libs.kotlinx.coroutines)
+  compileOnly(libs.kotlinx.serialization)
 
   // YAML and JSON schema validation (transitive from test-plan-validation)
   implementation(libs.snakeyaml)

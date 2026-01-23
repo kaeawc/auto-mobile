@@ -341,24 +341,53 @@ get_ide_plugins_dir() {
     version="${BASH_REMATCH[1]}"
   fi
 
+  # If no version in name, try to read from app bundle Info.plist
+  if [[ -z "${version}" && -n "${SELECTED_IDE_PATH}" ]]; then
+    local bundle_version
+    bundle_version=$(defaults read "${SELECTED_IDE_PATH}/Contents/Info" CFBundleShortVersionString 2>/dev/null || true)
+    if [[ "${bundle_version}" =~ ([0-9]{4}\.[0-9]+) ]]; then
+      version="${BASH_REMATCH[1]}"
+    fi
+  fi
+
   if [[ "${SELECTED_IDE_TYPE}" == "android-studio" ]]; then
     # Android Studio: ~/Library/Application Support/Google/AndroidStudio<version>/plugins
+    local config_base="${HOME}/Library/Application Support/Google"
     if [[ -n "${version}" ]]; then
-      plugins_dir="${HOME}/Library/Application Support/Google/AndroidStudio${version}/plugins"
-    else
-      # Fallback: find most recent AndroidStudio directory
-      plugins_dir=$(find "${HOME}/Library/Application Support/Google" -maxdepth 1 -type d -name "AndroidStudio*" 2>/dev/null | sort -r | head -n 1 || true)
+      # Try exact match first, then glob for patch versions (e.g., 2025.3 -> AndroidStudio2025.3.1)
+      if [[ -d "${config_base}/AndroidStudio${version}" ]]; then
+        plugins_dir="${config_base}/AndroidStudio${version}/plugins"
+      else
+        # Find directory matching version prefix (e.g., AndroidStudio2025.3*)
+        plugins_dir=$(find "${config_base}" -maxdepth 1 -type d -name "AndroidStudio${version}*" ! -name "*Preview*" 2>/dev/null | sort -V | tail -n 1 || true)
+        if [[ -n "${plugins_dir}" ]]; then
+          plugins_dir="${plugins_dir}/plugins"
+        fi
+      fi
+    fi
+    # Fallback: find most recent non-Preview AndroidStudio directory by modification time
+    if [[ -z "${plugins_dir}" || ! -d "$(dirname "${plugins_dir}")" ]]; then
+      plugins_dir=$(find "${config_base}" -maxdepth 1 -type d -name "AndroidStudio[0-9]*" ! -name "*Preview*" -exec stat -f "%m %N" {} \; 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2- || true)
       if [[ -n "${plugins_dir}" ]]; then
         plugins_dir="${plugins_dir}/plugins"
       fi
     fi
   else
     # IntelliJ IDEA: ~/Library/Application Support/JetBrains/IntelliJIdea<version>/plugins
+    local config_base="${HOME}/Library/Application Support/JetBrains"
     if [[ -n "${version}" ]]; then
-      plugins_dir="${HOME}/Library/Application Support/JetBrains/IntelliJIdea${version}/plugins"
-    else
-      # Fallback: find most recent IntelliJIdea directory
-      plugins_dir=$(find "${HOME}/Library/Application Support/JetBrains" -maxdepth 1 -type d -name "IntelliJIdea*" 2>/dev/null | sort -r | head -n 1 || true)
+      if [[ -d "${config_base}/IntelliJIdea${version}" ]]; then
+        plugins_dir="${config_base}/IntelliJIdea${version}/plugins"
+      else
+        plugins_dir=$(find "${config_base}" -maxdepth 1 -type d -name "IntelliJIdea${version}*" 2>/dev/null | sort -V | tail -n 1 || true)
+        if [[ -n "${plugins_dir}" ]]; then
+          plugins_dir="${plugins_dir}/plugins"
+        fi
+      fi
+    fi
+    # Fallback: find most recent IntelliJIdea directory by modification time
+    if [[ -z "${plugins_dir}" || ! -d "$(dirname "${plugins_dir}")" ]]; then
+      plugins_dir=$(find "${config_base}" -maxdepth 1 -type d -name "IntelliJIdea*" -exec stat -f "%m %N" {} \; 2>/dev/null | sort -rn | head -n 1 | cut -d' ' -f2- || true)
       if [[ -n "${plugins_dir}" ]]; then
         plugins_dir="${plugins_dir}/plugins"
       fi

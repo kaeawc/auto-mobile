@@ -28,6 +28,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -38,6 +39,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.toComposeImageBitmap
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -114,22 +116,35 @@ fun DeviceScreenView(
             val viewportWidth = constraints.maxWidth.toFloat()
             val viewportHeight = constraints.maxHeight.toFloat()
 
-            // Auto-fit on initial load
-            LaunchedEffect(viewportWidth, viewportHeight, screenWidth, screenHeight) {
-                if (!hasInitialFit && viewportWidth > 0 && viewportHeight > 0 && screenWidth > 0) {
-                    // Calculate scale to fit device screen in viewport with padding
-                    val padding = 32f
-                    val scaleX = (viewportWidth - padding * 2) / screenWidth
-                    val scaleY = (viewportHeight - padding * 2) / screenHeight
-                    val newScale = minOf(scaleX, scaleY, 1f).coerceIn(0.1f, 1f)
+            // Calculate device frame size that fits viewport while maintaining aspect ratio
+            val deviceAspectRatio = if (screenWidth > 0) screenHeight.toFloat() / screenWidth.toFloat() else 2.16f
+            val padding = 32f
+            val maxFrameWidth = (viewportWidth - padding * 2).coerceAtLeast(1f)
+            val maxFrameHeight = (viewportHeight - padding * 2).coerceAtLeast(1f)
 
-                    // Center the device screen
-                    val scaledWidth = screenWidth * newScale
-                    val scaledHeight = screenHeight * newScale
-                    offsetX = (viewportWidth - scaledWidth) / 2
-                    offsetY = (viewportHeight - scaledHeight) / 2
+            // Size to fit within viewport maintaining aspect ratio
+            val frameWidthPx: Float
+            val frameHeightPx: Float
+            if (maxFrameWidth * deviceAspectRatio <= maxFrameHeight) {
+                // Width-constrained
+                frameWidthPx = maxFrameWidth
+                frameHeightPx = maxFrameWidth * deviceAspectRatio
+            } else {
+                // Height-constrained
+                frameHeightPx = maxFrameHeight
+                frameWidthPx = maxFrameHeight / deviceAspectRatio
+            }
 
-                    scale = newScale
+            // Scale factor from frame pixels to device pixels (for hit testing)
+            val frameToDeviceScale = if (frameWidthPx > 0) screenWidth.toFloat() / frameWidthPx else 1f
+
+            // Auto-fit on initial load - center the frame at scale 1.0
+            LaunchedEffect(viewportWidth, viewportHeight, frameWidthPx, frameHeightPx) {
+                if (!hasInitialFit && viewportWidth > 0 && viewportHeight > 0 && frameWidthPx > 0) {
+                    // Center the device frame in viewport
+                    offsetX = (viewportWidth - frameWidthPx) / 2
+                    offsetY = (viewportHeight - frameHeightPx) / 2
+                    scale = 1f
                     hasInitialFit = true
                 }
             }
@@ -148,16 +163,20 @@ fun DeviceScreenView(
                 zoomAroundPoint(newScale, viewportWidth / 2, viewportHeight / 2)
             }
 
-            // Convert screen coordinates to device coordinates
+            // Convert screen coordinates to device pixel coordinates (for hit testing)
             fun screenToDevice(screenX: Float, screenY: Float): Pair<Int, Int> {
-                val deviceX = ((screenX - offsetX) / scale).roundToInt()
-                val deviceY = ((screenY - offsetY) / scale).roundToInt()
+                // First convert to frame coordinates, then scale to device pixels
+                val frameX = (screenX - offsetX) / scale
+                val frameY = (screenY - offsetY) / scale
+                val deviceX = (frameX * frameToDeviceScale).roundToInt()
+                val deviceY = (frameY * frameToDeviceScale).roundToInt()
                 return deviceX to deviceY
             }
 
             Box(
                 modifier = Modifier
                     .fillMaxSize()
+                    .clipToBounds()
                     .pointerInput(Unit) {
                         detectDragGestures { change, dragAmount ->
                             change.consume()
@@ -197,7 +216,11 @@ fun DeviceScreenView(
                         }
                     }
             ) {
-                // Device frame background
+                // Device frame - sized to fit viewport with proper aspect ratio
+                val localDensity = LocalDensity.current
+                val frameWidthDp = with(localDensity) { frameWidthPx.toDp() }
+                val frameHeightDp = with(localDensity) { frameHeightPx.toDp() }
+
                 Box(
                     modifier = Modifier
                         .graphicsLayer {
@@ -207,10 +230,7 @@ fun DeviceScreenView(
                             translationY = offsetY
                             transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0f, 0f)
                         }
-                        .size(
-                            width = screenWidth.dp / androidx.compose.ui.unit.Density(1f).density,
-                            height = screenHeight.dp / androidx.compose.ui.unit.Density(1f).density
-                        )
+                        .size(width = frameWidthDp, height = frameHeightDp)
                 ) {
                     // Screenshot or placeholder
                     if (imageBitmap != null) {
@@ -261,21 +281,11 @@ fun DeviceScreenView(
                                 .border(2.dp, Color(0xFF333333), RoundedCornerShape(8.dp)),
                             contentAlignment = Alignment.Center,
                         ) {
-                            Column(
-                                horizontalAlignment = Alignment.CenterHorizontally,
-                                verticalArrangement = Arrangement.spacedBy(8.dp),
-                            ) {
-                                Text(
-                                    "No Screenshot",
-                                    color = colors.text.normal.copy(alpha = 0.5f),
-                                    fontSize = 14.sp,
-                                )
-                                Text(
-                                    "Connect to device to view",
-                                    color = colors.text.normal.copy(alpha = 0.3f),
-                                    fontSize = 11.sp,
-                                )
-                            }
+                            Text(
+                                "Awaiting Observation",
+                                color = colors.text.normal.copy(alpha = 0.5f),
+                                fontSize = 12.sp,
+                            )
                         }
                     }
                 }
@@ -286,17 +296,10 @@ fun DeviceScreenView(
                     onZoomIn = { zoomAroundCenter((scale * 1.2f).coerceAtMost(5f)) },
                     onZoomOut = { zoomAroundCenter((scale / 1.2f).coerceAtLeast(0.1f)) },
                     onFitToScreen = {
-                        if (screenWidth > 0 && screenHeight > 0) {
-                            val padding = 32f
-                            val scaleX = (viewportWidth - padding * 2) / screenWidth
-                            val scaleY = (viewportHeight - padding * 2) / screenHeight
-                            val newScale = minOf(scaleX, scaleY, 1f).coerceIn(0.1f, 1f)
-                            val scaledWidth = screenWidth * newScale
-                            val scaledHeight = screenHeight * newScale
-                            scale = newScale
-                            offsetX = (viewportWidth - scaledWidth) / 2
-                            offsetY = (viewportHeight - scaledHeight) / 2
-                        }
+                        // Reset to scale 1.0 and center the frame
+                        scale = 1f
+                        offsetX = (viewportWidth - frameWidthPx) / 2
+                        offsetY = (viewportHeight - frameHeightPx) / 2
                     },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)

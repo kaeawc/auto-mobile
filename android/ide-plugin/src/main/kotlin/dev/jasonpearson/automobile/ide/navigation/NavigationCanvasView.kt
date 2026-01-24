@@ -68,6 +68,8 @@ fun NavigationCanvasView(
     onScreenSelected: (String) -> Unit,
     externalHighlightedScreens: List<String> = emptyList(),  // External highlights (e.g., from test flow)
     currentReplayScreen: String? = null,  // Currently active screen during replay
+    onFocusModeChanged: (Boolean) -> Unit = {},  // Called when zoom causes content to extend beyond canvas
+    headerHeightPx: Float = 0f,  // Height of header area to check overlap against
 ) {
     val density = LocalDensity.current
     val colors = JewelTheme.globalColors
@@ -342,6 +344,38 @@ fun NavigationCanvasView(
             } else if (externalHighlightedScreens.isEmpty() && lastAutoPannedScreens.isNotEmpty()) {
                 lastAutoPannedScreens = emptyList()
             }
+        }
+
+        // Detect focus mode: when any node extends beyond visible bounds
+        // Top bound is the header area, other bounds are viewport edges
+        LaunchedEffect(scale, offsetX, offsetY, nodePositions, viewportWidth, viewportHeight, headerHeightPx) {
+            if (nodePositions.isEmpty() || viewportWidth <= 0 || viewportHeight <= 0) {
+                onFocusModeChanged(false)
+                return@LaunchedEffect
+            }
+
+            // Check if any node extends beyond visible bounds
+            var contentExceedsBounds = false
+            for (pos in nodePositions) {
+                // Calculate node screen bounds
+                val nodeScreenLeft = pos.x * scale + offsetX
+                val nodeScreenTop = pos.y * scale + offsetY
+                val nodeScreenRight = nodeScreenLeft + nodeWidthPx * scale
+                val nodeScreenBottom = nodeScreenTop + nodeHeightPx * scale
+
+                // Check all four edges:
+                // - Top: overlap with header area
+                // - Left/Right/Bottom: extend beyond viewport edges
+                if (nodeScreenTop < headerHeightPx ||
+                    nodeScreenLeft < 0 ||
+                    nodeScreenRight > viewportWidth ||
+                    nodeScreenBottom > viewportHeight) {
+                    contentExceedsBounds = true
+                    break
+                }
+            }
+
+            onFocusModeChanged(contentExceedsBounds)
         }
 
         // Zoom helper that keeps a specific point fixed

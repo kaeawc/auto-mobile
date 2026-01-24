@@ -1,4 +1,4 @@
-@file:OptIn(ExperimentalFoundationApi::class)
+@file:OptIn(ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 
 package dev.jasonpearson.automobile.ide
 
@@ -28,11 +28,15 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
+import androidx.compose.ui.input.pointer.onPointerEvent
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
@@ -42,6 +46,7 @@ import org.jetbrains.jewel.ui.component.Tooltip
 import dev.jasonpearson.automobile.ide.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
+import dev.jasonpearson.automobile.ide.storage.StorageDashboard
 import dev.jasonpearson.automobile.ide.test.TestDashboard
 
 enum class Dashboard(val title: String) {
@@ -55,9 +60,6 @@ enum class Dashboard(val title: String) {
 
 // Reliability Dashboard sections
 enum class ReliabilitySection { Overview, FailureDetail }
-
-// Storage Dashboard sections
-enum class StorageSection { Overview, DatabaseInspector, SharedPrefs }
 
 // Device types for icons
 enum class DeviceType { AndroidEmulator, iOSSimulator }
@@ -93,6 +95,13 @@ fun AutoMobileToolWindowContent() {
   var currentReplayIndex by remember { mutableIntStateOf(0) }
   var isReplaying by remember { mutableStateOf(false) }
 
+  // Navigation focus mode state (when zoomed and content extends beyond canvas)
+  var isNavigationFocused by remember { mutableStateOf(false) }
+
+  // Setup state - true when AutoMobile service/daemon not detected or accessibility service not running
+  // TODO: Replace with actual service detection
+  var needsSetup by remember { mutableStateOf(false) }
+
   // Animate through the test flow screens
   androidx.compose.runtime.LaunchedEffect(isReplaying, testFlowScreens) {
     if (isReplaying && testFlowScreens.isNotEmpty()) {
@@ -119,72 +128,115 @@ fun AutoMobileToolWindowContent() {
     }
   }
 
-  Column(modifier = Modifier.fillMaxSize()) {
-    // Global Shell Header
-    GlobalShellHeader(
-        devices = bootedDevices,
-        activeDeviceId = activeDeviceId,
-        onDeviceSelected = { activeDeviceId = it },
-        isLive = isLive,
-        onLiveToggle = { isLive = it },
-    )
+  val colors = JewelTheme.globalColors
+  val isCurrentlyOnNavigation = dashboardOrder[selectedIndex] == Dashboard.Navigation
 
-    // Dashboard Tabs with drag-and-drop reordering
-    DraggableTabs(
-        tabs = dashboardOrder,
-        selectedIndex = selectedIndex,
-        onTabSelected = { selectedIndex = it },
-        onReorder = { fromIndex, toIndex ->
-            val item = dashboardOrder.removeAt(fromIndex)
-            dashboardOrder.add(toIndex, item)
-            // Adjust selected index if needed
-            when {
-                fromIndex == selectedIndex -> selectedIndex = toIndex
-                fromIndex < selectedIndex && toIndex >= selectedIndex -> selectedIndex--
-                fromIndex > selectedIndex && toIndex <= selectedIndex -> selectedIndex++
-            }
-        },
-        draggedIndex = draggedIndex,
-        onDragStart = { draggedIndex = it },
-        onDragEnd = { draggedIndex = null; dropTargetIndex = null },
-        dropTargetIndex = dropTargetIndex,
-        onDropTargetChanged = { dropTargetIndex = it },
-    )
+  // Header should fade when navigation nodes exceed bounds and user isn't hovering header
+  var isHeaderHovered by remember { mutableStateOf(false) }
+  val headerShouldFade = isNavigationFocused && isCurrentlyOnNavigation && !isHeaderHovered
+  val headerAlpha = if (headerShouldFade) 0.2f else 1f
 
+  // Track header height for padding non-navigation content
+  var headerHeight by remember { mutableStateOf(0) }
+  val density = LocalDensity.current
+  val headerHeightDp = with(density) { headerHeight.toDp() }
+
+  Box(modifier = Modifier.fillMaxSize()) {
     // Dashboard Content
-    when (dashboardOrder[selectedIndex]) {
-      Dashboard.Navigation -> NavigationDashboard(
-          highlightedScreens = replayHighlightedScreens,
-          onHighlightCleared = {
-              testFlowScreens = emptyList()
-              isReplaying = false
+    // Navigation fills entire space so nodes can extend under header when zoomed
+    // Other dashboards have top padding to stay below header
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .then(if (!isCurrentlyOnNavigation) Modifier.padding(top = headerHeightDp) else Modifier)
+    ) {
+      when (dashboardOrder[selectedIndex]) {
+        Dashboard.Navigation -> NavigationDashboard(
+            highlightedScreens = replayHighlightedScreens,
+            onHighlightCleared = {
+                testFlowScreens = emptyList()
+                isReplaying = false
+            },
+            onFocusModeChanged = { focused ->
+                isNavigationFocused = focused
+            },
+            headerHeightPx = headerHeight.toFloat(),
+        )
+        Dashboard.Test -> TestDashboard(
+            onOpenFile = { filePath ->
+                // TODO: Open file in IDE editor
+            },
+            onNavigateToGraph = { screens ->
+                // Set up test flow replay
+                testFlowScreens = screens
+                isReplaying = true
+                currentReplayIndex = 0
+                selectedIndex = 0  // Switch to Navigation tab
+            },
+        )
+        Dashboard.Performance -> PerformanceDashboard(
+            onNavigateToScreen = { screenName ->
+                // Switch to Navigation tab and highlight the screen
+                selectedIndex = 0
+            },
+            onNavigateToTest = { testName ->
+                // Switch to Test tab
+                selectedIndex = 1
+            },
+        )
+        Dashboard.Layout -> LayoutInspectorDashboard()
+        Dashboard.Storage -> StorageDashboard()
+        Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
+      }
+    }
+
+    // Header + Tabs overlay (rendered on top with solid background)
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .graphicsLayer { alpha = headerAlpha }
+            .onPointerEvent(PointerEventType.Enter) { isHeaderHovered = true }
+            .onPointerEvent(PointerEventType.Exit) { isHeaderHovered = false }
+            .onGloballyPositioned { coordinates ->
+                headerHeight = coordinates.size.height
+            }
+    ) {
+      GlobalShellHeader(
+          devices = bootedDevices,
+          activeDeviceId = activeDeviceId,
+          onDeviceSelected = { activeDeviceId = it },
+          isLive = isLive,
+          onLiveToggle = { isLive = it },
+          needsSetup = needsSetup,
+          onSetupClick = {
+              // TODO: Open setup wizard/dialog
+          },
+          onDoctorClick = {
+              // TODO: Run diagnostics
           },
       )
-      Dashboard.Test -> TestDashboard(
-          onOpenFile = { filePath ->
-              // TODO: Open file in IDE editor
+
+      // Dashboard Tabs with drag-and-drop reordering
+      DraggableTabs(
+          tabs = dashboardOrder,
+          selectedIndex = selectedIndex,
+          onTabSelected = { selectedIndex = it },
+          onReorder = { fromIndex, toIndex ->
+              val item = dashboardOrder.removeAt(fromIndex)
+              dashboardOrder.add(toIndex, item)
+              // Adjust selected index if needed
+              when {
+                  fromIndex == selectedIndex -> selectedIndex = toIndex
+                  fromIndex < selectedIndex && toIndex >= selectedIndex -> selectedIndex--
+                  fromIndex > selectedIndex && toIndex <= selectedIndex -> selectedIndex++
+              }
           },
-          onNavigateToGraph = { screens ->
-              // Set up test flow replay
-              testFlowScreens = screens
-              isReplaying = true
-              currentReplayIndex = 0
-              selectedIndex = 0  // Switch to Navigation tab
-          },
+          draggedIndex = draggedIndex,
+          onDragStart = { draggedIndex = it },
+          onDragEnd = { draggedIndex = null; dropTargetIndex = null },
+          dropTargetIndex = dropTargetIndex,
+          onDropTargetChanged = { dropTargetIndex = it },
       )
-      Dashboard.Performance -> PerformanceDashboard(
-          onNavigateToScreen = { screenName ->
-              // Switch to Navigation tab and highlight the screen
-              selectedIndex = 0
-          },
-          onNavigateToTest = { testName ->
-              // Switch to Test tab
-              selectedIndex = 1
-          },
-      )
-      Dashboard.Layout -> LayoutInspectorDashboard()
-      Dashboard.Storage -> Box(Modifier.fillMaxSize().padding(16.dp)) { StorageDashboard() }
-      Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
     }
   }
 }
@@ -196,20 +248,30 @@ private fun GlobalShellHeader(
     onDeviceSelected: (String) -> Unit,
     isLive: Boolean,
     onLiveToggle: (Boolean) -> Unit,
+    needsSetup: Boolean = false,
+    onSetupClick: () -> Unit = {},
+    onDoctorClick: () -> Unit = {},
 ) {
   val colors = JewelTheme.globalColors
 
   Row(
-      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      modifier = Modifier
+          .fillMaxWidth()
+          .background(JewelTheme.globalColors.panelBackground)
+          .padding(horizontal = 8.dp, vertical = 4.dp),
       horizontalArrangement = Arrangement.SpaceBetween,
       verticalAlignment = Alignment.CenterVertically,
   ) {
-    // Left side: Title + Device icons
+    // Left side: Device selection
     Row(
-        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text("AutoMobile", fontSize = 13.sp)
+      Text(
+          "Devices:",
+          fontSize = 11.sp,
+          color = colors.text.normal.copy(alpha = 0.5f),
+      )
 
       // Device icons
       Row(
@@ -227,17 +289,51 @@ private fun GlobalShellHeader(
       }
     }
 
-    // Live toggle
+    // Right side: Setup button (conditional), Doctor button, Live toggle
     Row(
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(
-          "Live",
-          fontSize = 11.sp,
-          color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
-      )
-      LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+      // Setup AutoMobile button (shown when service not detected)
+      if (needsSetup) {
+        Box(
+            modifier = Modifier
+                .background(Color(0xFF2196F3).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                .clickable(onClick = onSetupClick)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
+        ) {
+          Text(
+              "Setup",
+              fontSize = 10.sp,
+              color = Color(0xFF64B5F6),
+          )
+        }
+      }
+
+      // Doctor button (always visible)
+      Tooltip(tooltip = { Text("Run diagnostics", fontSize = 11.sp) }) {
+        Text(
+            "🩺",
+            fontSize = 12.sp,
+            modifier = Modifier
+                .clickable(onClick = onDoctorClick)
+                .pointerHoverIcon(PointerIcon.Hand),
+        )
+      }
+
+      // Live toggle
+      Row(
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+      ) {
+        Text(
+            "Live",
+            fontSize = 10.sp,
+            color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+        )
+        LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+      }
     }
   }
 }
@@ -380,7 +476,7 @@ private fun DraggableTabs(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .background(colors.text.normal.copy(alpha = 0.03f))
+            .background(JewelTheme.globalColors.panelBackground)
             .padding(horizontal = 4.dp),
         horizontalArrangement = Arrangement.Start,
     ) {
@@ -501,55 +597,6 @@ private fun ReliabilityDashboard() {
                     "Network state",
                 ),
             onBack = { currentSection = ReliabilitySection.Overview },
-        )
-  }
-}
-
-@Composable
-private fun StorageDashboard() {
-  var currentSection by remember { mutableStateOf(StorageSection.Overview) }
-
-  when (currentSection) {
-    StorageSection.Overview ->
-        DashboardOverview(
-            title = "Storage",
-            description = "Inspect and manage app data storage.",
-            sections =
-                listOf(
-                    SectionItem("Database Inspector", "Browse and query SQLite databases") {
-                      currentSection = StorageSection.DatabaseInspector
-                    },
-                    SectionItem("SharedPreferences", "View and edit preference files") {
-                      currentSection = StorageSection.SharedPrefs
-                    },
-                ),
-        )
-    StorageSection.DatabaseInspector ->
-        SectionDetail(
-            title = "Database Inspector",
-            description = "Browse and query SQLite databases.",
-            features =
-                listOf(
-                    "Table browser",
-                    "SQL query console",
-                    "Schema viewer",
-                    "Real-time updates",
-                    "Export data",
-                ),
-            onBack = { currentSection = StorageSection.Overview },
-        )
-    StorageSection.SharedPrefs ->
-        SectionDetail(
-            title = "SharedPreferences",
-            description = "View and edit preference files.",
-            features =
-                listOf(
-                    "Key-value browser",
-                    "Live editing",
-                    "Type support (String, Int, Boolean, etc.)",
-                    "Search and filter",
-                ),
-            onBack = { currentSection = StorageSection.Overview },
         )
   }
 }

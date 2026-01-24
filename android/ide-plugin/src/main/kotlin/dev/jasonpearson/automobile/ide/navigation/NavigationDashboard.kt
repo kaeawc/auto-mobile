@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.ide.navigation
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -16,10 +17,19 @@ fun NavigationDashboard(
     highlightedScreens: List<String> = emptyList(),  // Screen names to highlight (e.g., from test flow)
     currentStepScreen: String? = highlightedScreens.lastOrNull(),  // Current step being replayed
     onHighlightCleared: () -> Unit = {},  // Called when user interacts to clear external highlights
+    onFocusModeChanged: (Boolean) -> Unit = {},  // Called when zoom causes content to extend beyond canvas
+    headerHeightPx: Float = 0f,  // Height of header area to check overlap against
 ) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
     var selectedTransitionId by remember { mutableStateOf<String?>(null) }
+
+    // Reset focus mode when navigating away from FlowMap
+    LaunchedEffect(currentSection) {
+        if (currentSection != NavigationSection.FlowMap) {
+            onFocusModeChanged(false)
+        }
+    }
 
     // Use mock data
     val screens = remember { NavigationMockData.screens }
@@ -49,6 +59,8 @@ fun NavigationDashboard(
                     },
                     externalHighlightedScreens = highlightedScreens,
                     currentReplayScreen = currentStepScreen,
+                    onFocusModeChanged = onFocusModeChanged,
+                    headerHeightPx = headerHeightPx,
                 )
             }
 

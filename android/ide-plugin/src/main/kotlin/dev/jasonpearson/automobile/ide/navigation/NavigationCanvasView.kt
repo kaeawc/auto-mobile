@@ -87,6 +87,9 @@ fun NavigationCanvasView(
     var mouseX by remember { mutableFloatStateOf(0f) }
     var mouseY by remember { mutableFloatStateOf(0f) }
 
+    // Track if canvas is hovered - focus mode only activates when canvas is hovered
+    var isCanvasHovered by remember { mutableStateOf(false) }
+
     // Compute highlighted elements based on hover state OR external highlights
     // Track hovered, source (came from), and target (could go to) screens separately
     data class HighlightState(
@@ -269,7 +272,10 @@ fun NavigationCanvasView(
     var lastAutoPannedScreens by remember { mutableStateOf<List<String>>(emptyList()) }
 
     BoxWithConstraints(
-        modifier = Modifier.fillMaxSize()
+        modifier = Modifier
+            .fillMaxSize()
+            .onPointerEvent(PointerEventType.Enter) { isCanvasHovered = true }
+            .onPointerEvent(PointerEventType.Exit) { isCanvasHovered = false }
     ) {
         val viewportWidth = constraints.maxWidth.toFloat()
         val viewportHeight = constraints.maxHeight.toFloat()
@@ -346,10 +352,11 @@ fun NavigationCanvasView(
             }
         }
 
-        // Detect focus mode: when any node extends beyond visible bounds
+        // Detect focus mode: when canvas is hovered AND any node extends beyond visible bounds
         // Top bound is the header area, other bounds are viewport edges
-        LaunchedEffect(scale, offsetX, offsetY, nodePositions, viewportWidth, viewportHeight, headerHeightPx) {
-            if (nodePositions.isEmpty() || viewportWidth <= 0 || viewportHeight <= 0) {
+        // Focus mode only activates when user is actively interacting with the canvas
+        LaunchedEffect(scale, offsetX, offsetY, nodePositions, viewportWidth, viewportHeight, headerHeightPx, isCanvasHovered) {
+            if (!isCanvasHovered || nodePositions.isEmpty() || viewportWidth <= 0 || viewportHeight <= 0) {
                 onFocusModeChanged(false)
                 return@LaunchedEffect
             }

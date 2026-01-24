@@ -9,6 +9,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -49,13 +50,13 @@ import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.ide.storage.StorageDashboard
 import dev.jasonpearson.automobile.ide.test.TestDashboard
 
-enum class Dashboard(val title: String) {
-  Navigation("Navigation"),
-  Test("Test"),
-  Performance("Performance"),
-  Layout("Layout"),
-  Storage("Storage"),
-  Reliability("Reliability"),
+enum class Dashboard(val title: String, val icon: String) {
+  Navigation("Navigation", "🧭"),
+  Test("Test", "🧪"),
+  Performance("Performance", "⚡"),
+  Layout("Layout", "📐"),
+  Storage("Storage", "💾"),
+  Failures("Failures", "💥"),
 }
 
 // Reliability Dashboard sections
@@ -186,7 +187,7 @@ fun AutoMobileToolWindowContent() {
         )
         Dashboard.Layout -> LayoutInspectorDashboard()
         Dashboard.Storage -> StorageDashboard()
-        Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
+        Dashboard.Failures -> Box(Modifier.fillMaxSize().padding(16.dp)) { FailuresDashboard() }
       }
     }
 
@@ -254,85 +255,104 @@ private fun GlobalShellHeader(
 ) {
   val colors = JewelTheme.globalColors
 
-  Row(
+  BoxWithConstraints(
       modifier = Modifier
           .fillMaxWidth()
           .background(JewelTheme.globalColors.panelBackground)
           .padding(horizontal = 8.dp, vertical = 4.dp),
-      horizontalArrangement = Arrangement.SpaceBetween,
-      verticalAlignment = Alignment.CenterVertically,
   ) {
-    // Left side: Device selection
+    val isCompact = maxWidth < 400.dp
+
     Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-      Text(
-          "Devices:",
-          fontSize = 11.sp,
-          color = colors.text.normal.copy(alpha = 0.5f),
-      )
-
-      // Device icons
+      // Left side: Device selection
       Row(
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
           verticalAlignment = Alignment.CenterVertically,
       ) {
-        devices.forEach { device ->
-          DeviceIcon(
-              device = device,
-              isActive = device.id == activeDeviceId,
-              isLive = isLive,
-              onClick = { onDeviceSelected(device.id) },
-          )
-        }
-      }
-    }
-
-    // Right side: Setup button (conditional), Doctor button, Live toggle
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-      // Setup AutoMobile button (shown when service not detected)
-      if (needsSetup) {
-        Box(
-            modifier = Modifier
-                .background(Color(0xFF2196F3).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                .clickable(onClick = onSetupClick)
-                .pointerHoverIcon(PointerIcon.Hand)
-                .padding(horizontal = 8.dp, vertical = 4.dp),
-        ) {
+        if (!isCompact) {
           Text(
-              "Setup",
-              fontSize = 10.sp,
-              color = Color(0xFF64B5F6),
+              "Devices:",
+              fontSize = 11.sp,
+              maxLines = 1,
+              softWrap = false,
+              color = colors.text.normal.copy(alpha = 0.5f),
           )
+        }
+
+        // Device icons
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+          devices.forEach { device ->
+            DeviceIcon(
+                device = device,
+                isActive = device.id == activeDeviceId,
+                isLive = isLive,
+                onClick = { onDeviceSelected(device.id) },
+            )
+          }
         }
       }
 
-      // Doctor button (always visible)
-      Tooltip(tooltip = { Text("Run diagnostics", fontSize = 11.sp) }) {
-        Text(
-            "🩺",
-            fontSize = 12.sp,
-            modifier = Modifier
-                .clickable(onClick = onDoctorClick)
-                .pointerHoverIcon(PointerIcon.Hand),
-        )
-      }
-
-      // Live toggle
+      // Right side: Setup button (conditional), Doctor button, Live toggle
       Row(
-          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          horizontalArrangement = Arrangement.spacedBy(8.dp),
           verticalAlignment = Alignment.CenterVertically,
       ) {
-        Text(
-            "Live",
-            fontSize = 10.sp,
-            color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
-        )
-        LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+        // Setup AutoMobile button (shown when service not detected)
+        if (needsSetup) {
+          Box(
+              modifier = Modifier
+                  .background(Color(0xFF2196F3).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                  .clickable(onClick = onSetupClick)
+                  .pointerHoverIcon(PointerIcon.Hand)
+                  .padding(horizontal = 8.dp, vertical = 4.dp),
+          ) {
+            Text(
+                "Setup",
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = Color(0xFF64B5F6),
+            )
+          }
+        }
+
+        // Doctor button (always visible)
+        Tooltip(tooltip = { Text("Run diagnostics", fontSize = 11.sp) }) {
+          Box(
+              modifier = Modifier
+                  .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                  .clickable(onClick = onDoctorClick)
+                  .pointerHoverIcon(PointerIcon.Hand)
+                  .padding(horizontal = 6.dp, vertical = 4.dp),
+              contentAlignment = Alignment.Center,
+          ) {
+            Text("🩺", fontSize = 12.sp)
+          }
+        }
+
+        // Live toggle
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+          if (!isCompact) {
+            Text(
+                "Live",
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+            )
+          }
+          LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+        }
       }
     }
   }
@@ -473,106 +493,141 @@ private fun DraggableTabs(
     var tabPositions by remember { mutableStateOf<Map<Int, Float>>(emptyMap()) }
     var dragOffset by remember { mutableStateOf(0f) }
 
-    Row(
+    BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
             .background(JewelTheme.globalColors.panelBackground)
-            .padding(horizontal = 4.dp),
-        horizontalArrangement = Arrangement.Start,
     ) {
-        tabs.forEachIndexed { index, dashboard ->
-            val isSelected = index == selectedIndex
-            val isDragged = index == draggedIndex
-            val isDropTarget = index == dropTargetIndex && draggedIndex != null && draggedIndex != index
+        // Three modes: icons only (< 300dp), icon + text (300-600dp), text only (> 600dp)
+        val useIconsOnly = maxWidth < 300.dp
+        val useIconsWithText = maxWidth >= 300.dp && maxWidth < 600.dp
 
-            Box(
-                modifier = Modifier
-                    .padding(vertical = 4.dp, horizontal = 2.dp)
-                    .then(
-                        if (isDragged) Modifier.offset(x = dragOffset.dp)
-                        else Modifier
-                    )
-                    .background(
-                        when {
-                            isDropTarget -> colors.text.normal.copy(alpha = 0.15f)
-                            isSelected -> colors.text.normal.copy(alpha = 0.1f)
-                            else -> Color.Transparent
-                        },
-                        RoundedCornerShape(6.dp)
-                    )
-                    .then(
-                        if (isDropTarget)
-                            Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
-                        else Modifier
-                    )
-                    .clickable { onTabSelected(index) }
-                    .pointerInput(index) {
-                        detectDragGesturesAfterLongPress(
-                            onDragStart = { onDragStart(index) },
-                            onDragEnd = {
-                                if (draggedIndex != null && dropTargetIndex != null && draggedIndex != dropTargetIndex) {
-                                    onReorder(draggedIndex, dropTargetIndex)
-                                }
-                                dragOffset = 0f
-                                onDragEnd()
-                            },
-                            onDragCancel = {
-                                dragOffset = 0f
-                                onDragEnd()
-                            },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                dragOffset += dragAmount.x / 2  // Scale down for smoother feel
+        Row(
+            modifier = Modifier.padding(horizontal = 4.dp),
+            horizontalArrangement = Arrangement.Start,
+        ) {
+            tabs.forEachIndexed { index, dashboard ->
+                val isSelected = index == selectedIndex
+                val isDragged = index == draggedIndex
+                val isDropTarget = index == dropTargetIndex && draggedIndex != null && draggedIndex != index
 
-                                // Calculate which tab we're over based on position
-                                val positions = tabPositions.toList().sortedBy { it.second }
-                                val draggedPos = (tabPositions[index] ?: 0f) + dragOffset
-                                var newTarget: Int? = null
-                                for (i in positions.indices) {
-                                    val (tabIdx, pos) = positions[i]
-                                    val nextPos = positions.getOrNull(i + 1)?.second ?: (pos + 80f)
-                                    if (draggedPos >= pos && draggedPos < nextPos) {
-                                        newTarget = tabIdx
-                                        break
+                Box(
+                    modifier = Modifier
+                        .padding(vertical = 4.dp, horizontal = 2.dp)
+                        .then(
+                            if (isDragged) Modifier.offset(x = dragOffset.dp)
+                            else Modifier
+                        )
+                        .background(
+                            when {
+                                isDropTarget -> colors.text.normal.copy(alpha = 0.15f)
+                                isSelected -> colors.text.normal.copy(alpha = 0.1f)
+                                else -> Color.Transparent
+                            },
+                            RoundedCornerShape(6.dp)
+                        )
+                        .then(
+                            if (isDropTarget)
+                                Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                            else Modifier
+                        )
+                        .clickable { onTabSelected(index) }
+                        .pointerInput(index) {
+                            detectDragGesturesAfterLongPress(
+                                onDragStart = { onDragStart(index) },
+                                onDragEnd = {
+                                    if (draggedIndex != null && dropTargetIndex != null && draggedIndex != dropTargetIndex) {
+                                        onReorder(draggedIndex, dropTargetIndex)
+                                    }
+                                    dragOffset = 0f
+                                    onDragEnd()
+                                },
+                                onDragCancel = {
+                                    dragOffset = 0f
+                                    onDragEnd()
+                                },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    dragOffset += dragAmount.x / 2  // Scale down for smoother feel
+
+                                    // Calculate which tab we're over based on position
+                                    val positions = tabPositions.toList().sortedBy { it.second }
+                                    val draggedPos = (tabPositions[index] ?: 0f) + dragOffset
+                                    var newTarget: Int? = null
+                                    for (i in positions.indices) {
+                                        val (tabIdx, pos) = positions[i]
+                                        val nextPos = positions.getOrNull(i + 1)?.second ?: (pos + 80f)
+                                        if (draggedPos >= pos && draggedPos < nextPos) {
+                                            newTarget = tabIdx
+                                            break
+                                        }
+                                    }
+                                    if (newTarget != null && newTarget != draggedIndex) {
+                                        onDropTargetChanged(newTarget)
+                                    } else if (newTarget == draggedIndex) {
+                                        onDropTargetChanged(null)
                                     }
                                 }
-                                if (newTarget != null && newTarget != draggedIndex) {
-                                    onDropTargetChanged(newTarget)
-                                } else if (newTarget == draggedIndex) {
-                                    onDropTargetChanged(null)
-                                }
-                            }
-                        )
-                    }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 12.dp, vertical = 6.dp)
-                    .onGloballyPositioned { coordinates ->
-                        tabPositions = tabPositions + (index to coordinates.positionInParent().x)
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
-                Text(
-                    dashboard.title,
-                    fontSize = 12.sp,
-                    color = when {
+                            )
+                        }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = if (useIconsOnly) 8.dp else 10.dp, vertical = 6.dp)
+                        .onGloballyPositioned { coordinates ->
+                            tabPositions = tabPositions + (index to coordinates.positionInParent().x)
+                        },
+                    contentAlignment = Alignment.Center,
+                ) {
+                    val textColor = when {
                         isDragged -> colors.text.normal.copy(alpha = 0.8f)
                         isSelected -> colors.text.normal
                         else -> colors.text.normal.copy(alpha = 0.6f)
-                    },
-                )
+                    }
+
+                    when {
+                        useIconsOnly -> {
+                            Tooltip(tooltip = { Text(dashboard.title, fontSize = 11.sp) }) {
+                                Text(dashboard.icon, fontSize = 14.sp)
+                            }
+                        }
+                        useIconsWithText -> {
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(dashboard.icon, fontSize = 12.sp)
+                                Text(
+                                    dashboard.title,
+                                    fontSize = 11.sp,
+                                    maxLines = 1,
+                                    softWrap = false,
+                                    color = textColor,
+                                )
+                            }
+                        }
+                        else -> {
+                            Text(
+                                dashboard.title,
+                                fontSize = 12.sp,
+                                maxLines = 1,
+                                softWrap = false,
+                                color = textColor,
+                            )
+                        }
+                    }
+                }
             }
         }
     }
 }
 
 @Composable
-private fun ReliabilityDashboard() {
+private fun FailuresDashboard() {
   var currentSection by remember { mutableStateOf(ReliabilitySection.Overview) }
 
   when (currentSection) {
     ReliabilitySection.Overview ->
         DashboardOverview(
-            title = "Reliability",
+            title = "Failures",
             description = "Centralized failure intelligence for crashes and ANRs.",
             sections =
                 listOf(

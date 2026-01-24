@@ -39,6 +39,7 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Link
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
+import dev.jasonpearson.automobile.ide.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.ide.test.TestDashboard
@@ -54,9 +55,6 @@ enum class Dashboard(val title: String) {
 
 // Reliability Dashboard sections
 enum class ReliabilitySection { Overview, FailureDetail }
-
-// Layout Dashboard sections
-enum class LayoutSection { Overview, ViewHierarchy, Overdraw }
 
 // Storage Dashboard sections
 enum class StorageSection { Overview, DatabaseInspector, SharedPrefs }
@@ -184,7 +182,7 @@ fun AutoMobileToolWindowContent() {
               selectedIndex = 1
           },
       )
-      Dashboard.Layout -> Box(Modifier.fillMaxSize().padding(16.dp)) { LayoutDashboard() }
+      Dashboard.Layout -> LayoutInspectorDashboard()
       Dashboard.Storage -> Box(Modifier.fillMaxSize().padding(16.dp)) { StorageDashboard() }
       Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
     }
@@ -503,55 +501,6 @@ private fun ReliabilityDashboard() {
                     "Network state",
                 ),
             onBack = { currentSection = ReliabilitySection.Overview },
-        )
-  }
-}
-
-@Composable
-private fun LayoutDashboard() {
-  var currentSection by remember { mutableStateOf(LayoutSection.Overview) }
-
-  when (currentSection) {
-    LayoutSection.Overview ->
-        DashboardOverview(
-            title = "Layout",
-            description = "Analyze UI layout, composition, and rendering.",
-            sections =
-                listOf(
-                    SectionItem("View Hierarchy", "Interactive tree of UI components") {
-                      currentSection = LayoutSection.ViewHierarchy
-                    },
-                    SectionItem("Overdraw Analysis", "Pixel rendering efficiency") {
-                      currentSection = LayoutSection.Overdraw
-                    },
-                ),
-        )
-    LayoutSection.ViewHierarchy ->
-        SectionDetail(
-            title = "View Hierarchy",
-            description = "Interactive tree of UI components.",
-            features =
-                listOf(
-                    "Component tree view",
-                    "Property inspector",
-                    "Bounds overlay",
-                    "Search and filter",
-                    "Jump to source",
-                ),
-            onBack = { currentSection = LayoutSection.Overview },
-        )
-    LayoutSection.Overdraw ->
-        SectionDetail(
-            title = "Overdraw Analysis",
-            description = "Analyze pixel rendering efficiency.",
-            features =
-                listOf(
-                    "Overdraw heat map",
-                    "Per-screen analysis",
-                    "GPU profiling data",
-                    "Rendering time per layer",
-                ),
-            onBack = { currentSection = LayoutSection.Overview },
         )
   }
 }

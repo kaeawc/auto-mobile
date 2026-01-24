@@ -30,6 +30,7 @@ data class FailureEvent(
     val title: String,
     val message: String,
     val stackTrace: String?,
+    val stackTraceElements: List<StackTraceElement> = emptyList(),
     val timestamp: Long,
     val screenAtFailure: String?,
     val screensVisited: List<String>,
@@ -38,6 +39,19 @@ data class FailureEvent(
     val occurrenceCount: Int = 1,
     val severity: FailureSeverity = FailureSeverity.Medium,
     val toolCallInfo: ToolCallInfo? = null,
+    val screenshotPath: String? = null,
+    val videoPath: String? = null,
+)
+
+/**
+ * Parsed stack trace element with file navigation info
+ */
+data class StackTraceElement(
+    val className: String,
+    val methodName: String,
+    val fileName: String?,
+    val lineNumber: Int?,
+    val isAppCode: Boolean = false, // true if this is user's app code (not framework)
 )
 
 /**

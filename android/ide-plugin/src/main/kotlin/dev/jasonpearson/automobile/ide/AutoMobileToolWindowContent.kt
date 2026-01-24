@@ -193,6 +193,10 @@ fun AutoMobileToolWindowContent() {
                 // Switch to Test tab
                 selectedIndex = dashboardOrder.indexOf(Dashboard.Test)
             },
+            onNavigateToSource = { fileName, lineNumber ->
+                // TODO: Use OpenFileDescriptor to navigate to source
+                // FileEditorManager.getInstance(project).openFile(virtualFile, true)
+            },
         )
       }
     }

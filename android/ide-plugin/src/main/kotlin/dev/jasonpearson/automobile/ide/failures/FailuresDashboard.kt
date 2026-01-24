@@ -45,10 +45,9 @@ import org.jetbrains.jewel.ui.component.Text
 fun FailuresDashboard(
     onNavigateToScreen: (String) -> Unit = {},
     onNavigateToTest: (String) -> Unit = {},
+    onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
     modifier: Modifier = Modifier,
 ) {
-    val colors = JewelTheme.globalColors
-
     // Mock failure data
     val failureGroups = remember { createMockFailureGroups() }
 
@@ -62,6 +61,7 @@ fun FailuresDashboard(
                 onBack = { selectedFailure = null },
                 onNavigateToScreen = onNavigateToScreen,
                 onNavigateToTest = onNavigateToTest,
+                onNavigateToSource = onNavigateToSource,
             )
         } else {
             FailureListView(
@@ -283,6 +283,7 @@ private fun FailureDetailView(
     onBack: () -> Unit,
     onNavigateToScreen: (String) -> Unit,
     onNavigateToTest: (String) -> Unit,
+    onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
     val event = failure.representativeEvent
@@ -345,6 +346,52 @@ private fun FailureDetailView(
             modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
         )
 
+        // Screenshot/Video at failure (displayed inline if available)
+        if (event.screenshotPath != null || event.videoPath != null) {
+            SectionHeader("Failure Capture")
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(200.dp)
+                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                if (event.videoPath != null) {
+                    // Video placeholder - in real impl would use video player
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("🎬", fontSize = 32.sp)
+                        Text(
+                            "Video: ${event.videoPath.substringAfterLast("/")}",
+                            fontSize = 11.sp,
+                            color = colors.text.normal.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                        Text(
+                            "Click to play",
+                            fontSize = 10.sp,
+                            color = Color(0xFF2196F3),
+                            modifier = Modifier
+                                .padding(top = 4.dp)
+                                .clickable { /* TODO: Open video */ }
+                                .pointerHoverIcon(PointerIcon.Hand),
+                        )
+                    }
+                } else if (event.screenshotPath != null) {
+                    // Screenshot placeholder - in real impl would load image
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text("📸", fontSize = 32.sp)
+                        Text(
+                            "Screenshot: ${event.screenshotPath.substringAfterLast("/")}",
+                            fontSize = 11.sp,
+                            color = colors.text.normal.copy(alpha = 0.6f),
+                            modifier = Modifier.padding(top = 8.dp),
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
+
         // Error message
         SectionHeader("Error Message")
         Box(
@@ -361,8 +408,45 @@ private fun FailureDetailView(
             )
         }
 
-        // Stack trace (if available)
-        if (!event.stackTrace.isNullOrBlank()) {
+        // Stack trace with clickable lines (if available)
+        if (event.stackTraceElements.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("Stack Trace")
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+                    .padding(8.dp),
+            ) {
+                event.stackTraceElements.forEach { element ->
+                    val lineText = buildString {
+                        append("at ${element.className}.${element.methodName}")
+                        if (element.fileName != null && element.lineNumber != null) {
+                            append("(${element.fileName}:${element.lineNumber})")
+                        }
+                    }
+                    val isClickable = element.isAppCode && element.fileName != null && element.lineNumber != null
+
+                    Text(
+                        lineText,
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .then(
+                                if (isClickable) {
+                                    Modifier
+                                        .clickable { onNavigateToSource(element.fileName!!, element.lineNumber!!) }
+                                        .pointerHoverIcon(PointerIcon.Hand)
+                                } else Modifier
+                            )
+                            .padding(vertical = 2.dp, horizontal = 4.dp),
+                    )
+                }
+            }
+        } else if (!event.stackTrace.isNullOrBlank()) {
+            // Fallback: raw stack trace if not parsed
             Spacer(Modifier.height(16.dp))
             SectionHeader("Stack Trace")
             Box(
@@ -488,27 +572,8 @@ private fun FailureDetailView(
 
         // Action Buttons
         Spacer(Modifier.height(24.dp))
-        SectionHeader("Debug & Export")
+        SectionHeader("Actions")
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.fillMaxWidth(),
-            ) {
-                ActionCard(
-                    icon = "🔍",
-                    title = "Debug in IDE",
-                    description = "Open stack trace in debugger",
-                    modifier = Modifier.weight(1f),
-                    onClick = { /* TODO */ },
-                )
-                ActionCard(
-                    icon = "📸",
-                    title = "View Snapshot",
-                    description = "Screenshot at failure",
-                    modifier = Modifier.weight(1f),
-                    onClick = { /* TODO */ },
-                )
-            }
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
@@ -630,6 +695,12 @@ private fun ActionCard(
 
 /**
  * Create mock failure data for demonstration
+ *
+ * Severity is calculated based on:
+ * - Critical: >20 occurrences OR crash in critical flow (login, checkout, etc.)
+ * - High: 10-20 occurrences OR ANR
+ * - Medium: 5-10 occurrences
+ * - Low: <5 occurrences
  */
 private fun createMockFailureGroups(): List<FailureGroup> {
     return listOf(
@@ -642,18 +713,20 @@ private fun createMockFailureGroups(): List<FailureGroup> {
             lastOccurrence = System.currentTimeMillis() - 3600000,
             totalCount = 23,
             affectedTests = listOf("testLoginFlow", "testSignupValidation"),
-            severity = FailureSeverity.Critical,
+            severity = FailureSeverity.Critical, // >20 occurrences + critical flow
             representativeEvent = FailureEvent(
                 id = "event-1",
                 type = FailureType.Crash,
                 title = "NullPointerException in LoginViewModel",
                 message = "java.lang.NullPointerException: Attempt to invoke virtual method 'String com.example.User.getName()' on a null object reference",
-                stackTrace = """java.lang.NullPointerException: Attempt to invoke virtual method 'String com.example.User.getName()' on a null object reference
-    at com.example.app.LoginViewModel.validateUser(LoginViewModel.kt:42)
-    at com.example.app.LoginViewModel.onLoginClicked(LoginViewModel.kt:28)
-    at com.example.app.LoginFragment.onClick(LoginFragment.kt:67)
-    at android.view.View.performClick(View.java:7448)
-    at android.widget.Button.performClick(Button.java:188)""",
+                stackTrace = null, // Using parsed elements instead
+                stackTraceElements = listOf(
+                    StackTraceElement("com.example.app.LoginViewModel", "validateUser", "LoginViewModel.kt", 42, isAppCode = true),
+                    StackTraceElement("com.example.app.LoginViewModel", "onLoginClicked", "LoginViewModel.kt", 28, isAppCode = true),
+                    StackTraceElement("com.example.app.LoginFragment", "onClick", "LoginFragment.kt", 67, isAppCode = true),
+                    StackTraceElement("android.view.View", "performClick", "View.java", 7448, isAppCode = false),
+                    StackTraceElement("android.widget.Button", "performClick", "Button.java", 188, isAppCode = false),
+                ),
                 timestamp = System.currentTimeMillis() - 3600000,
                 screenAtFailure = "Login",
                 screensVisited = listOf("Splash", "Login"),
@@ -665,6 +738,7 @@ private fun createMockFailureGroups(): List<FailureGroup> {
                     memoryUsage = "156 MB / 512 MB",
                     cpuUsage = "23%",
                 ),
+                screenshotPath = "/captures/crash-1/screenshot.png",
             ),
         ),
         FailureGroup(
@@ -676,17 +750,19 @@ private fun createMockFailureGroups(): List<FailureGroup> {
             lastOccurrence = System.currentTimeMillis() - 7200000,
             totalCount = 8,
             affectedTests = listOf("testHomeLoad", "testProfileEdit"),
-            severity = FailureSeverity.High,
+            severity = FailureSeverity.High, // ANR = High severity
             representativeEvent = FailureEvent(
                 id = "event-2",
                 type = FailureType.ANR,
                 title = "ANR: Main thread blocked",
                 message = "Application Not Responding: Main thread blocked for 5+ seconds during database query",
-                stackTrace = """main thread blocked:
-    at com.example.app.data.UserDao.getAllUsers(UserDao.kt:23)
-    at com.example.app.HomeViewModel.loadUsers(HomeViewModel.kt:45)
-    at com.example.app.HomeFragment.onResume(HomeFragment.kt:31)
-    at androidx.fragment.app.Fragment.performResume(Fragment.java:3135)""",
+                stackTrace = null,
+                stackTraceElements = listOf(
+                    StackTraceElement("com.example.app.data.UserDao", "getAllUsers", "UserDao.kt", 23, isAppCode = true),
+                    StackTraceElement("com.example.app.HomeViewModel", "loadUsers", "HomeViewModel.kt", 45, isAppCode = true),
+                    StackTraceElement("com.example.app.HomeFragment", "onResume", "HomeFragment.kt", 31, isAppCode = true),
+                    StackTraceElement("androidx.fragment.app.Fragment", "performResume", "Fragment.java", 3135, isAppCode = false),
+                ),
                 timestamp = System.currentTimeMillis() - 7200000,
                 screenAtFailure = "Home",
                 screensVisited = listOf("Splash", "Login", "Home"),
@@ -698,6 +774,7 @@ private fun createMockFailureGroups(): List<FailureGroup> {
                     memoryUsage = "234 MB / 512 MB",
                     cpuUsage = "89%",
                 ),
+                videoPath = "/captures/anr-1/recording.mp4",
             ),
         ),
         FailureGroup(
@@ -709,7 +786,7 @@ private fun createMockFailureGroups(): List<FailureGroup> {
             lastOccurrence = System.currentTimeMillis() - 1800000,
             totalCount = 12,
             affectedTests = listOf("testFormSubmission", "testCheckout"),
-            severity = FailureSeverity.Medium,
+            severity = FailureSeverity.Medium, // 10-20 occurrences
             representativeEvent = FailureEvent(
                 id = "event-3",
                 type = FailureType.ToolCallFailure,
@@ -734,6 +811,7 @@ private fun createMockFailureGroups(): List<FailureGroup> {
                     errorCode = "ELEMENT_NOT_FOUND",
                     duration = 5023,
                 ),
+                screenshotPath = "/captures/tool-1/screenshot.png",
             ),
         ),
         FailureGroup(
@@ -745,15 +823,17 @@ private fun createMockFailureGroups(): List<FailureGroup> {
             lastOccurrence = System.currentTimeMillis() - 86400000,
             totalCount = 5,
             affectedTests = listOf("testSendMessage"),
-            severity = FailureSeverity.Low,
+            severity = FailureSeverity.Low, // <5 occurrences, not recent
             representativeEvent = FailureEvent(
                 id = "event-4",
                 type = FailureType.Crash,
                 title = "IndexOutOfBoundsException in MessageList",
                 message = "java.lang.IndexOutOfBoundsException: Inconsistency detected. Invalid view holder adapter position",
-                stackTrace = """java.lang.IndexOutOfBoundsException: Inconsistency detected. Invalid view holder adapter position
-    at androidx.recyclerview.widget.RecyclerView.findViewHolderForPosition(RecyclerView.java:1345)
-    at com.example.app.MessageListAdapter.onBindViewHolder(MessageListAdapter.kt:67)""",
+                stackTrace = null,
+                stackTraceElements = listOf(
+                    StackTraceElement("androidx.recyclerview.widget.RecyclerView", "findViewHolderForPosition", "RecyclerView.java", 1345, isAppCode = false),
+                    StackTraceElement("com.example.app.MessageListAdapter", "onBindViewHolder", "MessageListAdapter.kt", 67, isAppCode = true),
+                ),
                 timestamp = System.currentTimeMillis() - 86400000,
                 screenAtFailure = "Messages",
                 screensVisited = listOf("Home", "Messages"),

@@ -6,6 +6,7 @@ import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -28,30 +30,36 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Link
-import org.jetbrains.jewel.ui.component.TabData
-import org.jetbrains.jewel.ui.component.TabStrip
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
-import org.jetbrains.jewel.ui.theme.defaultTabStyle
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.ide.test.TestDashboard
 
 enum class Dashboard(val title: String) {
   Navigation("Navigation"),
   Test("Test"),
   Performance("Performance"),
+  Layout("Layout"),
+  Storage("Storage"),
   Reliability("Reliability"),
 }
 
-// Performance Dashboard sections
-enum class PerformanceSection { Overview, MetricDetail, AccessibilityLayout }
-
 // Reliability Dashboard sections
 enum class ReliabilitySection { Overview, FailureDetail }
+
+// Layout Dashboard sections
+enum class LayoutSection { Overview, ViewHierarchy, Overdraw }
+
+// Storage Dashboard sections
+enum class StorageSection { Overview, DatabaseInspector, SharedPrefs }
 
 // Device types for icons
 enum class DeviceType { AndroidEmulator, iOSSimulator }
@@ -68,7 +76,9 @@ data class BootedDevice(
 fun AutoMobileToolWindowContent() {
   var selectedIndex by remember { mutableIntStateOf(0) }
   var isLive by remember { mutableStateOf(true) }
-  val dashboards = Dashboard.entries
+  val dashboardOrder = remember { mutableStateListOf(*Dashboard.entries.toTypedArray()) }
+  var draggedIndex by remember { mutableStateOf<Int?>(null) }
+  var dropTargetIndex by remember { mutableStateOf<Int?>(null) }
 
   // Mock booted devices - will be replaced with real data
   var activeDeviceId by remember { mutableStateOf("pixel8") }
@@ -121,23 +131,30 @@ fun AutoMobileToolWindowContent() {
         onLiveToggle = { isLive = it },
     )
 
-    // Dashboard Tabs
-    TabStrip(
-        tabs =
-            dashboards.mapIndexed { index, dashboard ->
-              TabData.Default(
-                  selected = index == selectedIndex,
-                  content = { Text(dashboard.title) },
-                  closable = false,
-                  onClick = { selectedIndex = index },
-              )
-            },
-        style = JewelTheme.defaultTabStyle,
-        modifier = Modifier.fillMaxWidth(),
+    // Dashboard Tabs with drag-and-drop reordering
+    DraggableTabs(
+        tabs = dashboardOrder,
+        selectedIndex = selectedIndex,
+        onTabSelected = { selectedIndex = it },
+        onReorder = { fromIndex, toIndex ->
+            val item = dashboardOrder.removeAt(fromIndex)
+            dashboardOrder.add(toIndex, item)
+            // Adjust selected index if needed
+            when {
+                fromIndex == selectedIndex -> selectedIndex = toIndex
+                fromIndex < selectedIndex && toIndex >= selectedIndex -> selectedIndex--
+                fromIndex > selectedIndex && toIndex <= selectedIndex -> selectedIndex++
+            }
+        },
+        draggedIndex = draggedIndex,
+        onDragStart = { draggedIndex = it },
+        onDragEnd = { draggedIndex = null; dropTargetIndex = null },
+        dropTargetIndex = dropTargetIndex,
+        onDropTargetChanged = { dropTargetIndex = it },
     )
 
     // Dashboard Content
-    when (dashboards[selectedIndex]) {
+    when (dashboardOrder[selectedIndex]) {
       Dashboard.Navigation -> NavigationDashboard(
           highlightedScreens = replayHighlightedScreens,
           onHighlightCleared = {
@@ -157,7 +174,18 @@ fun AutoMobileToolWindowContent() {
               selectedIndex = 0  // Switch to Navigation tab
           },
       )
-      Dashboard.Performance -> Box(Modifier.fillMaxSize().padding(16.dp)) { PerformanceDashboard() }
+      Dashboard.Performance -> PerformanceDashboard(
+          onNavigateToScreen = { screenName ->
+              // Switch to Navigation tab and highlight the screen
+              selectedIndex = 0
+          },
+          onNavigateToTest = { testName ->
+              // Switch to Test tab
+              selectedIndex = 1
+          },
+      )
+      Dashboard.Layout -> Box(Modifier.fillMaxSize().padding(16.dp)) { LayoutDashboard() }
+      Dashboard.Storage -> Box(Modifier.fillMaxSize().padding(16.dp)) { StorageDashboard() }
       Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
     }
   }
@@ -336,55 +364,111 @@ private fun LiveToggle(isLive: Boolean, onToggle: (Boolean) -> Unit) {
 }
 
 @Composable
-private fun PerformanceDashboard() {
-  var currentSection by remember { mutableStateOf(PerformanceSection.Overview) }
+private fun DraggableTabs(
+    tabs: List<Dashboard>,
+    selectedIndex: Int,
+    onTabSelected: (Int) -> Unit,
+    onReorder: (fromIndex: Int, toIndex: Int) -> Unit,
+    draggedIndex: Int?,
+    onDragStart: (Int) -> Unit,
+    onDragEnd: () -> Unit,
+    dropTargetIndex: Int?,
+    onDropTargetChanged: (Int?) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    var tabPositions by remember { mutableStateOf<Map<Int, Float>>(emptyMap()) }
+    var dragOffset by remember { mutableStateOf(0f) }
 
-  when (currentSection) {
-    PerformanceSection.Overview ->
-        DashboardOverview(
-            title = "Performance & Quality",
-            description = "Analyze non-functional behavior across UI, system, and runtime.",
-            sections =
-                listOf(
-                    SectionItem("Performance Overview", "Aggregated health metrics") {
-                      currentSection = PerformanceSection.MetricDetail
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f))
+            .padding(horizontal = 4.dp),
+        horizontalArrangement = Arrangement.Start,
+    ) {
+        tabs.forEachIndexed { index, dashboard ->
+            val isSelected = index == selectedIndex
+            val isDragged = index == draggedIndex
+            val isDropTarget = index == dropTargetIndex && draggedIndex != null && draggedIndex != index
+
+            Box(
+                modifier = Modifier
+                    .padding(vertical = 4.dp, horizontal = 2.dp)
+                    .then(
+                        if (isDragged) Modifier.offset(x = dragOffset.dp)
+                        else Modifier
+                    )
+                    .background(
+                        when {
+                            isDropTarget -> colors.text.normal.copy(alpha = 0.15f)
+                            isSelected -> colors.text.normal.copy(alpha = 0.1f)
+                            else -> Color.Transparent
+                        },
+                        RoundedCornerShape(6.dp)
+                    )
+                    .then(
+                        if (isDropTarget)
+                            Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
+                        else Modifier
+                    )
+                    .clickable { onTabSelected(index) }
+                    .pointerInput(index) {
+                        detectDragGesturesAfterLongPress(
+                            onDragStart = { onDragStart(index) },
+                            onDragEnd = {
+                                if (draggedIndex != null && dropTargetIndex != null && draggedIndex != dropTargetIndex) {
+                                    onReorder(draggedIndex, dropTargetIndex)
+                                }
+                                dragOffset = 0f
+                                onDragEnd()
+                            },
+                            onDragCancel = {
+                                dragOffset = 0f
+                                onDragEnd()
+                            },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                dragOffset += dragAmount.x / 2  // Scale down for smoother feel
+
+                                // Calculate which tab we're over based on position
+                                val positions = tabPositions.toList().sortedBy { it.second }
+                                val draggedPos = (tabPositions[index] ?: 0f) + dragOffset
+                                var newTarget: Int? = null
+                                for (i in positions.indices) {
+                                    val (tabIdx, pos) = positions[i]
+                                    val nextPos = positions.getOrNull(i + 1)?.second ?: (pos + 80f)
+                                    if (draggedPos >= pos && draggedPos < nextPos) {
+                                        newTarget = tabIdx
+                                        break
+                                    }
+                                }
+                                if (newTarget != null && newTarget != draggedIndex) {
+                                    onDropTargetChanged(newTarget)
+                                } else if (newTarget == draggedIndex) {
+                                    onDropTargetChanged(null)
+                                }
+                            }
+                        )
+                    }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+                    .onGloballyPositioned { coordinates ->
+                        tabPositions = tabPositions + (index to coordinates.positionInParent().x)
                     },
-                    SectionItem("Metric Detail", "Deep dive into one metric over time") {
-                      currentSection = PerformanceSection.MetricDetail
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    dashboard.title,
+                    fontSize = 12.sp,
+                    color = when {
+                        isDragged -> colors.text.normal.copy(alpha = 0.8f)
+                        isSelected -> colors.text.normal
+                        else -> colors.text.normal.copy(alpha = 0.6f)
                     },
-                    SectionItem("Accessibility & Layout", "Violations and layout analysis") {
-                      currentSection = PerformanceSection.AccessibilityLayout
-                    },
-                ),
-        )
-    PerformanceSection.MetricDetail ->
-        SectionDetail(
-            title = "Metric Detail",
-            description = "Deep dive into one metric over time.",
-            features =
-                listOf(
-                    "Timeline graph",
-                    "Event overlays (screen changes, test steps)",
-                    "Threshold markers",
-                    "Historical comparisons",
-                ),
-            onBack = { currentSection = PerformanceSection.Overview },
-        )
-    PerformanceSection.AccessibilityLayout ->
-        SectionDetail(
-            title = "Accessibility & Layout",
-            description = "Accessibility violations and layout analysis.",
-            features =
-                listOf(
-                    "Accessibility violations",
-                    "Missing labels",
-                    "Touch target size issues",
-                    "Layout bounds",
-                    "Overdraw hints",
-                ),
-            onBack = { currentSection = PerformanceSection.Overview },
-        )
-  }
+                )
+            }
+        }
+    }
 }
 
 @Composable
@@ -419,6 +503,104 @@ private fun ReliabilityDashboard() {
                     "Network state",
                 ),
             onBack = { currentSection = ReliabilitySection.Overview },
+        )
+  }
+}
+
+@Composable
+private fun LayoutDashboard() {
+  var currentSection by remember { mutableStateOf(LayoutSection.Overview) }
+
+  when (currentSection) {
+    LayoutSection.Overview ->
+        DashboardOverview(
+            title = "Layout",
+            description = "Analyze UI layout, composition, and rendering.",
+            sections =
+                listOf(
+                    SectionItem("View Hierarchy", "Interactive tree of UI components") {
+                      currentSection = LayoutSection.ViewHierarchy
+                    },
+                    SectionItem("Overdraw Analysis", "Pixel rendering efficiency") {
+                      currentSection = LayoutSection.Overdraw
+                    },
+                ),
+        )
+    LayoutSection.ViewHierarchy ->
+        SectionDetail(
+            title = "View Hierarchy",
+            description = "Interactive tree of UI components.",
+            features =
+                listOf(
+                    "Component tree view",
+                    "Property inspector",
+                    "Bounds overlay",
+                    "Search and filter",
+                    "Jump to source",
+                ),
+            onBack = { currentSection = LayoutSection.Overview },
+        )
+    LayoutSection.Overdraw ->
+        SectionDetail(
+            title = "Overdraw Analysis",
+            description = "Analyze pixel rendering efficiency.",
+            features =
+                listOf(
+                    "Overdraw heat map",
+                    "Per-screen analysis",
+                    "GPU profiling data",
+                    "Rendering time per layer",
+                ),
+            onBack = { currentSection = LayoutSection.Overview },
+        )
+  }
+}
+
+@Composable
+private fun StorageDashboard() {
+  var currentSection by remember { mutableStateOf(StorageSection.Overview) }
+
+  when (currentSection) {
+    StorageSection.Overview ->
+        DashboardOverview(
+            title = "Storage",
+            description = "Inspect and manage app data storage.",
+            sections =
+                listOf(
+                    SectionItem("Database Inspector", "Browse and query SQLite databases") {
+                      currentSection = StorageSection.DatabaseInspector
+                    },
+                    SectionItem("SharedPreferences", "View and edit preference files") {
+                      currentSection = StorageSection.SharedPrefs
+                    },
+                ),
+        )
+    StorageSection.DatabaseInspector ->
+        SectionDetail(
+            title = "Database Inspector",
+            description = "Browse and query SQLite databases.",
+            features =
+                listOf(
+                    "Table browser",
+                    "SQL query console",
+                    "Schema viewer",
+                    "Real-time updates",
+                    "Export data",
+                ),
+            onBack = { currentSection = StorageSection.Overview },
+        )
+    StorageSection.SharedPrefs ->
+        SectionDetail(
+            title = "SharedPreferences",
+            description = "View and edit preference files.",
+            features =
+                listOf(
+                    "Key-value browser",
+                    "Live editing",
+                    "Type support (String, Int, Boolean, etc.)",
+                    "Search and filter",
+                ),
+            onBack = { currentSection = StorageSection.Overview },
         )
   }
 }

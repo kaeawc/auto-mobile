@@ -1,5 +1,10 @@
+@file:OptIn(ExperimentalFoundationApi::class)
+
 package dev.jasonpearson.automobile.ide
 
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -7,7 +12,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -16,6 +25,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.unit.dp
@@ -25,7 +35,9 @@ import org.jetbrains.jewel.ui.component.Link
 import org.jetbrains.jewel.ui.component.TabData
 import org.jetbrains.jewel.ui.component.TabStrip
 import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.theme.defaultTabStyle
+import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 
 enum class Dashboard(val title: String) {
   Navigation("Navigation"),
@@ -33,9 +45,6 @@ enum class Dashboard(val title: String) {
   Performance("Performance"),
   Reliability("Reliability"),
 }
-
-// Navigation Dashboard sections
-enum class NavigationSection { Overview, FlowMap, ScreenDetail, TransitionDetail }
 
 // Test Dashboard sections
 enum class TestSection { Overview, TestDetail, StepDetail }
@@ -46,12 +55,44 @@ enum class PerformanceSection { Overview, MetricDetail, AccessibilityLayout }
 // Reliability Dashboard sections
 enum class ReliabilitySection { Overview, FailureDetail }
 
+// Device types for icons
+enum class DeviceType { AndroidEmulator, iOSSimulator }
+
+data class BootedDevice(
+    val id: String,
+    val name: String,
+    val type: DeviceType,
+    val status: String = "Running",
+    val foregroundApp: String? = null,
+)
+
 @Composable
 fun AutoMobileToolWindowContent() {
   var selectedIndex by remember { mutableIntStateOf(0) }
+  var isLive by remember { mutableStateOf(true) }
   val dashboards = Dashboard.entries
 
+  // Mock booted devices - will be replaced with real data
+  var activeDeviceId by remember { mutableStateOf("pixel8") }
+  val bootedDevices = remember {
+    listOf(
+        BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running", "com.example.myapp"),
+        BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running", "com.android.launcher3"),
+        BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted", "com.apple.springboard"),
+    )
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
+    // Global Shell Header
+    GlobalShellHeader(
+        devices = bootedDevices,
+        activeDeviceId = activeDeviceId,
+        onDeviceSelected = { activeDeviceId = it },
+        isLive = isLive,
+        onLiveToggle = { isLive = it },
+    )
+
+    // Dashboard Tabs
     TabStrip(
         tabs =
             dashboards.mapIndexed { index, dashboard ->
@@ -66,82 +107,185 @@ fun AutoMobileToolWindowContent() {
         modifier = Modifier.fillMaxWidth(),
     )
 
-    Box(modifier = Modifier.fillMaxSize().padding(16.dp)) {
-      when (dashboards[selectedIndex]) {
-        Dashboard.Navigation -> NavigationDashboard()
-        Dashboard.Test -> TestDashboard()
-        Dashboard.Performance -> PerformanceDashboard()
-        Dashboard.Reliability -> ReliabilityDashboard()
+    // Dashboard Content
+    when (dashboards[selectedIndex]) {
+      Dashboard.Navigation -> NavigationDashboard() // Edge-to-edge canvas
+      Dashboard.Test -> Box(Modifier.fillMaxSize().padding(16.dp)) { TestDashboard() }
+      Dashboard.Performance -> Box(Modifier.fillMaxSize().padding(16.dp)) { PerformanceDashboard() }
+      Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
+    }
+  }
+}
+
+@Composable
+private fun GlobalShellHeader(
+    devices: List<BootedDevice>,
+    activeDeviceId: String,
+    onDeviceSelected: (String) -> Unit,
+    isLive: Boolean,
+    onLiveToggle: (Boolean) -> Unit,
+) {
+  val colors = JewelTheme.globalColors
+
+  Row(
+      modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
+      horizontalArrangement = Arrangement.SpaceBetween,
+      verticalAlignment = Alignment.CenterVertically,
+  ) {
+    // Left side: Title + Device icons
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text("AutoMobile", fontSize = 13.sp)
+
+      // Device icons
+      Row(
+          horizontalArrangement = Arrangement.spacedBy(4.dp),
+          verticalAlignment = Alignment.CenterVertically,
+      ) {
+        devices.forEach { device ->
+          DeviceIcon(
+              device = device,
+              isActive = device.id == activeDeviceId,
+              isLive = isLive,
+              onClick = { onDeviceSelected(device.id) },
+          )
+        }
+      }
+    }
+
+    // Live toggle
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+      Text(
+          "Live",
+          fontSize = 11.sp,
+          color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+      )
+      LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+    }
+  }
+}
+
+@Composable
+private fun DeviceIcon(
+    device: BootedDevice,
+    isActive: Boolean,
+    isLive: Boolean,
+    onClick: () -> Unit,
+) {
+  val colors = JewelTheme.globalColors
+  val bgColor =
+      if (isActive) colors.text.normal.copy(alpha = 0.15f)
+      else colors.text.normal.copy(alpha = 0.05f)
+  val borderColor =
+      if (isActive && isLive) Color(0xFF4CAF50)
+      else if (isActive) colors.text.normal.copy(alpha = 0.4f)
+      else Color.Transparent
+  val iconColor =
+      if (isActive) colors.text.normal
+      else colors.text.normal.copy(alpha = 0.4f)
+
+  Tooltip(
+      tooltip = {
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+          Text(device.name, fontSize = 12.sp)
+          Text(
+              "Status: ${device.status}",
+              fontSize = 11.sp,
+              color = colors.text.normal.copy(alpha = 0.7f),
+          )
+          device.foregroundApp?.let { app ->
+            Text(
+                "App: $app",
+                fontSize = 11.sp,
+                color = colors.text.normal.copy(alpha = 0.7f),
+            )
+          }
+        }
+      },
+  ) {
+    Box(
+        modifier =
+            Modifier.size(28.dp)
+                .background(bgColor, shape = RoundedCornerShape(6.dp))
+                .then(
+                    if (borderColor != Color.Transparent)
+                        Modifier.border(1.5.dp, borderColor, RoundedCornerShape(6.dp))
+                    else Modifier
+                )
+                .clickable(onClick = onClick)
+                .pointerHoverIcon(PointerIcon.Hand),
+        contentAlignment = Alignment.Center,
+    ) {
+      // Simple device icon representation
+      when (device.type) {
+        DeviceType.AndroidEmulator -> AndroidDeviceIcon(color = iconColor)
+        DeviceType.iOSSimulator -> AppleDeviceIcon(color = iconColor)
       }
     }
   }
 }
 
 @Composable
-private fun NavigationDashboard() {
-  var currentSection by remember { mutableStateOf(NavigationSection.Overview) }
+private fun AndroidDeviceIcon(color: Color) {
+  // Simple Android robot head shape
+  Box(modifier = Modifier.size(16.dp)) {
+    // Body (rounded rectangle)
+    Box(
+        modifier =
+            Modifier.align(Alignment.BottomCenter)
+                .size(width = 12.dp, height = 10.dp)
+                .background(color, RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp, bottomStart = 3.dp, bottomEnd = 3.dp))
+    )
+    // Head (smaller rounded rect on top)
+    Box(
+        modifier =
+            Modifier.align(Alignment.TopCenter)
+                .offset(y = 1.dp)
+                .size(width = 10.dp, height = 5.dp)
+                .background(color, RoundedCornerShape(topStart = 3.dp, topEnd = 3.dp))
+    )
+  }
+}
 
-  when (currentSection) {
-    NavigationSection.Overview ->
-        DashboardOverview(
-            title = "Flows & Navigation",
-            description = "Understand app structure, user flows, and reachable states.",
-            sections =
-                listOf(
-                    SectionItem("Flow Map", "Visual navigation graph of screens and transitions") {
-                      currentSection = NavigationSection.FlowMap
-                    },
-                    SectionItem("Screen Detail", "Everything known about one UI state") {
-                      currentSection = NavigationSection.ScreenDetail
-                    },
-                    SectionItem("Transition Detail", "What happens between screens") {
-                      currentSection = NavigationSection.TransitionDetail
-                    },
-                ),
-        )
-    NavigationSection.FlowMap ->
-        SectionDetail(
-            title = "Flow Map",
-            description = "Visual navigation graph representing screens, transitions, and entry points.",
-            features =
-                listOf(
-                    "Screen nodes (activities, fragments, composables)",
-                    "Edges (user actions, system events, deep links)",
-                    "Entry points (launch, notification, intent)",
-                    "Test coverage overlays",
-                    "Failure markers",
-                ),
-            onBack = { currentSection = NavigationSection.Overview },
-        )
-    NavigationSection.ScreenDetail ->
-        SectionDetail(
-            title = "Screen Detail",
-            description = "Everything known about one UI state.",
-            features =
-                listOf(
-                    "Screen identity & hierarchy",
-                    "Screenshot(s)",
-                    "View tree summary",
-                    "Accessibility summary",
-                    "Performance summary",
-                    "Tests that touch this screen",
-                ),
-            onBack = { currentSection = NavigationSection.Overview },
-        )
-    NavigationSection.TransitionDetail ->
-        SectionDetail(
-            title = "Transition Detail",
-            description = "What happens between screens.",
-            features =
-                listOf(
-                    "Triggering action (tap, intent, system)",
-                    "Preconditions",
-                    "Latency stats",
-                    "Failure rate",
-                    "Tests that validate this transition",
-                ),
-            onBack = { currentSection = NavigationSection.Overview },
-        )
+@Composable
+private fun AppleDeviceIcon(color: Color) {
+  // Simple iPhone shape (rounded rectangle with notch hint)
+  Box(
+      modifier =
+          Modifier.size(width = 10.dp, height = 16.dp)
+              .background(color, RoundedCornerShape(2.dp))
+  )
+}
+
+@Composable
+private fun LiveToggle(isLive: Boolean, onToggle: (Boolean) -> Unit) {
+  val colors = JewelTheme.globalColors
+  val trackColor =
+      if (isLive) Color(0xFF4CAF50).copy(alpha = 0.4f)
+      else colors.text.normal.copy(alpha = 0.2f)
+  val thumbColor =
+      if (isLive) Color(0xFF4CAF50)
+      else colors.text.normal.copy(alpha = 0.5f)
+
+  Box(
+      modifier =
+          Modifier.size(width = 32.dp, height = 18.dp)
+              .background(trackColor, shape = RoundedCornerShape(9.dp))
+              .clickable { onToggle(!isLive) }
+              .pointerHoverIcon(PointerIcon.Hand),
+  ) {
+    Box(
+        modifier =
+            Modifier.padding(2.dp)
+                .size(14.dp)
+                .align(if (isLive) Alignment.CenterEnd else Alignment.CenterStart)
+                .background(thumbColor, shape = CircleShape),
+    )
   }
 }
 

@@ -74,6 +74,28 @@ fun FailuresDashboard(
     }
 }
 
+/**
+ * Time aggregation options for the timeline
+ */
+private enum class TimeAggregation(val label: String, val buckets: Int) {
+    Minute("Min", 60),
+    Hour("Hour", 24),
+    Day("Day", 7),
+    Week("Week", 4),
+}
+
+/**
+ * Data point for timeline chart
+ */
+private data class TimelineDataPoint(
+    val label: String,
+    val crashes: Int,
+    val anrs: Int,
+    val toolFailures: Int,
+) {
+    val total: Int get() = crashes + anrs + toolFailures
+}
+
 @Composable
 private fun FailureListView(
     failures: List<FailureGroup>,
@@ -88,15 +110,67 @@ private fun FailureListView(
         failures
     }
 
-    Column(modifier = Modifier.fillMaxSize()) {
-        // Header
-        Text("Failures", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-        Text(
-            "Crashes, ANRs, and tool call failures",
-            color = colors.text.normal.copy(alpha = 0.6f),
-            fontSize = 12.sp,
-            modifier = Modifier.padding(top = 2.dp, bottom = 12.dp),
+    var timeAggregation by remember { mutableStateOf(TimeAggregation.Hour) }
+    val timelineData = remember(timeAggregation) { generateMockTimelineData(timeAggregation) }
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(rememberScrollState()),
+    ) {
+        // Header with time range
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Column {
+                Text("Failures", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                Text(
+                    "Crashes, ANRs, and tool call failures",
+                    color = colors.text.normal.copy(alpha = 0.6f),
+                    fontSize = 12.sp,
+                )
+            }
+
+            // Time aggregation selector
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+                    .padding(4.dp),
+            ) {
+                TimeAggregation.entries.forEach { agg ->
+                    val isSelected = agg == timeAggregation
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                                RoundedCornerShape(4.dp),
+                            )
+                            .clickable { timeAggregation = agg }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            agg.label,
+                            fontSize = 10.sp,
+                            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                        )
+                    }
+                }
+            }
+        }
+
+        Spacer(Modifier.height(16.dp))
+
+        // Event Trends section
+        EventTrendsSection(
+            data = timelineData,
+            aggregation = timeAggregation,
         )
+
+        Spacer(Modifier.height(16.dp))
 
         // Filter chips
         Row(
@@ -117,32 +191,18 @@ private fun FailureListView(
             }
         }
 
-        // Summary stats
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(16.dp),
-            modifier = Modifier.padding(bottom = 16.dp),
-        ) {
-            StatBox(
-                label = "Total",
-                value = filteredFailures.sumOf { it.totalCount }.toString(),
-                color = colors.text.normal,
-            )
-            StatBox(
-                label = "Critical",
-                value = filteredFailures.count { it.severity == FailureSeverity.Critical }.toString(),
-                color = FailureSeverity.Critical.color,
-            )
-            StatBox(
-                label = "Last 24h",
-                value = filteredFailures.count { System.currentTimeMillis() - it.lastOccurrence < 86400000 }.toString(),
-                color = Color(0xFF2196F3),
-            )
-        }
+        // Issues header
+        Text(
+            "Issues (${filteredFailures.size})",
+            fontSize = 13.sp,
+            fontWeight = FontWeight.Medium,
+            color = colors.text.normal.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 8.dp),
+        )
 
         // Failure list
         Column(
             verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.verticalScroll(rememberScrollState()),
         ) {
             if (filteredFailures.isEmpty()) {
                 Box(
@@ -193,6 +253,8 @@ private fun StatBox(
     label: String,
     value: String,
     color: Color,
+    delta: String? = null,
+    deltaPositive: Boolean = false,
 ) {
     val colors = JewelTheme.globalColors
 
@@ -203,12 +265,212 @@ private fun StatBox(
             fontWeight = FontWeight.Bold,
             color = color,
         )
+        if (delta != null) {
+            Text(
+                delta,
+                fontSize = 9.sp,
+                color = if (deltaPositive) Color(0xFF4CAF50) else Color(0xFFE53935),
+            )
+        }
         Text(
             label,
             fontSize = 10.sp,
             color = colors.text.normal.copy(alpha = 0.5f),
         )
     }
+}
+
+@Composable
+private fun EventTrendsSection(
+    data: List<TimelineDataPoint>,
+    aggregation: TimeAggregation,
+) {
+    val colors = JewelTheme.globalColors
+
+    // Calculate totals and deltas
+    val totalCrashes = data.sumOf { it.crashes }
+    val totalAnrs = data.sumOf { it.anrs }
+    val totalToolFailures = data.sumOf { it.toolFailures }
+
+    // Calculate delta (compare first half to second half as a simple approximation)
+    val halfPoint = data.size / 2
+    val recentCrashes = data.takeLast(halfPoint).sumOf { it.crashes }
+    val olderCrashes = data.take(halfPoint).sumOf { it.crashes }
+    val crashDelta = if (olderCrashes > 0) ((recentCrashes - olderCrashes) * 100 / olderCrashes) else 0
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
+            .padding(12.dp),
+    ) {
+        Text(
+            "Event Trends",
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = colors.text.normal.copy(alpha = 0.7f),
+            modifier = Modifier.padding(bottom = 12.dp),
+        )
+
+        // Stats row
+        Row(
+            horizontalArrangement = Arrangement.SpaceEvenly,
+            modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp),
+        ) {
+            StatBox(
+                label = "Crashes",
+                value = totalCrashes.toString(),
+                color = FailureType.Crash.color,
+                delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
+                deltaPositive = crashDelta < 0,
+            )
+            StatBox(
+                label = "ANRs",
+                value = totalAnrs.toString(),
+                color = FailureType.ANR.color,
+            )
+            StatBox(
+                label = "Tool Errors",
+                value = totalToolFailures.toString(),
+                color = FailureType.ToolCallFailure.color,
+            )
+            StatBox(
+                label = "Total",
+                value = (totalCrashes + totalAnrs + totalToolFailures).toString(),
+                color = colors.text.normal,
+            )
+        }
+
+        // Bar chart
+        FailureBarChart(data = data, aggregation = aggregation)
+    }
+}
+
+@Composable
+private fun FailureBarChart(
+    data: List<TimelineDataPoint>,
+    aggregation: TimeAggregation,
+) {
+    val colors = JewelTheme.globalColors
+    val maxValue = data.maxOfOrNull { it.total } ?: 1
+    val chartHeight = 80.dp
+
+    Column {
+        // Bars
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(chartHeight),
+            horizontalArrangement = Arrangement.spacedBy(2.dp),
+            verticalAlignment = Alignment.Bottom,
+        ) {
+            data.forEach { point ->
+                val barHeight = if (maxValue > 0) (point.total.toFloat() / maxValue) else 0f
+
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(chartHeight),
+                    verticalArrangement = Arrangement.Bottom,
+                ) {
+                    // Stacked bar: crashes (red) + ANRs (orange) + tool failures (purple)
+                    if (point.total > 0) {
+                        val crashHeight = point.crashes.toFloat() / point.total * barHeight
+                        val anrHeight = point.anrs.toFloat() / point.total * barHeight
+                        val toolHeight = point.toolFailures.toFloat() / point.total * barHeight
+
+                        if (point.toolFailures > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((chartHeight.value * toolHeight).dp)
+                                    .background(
+                                        FailureType.ToolCallFailure.color.copy(alpha = 0.8f),
+                                        RoundedCornerShape(topStart = 2.dp, topEnd = 2.dp),
+                                    ),
+                            )
+                        }
+                        if (point.anrs > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((chartHeight.value * anrHeight).dp)
+                                    .background(FailureType.ANR.color.copy(alpha = 0.8f)),
+                            )
+                        }
+                        if (point.crashes > 0) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height((chartHeight.value * crashHeight).dp)
+                                    .background(
+                                        FailureType.Crash.color.copy(alpha = 0.8f),
+                                        RoundedCornerShape(bottomStart = 2.dp, bottomEnd = 2.dp),
+                                    ),
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // X-axis labels (show every few labels to avoid crowding)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 4.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+        ) {
+            val labelStep = when {
+                data.size <= 7 -> 1
+                data.size <= 14 -> 2
+                data.size <= 24 -> 4
+                else -> 10
+            }
+            data.filterIndexed { index, _ -> index % labelStep == 0 || index == data.lastIndex }
+                .forEach { point ->
+                    Text(
+                        point.label,
+                        fontSize = 8.sp,
+                        color = colors.text.normal.copy(alpha = 0.4f),
+                    )
+                }
+        }
+    }
+}
+
+/**
+ * Generate mock timeline data for demonstration
+ */
+private fun generateMockTimelineData(aggregation: TimeAggregation): List<TimelineDataPoint> {
+    val buckets = aggregation.buckets
+    val random = kotlin.random.Random(42) // Fixed seed for consistent data
+
+    return (0 until buckets).map { i ->
+        val label = when (aggregation) {
+            TimeAggregation.Minute -> "${60 - i}m"
+            TimeAggregation.Hour -> "${23 - i}:00"
+            TimeAggregation.Day -> listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(6 - i % 7) { "?" }
+            TimeAggregation.Week -> "W${4 - i}"
+        }
+
+        // Generate realistic-looking failure data with some variance
+        val baseCrashes = when (aggregation) {
+            TimeAggregation.Minute -> random.nextInt(0, 5)
+            TimeAggregation.Hour -> random.nextInt(2, 15)
+            TimeAggregation.Day -> random.nextInt(10, 50)
+            TimeAggregation.Week -> random.nextInt(30, 150)
+        }
+        val baseAnrs = baseCrashes / 3
+        val baseToolFailures = baseCrashes / 2
+
+        TimelineDataPoint(
+            label = label,
+            crashes = baseCrashes,
+            anrs = baseAnrs,
+            toolFailures = baseToolFailures,
+        )
+    }.reversed() // Oldest first
 }
 
 @Composable

@@ -4,6 +4,7 @@ package dev.jasonpearson.automobile.ide.navigation
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.ui.input.pointer.PointerEventType
@@ -20,8 +21,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,6 +48,7 @@ import org.jetbrains.jewel.ui.component.Tooltip
 import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
+import kotlin.math.sqrt
 
 // Layout constants
 private val NODE_WIDTH = 80.dp
@@ -74,6 +78,80 @@ fun NavigationCanvasView(
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
 
+    // Hover state for highlighting
+    var hoveredScreenName by remember { mutableStateOf<String?>(null) }
+    var hoveredTransitionId by remember { mutableStateOf<String?>(null) }
+
+    // Mouse position for edge hover detection
+    var mouseX by remember { mutableFloatStateOf(0f) }
+    var mouseY by remember { mutableFloatStateOf(0f) }
+
+    // Compute highlighted elements based on hover state
+    val highlightedScreens = remember(hoveredScreenName, hoveredTransitionId, transitions) {
+        when {
+            hoveredScreenName != null -> {
+                // Highlight hovered screen and all connected screens
+                val connected = mutableSetOf(hoveredScreenName!!)
+                transitions.filter { it.trigger != "back" }.forEach { t ->
+                    if (t.fromScreen == hoveredScreenName) connected.add(t.toScreen)
+                    if (t.toScreen == hoveredScreenName) connected.add(t.fromScreen)
+                }
+                connected
+            }
+            hoveredTransitionId != null -> {
+                // Highlight screens at both ends of the hovered edge
+                val transition = transitions.find { it.id == hoveredTransitionId }
+                if (transition != null) setOf(transition.fromScreen, transition.toScreen) else emptySet()
+            }
+            else -> emptySet()
+        }
+    }
+
+    val highlightedTransitions = remember(hoveredScreenName, hoveredTransitionId, transitions) {
+        when {
+            hoveredScreenName != null -> {
+                // Highlight all edges connected to hovered screen
+                transitions.filter { it.trigger != "back" }
+                    .filter { it.fromScreen == hoveredScreenName || it.toScreen == hoveredScreenName }
+                    .map { it.id }
+                    .toSet()
+            }
+            hoveredTransitionId != null -> setOf(hoveredTransitionId!!)
+            else -> emptySet()
+        }
+    }
+
+    // Compute edge hit zones for hover detection
+    // Each edge is represented by its start and end points (simplified from the full path)
+    data class EdgeHitZone(
+        val transitionId: String,
+        val startX: Float,
+        val startY: Float,
+        val endX: Float,
+        val endY: Float,
+    )
+
+    // Helper to compute distance from point to line segment
+    fun distanceToSegment(px: Float, py: Float, x1: Float, y1: Float, x2: Float, y2: Float): Float {
+        val dx = x2 - x1
+        val dy = y2 - y1
+        val lengthSquared = dx * dx + dy * dy
+
+        if (lengthSquared == 0f) {
+            // Segment is a point
+            return sqrt((px - x1) * (px - x1) + (py - y1) * (py - y1))
+        }
+
+        // Project point onto segment, clamped to [0, 1]
+        val t = maxOf(0f, minOf(1f, ((px - x1) * dx + (py - y1) * dy) / lengthSquared))
+
+        // Find projection point
+        val projX = x1 + t * dx
+        val projY = y1 + t * dy
+
+        return sqrt((px - projX) * (px - projX) + (py - projY) * (py - projY))
+    }
+
     // Compute node positions using D3-style force-directed layout
     val nodePositions = remember(screens, transitions) {
         computeNodePositions(screens, transitions, density)
@@ -87,7 +165,51 @@ fun NavigationCanvasView(
     // Convert dp to px for drawing
     val nodeWidthPx = with(density) { NODE_WIDTH.toPx() }
     val nodeHeightPx = with(density) { NODE_HEIGHT.toPx() }
+
+    // Compute edge hit zones
+    val edgeHitZones = remember(transitions, positionByName, nodeWidthPx, nodeHeightPx) {
+        val forwardTransitions = transitions.filter { it.trigger != "back" }
+        forwardTransitions.mapNotNull { transition ->
+            val fromPos = positionByName[transition.fromScreen]
+            val toPos = positionByName[transition.toScreen]
+            if (fromPos != null && toPos != null) {
+                EdgeHitZone(
+                    transitionId = transition.id,
+                    startX = fromPos.x + nodeWidthPx,  // Right edge of source
+                    startY = fromPos.y + nodeHeightPx / 2,  // Center Y
+                    endX = toPos.x,  // Left edge of target
+                    endY = toPos.y + nodeHeightPx / 2,  // Center Y
+                )
+            } else null
+        }
+    }
+
+    // Check edge hover when mouse moves (only if not hovering a screen)
+    LaunchedEffect(mouseX, mouseY, edgeHitZones, scale, offsetX, offsetY, hoveredScreenName) {
+        if (hoveredScreenName != null) {
+            // Screen hover takes precedence - clear edge hover
+            if (hoveredTransitionId != null) {
+                hoveredTransitionId = null
+            }
+        } else {
+            val hitThreshold = 15f  // Pixels from edge line to count as hit
+            val detectedEdge = edgeHitZones.find { zone ->
+                // Transform edge points to screen coordinates
+                val sx = zone.startX * scale + offsetX
+                val sy = zone.startY * scale + offsetY
+                val ex = zone.endX * scale + offsetX
+                val ey = zone.endY * scale + offsetY
+                distanceToSegment(mouseX, mouseY, sx, sy, ex, ey) < hitThreshold
+            }?.transitionId
+
+            if (detectedEdge != hoveredTransitionId) {
+                hoveredTransitionId = detectedEdge
+            }
+        }
+    }
     val arrowColor = colors.text.normal.copy(alpha = 0.3f)
+    val highlightedArrowColor = Color(0xFF4CAF50)  // Green highlight
+    val dimmedArrowColor = colors.text.normal.copy(alpha = 0.1f)  // Dimmed when something else is highlighted
 
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
@@ -121,6 +243,19 @@ fun NavigationCanvasView(
                         change.consume()
                         offsetX += dragAmount.x
                         offsetY += dragAmount.y
+                    }
+                }
+                .onPointerEvent(PointerEventType.Move) { event ->
+                    val pos = event.changes.firstOrNull()?.position
+                    if (pos != null) {
+                        mouseX = pos.x
+                        mouseY = pos.y
+                    }
+                }
+                .onPointerEvent(PointerEventType.Exit) {
+                    // Clear edge hover when mouse leaves canvas
+                    if (hoveredScreenName == null) {
+                        hoveredTransitionId = null
                     }
                 }
                 .onPointerEvent(PointerEventType.Scroll) { event ->
@@ -199,6 +334,54 @@ fun NavigationCanvasView(
                     }
                 }
 
+                // Build list of all node bounds for collision detection
+                data class NodeBounds(val name: String, val left: Float, val top: Float, val right: Float, val bottom: Float)
+                val allNodeBounds = nodePositions.map { pos ->
+                    NodeBounds(
+                        name = pos.screenId,
+                        left = pos.x * scale + offsetX,
+                        top = pos.y * scale + offsetY,
+                        right = (pos.x + nodeWidthPx) * scale + offsetX,
+                        bottom = (pos.y + nodeHeightPx) * scale + offsetY
+                    )
+                }
+
+                // Helper to check if a horizontal line segment intersects any node (excluding specific nodes)
+                val collisionMargin = 15f * scale  // Larger margin for better clearance
+                fun horizontalLineHitsNode(y: Float, x1: Float, x2: Float, excludeNodes: Set<String>): NodeBounds? {
+                    val minX = minOf(x1, x2)
+                    val maxX = maxOf(x1, x2)
+                    return allNodeBounds.firstOrNull { node ->
+                        node.name !in excludeNodes &&
+                        y >= node.top - collisionMargin && y <= node.bottom + collisionMargin &&
+                        maxX >= node.left - collisionMargin && minX <= node.right + collisionMargin
+                    }
+                }
+
+                // Helper to check if a vertical line segment intersects any node
+                fun verticalLineHitsNode(x: Float, y1: Float, y2: Float, excludeNodes: Set<String>): NodeBounds? {
+                    val minY = minOf(y1, y2)
+                    val maxY = maxOf(y1, y2)
+                    return allNodeBounds.firstOrNull { node ->
+                        node.name !in excludeNodes &&
+                        x >= node.left - collisionMargin && x <= node.right + collisionMargin &&
+                        maxY >= node.top - collisionMargin && minY <= node.bottom + collisionMargin
+                    }
+                }
+
+                // Find all nodes that a rectangular region intersects
+                fun nodesInRegion(x1: Float, y1: Float, x2: Float, y2: Float, excludeNodes: Set<String>): List<NodeBounds> {
+                    val minX = minOf(x1, x2)
+                    val maxX = maxOf(x1, x2)
+                    val minY = minOf(y1, y2)
+                    val maxY = maxOf(y1, y2)
+                    return allNodeBounds.filter { node ->
+                        node.name !in excludeNodes &&
+                        maxX >= node.left - collisionMargin && minX <= node.right + collisionMargin &&
+                        maxY >= node.top - collisionMargin && minY <= node.bottom + collisionMargin
+                    }
+                }
+
                 // Second pass: draw forward transitions with proper offsets
                 forwardTransitions.forEach { transition ->
                     val fromPos = positionByName[transition.fromScreen]
@@ -211,9 +394,15 @@ fun NavigationCanvasView(
                         val fromCenterX = (fromPos.x + nodeWidthPx / 2) * scale + offsetX
                         val fromTop = fromPos.y * scale + offsetY
                         val fromBottom = (fromPos.y + nodeHeightPx) * scale + offsetY
+                        val fromLeft = fromPos.x * scale + offsetX
 
                         val toLeft = toPos.x * scale + offsetX
+                        val toRight = (toPos.x + nodeWidthPx) * scale + offsetX
                         val toCenterY = (toPos.y + nodeHeightPx / 2) * scale + offsetY
+                        val toTop = toPos.y * scale + offsetY
+                        val toBottom = (toPos.y + nodeHeightPx) * scale + offsetY
+
+                        val excludeNodes = setOf(transition.fromScreen, transition.toScreen)
 
                         // Determine which exit side was chosen
                         val exitSide = when {
@@ -251,18 +440,12 @@ fun NavigationCanvasView(
                             }
                         }
 
-                        // Draw orthogonal path that avoids crossing source/target nodes
+                        // Draw orthogonal path that avoids crossing source/target nodes AND intermediate nodes
                         // Rule: edges MUST always approach entry point from the LEFT
                         val path = Path()
                         val r = cornerRadius
                         val padding = 30f * scale  // Clearance around nodes
                         val approachDistance = 40f * scale  // How far left of entry to start horizontal approach
-
-                        // Source and target node bounds (scaled)
-                        val srcTop = fromTop
-                        val srcBottom = fromBottom
-                        val tgtTop = toPos.y * scale + offsetY
-                        val tgtBottom = (toPos.y + nodeHeightPx) * scale + offsetY
 
                         // The approach point is always to the LEFT of the entry point
                         val approachX = endX - approachDistance
@@ -271,18 +454,23 @@ fun NavigationCanvasView(
 
                         when (exitSide) {
                             "right" -> {
-                                if (endX > startX && approachX > startX) {
-                                    // Target is to the right - route to approach point, then enter from left
-                                    if (abs(endY - startY) < 1f) {
-                                        // Same horizontal level - straight line to approach, then to entry
-                                        path.lineTo(approachX, startY)
-                                        path.lineTo(endX, endY)
-                                    } else {
-                                        // Different Y - need vertical segment
-                                        // Route: start → midpoint → down/up → approach → entry
-                                        val midX = (startX + approachX) / 2
-                                        val bendR = min(r, min(abs(midX - startX), abs(endY - startY)) / 2)
+                                // Check if direct horizontal path is clear (same Y level)
+                                val directPathClear = abs(endY - startY) < nodeHeightPx * scale * 0.3f &&
+                                    horizontalLineHitsNode(startY, startX, endX, excludeNodes) == null
 
+                                if (directPathClear) {
+                                    // Simple straight line
+                                    path.lineTo(endX, endY)
+                                } else {
+                                    // Check if simple 2-bend route works (go right, then up/down to end)
+                                    val midX = (startX + endX) / 2
+                                    val simpleVerticalHit = verticalLineHitsNode(midX, startY, endY, excludeNodes)
+                                    val simpleHorizontalHit1 = horizontalLineHitsNode(startY, startX, midX, excludeNodes)
+                                    val simpleHorizontalHit2 = horizontalLineHitsNode(endY, midX, endX, excludeNodes)
+
+                                    if (simpleVerticalHit == null && simpleHorizontalHit1 == null && simpleHorizontalHit2 == null) {
+                                        // Simple 2-bend route: right → down/up → right
+                                        val bendR = min(r, min(abs(midX - startX), abs(endY - startY).coerceAtLeast(1f)) / 2)
                                         path.lineTo(midX - bendR, startY)
                                         if (endY > startY) {
                                             path.quadraticTo(midX, startY, midX, startY + bendR)
@@ -294,43 +482,70 @@ fun NavigationCanvasView(
                                             path.quadraticTo(midX, endY, midX + bendR, endY)
                                         }
                                         path.lineTo(endX, endY)
-                                    }
-                                } else {
-                                    // Target is to the left - need to route around and still approach from left
-                                    // Route: go right, then up/down, then all the way left past target, then right to entry
-                                    val extendX = startX + padding
-                                    val routeY = if (endY < srcTop) minOf(srcTop, tgtTop) - padding else maxOf(srcBottom, tgtBottom) + padding
-                                    val bendR = min(r, padding / 2)
+                                    } else {
+                                        // Need to route around blocking nodes - find clear path above or below
+                                        val allBlockingNodes = nodesInRegion(startX, minOf(startY, endY) - padding, endX, maxOf(startY, endY) + padding, excludeNodes)
 
-                                    // Go right first
-                                    path.lineTo(extendX - bendR, startY)
-                                    if (routeY < startY) {
-                                        path.quadraticTo(extendX, startY, extendX, startY - bendR)
-                                        path.lineTo(extendX, routeY + bendR)
-                                        path.quadraticTo(extendX, routeY, extendX - bendR, routeY)
-                                    } else {
-                                        path.quadraticTo(extendX, startY, extendX, startY + bendR)
-                                        path.lineTo(extendX, routeY - bendR)
-                                        path.quadraticTo(extendX, routeY, extendX - bendR, routeY)
+                                        val topRoute = if (allBlockingNodes.isEmpty()) {
+                                            minOf(startY, endY) - padding
+                                        } else {
+                                            allBlockingNodes.minOf { it.top } - padding * 1.5f
+                                        }
+                                        val bottomRoute = if (allBlockingNodes.isEmpty()) {
+                                            maxOf(startY, endY) + padding
+                                        } else {
+                                            allBlockingNodes.maxOf { it.bottom } + padding * 1.5f
+                                        }
+
+                                        // Choose route closer to average Y
+                                        val avgY = (startY + endY) / 2
+                                        val routeY = if (abs(topRoute - avgY) < abs(bottomRoute - avgY)) topRoute else bottomRoute
+
+                                        val bendR = min(r, min(abs(midX - startX), abs(routeY - startY).coerceAtLeast(padding)) / 2)
+
+                                        path.lineTo(midX - bendR, startY)
+                                        if (routeY > startY) {
+                                            path.quadraticTo(midX, startY, midX, startY + bendR)
+                                            path.lineTo(midX, routeY - bendR)
+                                            path.quadraticTo(midX, routeY, midX + bendR, routeY)
+                                        } else if (routeY < startY) {
+                                            path.quadraticTo(midX, startY, midX, startY - bendR)
+                                            path.lineTo(midX, routeY + bendR)
+                                            path.quadraticTo(midX, routeY, midX + bendR, routeY)
+                                        } else {
+                                            path.lineTo(midX + bendR, routeY)
+                                        }
+
+                                        // Go to end, adjusting Y if needed
+                                        if (abs(routeY - endY) > 1f) {
+                                            path.lineTo(approachX - bendR, routeY)
+                                            if (endY > routeY) {
+                                                path.quadraticTo(approachX, routeY, approachX, routeY + bendR)
+                                                path.lineTo(approachX, endY - bendR)
+                                                path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                            } else {
+                                                path.quadraticTo(approachX, routeY, approachX, routeY - bendR)
+                                                path.lineTo(approachX, endY + bendR)
+                                                path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                            }
+                                        }
+                                        path.lineTo(endX, endY)
                                     }
-                                    // Go all the way left past the approach point
-                                    path.lineTo(approachX + bendR, routeY)
-                                    if (routeY < endY) {
-                                        path.quadraticTo(approachX, routeY, approachX, routeY + bendR)
-                                        path.lineTo(approachX, endY - bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    } else {
-                                        path.quadraticTo(approachX, routeY, approachX, routeY - bendR)
-                                        path.lineTo(approachX, endY + bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    }
-                                    // Final approach from left to entry
-                                    path.lineTo(endX, endY)
                                 }
                             }
                             "top" -> {
-                                // Exit up, must still enter from left
-                                val extendY = startY - padding
+                                // Exit up - find all nodes in the horizontal range and route above them
+                                val blockingNodes = nodesInRegion(
+                                    minOf(startX, approachX) - padding,
+                                    Float.MIN_VALUE,
+                                    maxOf(startX, approachX, endX) + padding,
+                                    startY
+                                , excludeNodes)
+                                val extendY = if (blockingNodes.isEmpty()) {
+                                    startY - padding * 1.5f
+                                } else {
+                                    blockingNodes.minOf { it.top } - padding * 1.5f
+                                }
                                 val bendR = min(r, padding / 2)
 
                                 // Go up from exit
@@ -339,36 +554,36 @@ fun NavigationCanvasView(
 
                                 // Route to approach point X
                                 if (approachX > startX) {
-                                    // Approach is to the right - go right then down
                                     path.lineTo(approachX - bendR, extendY)
-                                    if (endY > extendY) {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
-                                        path.lineTo(approachX, endY - bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    } else {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
-                                        path.lineTo(approachX, endY + bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    }
                                 } else {
-                                    // Approach is to the left - go left then down
                                     path.lineTo(approachX + bendR, extendY)
-                                    if (endY > extendY) {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
-                                        path.lineTo(approachX, endY - bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    } else {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
-                                        path.lineTo(approachX, endY + bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    }
                                 }
-                                // Final approach from left
+
+                                // Go down to end Y
+                                if (endY > extendY) {
+                                    path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
+                                    path.lineTo(approachX, endY - bendR)
+                                    path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                } else {
+                                    path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
+                                    path.lineTo(approachX, endY + bendR)
+                                    path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                }
                                 path.lineTo(endX, endY)
                             }
                             else -> { // bottom
-                                // Exit down, must still enter from left
-                                val extendY = startY + padding
+                                // Exit down - find all nodes in the horizontal range and route below them
+                                val blockingNodes = nodesInRegion(
+                                    minOf(startX, approachX) - padding,
+                                    startY,
+                                    maxOf(startX, approachX, endX) + padding,
+                                    Float.MAX_VALUE
+                                , excludeNodes)
+                                val extendY = if (blockingNodes.isEmpty()) {
+                                    startY + padding * 1.5f
+                                } else {
+                                    blockingNodes.maxOf { it.bottom } + padding * 1.5f
+                                }
                                 val bendR = min(r, padding / 2)
 
                                 // Go down from exit
@@ -377,39 +592,39 @@ fun NavigationCanvasView(
 
                                 // Route to approach point X
                                 if (approachX > startX) {
-                                    // Approach is to the right - go right then up/down
                                     path.lineTo(approachX - bendR, extendY)
-                                    if (endY > extendY) {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
-                                        path.lineTo(approachX, endY - bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    } else {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
-                                        path.lineTo(approachX, endY + bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    }
                                 } else {
-                                    // Approach is to the left - go left then up/down
                                     path.lineTo(approachX + bendR, extendY)
-                                    if (endY > extendY) {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
-                                        path.lineTo(approachX, endY - bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    } else {
-                                        path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
-                                        path.lineTo(approachX, endY + bendR)
-                                        path.quadraticTo(approachX, endY, approachX + bendR, endY)
-                                    }
                                 }
-                                // Final approach from left
+
+                                // Go up to end Y
+                                if (endY > extendY) {
+                                    path.quadraticTo(approachX, extendY, approachX, extendY + bendR)
+                                    path.lineTo(approachX, endY - bendR)
+                                    path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                } else {
+                                    path.quadraticTo(approachX, extendY, approachX, extendY - bendR)
+                                    path.lineTo(approachX, endY + bendR)
+                                    path.quadraticTo(approachX, endY, approachX + bendR, endY)
+                                }
                                 path.lineTo(endX, endY)
                             }
                         }
 
+                        // Determine edge color based on highlight state
+                        val isHighlighted = transition.id in highlightedTransitions
+                        val hasAnyHighlight = highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
+                        val edgeColor = when {
+                            isHighlighted -> highlightedArrowColor
+                            hasAnyHighlight -> dimmedArrowColor
+                            else -> arrowColor
+                        }
+                        val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
+
                         drawPath(
                             path = path,
-                            color = arrowColor,
-                            style = Stroke(width = strokeWidth, cap = StrokeCap.Round),
+                            color = edgeColor,
+                            style = Stroke(width = edgeStrokeWidth, cap = StrokeCap.Round),
                         )
                     }
                 }
@@ -418,6 +633,8 @@ fun NavigationCanvasView(
             // Render screen nodes as Composables
             nodePositions.forEach { pos ->
                 val screen = screenByName[pos.screenId] ?: return@forEach
+
+                val hasAnyHighlight = highlightedScreens.isNotEmpty() || highlightedTransitions.isNotEmpty()
 
                 Box(
                     modifier = Modifier
@@ -435,7 +652,12 @@ fun NavigationCanvasView(
                 ) {
                     ScreenNodeCard(
                         screen = screen,
+                        isHighlighted = screen.name in highlightedScreens,
+                        isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
                         onClick = { onScreenSelected(screen.id) },
+                        onHoverChange = { isHovered ->
+                            hoveredScreenName = if (isHovered) screen.name else null
+                        },
                     )
                 }
             }
@@ -462,7 +684,10 @@ fun NavigationCanvasView(
 @Composable
 private fun ScreenNodeCard(
     screen: ScreenNode,
+    isHighlighted: Boolean,
+    isDimmed: Boolean,
     onClick: () -> Unit,
+    onHoverChange: (Boolean) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
     val coverageColor = when {
@@ -470,6 +695,15 @@ private fun ScreenNodeCard(
         screen.testCoverage >= 50 -> Color(0xFFFFC107)
         else -> Color(0xFFFF5722)
     }
+
+    // Visual states based on highlighting
+    val bgAlpha = when {
+        isHighlighted -> 0.25f
+        isDimmed -> 0.05f
+        else -> 0.1f
+    }
+    val borderColor = if (isHighlighted) Color(0xFF4CAF50) else Color.Transparent
+    val textAlpha = if (isDimmed) 0.4f else 0.8f
 
     Tooltip(
         tooltip = {
@@ -484,9 +718,15 @@ private fun ScreenNodeCard(
         Column(
             modifier = Modifier
                 .size(NODE_WIDTH, NODE_HEIGHT)
-                .background(colors.text.normal.copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                .background(colors.text.normal.copy(alpha = bgAlpha), RoundedCornerShape(8.dp))
+                .then(
+                    if (isHighlighted) Modifier.border(2.dp, borderColor, RoundedCornerShape(8.dp))
+                    else Modifier
+                )
                 .clickable(onClick = onClick)
                 .pointerHoverIcon(PointerIcon.Hand)
+                .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
+                .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
                 .padding(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
@@ -506,7 +746,7 @@ private fun ScreenNodeCard(
             Text(
                 text = screen.name.take(12) + if (screen.name.length > 12) "…" else "",
                 fontSize = 9.sp,
-                color = colors.text.normal.copy(alpha = 0.8f),
+                color = colors.text.normal.copy(alpha = textAlpha),
                 modifier = Modifier.padding(top = 4.dp),
             )
 
@@ -520,7 +760,7 @@ private fun ScreenNodeCard(
                 Text(
                     "${screen.testCoverage}%",
                     fontSize = 8.sp,
-                    color = colors.text.normal.copy(alpha = 0.5f),
+                    color = colors.text.normal.copy(alpha = if (isDimmed) 0.3f else 0.5f),
                 )
             }
         }
@@ -588,233 +828,21 @@ private fun computeNodePositions(
 ): List<NodePosition> {
     if (screens.isEmpty()) return emptyList()
 
-    // Build edges and compute node degrees (for adaptive link strength)
-    val screenNames = screens.map { it.name }.toSet()
-    val edges = mutableListOf<Triple<String, String, Float>>() // source, target, strength
-    val degree = mutableMapOf<String, Int>()
-
-    // First pass: count degrees
-    transitions.forEach { t ->
-        if (t.fromScreen in screenNames && t.toScreen in screenNames) {
-            degree[t.fromScreen] = (degree[t.fromScreen] ?: 0) + 1
-            degree[t.toScreen] = (degree[t.toScreen] ?: 0) + 1
-        }
-    }
-
-    // Second pass: build edges with D3-style adaptive strength
-    val seenEdges = mutableSetOf<Pair<String, String>>()
-    transitions.forEach { t ->
-        if (t.fromScreen in screenNames && t.toScreen in screenNames) {
-            val edge = if (t.fromScreen < t.toScreen) Pair(t.fromScreen, t.toScreen) else Pair(t.toScreen, t.fromScreen)
-            if (edge !in seenEdges) {
-                seenEdges.add(edge)
-                // D3 link strength: 1 / min(degree(source), degree(target))
-                val strength = 1f / minOf(degree[t.fromScreen] ?: 1, degree[t.toScreen] ?: 1)
-                edges.add(Triple(t.fromScreen, t.toScreen, strength))
-            }
-        }
-    }
-
-    // Parameters tuned for our node size (80x140dp)
+    // Simple grid layout based on discovery order
     val nodeWidth = with(density) { NODE_WIDTH.toPx() }
     val nodeHeight = with(density) { NODE_HEIGHT.toPx() }
-    val minNodeDistance = kotlin.math.sqrt(nodeWidth * nodeWidth + nodeHeight * nodeHeight) * 1.2f  // Node diagonal + padding
-    val linkDistance = with(density) { 300.dp.toPx() }  // Enough space between connected nodes
-    val chargeStrength = -15000f  // Base repulsion (leaves get weak, hubs get strong)
-    val centerStrength = 0.03f   // Centering to keep things on screen
+    val horizontalSpacing = nodeWidth * 1.8f
+    val verticalSpacing = nodeHeight * 1.4f
 
-    // Initialize positions in a circle (better than grid for force layout)
+    // Sort by discovery time and lay out left-to-right
+    val sortedScreens = screens.sortedBy { it.discoveredAt }
     val positions = mutableMapOf<String, Pair<Float, Float>>()
-    val velocities = mutableMapOf<String, Pair<Float, Float>>()
-    val radius = linkDistance * kotlin.math.sqrt(screens.size.toFloat())
 
-    screens.forEachIndexed { index, screen ->
-        val angle = 2 * kotlin.math.PI * index / screens.size
+    sortedScreens.forEachIndexed { index, screen ->
         positions[screen.name] = Pair(
-            (radius * kotlin.math.cos(angle)).toFloat(),
-            (radius * kotlin.math.sin(angle)).toFloat()
+            index * horizontalSpacing,
+            0f
         )
-        velocities[screen.name] = Pair(0f, 0f)
-    }
-
-    // Center is at origin (0, 0)
-    val centerX = 0f
-    val centerY = 0f
-
-    // D3-style force simulation parameters
-    var alpha = 1f
-    val alphaMin = 0.001f
-    val alphaDecay = 0.0228f  // D3 default: 1 - pow(0.001, 1/300)
-    val alphaTarget = 0f
-    val velocityDecay = 0.4f  // D3 default friction
-
-    // Run simulation until alpha < alphaMin (~300 iterations)
-    while (alpha >= alphaMin) {
-        // Update alpha (exponential cooling toward target)
-        alpha += (alphaTarget - alpha) * alphaDecay
-
-        val forces = screens.associate { it.name to Pair(0f, 0f) }.toMutableMap()
-
-        // 1. CHARGE FORCE (many-body repulsion) - simple like D3
-        for (i in screens.indices) {
-            for (j in i + 1 until screens.size) {
-                val node1 = screens[i].name
-                val node2 = screens[j].name
-                val pos1 = positions[node1]!!
-                val pos2 = positions[node2]!!
-
-                var dx = pos2.first - pos1.first
-                var dy = pos2.second - pos1.second
-                var dist = kotlin.math.sqrt(dx * dx + dy * dy)
-
-                if (dist < 1f) {
-                    dx = (Math.random().toFloat() - 0.5f)
-                    dy = (Math.random().toFloat() - 0.5f)
-                    dist = kotlin.math.sqrt(dx * dx + dy * dy)
-                }
-
-                // Simple charge force like D3 default
-                val force = chargeStrength * alpha / dist
-                val fx = force * dx / dist
-                val fy = force * dy / dist
-
-                forces[node1] = Pair(forces[node1]!!.first - fx, forces[node1]!!.second - fy)
-                forces[node2] = Pair(forces[node2]!!.first + fx, forces[node2]!!.second + fy)
-            }
-        }
-
-        // 2. COLLISION FORCE (like D3 forceCollide) - prevent overlap
-        for (i in screens.indices) {
-            for (j in i + 1 until screens.size) {
-                val node1 = screens[i].name
-                val node2 = screens[j].name
-                val pos1 = positions[node1]!!
-                val pos2 = positions[node2]!!
-
-                var dx = pos2.first - pos1.first
-                var dy = pos2.second - pos1.second
-                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-
-                if (dist < minNodeDistance && dist > 0) {
-                    // Push nodes apart to reach minNodeDistance
-                    val overlap = minNodeDistance - dist
-                    val pushStrength = overlap * 0.5f  // Each node moves half the overlap
-                    val nx = dx / dist
-                    val ny = dy / dist
-
-                    forces[node1] = Pair(forces[node1]!!.first - nx * pushStrength, forces[node1]!!.second - ny * pushStrength)
-                    forces[node2] = Pair(forces[node2]!!.first + nx * pushStrength, forces[node2]!!.second + ny * pushStrength)
-                }
-            }
-        }
-
-        // 3. LINK FORCE - always pull connected nodes closer (minimize link length)
-        edges.forEach { (source, target, strength) ->
-            val pos1 = positions[source]!!
-            val pos2 = positions[target]!!
-
-            val dx = pos2.first - pos1.first
-            val dy = pos2.second - pos1.second
-            val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-
-            if (dist > minNodeDistance) {
-                // Pull toward each other - strength proportional to distance
-                val pullStrength = (dist - minNodeDistance) * 0.05f * alpha * strength
-                val nx = dx / dist
-                val ny = dy / dist
-
-                forces[source] = Pair(forces[source]!!.first + nx * pullStrength, forces[source]!!.second + ny * pullStrength)
-                forces[target] = Pair(forces[target]!!.first - nx * pullStrength, forces[target]!!.second - ny * pullStrength)
-            }
-        }
-
-        // 4. POSITION FORCES (forceX, forceY) + time-based horizontal bias
-        // Older screens pull left, newer screens (>50% median) pull right
-        val sortedByTime = screens.sortedBy { it.discoveredAt }
-        val medianTime = sortedByTime[sortedByTime.size / 2].discoveredAt
-        val oldestTime = sortedByTime.first().discoveredAt
-        val newestTime = sortedByTime.last().discoveredAt
-        val timeRange = (newestTime - oldestTime).coerceAtLeast(1L)
-
-        screens.forEach { screen ->
-            val pos = positions[screen.name]!!
-
-            // Base centering force (Y only - let X be controlled by time)
-            val fy = (centerY - pos.second) * centerStrength * alpha
-
-            // Time-based X force: older = left, newer = right
-            val timePosition = (screen.discoveredAt - oldestTime).toFloat() / timeRange // 0 = oldest, 1 = newest
-            val targetX = if (screen.discoveredAt <= medianTime) {
-                // Older than median: pull left (stronger for oldest)
-                centerX - (1f - timePosition) * minNodeDistance * 3f
-            } else {
-                // Newer than median: pull slightly right
-                centerX + timePosition * minNodeDistance * 1.5f
-            }
-            val fx = (targetX - pos.first) * centerStrength * 2f * alpha
-
-            forces[screen.name] = Pair(
-                forces[screen.name]!!.first + fx,
-                forces[screen.name]!!.second + fy
-            )
-        }
-
-        // Apply forces using velocity Verlet integration
-        screens.forEach { screen ->
-            val vel = velocities[screen.name]!!
-            val force = forces[screen.name]!!
-
-            // Add force to velocity
-            var vx = vel.first + force.first
-            var vy = vel.second + force.second
-
-            // Apply velocity decay (friction)
-            vx *= (1f - velocityDecay)
-            vy *= (1f - velocityDecay)
-
-            velocities[screen.name] = Pair(vx, vy)
-
-            // Update position
-            val pos = positions[screen.name]!!
-            positions[screen.name] = Pair(pos.first + vx, pos.second + vy)
-        }
-    }
-
-    // POST-PROCESS: Run collision resolution passes to eliminate remaining overlaps
-    var collisionIterations = 0
-    while (collisionIterations < 100) {
-        collisionIterations++
-        var anyOverlap = false
-        for (i in screens.indices) {
-            for (j in i + 1 until screens.size) {
-                val node1 = screens[i].name
-                val node2 = screens[j].name
-                val pos1 = positions[node1]!!
-                val pos2 = positions[node2]!!
-
-                var dx = pos2.first - pos1.first
-                var dy = pos2.second - pos1.second
-                val dist = kotlin.math.sqrt(dx * dx + dy * dy)
-
-                if (dist < minNodeDistance) {
-                    anyOverlap = true
-                    if (dist > 0.1f) {
-                        val overlap = (minNodeDistance - dist) / 2f + 1f
-                        val nx = dx / dist
-                        val ny = dy / dist
-                        positions[node1] = Pair(pos1.first - nx * overlap, pos1.second - ny * overlap)
-                        positions[node2] = Pair(pos2.first + nx * overlap, pos2.second + ny * overlap)
-                    } else {
-                        // Nodes at same position - push apart randomly
-                        val angle = Math.random() * 2 * kotlin.math.PI
-                        val push = minNodeDistance / 2f
-                        positions[node1] = Pair(pos1.first - (push * kotlin.math.cos(angle)).toFloat(), pos1.second - (push * kotlin.math.sin(angle)).toFloat())
-                        positions[node2] = Pair(pos2.first + (push * kotlin.math.cos(angle)).toFloat(), pos2.second + (push * kotlin.math.sin(angle)).toFloat())
-                    }
-                }
-            }
-        }
-        if (!anyOverlap) break  // Early exit if no overlaps
     }
 
     // Center the result in the viewport

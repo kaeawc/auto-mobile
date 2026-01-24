@@ -41,9 +41,9 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.component.Link
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
+import dev.jasonpearson.automobile.ide.failures.FailuresDashboard
 import dev.jasonpearson.automobile.ide.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
@@ -58,9 +58,6 @@ enum class Dashboard(val title: String, val icon: String) {
   Storage("Storage", "💾"),
   Failures("Failures", "💥"),
 }
-
-// Reliability Dashboard sections
-enum class ReliabilitySection { Overview, FailureDetail }
 
 // Device types for icons
 enum class DeviceType { AndroidEmulator, iOSSimulator }
@@ -187,7 +184,16 @@ fun AutoMobileToolWindowContent() {
         )
         Dashboard.Layout -> LayoutInspectorDashboard()
         Dashboard.Storage -> StorageDashboard()
-        Dashboard.Failures -> Box(Modifier.fillMaxSize().padding(16.dp)) { FailuresDashboard() }
+        Dashboard.Failures -> FailuresDashboard(
+            onNavigateToScreen = { screenName ->
+                // Switch to Navigation tab and highlight the screen
+                selectedIndex = dashboardOrder.indexOf(Dashboard.Navigation)
+            },
+            onNavigateToTest = { testName ->
+                // Switch to Test tab
+                selectedIndex = dashboardOrder.indexOf(Dashboard.Test)
+            },
+        )
       }
     }
 
@@ -618,118 +624,4 @@ private fun DraggableTabs(
             }
         }
     }
-}
-
-@Composable
-private fun FailuresDashboard() {
-  var currentSection by remember { mutableStateOf(ReliabilitySection.Overview) }
-
-  when (currentSection) {
-    ReliabilitySection.Overview ->
-        DashboardOverview(
-            title = "Failures",
-            description = "Centralized failure intelligence for crashes and ANRs.",
-            sections =
-                listOf(
-                    SectionItem("Crash & ANR Overview", "Failure list with frequency and impact") {
-                      currentSection = ReliabilitySection.FailureDetail
-                    },
-                    SectionItem("Failure Detail", "Full context of a failure event") {
-                      currentSection = ReliabilitySection.FailureDetail
-                    },
-                ),
-        )
-    ReliabilitySection.FailureDetail ->
-        SectionDetail(
-            title = "Failure Detail",
-            description = "Full context of a failure event.",
-            features =
-                listOf(
-                    "Stack trace",
-                    "Screen at failure",
-                    "Test context",
-                    "Performance state",
-                    "Network state",
-                ),
-            onBack = { currentSection = ReliabilitySection.Overview },
-        )
-  }
-}
-
-private data class SectionItem(
-    val title: String,
-    val description: String,
-    val onClick: () -> Unit,
-)
-
-@Composable
-private fun DashboardOverview(title: String, description: String, sections: List<SectionItem>) {
-  val colors = JewelTheme.globalColors
-
-  Column(modifier = Modifier.fillMaxSize()) {
-    Text(title, fontSize = 16.sp)
-    Text(
-        description,
-        color = colors.text.normal.copy(alpha = 0.7f),
-        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
-    )
-
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-      sections.forEach { section ->
-        Column(
-            modifier =
-                Modifier.fillMaxWidth()
-                    .clickable(onClick = section.onClick)
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(vertical = 4.dp),
-        ) {
-          Link(section.title, onClick = section.onClick)
-          Text(
-              section.description,
-              color = colors.text.normal.copy(alpha = 0.5f),
-              fontSize = 12.sp,
-              modifier = Modifier.padding(start = 2.dp),
-          )
-        }
-      }
-    }
-  }
-}
-
-@Composable
-private fun SectionDetail(
-    title: String,
-    description: String,
-    features: List<String>,
-    onBack: () -> Unit,
-) {
-  val colors = JewelTheme.globalColors
-
-  Column(modifier = Modifier.fillMaxSize()) {
-    Row(
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-        modifier = Modifier.padding(bottom = 8.dp),
-    ) {
-      Link("← Back", onClick = onBack)
-    }
-
-    Text(title, fontSize = 16.sp)
-    Text(
-        description,
-        color = colors.text.normal.copy(alpha = 0.7f),
-        modifier = Modifier.padding(top = 4.dp, bottom = 16.dp),
-    )
-
-    Text("Features:", fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.6f))
-    Column(modifier = Modifier.padding(top = 8.dp)) {
-      features.forEach { feature ->
-        Text(
-            "• $feature",
-            color = colors.text.normal.copy(alpha = 0.5f),
-            modifier = Modifier.padding(vertical = 2.dp),
-        )
-      }
-    }
-  }
 }

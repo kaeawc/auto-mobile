@@ -31,8 +31,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import kotlin.math.abs
+import kotlin.math.min
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -185,7 +189,7 @@ fun NavigationCanvasView(
     val nodeWidthPx = with(density) { NODE_WIDTH.toPx() }
     val nodeHeightPx = with(density) { NODE_HEIGHT.toPx() }
 
-    // Compute edge hit zones (center to center, matching actual line drawing)
+    // Compute edge hit zones (right edge to left edge, matching actual line drawing)
     val edgeHitZones = remember(transitions, positionByName, nodeWidthPx, nodeHeightPx) {
         val forwardTransitions = transitions.filter { it.trigger != "back" }
         forwardTransitions.mapNotNull { transition ->
@@ -194,9 +198,9 @@ fun NavigationCanvasView(
             if (fromPos != null && toPos != null) {
                 EdgeHitZone(
                     transitionId = transition.id,
-                    startX = fromPos.x + nodeWidthPx / 2,  // Center X
+                    startX = fromPos.x + nodeWidthPx,  // Right edge
                     startY = fromPos.y + nodeHeightPx / 2,  // Center Y
-                    endX = toPos.x + nodeWidthPx / 2,  // Center X
+                    endX = toPos.x,  // Left edge
                     endY = toPos.y + nodeHeightPx / 2,  // Center Y
                 )
             } else null
@@ -289,22 +293,89 @@ fun NavigationCanvasView(
                     }
                 }
                 .drawBehind {
-                // Draw simple direct lines between node centers
-                val strokeWidth = 8f * scale  // 4x thicker
+                // Draw smooth curved edges between closest points on nodes
+                val strokeWidth = 4f * scale
 
                 // Filter out back press transitions
                 val forwardTransitions = transitions.filter { it.trigger != "back" }
+
+                // Edge point data class
+                data class EdgePoint(val x: Float, val y: Float, val side: String)
 
                 forwardTransitions.forEach { transition ->
                     val fromPos = positionByName[transition.fromScreen]
                     val toPos = positionByName[transition.toScreen]
 
                     if (fromPos != null && toPos != null) {
-                        // Calculate center points of each node
-                        val startX = (fromPos.x + nodeWidthPx / 2) * scale + offsetX
-                        val startY = (fromPos.y + nodeHeightPx / 2) * scale + offsetY
-                        val endX = (toPos.x + nodeWidthPx / 2) * scale + offsetX
-                        val endY = (toPos.y + nodeHeightPx / 2) * scale + offsetY
+                        // Calculate all edge midpoints for source node
+                        val fromLeft = EdgePoint(fromPos.x * scale + offsetX, (fromPos.y + nodeHeightPx / 2) * scale + offsetY, "left")
+                        val fromRight = EdgePoint((fromPos.x + nodeWidthPx) * scale + offsetX, (fromPos.y + nodeHeightPx / 2) * scale + offsetY, "right")
+                        val fromTop = EdgePoint((fromPos.x + nodeWidthPx / 2) * scale + offsetX, fromPos.y * scale + offsetY, "top")
+                        val fromBottom = EdgePoint((fromPos.x + nodeWidthPx / 2) * scale + offsetX, (fromPos.y + nodeHeightPx) * scale + offsetY, "bottom")
+
+                        // Calculate all edge midpoints for target node
+                        val toLeft = EdgePoint(toPos.x * scale + offsetX, (toPos.y + nodeHeightPx / 2) * scale + offsetY, "left")
+                        val toRight = EdgePoint((toPos.x + nodeWidthPx) * scale + offsetX, (toPos.y + nodeHeightPx / 2) * scale + offsetY, "right")
+                        val toTop = EdgePoint((toPos.x + nodeWidthPx / 2) * scale + offsetX, toPos.y * scale + offsetY, "top")
+                        val toBottom = EdgePoint((toPos.x + nodeWidthPx / 2) * scale + offsetX, (toPos.y + nodeHeightPx) * scale + offsetY, "bottom")
+
+                        val fromPoints = listOf(fromRight, fromBottom, fromTop, fromLeft)  // Priority order
+                        val toPoints = listOf(toLeft, toTop, toBottom, toRight)  // Priority order
+
+                        // Find the pair of points with minimum distance
+                        fun dist(p1: EdgePoint, p2: EdgePoint) =
+                            kotlin.math.sqrt((p2.x - p1.x) * (p2.x - p1.x) + (p2.y - p1.y) * (p2.y - p1.y))
+
+                        // Deterministic side priority (lower = preferred when distances are close)
+                        fun sidePriority(fromSide: String, toSide: String): Int {
+                            val fromPriority = when (fromSide) {
+                                "right" -> 0
+                                "bottom" -> 1
+                                "top" -> 2
+                                else -> 3  // left
+                            }
+                            val toPriority = when (toSide) {
+                                "left" -> 0
+                                "top" -> 1
+                                "bottom" -> 2
+                                else -> 3  // right
+                            }
+                            return fromPriority * 4 + toPriority
+                        }
+
+                        // Find minimum distance first
+                        var minDist = Float.MAX_VALUE
+                        for (fp in fromPoints) {
+                            for (tp in toPoints) {
+                                val d = dist(fp, tp)
+                                if (d < minDist) minDist = d
+                            }
+                        }
+
+                        // Find best pair within 15% of minimum distance, using priority as tie-breaker
+                        val margin = minDist * 0.15f
+                        var bestFrom = fromRight
+                        var bestTo = toLeft
+                        var bestPriority = Int.MAX_VALUE
+
+                        for (fp in fromPoints) {
+                            for (tp in toPoints) {
+                                val d = dist(fp, tp)
+                                if (d <= minDist + margin) {
+                                    val priority = sidePriority(fp.side, tp.side)
+                                    if (priority < bestPriority) {
+                                        bestPriority = priority
+                                        bestFrom = fp
+                                        bestTo = tp
+                                    }
+                                }
+                            }
+                        }
+
+                        val startX = bestFrom.x
+                        val startY = bestFrom.y
+                        val endX = bestTo.x
+                        val endY = bestTo.y
 
                         // Determine edge color based on highlight state
                         val isHighlighted = transition.id in highlightedTransitions
@@ -316,13 +387,43 @@ fun NavigationCanvasView(
                         }
                         val edgeStrokeWidth = if (isHighlighted) strokeWidth * 1.5f else strokeWidth
 
-                        // Draw simple line
-                        drawLine(
+                        // Build smooth curved path using cubic bezier
+                        val path = Path()
+                        path.moveTo(startX, startY)
+
+                        // Control point offset - extends perpendicular to the edge
+                        val curveStrength = minDist * 0.4f
+
+                        // Control point 1: extends outward from start point based on which side
+                        val ctrl1X = when (bestFrom.side) {
+                            "left" -> startX - curveStrength
+                            "right" -> startX + curveStrength
+                            else -> startX
+                        }
+                        val ctrl1Y = when (bestFrom.side) {
+                            "top" -> startY - curveStrength
+                            "bottom" -> startY + curveStrength
+                            else -> startY
+                        }
+
+                        // Control point 2: extends outward from end point based on which side
+                        val ctrl2X = when (bestTo.side) {
+                            "left" -> endX - curveStrength
+                            "right" -> endX + curveStrength
+                            else -> endX
+                        }
+                        val ctrl2Y = when (bestTo.side) {
+                            "top" -> endY - curveStrength
+                            "bottom" -> endY + curveStrength
+                            else -> endY
+                        }
+
+                        path.cubicTo(ctrl1X, ctrl1Y, ctrl2X, ctrl2Y, endX, endY)
+
+                        drawPath(
+                            path = path,
                             color = edgeColor,
-                            start = androidx.compose.ui.geometry.Offset(startX, startY),
-                            end = androidx.compose.ui.geometry.Offset(endX, endY),
-                            strokeWidth = edgeStrokeWidth,
-                            cap = StrokeCap.Round,
+                            style = Stroke(width = edgeStrokeWidth, cap = StrokeCap.Round),
                         )
                     }
                 }

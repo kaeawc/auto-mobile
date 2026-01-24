@@ -147,7 +147,12 @@ fun ScreenNodeRow(screen: ScreenNode, onClick: () -> Unit) {
 }
 
 @Composable
-fun TransitionRow(transition: ScreenTransition, onClick: () -> Unit) {
+fun TransitionRow(
+    transition: ScreenTransition,
+    onClick: () -> Unit,
+    currentScreen: String? = null,  // Current screen name - won't be a link
+    onScreenClick: ((String) -> Unit)? = null,  // Optional: click on screen name to navigate
+) {
     val colors = JewelTheme.globalColors
     val triggerIcon = when (transition.trigger) {
         "tap" -> "👆"
@@ -161,8 +166,10 @@ fun TransitionRow(transition: ScreenTransition, onClick: () -> Unit) {
         modifier =
         Modifier.fillMaxWidth()
             .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-            .clickable(onClick = onClick)
-            .pointerHoverIcon(PointerIcon.Hand)
+            .then(
+                if (onScreenClick == null) Modifier.clickable(onClick = onClick).pointerHoverIcon(PointerIcon.Hand)
+                else Modifier
+            )
             .padding(horizontal = 12.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
@@ -173,9 +180,19 @@ fun TransitionRow(transition: ScreenTransition, onClick: () -> Unit) {
             modifier = Modifier.weight(1f),
         ) {
             Text(triggerIcon, fontSize = 12.sp)
-            Text(transition.fromScreen, fontSize = 12.sp)
+            // From screen - only link if not current screen
+            if (onScreenClick != null && transition.fromScreen != currentScreen) {
+                Link(transition.fromScreen, onClick = { onScreenClick(transition.fromScreen) })
+            } else {
+                Text(transition.fromScreen, fontSize = 12.sp)
+            }
             Text("→", fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.4f))
-            Text(transition.toScreen, fontSize = 12.sp)
+            // To screen - only link if not current screen
+            if (onScreenClick != null && transition.toScreen != currentScreen) {
+                Link(transition.toScreen, onClick = { onScreenClick(transition.toScreen) })
+            } else {
+                Text(transition.toScreen, fontSize = 12.sp)
+            }
             transition.element?.let {
                 Text(
                     "($it)",
@@ -210,7 +227,7 @@ fun ScreenDetailView(
     screen: ScreenNode,
     transitions: List<ScreenTransition>,
     onBack: () -> Unit,
-    onTransitionSelected: (String) -> Unit,
+    onScreenSelected: (String) -> Unit,  // Navigate to another screen by name
 ) {
     val colors = JewelTheme.globalColors
     val scrollState = rememberScrollState()
@@ -267,23 +284,33 @@ fun ScreenDetailView(
 
         Spacer(Modifier.height(20.dp))
 
-        // Outgoing transitions
+        // Outgoing transitions - click screen name to navigate
         if (outgoing.isNotEmpty()) {
             Text("Outgoing Transitions", fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.8f))
             Spacer(Modifier.height(8.dp))
             outgoing.forEach { t ->
-                TransitionRow(transition = t, onClick = { onTransitionSelected(t.id) })
+                TransitionRow(
+                    transition = t,
+                    onClick = { },
+                    currentScreen = screen.name,
+                    onScreenClick = onScreenSelected,
+                )
                 Spacer(Modifier.height(4.dp))
             }
             Spacer(Modifier.height(12.dp))
         }
 
-        // Incoming transitions
+        // Incoming transitions - click screen name to navigate
         if (incoming.isNotEmpty()) {
             Text("Incoming Transitions", fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.8f))
             Spacer(Modifier.height(8.dp))
             incoming.forEach { t ->
-                TransitionRow(transition = t, onClick = { onTransitionSelected(t.id) })
+                TransitionRow(
+                    transition = t,
+                    onClick = { },
+                    currentScreen = screen.name,
+                    onScreenClick = onScreenSelected,
+                )
                 Spacer(Modifier.height(4.dp))
             }
         }
@@ -303,6 +330,7 @@ fun StatItem(label: String, value: String) {
 fun TransitionDetailView(
     transition: ScreenTransition,
     onBack: () -> Unit,
+    onScreenSelected: (String) -> Unit,  // Navigate to a screen by name
 ) {
     val colors = JewelTheme.globalColors
     val scrollState = rememberScrollState()
@@ -318,9 +346,9 @@ fun TransitionDetailView(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.padding(top = 8.dp),
         ) {
-            Text(transition.fromScreen, fontSize = 14.sp)
+            Link(transition.fromScreen, onClick = { onScreenSelected(transition.fromScreen) })
             Text("→", fontSize = 14.sp, color = colors.text.normal.copy(alpha = 0.4f))
-            Text(transition.toScreen, fontSize = 14.sp)
+            Link(transition.toScreen, onClick = { onScreenSelected(transition.toScreen) })
         }
 
         Spacer(Modifier.height(20.dp))

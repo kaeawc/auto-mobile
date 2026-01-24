@@ -20,7 +20,7 @@ data class ScreenTransition(
     val failureRate: Float,
 )
 
-// Mock data for development - Simple messaging app (8 screens)
+// Mock data for development - Messaging app (18 screens)
 // Timestamps simulate AutoMobile exploring the app starting from Splash
 object NavigationMockData {
     private const val BASE_TIME = 1705000000000L // Jan 11, 2024
@@ -35,6 +35,17 @@ object NavigationMockData {
         ScreenNode("chat", "Chat", "Composable", "com.chat.main", 80, 2, BASE_TIME + 10_000),
         ScreenNode("profile", "Profile", "Composable", "com.chat.user", 78, 2, BASE_TIME + 12_000),
         ScreenNode("settings", "Settings", "Composable", "com.chat.user", 75, 1, BASE_TIME + 14_000),
+        // Additional screens
+        ScreenNode("contacts", "Contacts", "Composable", "com.chat.contacts", 72, 3, BASE_TIME + 16_000),
+        ScreenNode("newchat", "NewChat", "Composable", "com.chat.main", 68, 2, BASE_TIME + 18_000),
+        ScreenNode("groupchat", "GroupChat", "Composable", "com.chat.main", 65, 3, BASE_TIME + 20_000),
+        ScreenNode("media", "MediaGallery", "Composable", "com.chat.media", 70, 2, BASE_TIME + 22_000),
+        ScreenNode("call", "VoiceCall", "Activity", "com.chat.calls", 60, 2, BASE_TIME + 24_000),
+        ScreenNode("videocall", "VideoCall", "Activity", "com.chat.calls", 55, 2, BASE_TIME + 26_000),
+        ScreenNode("notifications", "Notifications", "Composable", "com.chat.settings", 73, 1, BASE_TIME + 28_000),
+        ScreenNode("search", "Search", "Composable", "com.chat.main", 77, 2, BASE_TIME + 30_000),
+        ScreenNode("editprofile", "EditProfile", "Composable", "com.chat.user", 62, 1, BASE_TIME + 32_000),
+        ScreenNode("privacy", "Privacy", "Composable", "com.chat.settings", 58, 1, BASE_TIME + 34_000),
     )
 
     val transitions = listOf(
@@ -49,13 +60,49 @@ object NavigationMockData {
         ScreenTransition("t05", "Signup", "Home", "tap", "Sign Up", 280, 0.02f),
         ScreenTransition("t06", "Signup", "Login", "back", null, 40, 0.0f),
 
-        // Home → tabs
+        // Home → tabs and features
         ScreenTransition("t10", "Home", "ChatList", "tap", "Chats Tab", 50, 0.0f),
         ScreenTransition("t11", "Home", "Profile", "tap", "Profile Tab", 50, 0.0f),
         ScreenTransition("t12", "Home", "Settings", "tap", "Settings Tab", 50, 0.0f),
+        ScreenTransition("t13", "Home", "Contacts", "tap", "Contacts Tab", 50, 0.0f),
+        ScreenTransition("t14", "Home", "Search", "tap", "Search Icon", 40, 0.0f),
 
-        // ChatList → Chat detail
+        // ChatList → Chat detail and NewChat
         ScreenTransition("t20", "ChatList", "Chat", "tap", "Conversation", 90, 0.01f),
         ScreenTransition("t21", "Chat", "ChatList", "back", null, 45, 0.0f),
+        ScreenTransition("t22", "ChatList", "NewChat", "tap", "FAB", 60, 0.0f),
+        ScreenTransition("t23", "ChatList", "Search", "tap", "Search", 40, 0.0f),
+
+        // NewChat flows
+        ScreenTransition("t30", "NewChat", "Chat", "tap", "Contact", 80, 0.0f),
+        ScreenTransition("t31", "NewChat", "GroupChat", "tap", "New Group", 70, 0.0f),
+        ScreenTransition("t32", "NewChat", "Contacts", "tap", "Add Contact", 50, 0.0f),
+
+        // Chat features
+        ScreenTransition("t40", "Chat", "MediaGallery", "tap", "Media Button", 100, 0.02f),
+        ScreenTransition("t41", "Chat", "VoiceCall", "tap", "Call Button", 200, 0.05f),
+        ScreenTransition("t42", "Chat", "VideoCall", "tap", "Video Button", 250, 0.08f),
+        ScreenTransition("t43", "Chat", "Profile", "tap", "Contact Avatar", 60, 0.0f),
+
+        // GroupChat features
+        ScreenTransition("t50", "GroupChat", "MediaGallery", "tap", "Media Button", 100, 0.02f),
+        ScreenTransition("t51", "GroupChat", "VoiceCall", "tap", "Call Button", 220, 0.06f),
+
+        // Contacts
+        ScreenTransition("t60", "Contacts", "Chat", "tap", "Contact", 80, 0.01f),
+        ScreenTransition("t61", "Contacts", "NewChat", "tap", "Message Icon", 50, 0.0f),
+
+        // Profile
+        ScreenTransition("t70", "Profile", "EditProfile", "tap", "Edit Button", 60, 0.0f),
+        ScreenTransition("t71", "Profile", "Settings", "tap", "Settings Icon", 50, 0.0f),
+
+        // Settings
+        ScreenTransition("t80", "Settings", "Notifications", "tap", "Notifications", 50, 0.0f),
+        ScreenTransition("t81", "Settings", "Privacy", "tap", "Privacy", 50, 0.0f),
+        ScreenTransition("t82", "Settings", "EditProfile", "tap", "Account", 60, 0.0f),
+
+        // Search results
+        ScreenTransition("t90", "Search", "Chat", "tap", "Result", 70, 0.01f),
+        ScreenTransition("t91", "Search", "Contacts", "tap", "Contact Result", 60, 0.0f),
     )
 }

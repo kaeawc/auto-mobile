@@ -21,6 +21,16 @@ fun NavigationDashboard() {
     val screens = remember { NavigationMockData.screens }
     val transitions = remember { NavigationMockData.transitions }
 
+    // Helper to navigate to a screen by name
+    val navigateToScreen: (String) -> Unit = { screenName ->
+        // Find screen by name and set its ID
+        val screen = screens.find { it.name == screenName }
+        if (screen != null) {
+            selectedScreenId = screen.id
+            currentSection = NavigationSection.ScreenDetail
+        }
+    }
+
     when (currentSection) {
         NavigationSection.FlowMap ->
             Box(modifier = Modifier.fillMaxSize()) {
@@ -43,10 +53,7 @@ fun NavigationDashboard() {
                 screen = screen,
                 transitions = transitions,
                 onBack = { currentSection = NavigationSection.FlowMap },
-                onTransitionSelected = { transitionId ->
-                    selectedTransitionId = transitionId
-                    currentSection = NavigationSection.TransitionDetail
-                },
+                onScreenSelected = navigateToScreen,
             )
         }
 
@@ -57,6 +64,7 @@ fun NavigationDashboard() {
             TransitionDetailView(
                 transition = transition,
                 onBack = { currentSection = NavigationSection.FlowMap },
+                onScreenSelected = navigateToScreen,
             )
         }
     }

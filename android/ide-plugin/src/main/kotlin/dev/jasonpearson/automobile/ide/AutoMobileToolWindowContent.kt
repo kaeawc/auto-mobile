@@ -38,6 +38,7 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
 import org.jetbrains.jewel.ui.theme.defaultTabStyle
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.ide.test.TestDashboard
 
 enum class Dashboard(val title: String) {
   Navigation("Navigation"),
@@ -45,9 +46,6 @@ enum class Dashboard(val title: String) {
   Performance("Performance"),
   Reliability("Reliability"),
 }
-
-// Test Dashboard sections
-enum class TestSection { Overview, TestDetail, StepDetail }
 
 // Performance Dashboard sections
 enum class PerformanceSection { Overview, MetricDetail, AccessibilityLayout }
@@ -110,7 +108,15 @@ fun AutoMobileToolWindowContent() {
     // Dashboard Content
     when (dashboards[selectedIndex]) {
       Dashboard.Navigation -> NavigationDashboard() // Edge-to-edge canvas
-      Dashboard.Test -> Box(Modifier.fillMaxSize().padding(16.dp)) { TestDashboard() }
+      Dashboard.Test -> TestDashboard(
+          onOpenFile = { filePath ->
+              // TODO: Open file in IDE editor
+          },
+          onNavigateToGraph = { screens ->
+              // TODO: Navigate to graph tab with screens highlighted
+              selectedIndex = 0  // Switch to Navigation tab for now
+          },
+      )
       Dashboard.Performance -> Box(Modifier.fillMaxSize().padding(16.dp)) { PerformanceDashboard() }
       Dashboard.Reliability -> Box(Modifier.fillMaxSize().padding(16.dp)) { ReliabilityDashboard() }
     }
@@ -286,61 +292,6 @@ private fun LiveToggle(isLive: Boolean, onToggle: (Boolean) -> Unit) {
                 .align(if (isLive) Alignment.CenterEnd else Alignment.CenterStart)
                 .background(thumbColor, shape = CircleShape),
     )
-  }
-}
-
-@Composable
-private fun TestDashboard() {
-  var currentSection by remember { mutableStateOf(TestSection.Overview) }
-
-  when (currentSection) {
-    TestSection.Overview ->
-        DashboardOverview(
-            title = "Testing",
-            description = "Create, run, analyze, and iterate on UI tests.",
-            sections =
-                listOf(
-                    SectionItem("Test Overview", "High-level view of all tests and recent runs") {
-                      currentSection = TestSection.TestDetail
-                    },
-                    SectionItem("Test Detail", "Step-by-step breakdown of a single test") {
-                      currentSection = TestSection.TestDetail
-                    },
-                    SectionItem("Step Detail", "Microscopic inspection of a single interaction") {
-                      currentSection = TestSection.StepDetail
-                    },
-                ),
-        )
-    TestSection.TestDetail ->
-        SectionDetail(
-            title = "Test Detail",
-            description = "Step-by-step breakdown of a single test.",
-            features =
-                listOf(
-                    "Ordered step list",
-                    "Screenshot per step",
-                    "Assertions",
-                    "Timing per step",
-                    "Input/output events",
-                    "Errors and warnings",
-                ),
-            onBack = { currentSection = TestSection.Overview },
-        )
-    TestSection.StepDetail ->
-        SectionDetail(
-            title = "Step Detail",
-            description = "Microscopic inspection of a single interaction.",
-            features =
-                listOf(
-                    "Raw UI snapshot",
-                    "Targeted UI element",
-                    "Accessibility metadata",
-                    "Gesture details",
-                    "Network calls at that moment",
-                    "Performance deltas",
-                ),
-            onBack = { currentSection = TestSection.Overview },
-        )
   }
 }
 

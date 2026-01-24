@@ -66,6 +66,8 @@ fun NavigationCanvasView(
     screens: List<ScreenNode>,
     transitions: List<ScreenTransition>,
     onScreenSelected: (String) -> Unit,
+    externalHighlightedScreens: List<String> = emptyList(),  // External highlights (e.g., from test flow)
+    currentReplayScreen: String? = null,  // Currently active screen during replay
 ) {
     val density = LocalDensity.current
     val colors = JewelTheme.globalColors
@@ -83,15 +85,16 @@ fun NavigationCanvasView(
     var mouseX by remember { mutableFloatStateOf(0f) }
     var mouseY by remember { mutableFloatStateOf(0f) }
 
-    // Compute highlighted elements based on hover state
+    // Compute highlighted elements based on hover state OR external highlights
     // Track hovered, source (came from), and target (could go to) screens separately
     data class HighlightState(
         val hoveredScreen: String? = null,
         val sourceScreens: Set<String> = emptySet(),  // Orange - nodes we came from
         val targetScreens: Set<String> = emptySet(),  // Green - nodes we could go to
+        val testFlowScreens: Set<String> = emptySet(),  // Blue - screens from test flow
     )
 
-    val highlightState = remember(hoveredScreenName, hoveredTransitionId, transitions) {
+    val highlightState = remember(hoveredScreenName, hoveredTransitionId, transitions, externalHighlightedScreens) {
         when {
             hoveredScreenName != null -> {
                 // Hovering a screen: show where we came from (sources) and where we can go (targets)
@@ -117,6 +120,12 @@ fun NavigationCanvasView(
                     )
                 } else HighlightState()
             }
+            externalHighlightedScreens.isNotEmpty() -> {
+                // External highlights (e.g., from "View in Graph" on test detail)
+                HighlightState(
+                    testFlowScreens = externalHighlightedScreens.toSet(),
+                )
+            }
             else -> HighlightState()
         }
     }
@@ -127,11 +136,30 @@ fun NavigationCanvasView(
             highlightState.hoveredScreen?.let { add(it) }
             addAll(highlightState.sourceScreens)
             addAll(highlightState.targetScreens)
+            addAll(highlightState.testFlowScreens)
         }
     }
 
-    val highlightedTransitions = remember(hoveredScreenName, hoveredTransitionId, transitions) {
+    // Compute highlighted transitions for test flow (sequential path through screens)
+    val testFlowTransitions = remember(highlightState.testFlowScreens, transitions) {
+        if (highlightState.testFlowScreens.isEmpty()) emptySet()
+        else {
+            val flowScreensList = externalHighlightedScreens
+            val flowTransitions = mutableSetOf<String>()
+            // Find transitions between consecutive screens in the flow
+            for (i in 0 until flowScreensList.size - 1) {
+                val fromScreen = flowScreensList[i]
+                val toScreen = flowScreensList[i + 1]
+                transitions.find { it.fromScreen == fromScreen && it.toScreen == toScreen }
+                    ?.let { flowTransitions.add(it.id) }
+            }
+            flowTransitions
+        }
+    }
+
+    val highlightedTransitions = remember(hoveredScreenName, hoveredTransitionId, transitions, testFlowTransitions) {
         when {
+            testFlowTransitions.isNotEmpty() -> testFlowTransitions
             hoveredScreenName != null -> {
                 // Highlight all edges connected to hovered screen
                 transitions.filter { it.trigger != "back" }
@@ -234,11 +262,87 @@ fun NavigationCanvasView(
     val highlightedArrowColor = Color(0xFF1976D2)  // Darker blue for highlighted edges
     val dimmedArrowColor = colors.text.normal.copy(alpha = 0.1f)  // Dimmed when something else is highlighted
 
+    // Track if we've done initial fit and auto-panned for highlighted screens
+    var hasInitialFit by remember { mutableStateOf(false) }
+    var lastAutoPannedScreens by remember { mutableStateOf<List<String>>(emptyList()) }
+
     BoxWithConstraints(
         modifier = Modifier.fillMaxSize()
     ) {
         val viewportWidth = constraints.maxWidth.toFloat()
         val viewportHeight = constraints.maxHeight.toFloat()
+
+        // Auto-fit entire graph on initial load (no highlights)
+        LaunchedEffect(viewportWidth, viewportHeight, nodePositions) {
+            if (!hasInitialFit && externalHighlightedScreens.isEmpty() &&
+                nodePositions.isNotEmpty() && viewportWidth > 0 && viewportHeight > 0) {
+                // Compute bounding box of ALL screens
+                val minX = nodePositions.minOf { it.x }
+                val maxX = nodePositions.maxOf { it.x } + nodeWidthPx
+                val minY = nodePositions.minOf { it.y }
+                val maxY = nodePositions.maxOf { it.y } + nodeHeightPx
+
+                // Add padding
+                val padding = 60f
+                val boundsWidth = maxX - minX + padding * 2
+                val boundsHeight = maxY - minY + padding * 2
+                val centerX = (minX + maxX) / 2
+                val centerY = (minY + maxY) / 2
+
+                // Calculate scale to fit all nodes in viewport
+                val scaleX = viewportWidth / boundsWidth
+                val scaleY = viewportHeight / boundsHeight
+                val newScale = minOf(scaleX, scaleY, 1.5f).coerceIn(0.2f, 1.5f)
+
+                // Center the graph in viewport
+                val newOffsetX = viewportWidth / 2 - centerX * newScale
+                val newOffsetY = viewportHeight / 2 - centerY * newScale
+
+                scale = newScale
+                offsetX = newOffsetX
+                offsetY = newOffsetY
+                hasInitialFit = true
+            }
+        }
+
+        // Auto-pan to show highlighted screens when they change (from test flow)
+        LaunchedEffect(externalHighlightedScreens, viewportWidth, viewportHeight) {
+            if (externalHighlightedScreens.isNotEmpty() && externalHighlightedScreens != lastAutoPannedScreens) {
+                // Compute bounding box of highlighted screens
+                val highlightedPositions = externalHighlightedScreens.mapNotNull { screenName ->
+                    positionByName[screenName]
+                }
+                if (highlightedPositions.isNotEmpty() && viewportWidth > 0 && viewportHeight > 0) {
+                    val minX = highlightedPositions.minOf { it.x }
+                    val maxX = highlightedPositions.maxOf { it.x } + nodeWidthPx
+                    val minY = highlightedPositions.minOf { it.y }
+                    val maxY = highlightedPositions.maxOf { it.y } + nodeHeightPx
+
+                    // Add padding
+                    val padding = 80f
+                    val boundsWidth = maxX - minX + padding * 2
+                    val boundsHeight = maxY - minY + padding * 2
+                    val centerX = (minX + maxX) / 2
+                    val centerY = (minY + maxY) / 2
+
+                    // Calculate scale to fit bounds in viewport (with some margin)
+                    val scaleX = viewportWidth / boundsWidth
+                    val scaleY = viewportHeight / boundsHeight
+                    val newScale = minOf(scaleX, scaleY, 1.5f).coerceIn(0.3f, 1.5f)
+
+                    // Center the bounds in viewport
+                    val newOffsetX = viewportWidth / 2 - centerX * newScale
+                    val newOffsetY = viewportHeight / 2 - centerY * newScale
+
+                    scale = newScale
+                    offsetX = newOffsetX
+                    offsetY = newOffsetY
+                    lastAutoPannedScreens = externalHighlightedScreens
+                }
+            } else if (externalHighlightedScreens.isEmpty() && lastAutoPannedScreens.isNotEmpty()) {
+                lastAutoPannedScreens = emptyList()
+            }
+        }
 
         // Zoom helper that keeps a specific point fixed
         fun zoomAroundPoint(newScale: Float, pivotX: Float, pivotY: Float) {
@@ -454,6 +558,8 @@ fun NavigationCanvasView(
                         isHovered = screen.name == highlightState.hoveredScreen,
                         isSource = screen.name in highlightState.sourceScreens,
                         isTarget = screen.name in highlightState.targetScreens,
+                        isInTestFlow = screen.name in highlightState.testFlowScreens,
+                        isCurrentReplayStep = screen.name == currentReplayScreen,
                         isDimmed = hasAnyHighlight && screen.name !in highlightedScreens,
                         onClick = { onScreenSelected(screen.id) },
                         onHoverChange = { isHovered ->
@@ -488,6 +594,8 @@ private fun ScreenNodeCard(
     isHovered: Boolean,
     isSource: Boolean,  // Orange - nodes we came from
     isTarget: Boolean,  // Green - nodes we could go to
+    isInTestFlow: Boolean = false,  // Blue - part of test flow path
+    isCurrentReplayStep: Boolean = false,  // Currently active step in replay
     isDimmed: Boolean,
     onClick: () -> Unit,
     onHoverChange: (Boolean) -> Unit,
@@ -503,20 +611,26 @@ private fun ScreenNodeCard(
     val lightBlue = Color(0xFF64B5F6)   // Light blue for hovered screen
     val orange = Color(0xFFFF9800)       // Orange for source (came from)
     val green = Color(0xFF4CAF50)        // Green for target (could go to)
+    val testFlowBlue = Color(0xFF2196F3) // Blue for test flow path
+    val currentStepGreen = Color(0xFF00E676)  // Bright green for current step
 
     // Visual states based on highlighting type
-    val isHighlighted = isHovered || isSource || isTarget
+    val isHighlighted = isHovered || isSource || isTarget || isInTestFlow || isCurrentReplayStep
     val bgAlpha = when {
+        isCurrentReplayStep -> 0.35f  // Brightest for current step
         isHighlighted -> 0.25f
         isDimmed -> 0.05f
         else -> 0.1f
     }
     val borderColor = when {
+        isCurrentReplayStep -> currentStepGreen  // Current step is bright green
         isHovered -> lightBlue
+        isInTestFlow -> testFlowBlue
         isSource -> orange
         isTarget -> green
         else -> Color.Transparent
     }
+    val borderWidth = if (isCurrentReplayStep) 3.dp else 2.dp
     val textAlpha = if (isDimmed) 0.4f else 0.8f
 
     Tooltip(
@@ -534,7 +648,7 @@ private fun ScreenNodeCard(
                 .size(NODE_WIDTH, NODE_HEIGHT)
                 .background(colors.text.normal.copy(alpha = bgAlpha), RoundedCornerShape(8.dp))
                 .then(
-                    if (isHighlighted) Modifier.border(2.dp, borderColor, RoundedCornerShape(8.dp))
+                    if (isHighlighted) Modifier.border(borderWidth, borderColor, RoundedCornerShape(8.dp))
                     else Modifier
                 )
                 .clickable(onClick = onClick)

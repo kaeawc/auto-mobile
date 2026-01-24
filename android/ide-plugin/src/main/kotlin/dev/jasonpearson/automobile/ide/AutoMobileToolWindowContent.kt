@@ -80,6 +80,37 @@ fun AutoMobileToolWindowContent() {
     )
   }
 
+  // Test flow replay state
+  var testFlowScreens by remember { mutableStateOf<List<String>>(emptyList()) }
+  var currentReplayIndex by remember { mutableIntStateOf(0) }
+  var isReplaying by remember { mutableStateOf(false) }
+
+  // Animate through the test flow screens
+  androidx.compose.runtime.LaunchedEffect(isReplaying, testFlowScreens) {
+    if (isReplaying && testFlowScreens.isNotEmpty()) {
+      currentReplayIndex = 0
+      while (isReplaying && currentReplayIndex < testFlowScreens.size) {
+        kotlinx.coroutines.delay(800)  // Show each screen for 800ms
+        if (currentReplayIndex < testFlowScreens.size - 1) {
+          currentReplayIndex++
+        } else {
+          // Reached end - restart or stop
+          kotlinx.coroutines.delay(1000)  // Pause at end
+          currentReplayIndex = 0  // Loop back
+        }
+      }
+    }
+  }
+
+  // Compute the current highlighted screens for replay (show path up to current index)
+  val replayHighlightedScreens = remember(testFlowScreens, currentReplayIndex, isReplaying) {
+    if (isReplaying && testFlowScreens.isNotEmpty()) {
+      testFlowScreens.take(currentReplayIndex + 1)
+    } else {
+      testFlowScreens
+    }
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     // Global Shell Header
     GlobalShellHeader(
@@ -107,14 +138,23 @@ fun AutoMobileToolWindowContent() {
 
     // Dashboard Content
     when (dashboards[selectedIndex]) {
-      Dashboard.Navigation -> NavigationDashboard() // Edge-to-edge canvas
+      Dashboard.Navigation -> NavigationDashboard(
+          highlightedScreens = replayHighlightedScreens,
+          onHighlightCleared = {
+              testFlowScreens = emptyList()
+              isReplaying = false
+          },
+      )
       Dashboard.Test -> TestDashboard(
           onOpenFile = { filePath ->
               // TODO: Open file in IDE editor
           },
           onNavigateToGraph = { screens ->
-              // TODO: Navigate to graph tab with screens highlighted
-              selectedIndex = 0  // Switch to Navigation tab for now
+              // Set up test flow replay
+              testFlowScreens = screens
+              isReplaying = true
+              currentReplayIndex = 0
+              selectedIndex = 0  // Switch to Navigation tab
           },
       )
       Dashboard.Performance -> Box(Modifier.fillMaxSize().padding(16.dp)) { PerformanceDashboard() }

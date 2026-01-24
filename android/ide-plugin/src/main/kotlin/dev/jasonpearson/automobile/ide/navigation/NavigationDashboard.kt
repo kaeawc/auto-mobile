@@ -12,7 +12,11 @@ import androidx.compose.ui.Modifier
 enum class NavigationSection { FlowMap, ScreenDetail, TransitionDetail }
 
 @Composable
-fun NavigationDashboard() {
+fun NavigationDashboard(
+    highlightedScreens: List<String> = emptyList(),  // Screen names to highlight (e.g., from test flow)
+    currentStepScreen: String? = highlightedScreens.lastOrNull(),  // Current step being replayed
+    onHighlightCleared: () -> Unit = {},  // Called when user interacts to clear external highlights
+) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
     var selectedTransitionId by remember { mutableStateOf<String?>(null) }
@@ -28,6 +32,7 @@ fun NavigationDashboard() {
         if (screen != null) {
             selectedScreenId = screen.id
             currentSection = NavigationSection.ScreenDetail
+            onHighlightCleared()  // Clear external highlights when navigating
         }
     }
 
@@ -40,7 +45,10 @@ fun NavigationDashboard() {
                     onScreenSelected = { screenId ->
                         selectedScreenId = screenId
                         currentSection = NavigationSection.ScreenDetail
+                        onHighlightCleared()
                     },
+                    externalHighlightedScreens = highlightedScreens,
+                    currentReplayScreen = currentStepScreen,
                 )
             }
 

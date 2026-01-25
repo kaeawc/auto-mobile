@@ -541,11 +541,14 @@ private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregatio
             if (hours == 0L) "now" else "${hours}h"
         }
         TimeAggregation.Day -> {
-            when {
-                days == 0L -> "Today"
-                days == 1L -> "Yest"
-                else -> "${days}d"
-            }
+            // Show actual date
+            val now = System.currentTimeMillis()
+            val dayMs = now - timeAgoMs
+            val calendar = java.util.Calendar.getInstance()
+            calendar.timeInMillis = dayMs
+            val month = calendar.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.SHORT, java.util.Locale.getDefault()) ?: ""
+            val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            "$month $day"
         }
         TimeAggregation.Week -> {
             // Calculate the Monday of the week

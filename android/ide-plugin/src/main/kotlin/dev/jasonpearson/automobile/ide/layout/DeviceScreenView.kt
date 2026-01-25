@@ -138,13 +138,22 @@ fun DeviceScreenView(
             // Scale factor from frame pixels to device pixels (for hit testing)
             val frameToDeviceScale = if (frameWidthPx > 0) screenWidth.toFloat() / frameWidthPx else 1f
 
-            // Auto-fit on initial load - center the frame at scale 1.0
+            // Auto-fit on initial load - scale to fit if viewport is constrained
             LaunchedEffect(viewportWidth, viewportHeight, frameWidthPx, frameHeightPx) {
                 if (!hasInitialFit && viewportWidth > 0 && viewportHeight > 0 && frameWidthPx > 0) {
+                    // Calculate scale needed to fit device in viewport
+                    // The frame is already sized to fit, so scale 1.0 should fit
+                    // But if viewport is very narrow, we may need to scale down further
+                    val fitScale = minOf(
+                        viewportWidth / (frameWidthPx + padding * 2),
+                        viewportHeight / (frameHeightPx + padding * 2),
+                        1f  // Don't scale up beyond 1.0 initially
+                    ).coerceIn(0.3f, 1f)
+
+                    scale = fitScale
                     // Center the device frame in viewport
-                    offsetX = (viewportWidth - frameWidthPx) / 2
-                    offsetY = (viewportHeight - frameHeightPx) / 2
-                    scale = 1f
+                    offsetX = (viewportWidth - frameWidthPx * scale) / 2
+                    offsetY = (viewportHeight - frameHeightPx * scale) / 2
                     hasInitialFit = true
                 }
             }
@@ -296,10 +305,15 @@ fun DeviceScreenView(
                     onZoomIn = { zoomAroundCenter((scale * 1.2f).coerceAtMost(5f)) },
                     onZoomOut = { zoomAroundCenter((scale / 1.2f).coerceAtLeast(0.1f)) },
                     onFitToScreen = {
-                        // Reset to scale 1.0 and center the frame
-                        scale = 1f
-                        offsetX = (viewportWidth - frameWidthPx) / 2
-                        offsetY = (viewportHeight - frameHeightPx) / 2
+                        // Calculate scale to fit and center the frame
+                        val fitScale = minOf(
+                            viewportWidth / (frameWidthPx + padding * 2),
+                            viewportHeight / (frameHeightPx + padding * 2),
+                            1f
+                        ).coerceIn(0.3f, 1f)
+                        scale = fitScale
+                        offsetX = (viewportWidth - frameWidthPx * scale) / 2
+                        offsetY = (viewportHeight - frameHeightPx * scale) / 2
                     },
                     modifier = Modifier
                         .align(Alignment.BottomEnd)

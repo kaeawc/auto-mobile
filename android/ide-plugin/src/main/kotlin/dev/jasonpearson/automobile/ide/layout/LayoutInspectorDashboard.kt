@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
@@ -39,9 +40,10 @@ fun LayoutInspectorDashboard(
     val state = rememberLayoutInspectorState()
     val colors = JewelTheme.globalColors
 
-    // Panel collapse states
-    var isHierarchyCollapsed by remember { mutableStateOf(false) }
-    var isPropertiesCollapsed by remember { mutableStateOf(false) }
+    // Panel collapse states - default to collapsed, remember user preference
+    // TODO: Persist these to IDE preferences for remembering across sessions
+    var isHierarchyCollapsed by remember { mutableStateOf(true) }
+    var isPropertiesCollapsed by remember { mutableStateOf(true) }
 
     // Main content with 3 panels
     Row(modifier = modifier.fillMaxSize()) {
@@ -128,7 +130,7 @@ private fun CollapsiblePanel(
     val colors = JewelTheme.globalColors
 
     if (isCollapsed) {
-        // Collapsed state: vertical tab
+        // Collapsed state: vertical tab aligned to top
         Box(
             modifier = Modifier
                 .width(24.dp)
@@ -136,18 +138,25 @@ private fun CollapsiblePanel(
                 .background(colors.text.normal.copy(alpha = 0.03f))
                 .clickable(onClick = onToggle)
                 .pointerHoverIcon(PointerIcon.Hand),
-            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                title,
-                fontSize = 11.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.6f),
+            // Rotated text positioned at top - use a box with height to contain rotated text
+            Box(
                 modifier = Modifier
-                    .rotate(-90f)
-                    .width(100.dp),  // Fixed width to prevent overflow when rotated
-            )
+                    .align(Alignment.TopCenter)
+                    .padding(top = 12.dp)
+                    .width(24.dp)
+                    .height(100.dp),
+                contentAlignment = Alignment.TopCenter,
+            ) {
+                Text(
+                    title,
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    color = colors.text.normal.copy(alpha = 0.6f),
+                    modifier = Modifier.rotate(-90f),
+                )
+            }
         }
     } else {
         // Expanded state: full panel

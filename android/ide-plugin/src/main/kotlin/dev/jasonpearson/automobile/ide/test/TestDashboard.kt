@@ -1441,8 +1441,8 @@ private fun DevicePickerRow(
         // Device type icon
         Text(
             when (device.type) {
-                DeviceType.AndroidEmulator -> "🤖"
-                DeviceType.iOSSimulator -> "🍎"
+                DeviceType.AndroidEmulator, DeviceType.AndroidPhysical -> "🤖"
+                DeviceType.iOSSimulator, DeviceType.iOSPhysical -> "🍎"
             },
             fontSize = 16.sp,
         )

@@ -60,7 +60,7 @@ enum class Dashboard(val title: String, val icon: String) {
 }
 
 // Device types for icons
-enum class DeviceType { AndroidEmulator, iOSSimulator }
+enum class DeviceType { AndroidEmulator, AndroidPhysical, iOSSimulator, iOSPhysical }
 
 data class BootedDevice(
     val id: String,
@@ -68,6 +68,21 @@ data class BootedDevice(
     val type: DeviceType,
     val status: String = "Running",
     val foregroundApp: String? = null,
+    val connectedAt: Long = System.currentTimeMillis(),
+)
+
+data class AvailableEmulator(
+    val id: String,
+    val name: String,
+    val type: DeviceType,
+    val apiLevel: String? = null,
+)
+
+data class SystemImage(
+    val id: String,
+    val name: String,
+    val platform: String, // "Android" or "iOS"
+    val apiLevel: String,
 )
 
 @Composable
@@ -79,12 +94,29 @@ fun AutoMobileToolWindowContent() {
   var dropTargetIndex by remember { mutableStateOf<Int?>(null) }
 
   // Mock booted devices - will be replaced with real data
-  var activeDeviceId by remember { mutableStateOf("pixel8") }
+  var activeDeviceId by remember { mutableStateOf<String?>("pixel8") }
+  var isDevicePanelExpanded by remember { mutableStateOf(false) }
   val bootedDevices = remember {
     listOf(
-        BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running", "com.example.myapp"),
-        BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running", "com.android.launcher3"),
-        BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted", "com.apple.springboard"),
+        BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running", "com.example.myapp", System.currentTimeMillis() - 300000),
+        BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running", "com.android.launcher3", System.currentTimeMillis() - 600000),
+        BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted", "com.apple.springboard", System.currentTimeMillis() - 180000),
+    )
+  }
+  val availableEmulators = remember {
+    listOf(
+        AvailableEmulator("pixel6", "Pixel 6 API 33", DeviceType.AndroidEmulator, "33"),
+        AvailableEmulator("pixel5", "Pixel 5 API 31", DeviceType.AndroidEmulator, "31"),
+        AvailableEmulator("iphone14", "iPhone 14", DeviceType.iOSSimulator),
+        AvailableEmulator("ipad", "iPad Pro (12.9-inch)", DeviceType.iOSSimulator),
+    )
+  }
+  val systemImages = remember {
+    listOf(
+        SystemImage("android-35", "Android 15 (VanillaIceCream)", "Android", "35"),
+        SystemImage("android-34", "Android 14 (UpsideDownCake)", "Android", "34"),
+        SystemImage("ios-17", "iOS 17.2", "iOS", "17.2"),
+        SystemImage("ios-16", "iOS 16.4", "iOS", "16.4"),
     )
   }
 
@@ -140,64 +172,66 @@ fun AutoMobileToolWindowContent() {
   val headerHeightDp = with(density) { headerHeight.toDp() }
 
   Box(modifier = Modifier.fillMaxSize()) {
-    // Dashboard Content
-    // Navigation fills entire space so nodes can extend under header when zoomed
-    // Other dashboards have top padding to stay below header
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .then(if (!isCurrentlyOnNavigation) Modifier.padding(top = headerHeightDp) else Modifier)
-    ) {
-      when (dashboardOrder[selectedIndex]) {
-        Dashboard.Navigation -> NavigationDashboard(
-            highlightedScreens = replayHighlightedScreens,
-            onHighlightCleared = {
-                testFlowScreens = emptyList()
-                isReplaying = false
-            },
-            onFocusModeChanged = { focused ->
-                isNavigationFocused = focused
-            },
-            headerHeightPx = headerHeight.toFloat(),
-        )
-        Dashboard.Test -> TestDashboard(
-            onOpenFile = { filePath ->
-                // TODO: Open file in IDE editor
-            },
-            onNavigateToGraph = { screens ->
-                // Set up test flow replay
-                testFlowScreens = screens
-                isReplaying = true
-                currentReplayIndex = 0
-                selectedIndex = 0  // Switch to Navigation tab
-            },
-        )
-        Dashboard.Performance -> PerformanceDashboard(
-            onNavigateToScreen = { screenName ->
-                // Switch to Navigation tab and highlight the screen
-                selectedIndex = 0
-            },
-            onNavigateToTest = { testName ->
-                // Switch to Test tab
-                selectedIndex = 1
-            },
-        )
-        Dashboard.Layout -> LayoutInspectorDashboard()
-        Dashboard.Storage -> StorageDashboard()
-        Dashboard.Failures -> FailuresDashboard(
-            onNavigateToScreen = { screenName ->
-                // Switch to Navigation tab and highlight the screen
-                selectedIndex = dashboardOrder.indexOf(Dashboard.Navigation)
-            },
-            onNavigateToTest = { testName ->
-                // Switch to Test tab
-                selectedIndex = dashboardOrder.indexOf(Dashboard.Test)
-            },
-            onNavigateToSource = { fileName, lineNumber ->
-                // TODO: Use OpenFileDescriptor to navigate to source
-                // FileEditorManager.getInstance(project).openFile(virtualFile, true)
-            },
-        )
+    // Dashboard Content - only show when a device is selected
+    if (!isDevicePanelExpanded && activeDeviceId != null) {
+      // Navigation fills entire space so nodes can extend under header when zoomed
+      // Other dashboards have top padding to stay below header
+      Box(
+          modifier = Modifier
+              .fillMaxSize()
+              .then(if (!isCurrentlyOnNavigation) Modifier.padding(top = headerHeightDp) else Modifier)
+      ) {
+        when (dashboardOrder[selectedIndex]) {
+          Dashboard.Navigation -> NavigationDashboard(
+              highlightedScreens = replayHighlightedScreens,
+              onHighlightCleared = {
+                  testFlowScreens = emptyList()
+                  isReplaying = false
+              },
+              onFocusModeChanged = { focused ->
+                  isNavigationFocused = focused
+              },
+              headerHeightPx = headerHeight.toFloat(),
+          )
+          Dashboard.Test -> TestDashboard(
+              onOpenFile = { filePath ->
+                  // TODO: Open file in IDE editor
+              },
+              onNavigateToGraph = { screens ->
+                  // Set up test flow replay
+                  testFlowScreens = screens
+                  isReplaying = true
+                  currentReplayIndex = 0
+                  selectedIndex = 0  // Switch to Navigation tab
+              },
+          )
+          Dashboard.Performance -> PerformanceDashboard(
+              onNavigateToScreen = { screenName ->
+                  // Switch to Navigation tab and highlight the screen
+                  selectedIndex = 0
+              },
+              onNavigateToTest = { testName ->
+                  // Switch to Test tab
+                  selectedIndex = 1
+              },
+          )
+          Dashboard.Layout -> LayoutInspectorDashboard()
+          Dashboard.Storage -> StorageDashboard()
+          Dashboard.Failures -> FailuresDashboard(
+              onNavigateToScreen = { screenName ->
+                  // Switch to Navigation tab and highlight the screen
+                  selectedIndex = dashboardOrder.indexOf(Dashboard.Navigation)
+              },
+              onNavigateToTest = { testName ->
+                  // Switch to Test tab
+                  selectedIndex = dashboardOrder.indexOf(Dashboard.Test)
+              },
+              onNavigateToSource = { fileName, lineNumber ->
+                  // TODO: Use OpenFileDescriptor to navigate to source
+                  // FileEditorManager.getInstance(project).openFile(virtualFile, true)
+              },
+          )
+        }
       }
     }
 
@@ -215,9 +249,30 @@ fun AutoMobileToolWindowContent() {
       GlobalShellHeader(
           devices = bootedDevices,
           activeDeviceId = activeDeviceId,
-          onDeviceSelected = { activeDeviceId = it },
+          onDeviceSelected = { deviceId ->
+              if (deviceId == activeDeviceId) {
+                  // Tapping active device deactivates it and shows panel
+                  activeDeviceId = null
+                  isDevicePanelExpanded = true
+              } else {
+                  activeDeviceId = deviceId
+                  isDevicePanelExpanded = false
+              }
+          },
           isLive = isLive,
           onLiveToggle = { isLive = it },
+          isDevicePanelExpanded = isDevicePanelExpanded,
+          availableEmulators = availableEmulators,
+          systemImages = systemImages,
+          onBootEmulator = { emulatorId ->
+              // TODO: Boot emulator
+          },
+          onCreateEmulator = { imageId ->
+              // TODO: Create emulator from system image
+          },
+          onCollapsePanel = {
+              isDevicePanelExpanded = false
+          },
           needsSetup = needsSetup,
           onSetupClick = {
               // TODO: Open setup wizard/dialog
@@ -227,27 +282,29 @@ fun AutoMobileToolWindowContent() {
           },
       )
 
-      // Dashboard Tabs with drag-and-drop reordering
-      DraggableTabs(
-          tabs = dashboardOrder,
-          selectedIndex = selectedIndex,
-          onTabSelected = { selectedIndex = it },
-          onReorder = { fromIndex, toIndex ->
-              val item = dashboardOrder.removeAt(fromIndex)
-              dashboardOrder.add(toIndex, item)
-              // Adjust selected index if needed
-              when {
-                  fromIndex == selectedIndex -> selectedIndex = toIndex
-                  fromIndex < selectedIndex && toIndex >= selectedIndex -> selectedIndex--
-                  fromIndex > selectedIndex && toIndex <= selectedIndex -> selectedIndex++
-              }
-          },
-          draggedIndex = draggedIndex,
-          onDragStart = { draggedIndex = it },
-          onDragEnd = { draggedIndex = null; dropTargetIndex = null },
-          dropTargetIndex = dropTargetIndex,
-          onDropTargetChanged = { dropTargetIndex = it },
-      )
+      // Dashboard Tabs with drag-and-drop reordering - hidden when device panel is expanded
+      if (!isDevicePanelExpanded && activeDeviceId != null) {
+        DraggableTabs(
+            tabs = dashboardOrder,
+            selectedIndex = selectedIndex,
+            onTabSelected = { selectedIndex = it },
+            onReorder = { fromIndex, toIndex ->
+                val item = dashboardOrder.removeAt(fromIndex)
+                dashboardOrder.add(toIndex, item)
+                // Adjust selected index if needed
+                when {
+                    fromIndex == selectedIndex -> selectedIndex = toIndex
+                    fromIndex < selectedIndex && toIndex >= selectedIndex -> selectedIndex--
+                    fromIndex > selectedIndex && toIndex <= selectedIndex -> selectedIndex++
+                }
+            },
+            draggedIndex = draggedIndex,
+            onDragStart = { draggedIndex = it },
+            onDragEnd = { draggedIndex = null; dropTargetIndex = null },
+            dropTargetIndex = dropTargetIndex,
+            onDropTargetChanged = { dropTargetIndex = it },
+        )
+      }
     }
   }
 }
@@ -255,115 +312,143 @@ fun AutoMobileToolWindowContent() {
 @Composable
 private fun GlobalShellHeader(
     devices: List<BootedDevice>,
-    activeDeviceId: String,
+    activeDeviceId: String?,
     onDeviceSelected: (String) -> Unit,
     isLive: Boolean,
     onLiveToggle: (Boolean) -> Unit,
+    isDevicePanelExpanded: Boolean = false,
+    availableEmulators: List<AvailableEmulator> = emptyList(),
+    systemImages: List<SystemImage> = emptyList(),
+    onBootEmulator: (String) -> Unit = {},
+    onCreateEmulator: (String) -> Unit = {},
+    onCollapsePanel: () -> Unit = {},
     needsSetup: Boolean = false,
     onSetupClick: () -> Unit = {},
     onDoctorClick: () -> Unit = {},
 ) {
   val colors = JewelTheme.globalColors
 
-  BoxWithConstraints(
+  Column(
       modifier = Modifier
           .fillMaxWidth()
-          .background(JewelTheme.globalColors.panelBackground)
-          .padding(horizontal = 8.dp, vertical = 4.dp),
+          .background(JewelTheme.globalColors.panelBackground),
   ) {
-    val isCompact = maxWidth < 400.dp
-
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
+    BoxWithConstraints(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
-      // Left side: Device selection
+      val isCompact = maxWidth < 400.dp
+
       Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
+          modifier = Modifier.fillMaxWidth(),
+          horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
       ) {
-        if (!isCompact) {
-          Text(
-              "Devices:",
-              fontSize = 11.sp,
-              maxLines = 1,
-              softWrap = false,
-              color = colors.text.normal.copy(alpha = 0.5f),
-          )
-        }
-
-        // Device icons
+        // Left side: Device selection
         Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-          devices.forEach { device ->
-            DeviceIcon(
-                device = device,
-                isActive = device.id == activeDeviceId,
-                isLive = isLive,
-                onClick = { onDeviceSelected(device.id) },
-            )
-          }
-        }
-      }
-
-      // Right side: Setup button (conditional), Doctor button, Live toggle
-      Row(
-          horizontalArrangement = Arrangement.spacedBy(8.dp),
-          verticalAlignment = Alignment.CenterVertically,
-      ) {
-        // Setup AutoMobile button (shown when service not detected)
-        if (needsSetup) {
-          Box(
-              modifier = Modifier
-                  .background(Color(0xFF2196F3).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                  .clickable(onClick = onSetupClick)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 8.dp, vertical = 4.dp),
-          ) {
-            Text(
-                "Setup",
-                fontSize = 10.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = Color(0xFF64B5F6),
-            )
-          }
-        }
-
-        // Doctor button (always visible)
-        Tooltip(tooltip = { Text("Run diagnostics", fontSize = 11.sp) }) {
-          Box(
-              modifier = Modifier
-                  .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                  .clickable(onClick = onDoctorClick)
-                  .pointerHoverIcon(PointerIcon.Hand)
-                  .padding(horizontal = 6.dp, vertical = 4.dp),
-              contentAlignment = Alignment.Center,
-          ) {
-            Text("🩺", fontSize = 12.sp)
-          }
-        }
-
-        // Live toggle
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
           if (!isCompact) {
             Text(
-                "Live",
-                fontSize = 10.sp,
+                "Devices:",
+                fontSize = 11.sp,
                 maxLines = 1,
                 softWrap = false,
-                color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+                color = colors.text.normal.copy(alpha = 0.5f),
             )
           }
-          LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+
+          // Device icons
+          Row(
+              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              verticalAlignment = Alignment.CenterVertically,
+          ) {
+            devices.forEach { device ->
+              DeviceIcon(
+                  device = device,
+                  isActive = device.id == activeDeviceId,
+                  isLive = isLive && device.id == activeDeviceId,
+                  onClick = { onDeviceSelected(device.id) },
+              )
+            }
+          }
+        }
+
+        // Right side: Setup button (conditional), Doctor button, Live toggle (hidden when panel expanded)
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+          // Setup AutoMobile button (shown when service not detected)
+          if (needsSetup) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF2196F3).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                    .clickable(onClick = onSetupClick)
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+              Text(
+                  "Setup",
+                  fontSize = 10.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = Color(0xFF64B5F6),
+              )
+            }
+          }
+
+          // Doctor button (always visible)
+          Tooltip(tooltip = { Text("Run diagnostics", fontSize = 11.sp) }) {
+            Box(
+                modifier = Modifier
+                    .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                    .clickable(onClick = onDoctorClick)
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+              Text("🩺", fontSize = 12.sp)
+            }
+          }
+
+          // Live toggle (hidden when device panel is expanded)
+          if (!isDevicePanelExpanded) {
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+              if (!isCompact) {
+                Text(
+                    "Live",
+                    fontSize = 10.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    color = if (isLive) colors.text.normal else colors.text.normal.copy(alpha = 0.5f),
+                )
+              }
+              LiveToggle(isLive = isLive, onToggle = onLiveToggle)
+            }
+          }
         }
       }
+    }
+
+    // Device management panel (expanded when no active device selected)
+    if (isDevicePanelExpanded) {
+      DeviceManagementPanel(
+          bootedDevices = devices,
+          availableEmulators = availableEmulators,
+          systemImages = systemImages,
+          onDeviceSelected = { id: String ->
+              onDeviceSelected(id)
+              onCollapsePanel()
+          },
+          onBootEmulator = onBootEmulator,
+          onCreateEmulator = onCreateEmulator,
+      )
     }
   }
 }
@@ -421,8 +506,8 @@ private fun DeviceIcon(
     ) {
       // Simple device icon representation
       when (device.type) {
-        DeviceType.AndroidEmulator -> AndroidDeviceIcon(color = iconColor)
-        DeviceType.iOSSimulator -> AppleDeviceIcon(color = iconColor)
+        DeviceType.AndroidEmulator, DeviceType.AndroidPhysical -> AndroidDeviceIcon(color = iconColor)
+        DeviceType.iOSSimulator, DeviceType.iOSPhysical -> AppleDeviceIcon(color = iconColor)
       }
     }
   }
@@ -627,5 +712,286 @@ private fun DraggableTabs(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DeviceManagementPanel(
+    bootedDevices: List<BootedDevice>,
+    availableEmulators: List<AvailableEmulator>,
+    systemImages: List<SystemImage>,
+    onDeviceSelected: (String) -> Unit,
+    onBootEmulator: (String) -> Unit,
+    onCreateEmulator: (String) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    // Split devices by platform
+    val androidDevices = bootedDevices.filter {
+        it.type == DeviceType.AndroidEmulator || it.type == DeviceType.AndroidPhysical
+    }.sortedByDescending { it.connectedAt }
+
+    val iosDevices = bootedDevices.filter {
+        it.type == DeviceType.iOSSimulator || it.type == DeviceType.iOSPhysical
+    }.sortedByDescending { it.connectedAt }
+
+    val androidEmulators = availableEmulators.filter {
+        it.type == DeviceType.AndroidEmulator
+    }
+    val iosSimulators = availableEmulators.filter {
+        it.type == DeviceType.iOSSimulator
+    }
+
+    val androidImages = systemImages.filter { it.platform == "Android" }
+    val iosImages = systemImages.filter { it.platform == "iOS" }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.02f))
+            .padding(8.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Active Devices section
+        if (androidDevices.isNotEmpty() || iosDevices.isNotEmpty()) {
+            DeviceSectionHeader("Active Devices")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Android column
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("Android", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    if (androidDevices.isEmpty()) {
+                        Text("None", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                    } else {
+                        androidDevices.forEach { device ->
+                            DeviceListItem(
+                                name = device.name,
+                                status = device.status,
+                                icon = if (device.type == DeviceType.AndroidPhysical) "📱" else "📲",
+                                onClick = { onDeviceSelected(device.id) },
+                            )
+                        }
+                    }
+                }
+
+                // iOS column
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("iOS", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    if (iosDevices.isEmpty()) {
+                        Text("None", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                    } else {
+                        iosDevices.forEach { device ->
+                            DeviceListItem(
+                                name = device.name,
+                                status = device.status,
+                                icon = if (device.type == DeviceType.iOSPhysical) "📱" else "📲",
+                                onClick = { onDeviceSelected(device.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Available Emulators/Simulators section
+        if (androidEmulators.isNotEmpty() || iosSimulators.isNotEmpty()) {
+            DeviceSectionHeader("Available to Boot")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Android emulators
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (androidEmulators.isNotEmpty()) {
+                        androidEmulators.forEach { emulator ->
+                            EmulatorListItem(
+                                name = emulator.name,
+                                apiLevel = emulator.apiLevel,
+                                icon = "🤖",
+                                onClick = { onBootEmulator(emulator.id) },
+                            )
+                        }
+                    }
+                }
+
+                // iOS simulators
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (iosSimulators.isNotEmpty()) {
+                        iosSimulators.forEach { simulator ->
+                            EmulatorListItem(
+                                name = simulator.name,
+                                apiLevel = null,
+                                icon = "🍎",
+                                onClick = { onBootEmulator(simulator.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        // System Images section
+        if (androidImages.isNotEmpty() || iosImages.isNotEmpty()) {
+            DeviceSectionHeader("System Images")
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
+            ) {
+                // Android images
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (androidImages.isNotEmpty()) {
+                        androidImages.forEach { image ->
+                            SystemImageListItem(
+                                name = image.name,
+                                apiLevel = image.apiLevel,
+                                icon = "💿",
+                                onClick = { onCreateEmulator(image.id) },
+                            )
+                        }
+                    }
+                }
+
+                // iOS images
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    if (iosImages.isNotEmpty()) {
+                        iosImages.forEach { image ->
+                            SystemImageListItem(
+                                name = image.name,
+                                apiLevel = image.apiLevel,
+                                icon = "💿",
+                                onClick = { onCreateEmulator(image.id) },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DeviceSectionHeader(title: String) {
+    val colors = JewelTheme.globalColors
+    Text(
+        title,
+        fontSize = 11.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
+    )
+}
+
+@Composable
+private fun DeviceListItem(
+    name: String,
+    status: String,
+    icon: String,
+    onClick: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(icon, fontSize = 14.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, fontSize = 11.sp, maxLines = 1)
+            Text(
+                status,
+                fontSize = 9.sp,
+                color = Color(0xFF4CAF50),
+            )
+        }
+    }
+}
+
+@Composable
+private fun EmulatorListItem(
+    name: String,
+    apiLevel: String?,
+    icon: String,
+    onClick: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(icon, fontSize = 14.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, fontSize = 11.sp, maxLines = 1)
+            if (apiLevel != null) {
+                Text(
+                    "API $apiLevel",
+                    fontSize = 9.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
+        }
+        Text("Boot", fontSize = 10.sp, color = Color(0xFF2196F3))
+    }
+}
+
+@Composable
+private fun SystemImageListItem(
+    name: String,
+    apiLevel: String,
+    icon: String,
+    onClick: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(icon, fontSize = 14.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(name, fontSize = 11.sp, maxLines = 1)
+            Text(
+                "API $apiLevel",
+                fontSize = 9.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+            )
+        }
+        Text("Create", fontSize = 10.sp, color = Color(0xFF2196F3))
     }
 }

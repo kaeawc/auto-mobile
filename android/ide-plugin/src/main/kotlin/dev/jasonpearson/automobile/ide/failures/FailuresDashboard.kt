@@ -605,9 +605,12 @@ private fun FailureDetailView(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.horizontalScroll(rememberScrollState()),
             ) {
-                failure.recentCaptures.forEach { capture ->
+                failure.recentCaptures.take(5).forEach { capture ->
                     CaptureCard(capture = capture)
                 }
+            }
+            if (failure.recentCaptures.size > 5) {
+                ViewAllLink("View all ${failure.recentCaptures.size} captures") { /* TODO: Show all captures */ }
             }
             Spacer(Modifier.height(16.dp))
         }
@@ -656,10 +659,13 @@ private fun FailureDetailView(
             Spacer(Modifier.height(16.dp))
             SectionHeader("Screens Visited (across ${failure.totalCount} occurrences)")
             ScreenBreakdownSection(
-                breakdown = failure.screenBreakdown,
+                breakdown = failure.screenBreakdown.take(5),
                 failureScreens = failure.failureScreens,
                 onNavigateToScreen = onNavigateToScreen,
             )
+            if (failure.screenBreakdown.size > 5) {
+                ViewAllLink("View all ${failure.screenBreakdown.size} screens") { /* TODO: Show all screens */ }
+            }
         }
 
         // Device breakdown
@@ -667,7 +673,7 @@ private fun FailureDetailView(
             Spacer(Modifier.height(16.dp))
             SectionHeader("Devices (${failure.deviceBreakdown.size} models)")
             BreakdownList(
-                items = failure.deviceBreakdown.map { device ->
+                items = failure.deviceBreakdown.take(5).map { device ->
                     BreakdownItem(
                         label = device.deviceModel,
                         sublabel = device.os,
@@ -676,6 +682,9 @@ private fun FailureDetailView(
                     )
                 },
             )
+            if (failure.deviceBreakdown.size > 5) {
+                ViewAllLink("View all ${failure.deviceBreakdown.size} devices") { /* TODO: Show all devices */ }
+            }
         }
 
         // Version breakdown
@@ -683,7 +692,7 @@ private fun FailureDetailView(
             Spacer(Modifier.height(16.dp))
             SectionHeader("App Versions (${failure.versionBreakdown.size})")
             BreakdownList(
-                items = failure.versionBreakdown.map { version ->
+                items = failure.versionBreakdown.take(5).map { version ->
                     BreakdownItem(
                         label = version.version,
                         sublabel = null,
@@ -692,6 +701,9 @@ private fun FailureDetailView(
                     )
                 },
             )
+            if (failure.versionBreakdown.size > 5) {
+                ViewAllLink("View all ${failure.versionBreakdown.size} versions") { /* TODO: Show all versions */ }
+            }
         }
 
         // Affected tests
@@ -699,7 +711,7 @@ private fun FailureDetailView(
             Spacer(Modifier.height(16.dp))
             SectionHeader("Affected Tests (${failure.affectedTests.size})")
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                failure.affectedTests.entries.sortedByDescending { it.value }.forEach { (testName, count) ->
+                failure.affectedTests.entries.sortedByDescending { it.value }.take(5).forEach { (testName, count) ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -719,6 +731,9 @@ private fun FailureDetailView(
                         Text("View →", fontSize = 11.sp, color = Color(0xFF2196F3))
                     }
                 }
+                if (failure.affectedTests.size > 5) {
+                    ViewAllLink("View all ${failure.affectedTests.size} tests") { /* TODO: Show all tests */ }
+                }
             }
         }
 
@@ -731,15 +746,7 @@ private fun FailureDetailView(
                     OccurrenceRow(occurrence = occurrence)
                 }
                 if (failure.sampleOccurrences.size > 5) {
-                    Text(
-                        "View all ${failure.totalCount} occurrences →",
-                        fontSize = 11.sp,
-                        color = Color(0xFF2196F3),
-                        modifier = Modifier
-                            .clickable { /* TODO: Show all */ }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(8.dp),
-                    )
+                    ViewAllLink("View all ${failure.totalCount} occurrences") { /* TODO: Show all */ }
                 }
             }
         }
@@ -846,11 +853,15 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         // Error codes breakdown
         if (toolCallInfo.errorCodes.isNotEmpty()) {
             Text("Error Codes:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
-            toolCallInfo.errorCodes.entries.sortedByDescending { it.value }.forEach { (code, count) ->
+            val sortedCodes = toolCallInfo.errorCodes.entries.sortedByDescending { it.value }
+            sortedCodes.take(5).forEach { (code, count) ->
                 Row(modifier = Modifier.padding(start = 8.dp)) {
                     Text(code, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
                     Text("${count}x", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
                 }
+            }
+            if (sortedCodes.size > 5) {
+                ViewAllLink("View all ${sortedCodes.size} error codes") { /* TODO: Show all error codes */ }
             }
         }
 
@@ -871,7 +882,8 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         // Parameter variants
         if (toolCallInfo.parameterVariants.isNotEmpty()) {
             Text("Parameters:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
-            toolCallInfo.parameterVariants.forEach { (param, values) ->
+            val params = toolCallInfo.parameterVariants.entries.toList()
+            params.take(5).forEach { (param, values) ->
                 Row(modifier = Modifier.padding(start = 8.dp)) {
                     Text("$param: ", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
                     Text(
@@ -880,6 +892,9 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
                         fontFamily = FontFamily.Monospace,
                     )
                 }
+            }
+            if (params.size > 5) {
+                ViewAllLink("View all ${params.size} parameters") { /* TODO: Show all parameters */ }
             }
         }
     }
@@ -1079,6 +1094,22 @@ private fun SectionHeader(title: String) {
         fontWeight = FontWeight.Medium,
         color = colors.text.normal.copy(alpha = 0.7f),
         modifier = Modifier.padding(bottom = 8.dp),
+    )
+}
+
+@Composable
+private fun ViewAllLink(
+    text: String,
+    onClick: () -> Unit,
+) {
+    Text(
+        "$text →",
+        fontSize = 11.sp,
+        color = Color(0xFF2196F3),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(top = 8.dp, bottom = 4.dp),
     )
 }
 

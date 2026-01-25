@@ -21,6 +21,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -88,11 +89,31 @@ private enum class DateRange(val label: String, val durationMs: Long) {
 /**
  * Time aggregation options for the timeline
  */
-private enum class TimeAggregation(val label: String) {
-    Minute("Min"),
-    Hour("Hour"),
-    Day("Day"),
-    Week("Week"),
+private enum class TimeAggregation(val label: String, val durationMs: Long) {
+    Minute("Min", 60 * 1000L),
+    Hour("Hour", 60 * 60 * 1000L),
+    Day("Day", 24 * 60 * 60 * 1000L),
+    Week("Week", 7 * 24 * 60 * 60 * 1000L),
+}
+
+/**
+ * Get valid aggregation options for a date range (must produce at least 2 buckets)
+ */
+private fun getValidAggregations(dateRange: DateRange): List<TimeAggregation> {
+    return TimeAggregation.entries.filter { agg ->
+        dateRange.durationMs / agg.durationMs >= 2
+    }
+}
+
+/**
+ * Get the best default aggregation for a date range
+ */
+private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation): TimeAggregation {
+    val valid = getValidAggregations(dateRange)
+    // If current is valid, keep it
+    if (currentAgg in valid) return currentAgg
+    // Otherwise pick the finest valid granularity
+    return valid.firstOrNull() ?: TimeAggregation.Minute
 }
 
 /**
@@ -123,6 +144,16 @@ private fun FailureListView(
 
     var dateRange by remember { mutableStateOf(DateRange.TwentyFourHours) }
     var timeAggregation by remember { mutableStateOf(TimeAggregation.Hour) }
+
+    // Auto-switch aggregation when date range changes and current agg is invalid
+    val validAggregations = remember(dateRange) { getValidAggregations(dateRange) }
+    LaunchedEffect(dateRange) {
+        val bestAgg = getBestAggregation(dateRange, timeAggregation)
+        if (bestAgg != timeAggregation) {
+            timeAggregation = bestAgg
+        }
+    }
+
     val timelineData = remember(dateRange, timeAggregation) { generateMockTimelineData(dateRange, timeAggregation) }
 
     Column(
@@ -164,7 +195,7 @@ private fun FailureListView(
                 }
             }
 
-            // Aggregation selector
+            // Aggregation selector (only show valid options)
             Row(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -180,7 +211,7 @@ private fun FailureListView(
                         .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
                         .padding(4.dp),
                 ) {
-                    TimeAggregation.entries.forEach { agg ->
+                    validAggregations.forEach { agg ->
                         val isSelected = agg == timeAggregation
                         Box(
                             modifier = Modifier
@@ -480,14 +511,6 @@ private fun FailureBarChart(
 private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
     val random = kotlin.random.Random(42) // Fixed seed for consistent data
 
-    // Calculate bucket duration and count based on aggregation
-    val bucketDurationMs = when (aggregation) {
-        TimeAggregation.Minute -> 60 * 1000L
-        TimeAggregation.Hour -> 60 * 60 * 1000L
-        TimeAggregation.Day -> 24 * 60 * 60 * 1000L
-        TimeAggregation.Week -> 7 * 24 * 60 * 60 * 1000L
-    }
-
     // Calculate number of buckets - cap at reasonable display limit
     val maxBuckets = when (aggregation) {
         TimeAggregation.Minute -> 120  // Up to 2 hours of minute data
@@ -495,12 +518,12 @@ private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggr
         TimeAggregation.Day -> 60      // Up to 60 days
         TimeAggregation.Week -> 52     // Up to 52 weeks
     }
-    val buckets = (dateRange.durationMs / bucketDurationMs).toInt().coerceIn(1, maxBuckets)
+    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceIn(1, maxBuckets)
 
     return (0 until buckets).map { i ->
         // Calculate time offset from now (bucket 0 is most recent)
         val bucketIndex = buckets - 1 - i  // Reverse so oldest first
-        val timeAgoMs = bucketIndex * bucketDurationMs
+        val timeAgoMs = bucketIndex * aggregation.durationMs
 
         // Generate relative time label
         val label = formatRelativeTimeLabel(timeAgoMs, aggregation)
@@ -525,38 +548,46 @@ private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggr
 }
 
 /**
- * Format a relative time label for the timeline
+ * Format a local human-readable time label for the timeline
  */
 private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregation): String {
-    val minutes = timeAgoMs / (60 * 1000)
-    val hours = timeAgoMs / (60 * 60 * 1000)
-    val days = timeAgoMs / (24 * 60 * 60 * 1000)
-    val weeks = timeAgoMs / (7 * 24 * 60 * 60 * 1000)
+    val now = System.currentTimeMillis()
+    val timestamp = now - timeAgoMs
+    val calendar = java.util.Calendar.getInstance()
+    calendar.timeInMillis = timestamp
 
     return when (aggregation) {
         TimeAggregation.Minute -> {
-            if (minutes == 0L) "now" else "${minutes}m"
+            // Show local time like "7:45 PM"
+            if (timeAgoMs == 0L) {
+                "now"
+            } else {
+                val hour = calendar.get(java.util.Calendar.HOUR)
+                val minute = calendar.get(java.util.Calendar.MINUTE)
+                val amPm = if (calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
+                val displayHour = if (hour == 0) 12 else hour
+                "${displayHour}:${minute.toString().padStart(2, '0')} $amPm"
+            }
         }
         TimeAggregation.Hour -> {
-            if (hours == 0L) "now" else "${hours}h"
+            // Show local hour like "3 PM", "11 AM"
+            if (timeAgoMs == 0L) {
+                "now"
+            } else {
+                val hour = calendar.get(java.util.Calendar.HOUR)
+                val amPm = if (calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
+                val displayHour = if (hour == 0) 12 else hour
+                "$displayHour $amPm"
+            }
         }
         TimeAggregation.Day -> {
-            // Show actual date
-            val now = System.currentTimeMillis()
-            val dayMs = now - timeAgoMs
-            val calendar = java.util.Calendar.getInstance()
-            calendar.timeInMillis = dayMs
+            // Show actual date like "Jan 18"
             val month = calendar.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.SHORT, java.util.Locale.getDefault()) ?: ""
             val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
             "$month $day"
         }
         TimeAggregation.Week -> {
             // Calculate the Monday of the week
-            val now = System.currentTimeMillis()
-            val weekStartMs = now - timeAgoMs
-            val calendar = java.util.Calendar.getInstance()
-            calendar.timeInMillis = weekStartMs
-            // Adjust to Monday of that week
             val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK)
             val daysToMonday = if (dayOfWeek == java.util.Calendar.SUNDAY) -6 else java.util.Calendar.MONDAY - dayOfWeek
             calendar.add(java.util.Calendar.DAY_OF_MONTH, daysToMonday)

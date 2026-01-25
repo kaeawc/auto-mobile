@@ -48,6 +48,7 @@ import { registerPerformanceResources } from "./performanceResources";
 import { registerVideoRecordingResources } from "./videoRecordingResources";
 import { registerLocalizationResources } from "./localizationResources";
 import { registerDeviceSnapshotResources } from "./deviceSnapshotResources";
+import { registerDatabaseResources } from "./databaseResources";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { startupBenchmark } from "../utils/startupBenchmark";
 
@@ -155,6 +156,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerVideoRecordingResources();
   registerLocalizationResources();
   registerDeviceSnapshotResources();
+  registerDatabaseResources();
   startupBenchmark.endPhase("resourceRegistration");
 
   // Create a new MCP server

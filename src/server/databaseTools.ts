@@ -5,41 +5,10 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { AdbClient } from "../utils/android-cmdline-tools/AdbClient";
+import { notifyDatabaseChanged } from "./databaseResources";
 
-// Schema definitions
-
-export const listDatabasesSchema = addDeviceTargetingToSchema(
-  z.object({
-    appId: z.string().describe("App package ID (e.g., com.example.app)")
-  })
-);
-
-export const listTablesSchema = addDeviceTargetingToSchema(
-  z.object({
-    appId: z.string().describe("App package ID"),
-    databasePath: z.string().describe("Absolute path to the database file")
-  })
-);
-
-export const getTableDataSchema = addDeviceTargetingToSchema(
-  z.object({
-    appId: z.string().describe("App package ID"),
-    databasePath: z.string().describe("Absolute path to the database file"),
-    table: z.string().describe("Table name"),
-    limit: z.number().optional().describe("Maximum number of rows to return (default: 50)"),
-    offset: z.number().optional().describe("Row offset for pagination (default: 0)")
-  })
-);
-
-export const getTableStructureSchema = addDeviceTargetingToSchema(
-  z.object({
-    appId: z.string().describe("App package ID"),
-    databasePath: z.string().describe("Absolute path to the database file"),
-    table: z.string().describe("Table name")
-  })
-);
-
-export const executeSQLSchema = addDeviceTargetingToSchema(
+// Schema for sqlQuery tool
+export const sqlQuerySchema = addDeviceTargetingToSchema(
   z.object({
     appId: z.string().describe("App package ID"),
     databasePath: z.string().describe("Absolute path to the database file"),
@@ -47,140 +16,68 @@ export const executeSQLSchema = addDeviceTargetingToSchema(
   })
 );
 
-// Type interfaces for tool arguments
-
-export interface ListDatabasesArgs {
-  appId: string;
-}
-
-export interface ListTablesArgs {
-  appId: string;
-  databasePath: string;
-}
-
-export interface GetTableDataArgs {
-  appId: string;
-  databasePath: string;
-  table: string;
-  limit?: number;
-  offset?: number;
-}
-
-export interface GetTableStructureArgs {
-  appId: string;
-  databasePath: string;
-  table: string;
-}
-
-export interface ExecuteSQLArgs {
+// Type interface for tool arguments
+export interface SqlQueryArgs {
   appId: string;
   databasePath: string;
   query: string;
 }
 
 /**
- * Register database inspection tools.
+ * Extract table names from SQL query for notification purposes
+ */
+function extractAffectedTables(query: string): string[] {
+  const tables: string[] = [];
+
+  // Match INSERT INTO table, UPDATE table, DELETE FROM table, ALTER TABLE table
+  const patterns = [
+    /INSERT\s+INTO\s+["']?(\w+)["']?/gi,
+    /UPDATE\s+["']?(\w+)["']?/gi,
+    /DELETE\s+FROM\s+["']?(\w+)["']?/gi,
+    /ALTER\s+TABLE\s+["']?(\w+)["']?/gi,
+    /DROP\s+TABLE\s+(?:IF\s+EXISTS\s+)?["']?(\w+)["']?/gi,
+    /CREATE\s+TABLE\s+(?:IF\s+NOT\s+EXISTS\s+)?["']?(\w+)["']?/gi,
+    /TRUNCATE\s+(?:TABLE\s+)?["']?(\w+)["']?/gi
+  ];
+
+  for (const pattern of patterns) {
+    let match;
+    while ((match = pattern.exec(query)) !== null) {
+      if (match[1] && !tables.includes(match[1])) {
+        tables.push(match[1]);
+      }
+    }
+  }
+
+  return tables;
+}
+
+/**
+ * Determine if query is a mutation (modifies data)
+ */
+function isMutationQuery(query: string): boolean {
+  const upperQuery = query.trim().toUpperCase();
+  return (
+    upperQuery.startsWith("INSERT") ||
+    upperQuery.startsWith("UPDATE") ||
+    upperQuery.startsWith("DELETE") ||
+    upperQuery.startsWith("ALTER") ||
+    upperQuery.startsWith("DROP") ||
+    upperQuery.startsWith("CREATE") ||
+    upperQuery.startsWith("TRUNCATE")
+  );
+}
+
+/**
+ * Register database tools.
  *
- * These tools allow inspection and manipulation of SQLite databases in Android apps
- * that have integrated the AutoMobile SDK with database inspection enabled.
+ * Only the sqlQuery tool is registered here. Read-only operations
+ * (listDatabases, listTables, getTableData, getTableStructure) are
+ * exposed as MCP resources instead.
  */
 export function registerDatabaseTools() {
-  // List databases handler
-  const listDatabasesHandler = async (device: BootedDevice, args: ListDatabasesArgs) => {
-    validateAndroidDevice(device);
-
-    try {
-      const adb = new AdbClient(device);
-      const inspector = new DatabaseInspector(device, adb);
-      const databases = await inspector.listDatabases(args.appId);
-
-      return createJSONToolResponse({
-        message: `Found ${databases.length} database(s) in ${args.appId}`,
-        databases
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw new ActionableError(`Failed to list databases: ${error}`);
-    }
-  };
-
-  // List tables handler
-  const listTablesHandler = async (device: BootedDevice, args: ListTablesArgs) => {
-    validateAndroidDevice(device);
-
-    try {
-      const adb = new AdbClient(device);
-      const inspector = new DatabaseInspector(device, adb);
-      const tables = await inspector.listTables(args.appId, args.databasePath);
-
-      return createJSONToolResponse({
-        message: `Found ${tables.length} table(s) in database`,
-        tables
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw new ActionableError(`Failed to list tables: ${error}`);
-    }
-  };
-
-  // Get table data handler
-  const getTableDataHandler = async (device: BootedDevice, args: GetTableDataArgs) => {
-    validateAndroidDevice(device);
-
-    try {
-      const adb = new AdbClient(device);
-      const inspector = new DatabaseInspector(device, adb);
-      const data = await inspector.getTableData(
-        args.appId,
-        args.databasePath,
-        args.table,
-        args.limit ?? 50,
-        args.offset ?? 0
-      );
-
-      return createJSONToolResponse({
-        message: `Retrieved ${data.rows.length} row(s) from ${args.table} (${data.total} total)`,
-        ...data
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw new ActionableError(`Failed to get table data: ${error}`);
-    }
-  };
-
-  // Get table structure handler
-  const getTableStructureHandler = async (device: BootedDevice, args: GetTableStructureArgs) => {
-    validateAndroidDevice(device);
-
-    try {
-      const adb = new AdbClient(device);
-      const inspector = new DatabaseInspector(device, adb);
-      const structure = await inspector.getTableStructure(
-        args.appId,
-        args.databasePath,
-        args.table
-      );
-
-      return createJSONToolResponse({
-        message: `Table ${args.table} has ${structure.columns.length} column(s)`,
-        ...structure
-      });
-    } catch (error) {
-      if (error instanceof ActionableError) {
-        throw error;
-      }
-      throw new ActionableError(`Failed to get table structure: ${error}`);
-    }
-  };
-
-  // Execute SQL handler
-  const executeSQLHandler = async (device: BootedDevice, args: ExecuteSQLArgs) => {
+  // SQL Query handler
+  const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
     validateAndroidDevice(device);
 
     try {
@@ -191,6 +88,17 @@ export function registerDatabaseTools() {
         args.databasePath,
         args.query
       );
+
+      // If this was a mutation, notify resource subscribers of the change
+      if (isMutationQuery(args.query)) {
+        const affectedTables = extractAffectedTables(args.query);
+        await notifyDatabaseChanged(
+          device.deviceId,
+          args.appId,
+          args.databasePath,
+          affectedTables
+        );
+      }
 
       const message =
         result.type === "query"
@@ -209,40 +117,13 @@ export function registerDatabaseTools() {
     }
   };
 
-  // Register tools with the registry
+  // Register the sqlQuery tool
   ToolRegistry.registerDeviceAware(
-    "listDatabases",
-    "List all SQLite databases in an Android app. Requires the app to have AutoMobile SDK integrated with database inspection enabled.",
-    listDatabasesSchema,
-    listDatabasesHandler
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "listTables",
-    "List all tables in a database. Use listDatabases first to get the database path.",
-    listTablesSchema,
-    listTablesHandler
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "getTableData",
-    "Get rows from a database table with pagination support. Returns column names, row data, and total count.",
-    getTableDataSchema,
-    getTableDataHandler
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "getTableStructure",
-    "Get column definitions for a database table including name, type, nullable, primary key, and default value.",
-    getTableStructureSchema,
-    getTableStructureHandler
-  );
-
-  ToolRegistry.registerDeviceAware(
-    "executeSQL",
-    "Execute a SQL query on a database. Supports SELECT, INSERT, UPDATE, and DELETE statements.",
-    executeSQLSchema,
-    executeSQLHandler
+    "sqlQuery",
+    "Execute a SQL query on an Android app's database. Supports SELECT, INSERT, UPDATE, DELETE. " +
+    "For read-only operations (listing databases, tables, viewing data/schema), use the database resources instead.",
+    sqlQuerySchema,
+    sqlQueryHandler
   );
 }
 

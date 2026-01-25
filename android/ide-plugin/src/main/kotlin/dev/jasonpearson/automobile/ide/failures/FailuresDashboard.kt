@@ -511,14 +511,8 @@ private fun FailureBarChart(
 private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
     val random = kotlin.random.Random(42) // Fixed seed for consistent data
 
-    // Calculate number of buckets - cap at reasonable display limit
-    val maxBuckets = when (aggregation) {
-        TimeAggregation.Minute -> 120  // Up to 2 hours of minute data
-        TimeAggregation.Hour -> 168    // Up to 7 days of hourly data
-        TimeAggregation.Day -> 60      // Up to 60 days
-        TimeAggregation.Week -> 52     // Up to 52 weeks
-    }
-    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceIn(1, maxBuckets)
+    // Calculate number of buckets for the full date range
+    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceAtLeast(1)
 
     return (0 until buckets).map { i ->
         // Calculate time offset from now (bucket 0 is most recent)

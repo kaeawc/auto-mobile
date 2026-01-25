@@ -96,12 +96,30 @@ private enum class TimeAggregation(val label: String, val durationMs: Long) {
     Week("Week", 7 * 24 * 60 * 60 * 1000L),
 }
 
+// Maximum number of buckets we can reasonably display
+private const val MAX_DISPLAYABLE_BUCKETS = 100
+
 /**
- * Get valid aggregation options for a date range (must produce at least 2 buckets)
+ * Get valid aggregation options for a date range
+ * Must produce at least 2 buckets and no more than MAX_DISPLAYABLE_BUCKETS
  */
 private fun getValidAggregations(dateRange: DateRange): List<TimeAggregation> {
     return TimeAggregation.entries.filter { agg ->
-        dateRange.durationMs / agg.durationMs >= 2
+        val buckets = dateRange.durationMs / agg.durationMs
+        buckets >= 2 && buckets <= MAX_DISPLAYABLE_BUCKETS
+    }
+}
+
+/**
+ * Get the next smaller date range for drill-down
+ */
+private fun getNextSmallerDateRange(current: DateRange): DateRange? {
+    return when (current) {
+        DateRange.ThirtyDays -> DateRange.SevenDays
+        DateRange.SevenDays -> DateRange.ThreeDays
+        DateRange.ThreeDays -> DateRange.TwentyFourHours
+        DateRange.TwentyFourHours -> DateRange.OneHour
+        DateRange.OneHour -> null // Can't go smaller
     }
 }
 
@@ -126,6 +144,38 @@ private data class TimelineDataPoint(
     val toolFailures: Int,
 ) {
     val total: Int get() = crashes + anrs + toolFailures
+}
+
+/**
+ * Totals for a period (used for previous period comparison)
+ */
+private data class PeriodTotals(
+    val crashes: Int,
+    val anrs: Int,
+    val toolFailures: Int,
+)
+
+/**
+ * Generate mock totals for the previous equivalent period
+ */
+private fun generateMockPreviousPeriodTotals(dateRange: DateRange): PeriodTotals {
+    // Use a different seed based on date range to get consistent but different values
+    val random = kotlin.random.Random(dateRange.ordinal + 100)
+
+    // Generate totals that are somewhat similar to current period but with variance
+    val baseCrashes = when (dateRange) {
+        DateRange.OneHour -> random.nextInt(50, 150)
+        DateRange.TwentyFourHours -> random.nextInt(200, 600)
+        DateRange.ThreeDays -> random.nextInt(500, 1500)
+        DateRange.SevenDays -> random.nextInt(1000, 3000)
+        DateRange.ThirtyDays -> random.nextInt(3000, 8000)
+    }
+
+    return PeriodTotals(
+        crashes = baseCrashes,
+        anrs = baseCrashes / 3,
+        toolFailures = baseCrashes / 2,
+    )
 }
 
 @Composable
@@ -237,10 +287,20 @@ private fun FailureListView(
         Spacer(Modifier.height(16.dp))
 
         // Event Trends section
+        val canDrillDown = getNextSmallerDateRange(dateRange) != null
         EventTrendsSection(
             data = timelineData,
             dateRange = dateRange,
             aggregation = timeAggregation,
+            onBarClick = if (canDrillDown) {
+                {
+                    // Drill down to smaller time range
+                    val nextRange = getNextSmallerDateRange(dateRange)
+                    if (nextRange != null) {
+                        dateRange = nextRange
+                    }
+                }
+            } else null,
         )
 
         Spacer(Modifier.height(16.dp))
@@ -358,19 +418,20 @@ private fun EventTrendsSection(
     data: List<TimelineDataPoint>,
     dateRange: DateRange,
     aggregation: TimeAggregation,
+    onBarClick: (() -> Unit)?,
 ) {
     val colors = JewelTheme.globalColors
 
-    // Calculate totals and deltas
+    // Calculate totals for current period
     val totalCrashes = data.sumOf { it.crashes }
     val totalAnrs = data.sumOf { it.anrs }
     val totalToolFailures = data.sumOf { it.toolFailures }
 
-    // Calculate delta (compare first half to second half as a simple approximation)
-    val halfPoint = data.size / 2
-    val recentCrashes = data.takeLast(halfPoint).sumOf { it.crashes }
-    val olderCrashes = data.take(halfPoint).sumOf { it.crashes }
-    val crashDelta = if (olderCrashes > 0) ((recentCrashes - olderCrashes) * 100 / olderCrashes) else 0
+    // Calculate delta vs previous period (e.g., this 24h vs previous 24h)
+    val previousPeriodTotals = remember(dateRange) { generateMockPreviousPeriodTotals(dateRange) }
+    val crashDelta = if (previousPeriodTotals.crashes > 0) {
+        ((totalCrashes - previousPeriodTotals.crashes) * 100 / previousPeriodTotals.crashes)
+    } else 0
 
     Column(
         modifier = Modifier
@@ -385,30 +446,30 @@ private fun EventTrendsSection(
         ) {
             StatBox(
                 label = "Crashes",
-                value = totalCrashes.toString(),
+                value = formatNumber(totalCrashes),
                 color = FailureType.Crash.color,
                 delta = if (crashDelta != 0) "${if (crashDelta > 0) "+" else ""}$crashDelta%" else null,
                 deltaPositive = crashDelta < 0,
             )
             StatBox(
                 label = "ANRs",
-                value = totalAnrs.toString(),
+                value = formatNumber(totalAnrs),
                 color = FailureType.ANR.color,
             )
             StatBox(
                 label = "Tool Errors",
-                value = totalToolFailures.toString(),
+                value = formatNumber(totalToolFailures),
                 color = FailureType.ToolCallFailure.color,
             )
             StatBox(
                 label = "Total",
-                value = (totalCrashes + totalAnrs + totalToolFailures).toString(),
+                value = formatNumber(totalCrashes + totalAnrs + totalToolFailures),
                 color = colors.text.normal,
             )
         }
 
         // Bar chart
-        FailureBarChart(data = data, aggregation = aggregation)
+        FailureBarChart(data = data, aggregation = aggregation, onBarClick = onBarClick)
     }
 }
 
@@ -416,6 +477,7 @@ private fun EventTrendsSection(
 private fun FailureBarChart(
     data: List<TimelineDataPoint>,
     aggregation: TimeAggregation,
+    onBarClick: (() -> Unit)?,
 ) {
     val colors = JewelTheme.globalColors
     val maxValue = data.maxOfOrNull { it.total } ?: 1
@@ -436,7 +498,14 @@ private fun FailureBarChart(
                 Column(
                     modifier = Modifier
                         .weight(1f)
-                        .height(chartHeight),
+                        .height(chartHeight)
+                        .then(
+                            if (onBarClick != null) {
+                                Modifier
+                                    .clickable(onClick = onBarClick)
+                                    .pointerHoverIcon(PointerIcon.Hand)
+                            } else Modifier
+                        ),
                     verticalArrangement = Arrangement.Bottom,
                 ) {
                     // Stacked bar: crashes (red) + ANRs (orange) + tool failures (purple)
@@ -511,8 +580,8 @@ private fun FailureBarChart(
 private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
     val random = kotlin.random.Random(42) // Fixed seed for consistent data
 
-    // Calculate number of buckets for the full date range
-    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceAtLeast(1)
+    // Calculate number of buckets, capped at displayable limit
+    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceIn(1, MAX_DISPLAYABLE_BUCKETS)
 
     return (0 until buckets).map { i ->
         // Calculate time offset from now (bucket 0 is most recent)
@@ -1194,6 +1263,10 @@ private fun OccurrenceRow(occurrence: FailureOccurrence) {
         }
     }
 }
+
+private val numberFormat = java.text.NumberFormat.getNumberInstance()
+
+private fun formatNumber(value: Int): String = numberFormat.format(value)
 
 private fun formatTimeAgo(timestamp: Long): String {
     val diff = System.currentTimeMillis() - timestamp

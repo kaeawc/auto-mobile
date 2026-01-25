@@ -82,8 +82,9 @@ class RealMcpProcessDetector(
                 isListeningOnSocket(pid) != null -> {
                     Triple(McpConnectionType.UnixSocket, null, isListeningOnSocket(pid))
                 }
-                // Check if THIS process is listening on HTTP port (daemon mode)
-                cmdLine.contains("--daemon-mode") || cmdLine.contains("daemon start") -> {
+                // Check if THIS process is the daemon running in HTTP mode
+                // Only --daemon-mode is the actual daemon; --daemon start is just the manager
+                cmdLine.contains("--daemon-mode") -> {
                     Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
                 }
                 // Check for explicit port indicators

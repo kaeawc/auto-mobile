@@ -1468,7 +1468,7 @@ private fun McpProcessesPanel(
         if (isDaemonStarting) {
             try {
                 println("[AutoMobile IDE] Starting daemon...")
-                val processBuilder = ProcessBuilder("auto-mobile", "daemon", "start")
+                val processBuilder = ProcessBuilder("auto-mobile", "--daemon", "start")
                 processBuilder.redirectErrorStream(true)
                 val process = processBuilder.start()
 
@@ -2118,7 +2118,7 @@ private fun McpProcessDetails(process: McpProcess) {
             try {
                 kotlinx.coroutines.withTimeout(5000) {
                     val client = when (process.connectionType) {
-                        McpConnectionType.StreamableHttp -> McpHttpClient("http://localhost:${process.port}")
+                        McpConnectionType.StreamableHttp -> McpHttpClient("http://localhost:${process.port}/auto-mobile/streamable")
                         McpConnectionType.UnixSocket -> McpDaemonClient(process.socketPath ?: "")
                         McpConnectionType.Stdio -> null // STDIO shouldn't appear
                     }

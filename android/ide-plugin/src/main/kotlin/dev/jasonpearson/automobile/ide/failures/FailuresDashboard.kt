@@ -75,13 +75,24 @@ fun FailuresDashboard(
 }
 
 /**
+ * Date range options for the timeline
+ */
+private enum class DateRange(val label: String, val durationMs: Long) {
+    OneHour("1h", 60 * 60 * 1000L),
+    TwentyFourHours("24h", 24 * 60 * 60 * 1000L),
+    ThreeDays("3d", 3 * 24 * 60 * 60 * 1000L),
+    SevenDays("7d", 7 * 24 * 60 * 60 * 1000L),
+    ThirtyDays("30d", 30 * 24 * 60 * 60 * 1000L),
+}
+
+/**
  * Time aggregation options for the timeline
  */
-private enum class TimeAggregation(val label: String, val buckets: Int) {
-    Minute("Min", 60),
-    Hour("Hour", 24),
-    Day("Day", 7),
-    Week("Week", 4),
+private enum class TimeAggregation(val label: String) {
+    Minute("Min"),
+    Hour("Hour"),
+    Day("Day"),
+    Week("Week"),
 }
 
 /**
@@ -110,53 +121,98 @@ private fun FailureListView(
         failures
     }
 
+    var dateRange by remember { mutableStateOf(DateRange.TwentyFourHours) }
     var timeAggregation by remember { mutableStateOf(TimeAggregation.Hour) }
-    val timelineData = remember(timeAggregation) { generateMockTimelineData(timeAggregation) }
+    val timelineData = remember(dateRange, timeAggregation) { generateMockTimelineData(dateRange, timeAggregation) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        // Header with time range
-        Row(
+        // Header with date range and aggregation selectors
+        Column(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically,
+            verticalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Column {
-                Text("Failures", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                Text(
-                    "Crashes, ANRs, and tool call failures",
-                    color = colors.text.normal.copy(alpha = 0.6f),
-                    fontSize = 12.sp,
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Column {
+                    Text("Failures", fontSize = 16.sp, fontWeight = FontWeight.Medium)
+                    Text(
+                        "Crashes, ANRs, and tool call failures",
+                        color = colors.text.normal.copy(alpha = 0.6f),
+                        fontSize = 12.sp,
+                    )
+                }
+
+                // Date range selector
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+                        .padding(4.dp),
+                ) {
+                    DateRange.entries.forEach { range ->
+                        val isSelected = range == dateRange
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                                    RoundedCornerShape(4.dp),
+                                )
+                                .clickable { dateRange = range }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                range.label,
+                                fontSize = 10.sp,
+                                color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                            )
+                        }
+                    }
+                }
             }
 
-            // Time aggregation selector
+            // Aggregation selector (right-aligned)
             Row(
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                modifier = Modifier
-                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-                    .padding(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
             ) {
-                TimeAggregation.entries.forEach { agg ->
-                    val isSelected = agg == timeAggregation
-                    Box(
-                        modifier = Modifier
-                            .background(
-                                if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
-                                RoundedCornerShape(4.dp),
+                Text(
+                    "Group by: ",
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                    modifier = Modifier.align(Alignment.CenterVertically),
+                )
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    modifier = Modifier
+                        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+                        .padding(4.dp),
+                ) {
+                    TimeAggregation.entries.forEach { agg ->
+                        val isSelected = agg == timeAggregation
+                        Box(
+                            modifier = Modifier
+                                .background(
+                                    if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                                    RoundedCornerShape(4.dp),
+                                )
+                                .clickable { timeAggregation = agg }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .padding(horizontal = 8.dp, vertical = 4.dp),
+                        ) {
+                            Text(
+                                agg.label,
+                                fontSize = 10.sp,
+                                color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
                             )
-                            .clickable { timeAggregation = agg }
-                            .pointerHoverIcon(PointerIcon.Hand)
-                            .padding(horizontal = 8.dp, vertical = 4.dp),
-                    ) {
-                        Text(
-                            agg.label,
-                            fontSize = 10.sp,
-                            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                        )
+                        }
                     }
                 }
             }
@@ -167,6 +223,7 @@ private fun FailureListView(
         // Event Trends section
         EventTrendsSection(
             data = timelineData,
+            dateRange = dateRange,
             aggregation = timeAggregation,
         )
 
@@ -283,6 +340,7 @@ private fun StatBox(
 @Composable
 private fun EventTrendsSection(
     data: List<TimelineDataPoint>,
+    dateRange: DateRange,
     aggregation: TimeAggregation,
 ) {
     val colors = JewelTheme.globalColors
@@ -440,19 +498,28 @@ private fun FailureBarChart(
 }
 
 /**
- * Generate mock timeline data for demonstration
+ * Generate mock timeline data with relative time labels
  */
-private fun generateMockTimelineData(aggregation: TimeAggregation): List<TimelineDataPoint> {
-    val buckets = aggregation.buckets
+private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
     val random = kotlin.random.Random(42) // Fixed seed for consistent data
 
+    // Calculate bucket duration and count based on aggregation
+    val bucketDurationMs = when (aggregation) {
+        TimeAggregation.Minute -> 60 * 1000L
+        TimeAggregation.Hour -> 60 * 60 * 1000L
+        TimeAggregation.Day -> 24 * 60 * 60 * 1000L
+        TimeAggregation.Week -> 7 * 24 * 60 * 60 * 1000L
+    }
+
+    val buckets = (dateRange.durationMs / bucketDurationMs).toInt().coerceIn(1, 60)
+
     return (0 until buckets).map { i ->
-        val label = when (aggregation) {
-            TimeAggregation.Minute -> "${60 - i}m"
-            TimeAggregation.Hour -> "${23 - i}:00"
-            TimeAggregation.Day -> listOf("Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat").getOrElse(6 - i % 7) { "?" }
-            TimeAggregation.Week -> "W${4 - i}"
-        }
+        // Calculate time offset from now (bucket 0 is most recent)
+        val bucketIndex = buckets - 1 - i  // Reverse so oldest first
+        val timeAgoMs = bucketIndex * bucketDurationMs
+
+        // Generate relative time label
+        val label = formatRelativeTimeLabel(timeAgoMs, aggregation)
 
         // Generate realistic-looking failure data with some variance
         val baseCrashes = when (aggregation) {
@@ -470,7 +537,41 @@ private fun generateMockTimelineData(aggregation: TimeAggregation): List<Timelin
             anrs = baseAnrs,
             toolFailures = baseToolFailures,
         )
-    }.reversed() // Oldest first
+    }
+}
+
+/**
+ * Format a relative time label for the timeline
+ */
+private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregation): String {
+    val minutes = timeAgoMs / (60 * 1000)
+    val hours = timeAgoMs / (60 * 60 * 1000)
+    val days = timeAgoMs / (24 * 60 * 60 * 1000)
+    val weeks = timeAgoMs / (7 * 24 * 60 * 60 * 1000)
+
+    return when (aggregation) {
+        TimeAggregation.Minute -> {
+            if (minutes == 0L) "now" else "${minutes}m"
+        }
+        TimeAggregation.Hour -> {
+            if (hours == 0L) "now" else "${hours}h"
+        }
+        TimeAggregation.Day -> {
+            when {
+                days == 0L -> "Today"
+                days == 1L -> "Yesterday"
+                days < 7L -> "${days}d ago"
+                else -> "${days}d"
+            }
+        }
+        TimeAggregation.Week -> {
+            when {
+                weeks == 0L -> "This week"
+                weeks == 1L -> "Last week"
+                else -> "${weeks}w ago"
+            }
+        }
+    }
 }
 
 @Composable

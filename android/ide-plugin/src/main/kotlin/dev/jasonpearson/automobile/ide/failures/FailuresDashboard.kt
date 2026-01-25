@@ -548,14 +548,13 @@ private fun FailureDetailView(
     onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
-    val event = failure.representativeEvent
 
     Column(
         modifier = Modifier
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        // Back button and header
+        // Back button
         Text(
             "← Back",
             fontSize = 12.sp,
@@ -566,33 +565,13 @@ private fun FailureDetailView(
                 .padding(bottom = 12.dp),
         )
 
-        // Failure header with type badge
+        // Header with badges
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            Box(
-                modifier = Modifier
-                    .background(failure.type.color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    "${failure.type.icon} ${failure.type.label}",
-                    fontSize = 11.sp,
-                    color = failure.type.color,
-                )
-            }
-            Box(
-                modifier = Modifier
-                    .background(failure.severity.color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                Text(
-                    failure.severity.label,
-                    fontSize = 11.sp,
-                    color = failure.severity.color,
-                )
-            }
+            Badge(failure.type.icon + " " + failure.type.label, failure.type.color)
+            Badge(failure.severity.label, failure.severity.color)
         }
 
         Text(
@@ -601,54 +580,33 @@ private fun FailureDetailView(
             fontWeight = FontWeight.Medium,
             modifier = Modifier.padding(top = 8.dp),
         )
-        Text(
-            "${failure.totalCount} occurrences",
-            fontSize = 12.sp,
-            color = colors.text.normal.copy(alpha = 0.5f),
-            modifier = Modifier.padding(top = 2.dp, bottom = 16.dp),
-        )
 
-        // Screenshot/Video at failure (displayed inline if available)
-        if (event.screenshotPath != null || event.videoPath != null) {
-            SectionHeader("Failure Capture")
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp)),
-                contentAlignment = Alignment.Center,
+        // Summary stats row
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.padding(top = 8.dp, bottom = 16.dp),
+        ) {
+            Text(
+                "${failure.totalCount} occurrences",
+                fontSize = 12.sp,
+                color = colors.text.normal.copy(alpha = 0.6f),
+            )
+            Text(
+                "${failure.uniqueSessions} sessions",
+                fontSize = 12.sp,
+                color = colors.text.normal.copy(alpha = 0.6f),
+            )
+        }
+
+        // Captures gallery (if available)
+        if (failure.recentCaptures.isNotEmpty()) {
+            SectionHeader("Captures (${failure.recentCaptures.size})")
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
             ) {
-                if (event.videoPath != null) {
-                    // Video placeholder - in real impl would use video player
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("🎬", fontSize = 32.sp)
-                        Text(
-                            "Video: ${event.videoPath.substringAfterLast("/")}",
-                            fontSize = 11.sp,
-                            color = colors.text.normal.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                        Text(
-                            "Click to play",
-                            fontSize = 10.sp,
-                            color = Color(0xFF2196F3),
-                            modifier = Modifier
-                                .padding(top = 4.dp)
-                                .clickable { /* TODO: Open video */ }
-                                .pointerHoverIcon(PointerIcon.Hand),
-                        )
-                    }
-                } else if (event.screenshotPath != null) {
-                    // Screenshot placeholder - in real impl would load image
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                        Text("📸", fontSize = 32.sp)
-                        Text(
-                            "Screenshot: ${event.screenshotPath.substringAfterLast("/")}",
-                            fontSize = 11.sp,
-                            color = colors.text.normal.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(top = 8.dp),
-                        )
-                    }
+                failure.recentCaptures.forEach { capture ->
+                    CaptureCard(capture = capture)
                 }
             }
             Spacer(Modifier.height(16.dp))
@@ -663,15 +621,15 @@ private fun FailureDetailView(
                 .padding(12.dp),
         ) {
             Text(
-                event.message,
+                failure.message,
                 fontSize = 12.sp,
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFFE53935),
             )
         }
 
-        // Stack trace with clickable lines (if available)
-        if (event.stackTraceElements.isNotEmpty()) {
+        // Stack trace with clickable lines
+        if (failure.stackTraceElements.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
             SectionHeader("Stack Trace")
             Column(
@@ -680,120 +638,68 @@ private fun FailureDetailView(
                     .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
                     .padding(8.dp),
             ) {
-                event.stackTraceElements.forEach { element ->
-                    val lineText = buildString {
-                        append("at ${element.className}.${element.methodName}")
-                        if (element.fileName != null && element.lineNumber != null) {
-                            append("(${element.fileName}:${element.lineNumber})")
-                        }
-                    }
-                    val isClickable = element.isAppCode && element.fileName != null && element.lineNumber != null
-
-                    Text(
-                        lineText,
-                        fontSize = 11.sp,
-                        fontFamily = FontFamily.Monospace,
-                        color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .then(
-                                if (isClickable) {
-                                    Modifier
-                                        .clickable { onNavigateToSource(element.fileName!!, element.lineNumber!!) }
-                                        .pointerHoverIcon(PointerIcon.Hand)
-                                } else Modifier
-                            )
-                            .padding(vertical = 2.dp, horizontal = 4.dp),
-                    )
+                failure.stackTraceElements.forEach { element ->
+                    StackTraceLine(element = element, onNavigateToSource = onNavigateToSource)
                 }
-            }
-        } else if (!event.stackTrace.isNullOrBlank()) {
-            // Fallback: raw stack trace if not parsed
-            Spacer(Modifier.height(16.dp))
-            SectionHeader("Stack Trace")
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                    .horizontalScroll(rememberScrollState())
-                    .padding(12.dp),
-            ) {
-                Text(
-                    event.stackTrace,
-                    fontSize = 11.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = colors.text.normal.copy(alpha = 0.8f),
-                )
             }
         }
 
         // Tool call info (for tool failures)
-        if (event.toolCallInfo != null) {
+        if (failure.toolCallInfo != null) {
             Spacer(Modifier.height(16.dp))
             SectionHeader("Tool Call Details")
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                    .padding(12.dp),
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    DetailRow("Tool", event.toolCallInfo.toolName)
-                    event.toolCallInfo.errorCode?.let { DetailRow("Error Code", it) }
-                    event.toolCallInfo.duration?.let { DetailRow("Duration", "${it}ms") }
-                    if (event.toolCallInfo.parameters.isNotEmpty()) {
-                        Text(
-                            "Parameters:",
-                            fontSize = 11.sp,
-                            color = colors.text.normal.copy(alpha = 0.6f),
-                            modifier = Modifier.padding(top = 4.dp),
-                        )
-                        event.toolCallInfo.parameters.forEach { (key, value) ->
-                            Text(
-                                "  $key: $value",
-                                fontSize = 11.sp,
-                                fontFamily = FontFamily.Monospace,
-                                color = colors.text.normal.copy(alpha = 0.8f),
-                            )
-                        }
-                    }
-                }
-            }
+            ToolCallDetailsSection(toolCallInfo = failure.toolCallInfo)
         }
 
-        // Screens Visited
-        if (event.screensVisited.isNotEmpty()) {
+        // Screen breakdown histogram
+        if (failure.screenBreakdown.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SectionHeader("Screens Visited")
-            FlowRow(
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                event.screensVisited.forEachIndexed { index, screen ->
-                    val isFailureScreen = screen == event.screenAtFailure
-                    ScreenChip(
-                        name = screen,
-                        isHighlighted = isFailureScreen,
-                        onClick = { onNavigateToScreen(screen) },
-                    )
-                }
-            }
-            if (event.screenAtFailure != null) {
-                Text(
-                    "💥 Failure occurred on ${event.screenAtFailure}",
-                    fontSize = 11.sp,
-                    color = Color(0xFFE53935).copy(alpha = 0.8f),
-                    modifier = Modifier.padding(top = 8.dp),
-                )
-            }
+            SectionHeader("Screens Visited (across ${failure.totalCount} occurrences)")
+            ScreenBreakdownSection(
+                breakdown = failure.screenBreakdown,
+                failureScreens = failure.failureScreens,
+                onNavigateToScreen = onNavigateToScreen,
+            )
         }
 
-        // Related Tests
+        // Device breakdown
+        if (failure.deviceBreakdown.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("Devices (${failure.deviceBreakdown.size} models)")
+            BreakdownList(
+                items = failure.deviceBreakdown.map { device ->
+                    BreakdownItem(
+                        label = device.deviceModel,
+                        sublabel = device.os,
+                        count = device.count,
+                        percentage = device.percentage,
+                    )
+                },
+            )
+        }
+
+        // Version breakdown
+        if (failure.versionBreakdown.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("App Versions (${failure.versionBreakdown.size})")
+            BreakdownList(
+                items = failure.versionBreakdown.map { version ->
+                    BreakdownItem(
+                        label = version.version,
+                        sublabel = null,
+                        count = version.count,
+                        percentage = version.percentage,
+                    )
+                },
+            )
+        }
+
+        // Affected tests
         if (failure.affectedTests.isNotEmpty()) {
             Spacer(Modifier.height(16.dp))
-            SectionHeader("Affected Tests")
+            SectionHeader("Affected Tests (${failure.affectedTests.size})")
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                failure.affectedTests.forEach { testName ->
+                failure.affectedTests.entries.sortedByDescending { it.value }.forEach { (testName, count) ->
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -805,34 +711,40 @@ private fun FailureDetailView(
                     ) {
                         Text(testName, fontSize = 12.sp, modifier = Modifier.weight(1f))
                         Text(
-                            "View →",
+                            "${count}x",
                             fontSize = 11.sp,
-                            color = Color(0xFF2196F3),
+                            color = colors.text.normal.copy(alpha = 0.5f),
+                            modifier = Modifier.padding(end = 8.dp),
                         )
+                        Text("View →", fontSize = 11.sp, color = Color(0xFF2196F3))
                     }
                 }
             }
         }
 
-        // Device Info
-        Spacer(Modifier.height(16.dp))
-        SectionHeader("Device Info")
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
-                .padding(12.dp),
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                DetailRow("Device", event.deviceInfo.name)
-                DetailRow("OS", event.deviceInfo.os)
-                DetailRow("App Version", event.deviceInfo.appVersion)
-                event.deviceInfo.memoryUsage?.let { DetailRow("Memory", it) }
-                event.deviceInfo.cpuUsage?.let { DetailRow("CPU", it) }
+        // Recent occurrences for drill-down
+        if (failure.sampleOccurrences.isNotEmpty()) {
+            Spacer(Modifier.height(16.dp))
+            SectionHeader("Recent Occurrences")
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                failure.sampleOccurrences.take(5).forEach { occurrence ->
+                    OccurrenceRow(occurrence = occurrence)
+                }
+                if (failure.sampleOccurrences.size > 5) {
+                    Text(
+                        "View all ${failure.totalCount} occurrences →",
+                        fontSize = 11.sp,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier
+                            .clickable { /* TODO: Show all */ }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(8.dp),
+                    )
+                }
             }
         }
 
-        // Action Buttons
+        // Actions
         Spacer(Modifier.height(24.dp))
         SectionHeader("Actions")
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -840,31 +752,321 @@ private fun FailureDetailView(
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                ActionCard(
-                    icon = "📋",
-                    title = "Copy Logs",
-                    description = "Copy full logs to clipboard",
-                    modifier = Modifier.weight(1f),
-                    onClick = { /* TODO */ },
-                )
-                ActionCard(
-                    icon = "📦",
-                    title = "Export Bundle",
-                    description = "Save debug bundle to file",
-                    modifier = Modifier.weight(1f),
-                    onClick = { /* TODO */ },
-                )
+                ActionCard("📋", "Copy Logs", "All ${failure.totalCount} occurrences", Modifier.weight(1f)) {}
+                ActionCard("📦", "Export Bundle", "Debug data package", Modifier.weight(1f)) {}
             }
-            ActionCard(
-                icon = "🔄",
-                title = "Reproduce Failure",
-                description = "Replay test steps up to failure point",
-                modifier = Modifier.fillMaxWidth(),
-                onClick = { /* TODO */ },
-            )
+            ActionCard("🔄", "Reproduce", "Replay test to failure point", Modifier.fillMaxWidth()) {}
         }
 
         Spacer(Modifier.height(16.dp))
+    }
+}
+
+@Composable
+private fun Badge(text: String, color: Color) {
+    Box(
+        modifier = Modifier
+            .background(color.copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+    ) {
+        Text(text, fontSize = 11.sp, color = color)
+    }
+}
+
+@Composable
+private fun CaptureCard(capture: FailureCapture) {
+    val colors = JewelTheme.globalColors
+    val icon = if (capture.type == CaptureType.Video) "🎬" else "📸"
+
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = Modifier
+            .width(100.dp)
+            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+            .clickable { /* TODO: Open capture */ }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(8.dp),
+    ) {
+        Text(icon, fontSize = 24.sp)
+        Text(
+            capture.deviceModel,
+            fontSize = 9.sp,
+            color = colors.text.normal.copy(alpha = 0.6f),
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.padding(top = 4.dp),
+        )
+    }
+}
+
+@Composable
+private fun StackTraceLine(
+    element: StackTraceElement,
+    onNavigateToSource: (String, Int) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val lineText = buildString {
+        append("at ${element.className}.${element.methodName}")
+        if (element.fileName != null && element.lineNumber != null) {
+            append("(${element.fileName}:${element.lineNumber})")
+        }
+    }
+    val isClickable = element.isAppCode && element.fileName != null && element.lineNumber != null
+
+    Text(
+        lineText,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        color = if (element.isAppCode) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.6f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isClickable) Modifier
+                    .clickable { onNavigateToSource(element.fileName!!, element.lineNumber!!) }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                else Modifier
+            )
+            .padding(vertical = 2.dp, horizontal = 4.dp),
+    )
+}
+
+@Composable
+private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
+    val colors = JewelTheme.globalColors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        DetailRow("Tool", toolCallInfo.toolName)
+
+        // Error codes breakdown
+        if (toolCallInfo.errorCodes.isNotEmpty()) {
+            Text("Error Codes:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
+            toolCallInfo.errorCodes.entries.sortedByDescending { it.value }.forEach { (code, count) ->
+                Row(modifier = Modifier.padding(start = 8.dp)) {
+                    Text(code, fontSize = 11.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.weight(1f))
+                    Text("${count}x", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                }
+            }
+        }
+
+        // Duration stats
+        if (toolCallInfo.durationStats != null) {
+            Text("Duration:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
+            Row(
+                horizontalArrangement = Arrangement.SpaceEvenly,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                DurationStat("Min", toolCallInfo.durationStats.minMs)
+                DurationStat("Avg", toolCallInfo.durationStats.avgMs)
+                DurationStat("P95", toolCallInfo.durationStats.p95Ms)
+                DurationStat("Max", toolCallInfo.durationStats.maxMs)
+            }
+        }
+
+        // Parameter variants
+        if (toolCallInfo.parameterVariants.isNotEmpty()) {
+            Text("Parameters:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
+            toolCallInfo.parameterVariants.forEach { (param, values) ->
+                Row(modifier = Modifier.padding(start = 8.dp)) {
+                    Text("$param: ", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text(
+                        if (values.size == 1) values.first() else "${values.size} variants",
+                        fontSize = 11.sp,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun DurationStat(label: String, ms: Long) {
+    val colors = JewelTheme.globalColors
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text("${ms}ms", fontSize = 12.sp, fontWeight = FontWeight.Medium)
+        Text(label, fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+    }
+}
+
+@Composable
+private fun ScreenBreakdownSection(
+    breakdown: List<ScreenBreakdown>,
+    failureScreens: Map<String, Int>,
+    onNavigateToScreen: (String) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val maxVisits = breakdown.maxOfOrNull { it.visitCount } ?: 1
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        breakdown.sortedByDescending { it.visitCount }.forEach { screen ->
+            val failureCount = failureScreens[screen.screenName] ?: 0
+            val isFailureScreen = failureCount > 0
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onNavigateToScreen(screen.screenName) }
+                    .pointerHoverIcon(PointerIcon.Hand),
+            ) {
+                // Screen name with failure indicator
+                Row(modifier = Modifier.width(100.dp)) {
+                    if (isFailureScreen) {
+                        Text("💥 ", fontSize = 10.sp)
+                    }
+                    Text(
+                        screen.screenName,
+                        fontSize = 11.sp,
+                        color = if (isFailureScreen) Color(0xFFE53935) else colors.text.normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+
+                // Bar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(16.dp)
+                        .padding(horizontal = 8.dp),
+                ) {
+                    // Visit bar
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(screen.visitCount.toFloat() / maxVisits)
+                            .height(16.dp)
+                            .background(
+                                if (isFailureScreen) Color(0xFFE53935).copy(alpha = 0.3f)
+                                else colors.text.normal.copy(alpha = 0.15f),
+                                RoundedCornerShape(2.dp),
+                            ),
+                    )
+                }
+
+                // Count
+                Text(
+                    "${screen.visitCount}",
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.6f),
+                    modifier = Modifier.width(40.dp),
+                )
+            }
+        }
+    }
+}
+
+private data class BreakdownItem(
+    val label: String,
+    val sublabel: String?,
+    val count: Int,
+    val percentage: Float,
+)
+
+@Composable
+private fun BreakdownList(items: List<BreakdownItem>) {
+    val colors = JewelTheme.globalColors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        items.sortedByDescending { it.count }.forEach { item ->
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Column(modifier = Modifier.width(120.dp)) {
+                    Text(item.label, fontSize = 11.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    if (item.sublabel != null) {
+                        Text(
+                            item.sublabel,
+                            fontSize = 9.sp,
+                            color = colors.text.normal.copy(alpha = 0.5f),
+                        )
+                    }
+                }
+
+                // Bar
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(12.dp)
+                        .padding(horizontal = 8.dp),
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(item.percentage / 100f)
+                            .height(12.dp)
+                            .background(Color(0xFF2196F3).copy(alpha = 0.4f), RoundedCornerShape(2.dp)),
+                    )
+                }
+
+                Text(
+                    "${item.count} (${item.percentage.toInt()}%)",
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.6f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun OccurrenceRow(occurrence: FailureOccurrence) {
+    val colors = JewelTheme.globalColors
+    val timeAgo = formatTimeAgo(occurrence.timestamp)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .clickable { /* TODO: Show occurrence detail */ }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(occurrence.deviceModel, fontSize = 11.sp)
+            Text(
+                "${occurrence.appVersion} • ${occurrence.screenAtFailure ?: "Unknown screen"}",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+            )
+        }
+        Column(horizontalAlignment = Alignment.End) {
+            Text(timeAgo, fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+            if (occurrence.capturePath != null) {
+                Text(
+                    if (occurrence.captureType == CaptureType.Video) "🎬" else "📸",
+                    fontSize = 12.sp,
+                )
+            }
+        }
+    }
+}
+
+private fun formatTimeAgo(timestamp: Long): String {
+    val diff = System.currentTimeMillis() - timestamp
+    return when {
+        diff < 60_000 -> "Just now"
+        diff < 3600_000 -> "${diff / 60_000}m ago"
+        diff < 86400_000 -> "${diff / 3600_000}h ago"
+        else -> "${diff / 86400_000}d ago"
     }
 }
 
@@ -956,155 +1158,199 @@ private fun ActionCard(
 }
 
 /**
- * Create mock failure data for demonstration
- *
- * Severity is calculated based on:
- * - Critical: >20 occurrences OR crash in critical flow (login, checkout, etc.)
- * - High: 10-20 occurrences OR ANR
- * - Medium: 5-10 occurrences
- * - Low: <5 occurrences
+ * Create mock failure data for demonstration with aggregated data across multiple occurrences
  */
 private fun createMockFailureGroups(): List<FailureGroup> {
+    val now = System.currentTimeMillis()
+
     return listOf(
+        // Crash with data from multiple devices, versions, and sessions
         FailureGroup(
             id = "crash-1",
             type = FailureType.Crash,
             signature = "NullPointerException at LoginViewModel.kt:42",
             title = "NullPointerException in LoginViewModel",
-            firstOccurrence = System.currentTimeMillis() - 86400000 * 3,
-            lastOccurrence = System.currentTimeMillis() - 3600000,
+            message = "java.lang.NullPointerException: Attempt to invoke virtual method 'String com.example.User.getName()' on a null object reference",
+            firstOccurrence = now - 86400000 * 3,
+            lastOccurrence = now - 3600000,
             totalCount = 23,
-            affectedTests = listOf("testLoginFlow", "testSignupValidation"),
-            severity = FailureSeverity.Critical, // >20 occurrences + critical flow
-            representativeEvent = FailureEvent(
-                id = "event-1",
-                type = FailureType.Crash,
-                title = "NullPointerException in LoginViewModel",
-                message = "java.lang.NullPointerException: Attempt to invoke virtual method 'String com.example.User.getName()' on a null object reference",
-                stackTrace = null, // Using parsed elements instead
-                stackTraceElements = listOf(
-                    StackTraceElement("com.example.app.LoginViewModel", "validateUser", "LoginViewModel.kt", 42, isAppCode = true),
-                    StackTraceElement("com.example.app.LoginViewModel", "onLoginClicked", "LoginViewModel.kt", 28, isAppCode = true),
-                    StackTraceElement("com.example.app.LoginFragment", "onClick", "LoginFragment.kt", 67, isAppCode = true),
-                    StackTraceElement("android.view.View", "performClick", "View.java", 7448, isAppCode = false),
-                    StackTraceElement("android.widget.Button", "performClick", "Button.java", 188, isAppCode = false),
-                ),
-                timestamp = System.currentTimeMillis() - 3600000,
-                screenAtFailure = "Login",
-                screensVisited = listOf("Splash", "Login"),
-                relatedTestName = "testLoginFlow",
-                deviceInfo = DeviceInfo(
-                    name = "Pixel 8 API 35",
-                    os = "Android 15",
-                    appVersion = "2.4.1-debug",
-                    memoryUsage = "156 MB / 512 MB",
-                    cpuUsage = "23%",
-                ),
-                screenshotPath = "/captures/crash-1/screenshot.png",
+            uniqueSessions = 18,
+            severity = FailureSeverity.Critical,
+            deviceBreakdown = listOf(
+                DeviceBreakdown("Pixel 8", "Android 15", 9, 39f),
+                DeviceBreakdown("Pixel 7", "Android 14", 6, 26f),
+                DeviceBreakdown("Samsung S24", "Android 14", 5, 22f),
+                DeviceBreakdown("OnePlus 12", "Android 14", 3, 13f),
+            ),
+            versionBreakdown = listOf(
+                VersionBreakdown("2.4.1-debug", 15, 65f),
+                VersionBreakdown("2.4.0", 6, 26f),
+                VersionBreakdown("2.3.9", 2, 9f),
+            ),
+            screenBreakdown = listOf(
+                ScreenBreakdown("Splash", 23, 0, 100f),
+                ScreenBreakdown("Login", 23, 23, 100f),
+            ),
+            failureScreens = mapOf("Login" to 23),
+            stackTraceElements = listOf(
+                StackTraceElement("com.example.app.LoginViewModel", "validateUser", "LoginViewModel.kt", 42, true),
+                StackTraceElement("com.example.app.LoginViewModel", "onLoginClicked", "LoginViewModel.kt", 28, true),
+                StackTraceElement("com.example.app.LoginFragment", "onClick", "LoginFragment.kt", 67, true),
+                StackTraceElement("android.view.View", "performClick", "View.java", 7448, false),
+            ),
+            toolCallInfo = null,
+            affectedTests = mapOf("testLoginFlow" to 15, "testSignupValidation" to 8),
+            recentCaptures = listOf(
+                FailureCapture("cap-1", CaptureType.Screenshot, "/captures/crash-1/1.png", now - 3600000, "Pixel 8"),
+                FailureCapture("cap-2", CaptureType.Screenshot, "/captures/crash-1/2.png", now - 7200000, "Samsung S24"),
+                FailureCapture("cap-3", CaptureType.Video, "/captures/crash-1/3.mp4", now - 10800000, "Pixel 7"),
+            ),
+            sampleOccurrences = listOf(
+                FailureOccurrence("occ-1", now - 3600000, "Pixel 8", "Android 15", "2.4.1-debug", "session-1", "Login", listOf("Splash", "Login"), "testLoginFlow", "/captures/crash-1/1.png", CaptureType.Screenshot),
+                FailureOccurrence("occ-2", now - 7200000, "Samsung S24", "Android 14", "2.4.1-debug", "session-2", "Login", listOf("Splash", "Login"), "testLoginFlow", "/captures/crash-1/2.png", CaptureType.Screenshot),
+                FailureOccurrence("occ-3", now - 10800000, "Pixel 7", "Android 14", "2.4.0", "session-3", "Login", listOf("Splash", "Login"), "testSignupValidation", "/captures/crash-1/3.mp4", CaptureType.Video),
+                FailureOccurrence("occ-4", now - 14400000, "OnePlus 12", "Android 14", "2.4.1-debug", "session-4", "Login", listOf("Splash", "Login"), "testLoginFlow", null, null),
+                FailureOccurrence("occ-5", now - 18000000, "Pixel 8", "Android 15", "2.4.0", "session-5", "Login", listOf("Splash", "Login"), "testSignupValidation", null, null),
+                FailureOccurrence("occ-6", now - 21600000, "Pixel 7", "Android 14", "2.3.9", "session-6", "Login", listOf("Splash", "Login"), "testLoginFlow", null, null),
             ),
         ),
+
+        // ANR with multiple occurrences
         FailureGroup(
             id = "anr-1",
             type = FailureType.ANR,
             signature = "ANR in HomeFragment.onResume",
-            title = "ANR: Main thread blocked",
-            firstOccurrence = System.currentTimeMillis() - 86400000 * 2,
-            lastOccurrence = System.currentTimeMillis() - 7200000,
+            title = "ANR: Main thread blocked during DB query",
+            message = "Application Not Responding: Main thread blocked for 5+ seconds during database query",
+            firstOccurrence = now - 86400000 * 2,
+            lastOccurrence = now - 7200000,
             totalCount = 8,
-            affectedTests = listOf("testHomeLoad", "testProfileEdit"),
-            severity = FailureSeverity.High, // ANR = High severity
-            representativeEvent = FailureEvent(
-                id = "event-2",
-                type = FailureType.ANR,
-                title = "ANR: Main thread blocked",
-                message = "Application Not Responding: Main thread blocked for 5+ seconds during database query",
-                stackTrace = null,
-                stackTraceElements = listOf(
-                    StackTraceElement("com.example.app.data.UserDao", "getAllUsers", "UserDao.kt", 23, isAppCode = true),
-                    StackTraceElement("com.example.app.HomeViewModel", "loadUsers", "HomeViewModel.kt", 45, isAppCode = true),
-                    StackTraceElement("com.example.app.HomeFragment", "onResume", "HomeFragment.kt", 31, isAppCode = true),
-                    StackTraceElement("androidx.fragment.app.Fragment", "performResume", "Fragment.java", 3135, isAppCode = false),
-                ),
-                timestamp = System.currentTimeMillis() - 7200000,
-                screenAtFailure = "Home",
-                screensVisited = listOf("Splash", "Login", "Home"),
-                relatedTestName = "testHomeLoad",
-                deviceInfo = DeviceInfo(
-                    name = "Pixel 7 API 34",
-                    os = "Android 14",
-                    appVersion = "2.4.1-debug",
-                    memoryUsage = "234 MB / 512 MB",
-                    cpuUsage = "89%",
-                ),
-                videoPath = "/captures/anr-1/recording.mp4",
+            uniqueSessions = 7,
+            severity = FailureSeverity.High,
+            deviceBreakdown = listOf(
+                DeviceBreakdown("Pixel 7", "Android 14", 4, 50f),
+                DeviceBreakdown("Pixel 6", "Android 13", 3, 37f),
+                DeviceBreakdown("Samsung A54", "Android 13", 1, 13f),
+            ),
+            versionBreakdown = listOf(
+                VersionBreakdown("2.4.1-debug", 6, 75f),
+                VersionBreakdown("2.4.0", 2, 25f),
+            ),
+            screenBreakdown = listOf(
+                ScreenBreakdown("Splash", 8, 0, 100f),
+                ScreenBreakdown("Login", 8, 0, 100f),
+                ScreenBreakdown("Home", 8, 8, 100f),
+            ),
+            failureScreens = mapOf("Home" to 8),
+            stackTraceElements = listOf(
+                StackTraceElement("com.example.app.data.UserDao", "getAllUsers", "UserDao.kt", 23, true),
+                StackTraceElement("com.example.app.HomeViewModel", "loadUsers", "HomeViewModel.kt", 45, true),
+                StackTraceElement("com.example.app.HomeFragment", "onResume", "HomeFragment.kt", 31, true),
+                StackTraceElement("androidx.fragment.app.Fragment", "performResume", "Fragment.java", 3135, false),
+            ),
+            toolCallInfo = null,
+            affectedTests = mapOf("testHomeLoad" to 5, "testProfileEdit" to 3),
+            recentCaptures = listOf(
+                FailureCapture("cap-4", CaptureType.Video, "/captures/anr-1/1.mp4", now - 7200000, "Pixel 7"),
+                FailureCapture("cap-5", CaptureType.Video, "/captures/anr-1/2.mp4", now - 14400000, "Pixel 6"),
+            ),
+            sampleOccurrences = listOf(
+                FailureOccurrence("occ-7", now - 7200000, "Pixel 7", "Android 14", "2.4.1-debug", "session-7", "Home", listOf("Splash", "Login", "Home"), "testHomeLoad", "/captures/anr-1/1.mp4", CaptureType.Video),
+                FailureOccurrence("occ-8", now - 14400000, "Pixel 6", "Android 13", "2.4.1-debug", "session-8", "Home", listOf("Splash", "Login", "Home"), "testProfileEdit", "/captures/anr-1/2.mp4", CaptureType.Video),
+                FailureOccurrence("occ-9", now - 21600000, "Samsung A54", "Android 13", "2.4.0", "session-9", "Home", listOf("Splash", "Login", "Home"), "testHomeLoad", null, null),
             ),
         ),
+
+        // Tool call failure with aggregated duration stats and parameter variants
         FailureGroup(
             id = "tool-1",
             type = FailureType.ToolCallFailure,
             signature = "tapOn failed: Element not found",
-            title = "tapOn: Element 'Submit' not found",
-            firstOccurrence = System.currentTimeMillis() - 86400000,
-            lastOccurrence = System.currentTimeMillis() - 1800000,
+            title = "tapOn: Element not found",
+            message = "Element with text not found within timeout. Check element visibility and timing.",
+            firstOccurrence = now - 86400000,
+            lastOccurrence = now - 1800000,
             totalCount = 12,
-            affectedTests = listOf("testFormSubmission", "testCheckout"),
-            severity = FailureSeverity.Medium, // 10-20 occurrences
-            representativeEvent = FailureEvent(
-                id = "event-3",
-                type = FailureType.ToolCallFailure,
-                title = "tapOn: Element 'Submit' not found",
-                message = "Element with text 'Submit' not found within 5000ms timeout. Found elements: ['Cancel', 'Back', 'Save Draft']",
-                stackTrace = null,
-                timestamp = System.currentTimeMillis() - 1800000,
-                screenAtFailure = "Checkout",
-                screensVisited = listOf("Home", "Cart", "Checkout"),
-                relatedTestName = "testCheckout",
-                deviceInfo = DeviceInfo(
-                    name = "iPhone 15 Pro",
-                    os = "iOS 17.2",
-                    appVersion = "2.4.0",
+            uniqueSessions = 10,
+            severity = FailureSeverity.Medium,
+            deviceBreakdown = listOf(
+                DeviceBreakdown("iPhone 15 Pro", "iOS 17.2", 5, 42f),
+                DeviceBreakdown("iPhone 14", "iOS 17.1", 4, 33f),
+                DeviceBreakdown("Pixel 8", "Android 15", 3, 25f),
+            ),
+            versionBreakdown = listOf(
+                VersionBreakdown("2.4.0", 8, 67f),
+                VersionBreakdown("2.4.1-debug", 4, 33f),
+            ),
+            screenBreakdown = listOf(
+                ScreenBreakdown("Home", 12, 0, 100f),
+                ScreenBreakdown("Cart", 12, 0, 100f),
+                ScreenBreakdown("Checkout", 12, 12, 100f),
+            ),
+            failureScreens = mapOf("Checkout" to 12),
+            stackTraceElements = emptyList(),
+            toolCallInfo = AggregatedToolCallInfo(
+                toolName = "tapOn",
+                errorCodes = mapOf("ELEMENT_NOT_FOUND" to 10, "TIMEOUT" to 2),
+                parameterVariants = mapOf(
+                    "text" to listOf("Submit", "Complete Order", "Place Order"),
+                    "timeout" to listOf("5000", "10000"),
                 ),
-                toolCallInfo = ToolCallInfo(
-                    toolName = "tapOn",
-                    parameters = mapOf(
-                        "text" to "Submit",
-                        "timeout" to "5000",
-                    ),
-                    errorCode = "ELEMENT_NOT_FOUND",
-                    duration = 5023,
+                durationStats = DurationStats(
+                    minMs = 5001,
+                    maxMs = 10234,
+                    avgMs = 6543,
+                    medianMs = 5500,
+                    p95Ms = 9800,
                 ),
-                screenshotPath = "/captures/tool-1/screenshot.png",
+            ),
+            affectedTests = mapOf("testFormSubmission" to 7, "testCheckout" to 5),
+            recentCaptures = listOf(
+                FailureCapture("cap-6", CaptureType.Screenshot, "/captures/tool-1/1.png", now - 1800000, "iPhone 15 Pro"),
+                FailureCapture("cap-7", CaptureType.Screenshot, "/captures/tool-1/2.png", now - 3600000, "Pixel 8"),
+                FailureCapture("cap-8", CaptureType.Screenshot, "/captures/tool-1/3.png", now - 7200000, "iPhone 14"),
+            ),
+            sampleOccurrences = listOf(
+                FailureOccurrence("occ-10", now - 1800000, "iPhone 15 Pro", "iOS 17.2", "2.4.0", "session-10", "Checkout", listOf("Home", "Cart", "Checkout"), "testCheckout", "/captures/tool-1/1.png", CaptureType.Screenshot),
+                FailureOccurrence("occ-11", now - 3600000, "Pixel 8", "Android 15", "2.4.1-debug", "session-11", "Checkout", listOf("Home", "Cart", "Checkout"), "testFormSubmission", "/captures/tool-1/2.png", CaptureType.Screenshot),
+                FailureOccurrence("occ-12", now - 7200000, "iPhone 14", "iOS 17.1", "2.4.0", "session-12", "Checkout", listOf("Home", "Cart", "Checkout"), "testCheckout", "/captures/tool-1/3.png", CaptureType.Screenshot),
             ),
         ),
+
+        // Low severity crash
         FailureGroup(
             id = "crash-2",
             type = FailureType.Crash,
             signature = "IndexOutOfBoundsException at RecyclerView",
             title = "IndexOutOfBoundsException in MessageList",
-            firstOccurrence = System.currentTimeMillis() - 86400000 * 5,
-            lastOccurrence = System.currentTimeMillis() - 86400000,
+            message = "java.lang.IndexOutOfBoundsException: Inconsistency detected. Invalid view holder adapter position",
+            firstOccurrence = now - 86400000 * 5,
+            lastOccurrence = now - 86400000,
             totalCount = 5,
-            affectedTests = listOf("testSendMessage"),
-            severity = FailureSeverity.Low, // <5 occurrences, not recent
-            representativeEvent = FailureEvent(
-                id = "event-4",
-                type = FailureType.Crash,
-                title = "IndexOutOfBoundsException in MessageList",
-                message = "java.lang.IndexOutOfBoundsException: Inconsistency detected. Invalid view holder adapter position",
-                stackTrace = null,
-                stackTraceElements = listOf(
-                    StackTraceElement("androidx.recyclerview.widget.RecyclerView", "findViewHolderForPosition", "RecyclerView.java", 1345, isAppCode = false),
-                    StackTraceElement("com.example.app.MessageListAdapter", "onBindViewHolder", "MessageListAdapter.kt", 67, isAppCode = true),
-                ),
-                timestamp = System.currentTimeMillis() - 86400000,
-                screenAtFailure = "Messages",
-                screensVisited = listOf("Home", "Messages"),
-                relatedTestName = "testSendMessage",
-                deviceInfo = DeviceInfo(
-                    name = "Pixel 8 API 35",
-                    os = "Android 15",
-                    appVersion = "2.4.1-debug",
-                ),
+            uniqueSessions = 5,
+            severity = FailureSeverity.Low,
+            deviceBreakdown = listOf(
+                DeviceBreakdown("Pixel 8", "Android 15", 3, 60f),
+                DeviceBreakdown("Pixel 7", "Android 14", 2, 40f),
+            ),
+            versionBreakdown = listOf(
+                VersionBreakdown("2.4.1-debug", 5, 100f),
+            ),
+            screenBreakdown = listOf(
+                ScreenBreakdown("Home", 5, 0, 100f),
+                ScreenBreakdown("Messages", 5, 5, 100f),
+            ),
+            failureScreens = mapOf("Messages" to 5),
+            stackTraceElements = listOf(
+                StackTraceElement("androidx.recyclerview.widget.RecyclerView", "findViewHolderForPosition", "RecyclerView.java", 1345, false),
+                StackTraceElement("com.example.app.MessageListAdapter", "onBindViewHolder", "MessageListAdapter.kt", 67, true),
+            ),
+            toolCallInfo = null,
+            affectedTests = mapOf("testSendMessage" to 5),
+            recentCaptures = emptyList(),
+            sampleOccurrences = listOf(
+                FailureOccurrence("occ-13", now - 86400000, "Pixel 8", "Android 15", "2.4.1-debug", "session-13", "Messages", listOf("Home", "Messages"), "testSendMessage", null, null),
+                FailureOccurrence("occ-14", now - 86400000 * 2, "Pixel 7", "Android 14", "2.4.1-debug", "session-14", "Messages", listOf("Home", "Messages"), "testSendMessage", null, null),
             ),
         ),
     )

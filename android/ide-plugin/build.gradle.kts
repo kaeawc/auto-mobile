@@ -23,6 +23,12 @@ sourceSets {
   named("main") { resources.srcDir(rootProject.projectDir.parentFile.resolve("schemas")) }
 }
 
+// Exclude coroutines from all configurations - use IDE's version
+configurations.all {
+  exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+  exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+}
+
 dependencies {
   // Shared validation module
   implementation(project(":test-plan-validation"))

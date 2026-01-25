@@ -130,64 +130,49 @@ private fun FailureListView(
             .fillMaxSize()
             .verticalScroll(rememberScrollState()),
     ) {
-        // Header with date range and aggregation selectors
-        Column(
+        // Date range and aggregation selectors
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
         ) {
+            // Date range selector
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier
+                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+                    .padding(4.dp),
             ) {
-                Column {
-                    Text("Failures", fontSize = 16.sp, fontWeight = FontWeight.Medium)
-                    Text(
-                        "Crashes, ANRs, and tool call failures",
-                        color = colors.text.normal.copy(alpha = 0.6f),
-                        fontSize = 12.sp,
-                    )
-                }
-
-                // Date range selector
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    modifier = Modifier
-                        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-                        .padding(4.dp),
-                ) {
-                    DateRange.entries.forEach { range ->
-                        val isSelected = range == dateRange
-                        Box(
-                            modifier = Modifier
-                                .background(
-                                    if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
-                                    RoundedCornerShape(4.dp),
-                                )
-                                .clickable { dateRange = range }
-                                .pointerHoverIcon(PointerIcon.Hand)
-                                .padding(horizontal = 8.dp, vertical = 4.dp),
-                        ) {
-                            Text(
-                                range.label,
-                                fontSize = 10.sp,
-                                color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                DateRange.entries.forEach { range ->
+                    val isSelected = range == dateRange
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                                RoundedCornerShape(4.dp),
                             )
-                        }
+                            .clickable { dateRange = range }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(horizontal = 8.dp, vertical = 4.dp),
+                    ) {
+                        Text(
+                            range.label,
+                            fontSize = 10.sp,
+                            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                        )
                     }
                 }
             }
 
-            // Aggregation selector (right-aligned)
+            // Aggregation selector
             Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
             ) {
                 Text(
-                    "Group by: ",
+                    "Group by:",
                     fontSize = 10.sp,
                     color = colors.text.normal.copy(alpha = 0.5f),
-                    modifier = Modifier.align(Alignment.CenterVertically),
                 )
                 Row(
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -362,14 +347,6 @@ private fun EventTrendsSection(
             .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp))
             .padding(12.dp),
     ) {
-        Text(
-            "Event Trends",
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Medium,
-            color = colors.text.normal.copy(alpha = 0.7f),
-            modifier = Modifier.padding(bottom = 12.dp),
-        )
-
         // Stats row
         Row(
             horizontalArrangement = Arrangement.SpaceEvenly,
@@ -511,7 +488,14 @@ private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggr
         TimeAggregation.Week -> 7 * 24 * 60 * 60 * 1000L
     }
 
-    val buckets = (dateRange.durationMs / bucketDurationMs).toInt().coerceIn(1, 60)
+    // Calculate number of buckets - cap at reasonable display limit
+    val maxBuckets = when (aggregation) {
+        TimeAggregation.Minute -> 120  // Up to 2 hours of minute data
+        TimeAggregation.Hour -> 168    // Up to 7 days of hourly data
+        TimeAggregation.Day -> 60      // Up to 60 days
+        TimeAggregation.Week -> 52     // Up to 52 weeks
+    }
+    val buckets = (dateRange.durationMs / bucketDurationMs).toInt().coerceIn(1, maxBuckets)
 
     return (0 until buckets).map { i ->
         // Calculate time offset from now (bucket 0 is most recent)
@@ -559,17 +543,24 @@ private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregatio
         TimeAggregation.Day -> {
             when {
                 days == 0L -> "Today"
-                days == 1L -> "Yesterday"
-                days < 7L -> "${days}d ago"
+                days == 1L -> "Yest"
                 else -> "${days}d"
             }
         }
         TimeAggregation.Week -> {
-            when {
-                weeks == 0L -> "This week"
-                weeks == 1L -> "Last week"
-                else -> "${weeks}w ago"
-            }
+            // Calculate the Monday of the week
+            val now = System.currentTimeMillis()
+            val weekStartMs = now - timeAgoMs
+            val calendar = java.util.Calendar.getInstance()
+            calendar.timeInMillis = weekStartMs
+            // Adjust to Monday of that week
+            val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK)
+            val daysToMonday = if (dayOfWeek == java.util.Calendar.SUNDAY) -6 else java.util.Calendar.MONDAY - dayOfWeek
+            calendar.add(java.util.Calendar.DAY_OF_MONTH, daysToMonday)
+
+            val month = calendar.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.SHORT, java.util.Locale.getDefault()) ?: ""
+            val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
+            "$month $day"
         }
     }
 }

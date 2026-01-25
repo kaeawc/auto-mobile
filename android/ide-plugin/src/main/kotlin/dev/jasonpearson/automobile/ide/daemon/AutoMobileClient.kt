@@ -20,6 +20,8 @@ interface AutoMobileClient {
 
   fun listResourceTemplates(): List<McpResourceTemplate>
 
+  fun listTools(): List<McpTool>
+
   fun readResource(uri: String): List<McpResourceContent>
 
   fun getNavigationGraph(platform: String = "android"): JsonElement
@@ -51,8 +53,29 @@ interface AutoMobileClient {
       sessionUuid: String? = null,
   ): ExecutePlanResult
 
+  fun startDevice(
+      name: String,
+      platform: String,
+      deviceId: String? = null,
+  ): StartDeviceResult
+
+  fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
+
   fun close() {}
 }
+
+@Serializable
+data class StartDeviceResult(
+    val success: Boolean = true,
+    val deviceId: String? = null,
+    val message: String? = null,
+)
+
+@Serializable
+data class SetActiveDeviceResult(
+    val success: Boolean = true,
+    val message: String? = null,
+)
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :
     Exception(message, cause)
@@ -71,6 +94,13 @@ data class McpResourceTemplate(
     val name: String,
     val description: String? = null,
     val mimeType: String? = null,
+)
+
+@Serializable
+data class McpTool(
+    val name: String,
+    val description: String? = null,
+    val inputSchema: JsonObject? = null,
 )
 
 @Serializable
@@ -132,6 +162,8 @@ data class JsonRpcError(
 
 @Serializable
 internal data class ListResourceTemplatesResult(val resourceTemplates: List<McpResourceTemplate>)
+
+@Serializable internal data class ListToolsResult(val tools: List<McpTool>)
 
 @Serializable internal data class ReadResourceResult(val contents: List<McpResourceContent>)
 

@@ -5,13 +5,13 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")
   id("org.jetbrains.intellij.platform") version "2.10.5"
-  id("org.jetbrains.compose") version "1.10.0"
+  // Note: Using IntelliJ Platform's composeUI() instead of standalone org.jetbrains.compose
+  // to avoid bundling duplicate coroutines that conflict with IDE's version
 }
 
 repositories {
   google()
   mavenCentral()
-  maven("https://maven.pkg.jetbrains.space/public/p/compose/dev")
   intellijPlatform { defaultRepositories() }
 }
 
@@ -23,12 +23,6 @@ sourceSets {
   named("main") { resources.srcDir(rootProject.projectDir.parentFile.resolve("schemas")) }
 }
 
-// Exclude coroutines from all configurations - use IDE's version
-configurations.all {
-  exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
-  exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
-}
-
 dependencies {
   // Shared validation module
   implementation(project(":test-plan-validation"))
@@ -36,6 +30,16 @@ dependencies {
   // Kotlin ecosystem (provided by IntelliJ platform, don't bundle)
   compileOnly(libs.kotlinx.coroutines)
   compileOnly(libs.kotlinx.serialization)
+
+  // MCP Kotlin SDK for client communication
+  implementation("io.modelcontextprotocol:kotlin-sdk:0.4.0") {
+    // Exclude coroutines since IntelliJ provides them
+    exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+  }
+  // Ktor client engine for MCP transport (CIO = Coroutine-based I/O)
+  implementation("io.ktor:ktor-client-cio:3.0.3") {
+    exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+  }
 
   // YAML and JSON schema validation (transitive from test-plan-validation)
   implementation(libs.snakeyaml)

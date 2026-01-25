@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -26,6 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 
 /**
  * Main Layout Inspector dashboard with 3-panel layout:
@@ -36,9 +39,33 @@ import org.jetbrains.jewel.ui.component.Text
 @Composable
 fun LayoutInspectorDashboard(
     modifier: Modifier = Modifier,
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+    clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
 ) {
     val state = rememberLayoutInspectorState()
     val colors = JewelTheme.globalColors
+
+    // Fetch view hierarchy from data source
+    LaunchedEffect(dataSourceMode, clientProvider) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider)
+                when (val result = dataSource.getViewHierarchy()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        state.updateHierarchy(result.data)
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        // Keep current hierarchy or show error
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+            } catch (e: Exception) {
+                // Keep current hierarchy or show error
+            }
+        }
+    }
 
     // Panel collapse states - default to collapsed, remember user preference
     // TODO: Persist these to IDE preferences for remembering across sessions

@@ -9,6 +9,13 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
+import dev.jasonpearson.automobile.ide.datasource.DataSourceFactory
+import dev.jasonpearson.automobile.ide.datasource.NavigationGraph
+import com.intellij.openapi.diagnostic.Logger
+
+private val LOG = Logger.getInstance("NavigationDashboard")
 
 enum class NavigationSection { FlowMap, ScreenDetail, TransitionDetail }
 
@@ -19,6 +26,8 @@ fun NavigationDashboard(
     onHighlightCleared: () -> Unit = {},  // Called when user interacts to clear external highlights
     onFocusModeChanged: (Boolean) -> Unit = {},  // Called when zoom causes content to extend beyond canvas
     headerHeightPx: Float = 0f,  // Height of header area to check overlap against
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+    clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
 ) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
@@ -31,9 +40,44 @@ fun NavigationDashboard(
         }
     }
 
-    // Use mock data
-    val screens = remember { NavigationMockData.screens }
-    val transitions = remember { NavigationMockData.transitions }
+    // Fetch navigation data from data source
+    var navigationGraph by remember { mutableStateOf<NavigationGraph?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(dataSourceMode, clientProvider) {
+        LOG.info("Loading navigation data with mode: $dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}")
+        isLoading = true
+        error = null
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val dataSource = DataSourceFactory.createNavigationDataSource(dataSourceMode, clientProvider)
+                when (val result = dataSource.getNavigationGraph()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        LOG.info("Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions")
+                        navigationGraph = result.data
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        LOG.warn("Failed to load navigation data: ${result.message}")
+                        error = result.message
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+            } catch (e: Exception) {
+                LOG.error("Exception loading navigation data", e)
+                error = e.message ?: "Unknown error"
+                isLoading = false
+            }
+        }
+    }
+
+    // Use fetched data or fall back to empty lists
+    val screens = navigationGraph?.screens ?: emptyList()
+    val transitions = navigationGraph?.transitions ?: emptyList()
 
     // Helper to navigate to a screen by name
     val navigateToScreen: (String) -> Unit = { screenName ->

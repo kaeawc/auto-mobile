@@ -63,13 +63,7 @@ enum class TimeAggregation(val label: String, val durationMs: Long) {
     fun toQueryParam(): String = name.lowercase()
 }
 
-/**
- * Data source mode
- */
-enum class DataSourceMode {
-    Fake,
-    Real,
-}
+// DataSourceMode has been moved to dev.jasonpearson.automobile.ide.datasource package
 
 /**
  * Result of a data source operation
@@ -107,6 +101,27 @@ class MockFailuresDataSource : FailuresDataSource {
             TimelineData(
                 dataPoints = generateMockTimelineData(dateRange, aggregation),
                 previousPeriodTotals = generateMockPreviousPeriodTotals(dateRange),
+            )
+        )
+    }
+}
+
+/**
+ * Empty data source that returns empty results (for Real mode when MCP not available)
+ */
+class EmptyFailuresDataSource : FailuresDataSource {
+    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
+        return DataSourceResult.Success(emptyList())
+    }
+
+    override suspend fun getTimelineData(
+        dateRange: DateRange,
+        aggregation: TimeAggregation,
+    ): DataSourceResult<TimelineData> {
+        return DataSourceResult.Success(
+            TimelineData(
+                dataPoints = emptyList(),
+                previousPeriodTotals = PeriodTotals(0, 0, 0),
             )
         )
     }

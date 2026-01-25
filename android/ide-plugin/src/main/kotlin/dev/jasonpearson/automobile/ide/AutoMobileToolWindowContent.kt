@@ -7,6 +7,10 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -20,6 +24,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -30,6 +35,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.onPointerEvent
@@ -43,12 +49,39 @@ import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
+import com.intellij.openapi.diagnostic.Logger
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 import dev.jasonpearson.automobile.ide.failures.FailuresDashboard
+import dev.jasonpearson.automobile.ide.mcp.McpProcess
+import dev.jasonpearson.automobile.ide.mcp.McpConnectionType
+import dev.jasonpearson.automobile.ide.mcp.FakeMcpProcessDetector
+import dev.jasonpearson.automobile.ide.mcp.RealMcpProcessDetector
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.daemon.McpResource
+import dev.jasonpearson.automobile.ide.daemon.McpTool
+import dev.jasonpearson.automobile.ide.daemon.McpHttpClient
+import dev.jasonpearson.automobile.ide.daemon.McpDaemonClient
+import dev.jasonpearson.automobile.ide.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.ide.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.ide.storage.StorageDashboard
 import dev.jasonpearson.automobile.ide.test.TestDashboard
+
+private val LOG = Logger.getInstance("AutoMobileToolWindow")
+
+private fun showNotification(title: String, content: String, type: NotificationType = NotificationType.INFORMATION) {
+    try {
+        NotificationGroupManager.getInstance()
+            .getNotificationGroup("AutoMobile")
+            .createNotification(title, content, type)
+            .notify(null)
+    } catch (e: Exception) {
+        LOG.error("Failed to show notification: $title - $content", e)
+    }
+}
 
 enum class Dashboard(val title: String, val icon: String) {
   Navigation("Navigation", "🧭"),
@@ -94,14 +127,64 @@ fun AutoMobileToolWindowContent() {
   var dropTargetIndex by remember { mutableStateOf<Int?>(null) }
 
   // Mock booted devices - will be replaced with real data
-  var activeDeviceId by remember { mutableStateOf<String?>("pixel8") }
-  var isDevicePanelExpanded by remember { mutableStateOf(false) }
-  val bootedDevices = remember {
+  val activeDeviceIdState = remember { mutableStateOf<String?>(null) }  // null = show MCP panel in Real mode
+  val isDevicePanelExpandedState = remember { mutableStateOf(true) }  // Start expanded to show MCP servers
+  var activeDeviceId by activeDeviceIdState
+  var isDevicePanelExpanded by isDevicePanelExpandedState
+
+  // Track when user explicitly navigates to device panel (to suppress auto-selection)
+  var userNavigatedToDevices by remember { mutableStateOf(false) }
+
+  // Log state changes for debugging
+  LaunchedEffect(activeDeviceId, isDevicePanelExpanded) {
+      LOG.info("State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded")
+  }
+
+  // Data source mode (Fake/Real) - global toggle for all dashboards
+  var dataSourceMode by remember { mutableStateOf(DataSourceMode.Real) }
+
+  // Mock devices list (only used in Fake mode)
+  val mockBootedDevices = remember {
     listOf(
         BootedDevice("pixel8", "Pixel 8 API 35", DeviceType.AndroidEmulator, "Running", "com.example.myapp", System.currentTimeMillis() - 300000),
         BootedDevice("pixel7", "Pixel 7 API 34", DeviceType.AndroidEmulator, "Running", "com.android.launcher3", System.currentTimeMillis() - 600000),
         BootedDevice("iphone15", "iPhone 15 Pro", DeviceType.iOSSimulator, "Booted", "com.apple.springboard", System.currentTimeMillis() - 180000),
     )
+  }
+
+  // Real device info (when connected to MCP)
+  var realDevice by remember { mutableStateOf<BootedDevice?>(null) }
+
+  // Connected MCP process (for creating clients)
+  var connectedMcpProcess by remember { mutableStateOf<McpProcess?>(null) }
+
+  // Client provider function for dashboards to access MCP data
+  val clientProvider: (() -> AutoMobileClient)? = remember(connectedMcpProcess) {
+      connectedMcpProcess?.let { process ->
+          {
+              when (process.connectionType) {
+                  McpConnectionType.UnixSocket -> {
+                      val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
+                      McpDaemonClient(socketPath)
+                  }
+                  McpConnectionType.StreamableHttp -> {
+                      val port = process.port ?: 3000
+                      McpHttpClient("http://localhost:$port/auto-mobile/streamable")
+                  }
+                  McpConnectionType.Stdio -> {
+                      throw UnsupportedOperationException("Cannot connect to STDIO process externally")
+                  }
+              }
+          }
+      }
+  }
+
+  // Devices list switches based on mode
+  val bootedDevices = if (dataSourceMode == DataSourceMode.Fake) {
+    mockBootedDevices
+  } else {
+    // In Real mode, show connected MCP device if available
+    listOfNotNull(realDevice)
   }
   val availableEmulators = remember {
     listOf(
@@ -192,6 +275,8 @@ fun AutoMobileToolWindowContent() {
                   isNavigationFocused = focused
               },
               headerHeightPx = headerHeight.toFloat(),
+              dataSourceMode = dataSourceMode,
+              clientProvider = clientProvider,
           )
           Dashboard.Test -> TestDashboard(
               onOpenFile = { filePath ->
@@ -204,6 +289,8 @@ fun AutoMobileToolWindowContent() {
                   currentReplayIndex = 0
                   selectedIndex = 0  // Switch to Navigation tab
               },
+              dataSourceMode = dataSourceMode,
+              clientProvider = clientProvider,
           )
           Dashboard.Performance -> PerformanceDashboard(
               onNavigateToScreen = { screenName ->
@@ -214,9 +301,16 @@ fun AutoMobileToolWindowContent() {
                   // Switch to Test tab
                   selectedIndex = 1
               },
+              dataSourceMode = dataSourceMode,
+              clientProvider = clientProvider,
           )
-          Dashboard.Layout -> LayoutInspectorDashboard()
-          Dashboard.Storage -> StorageDashboard()
+          Dashboard.Layout -> LayoutInspectorDashboard(
+              dataSourceMode = dataSourceMode,
+              clientProvider = clientProvider,
+          )
+          Dashboard.Storage -> StorageDashboard(
+              dataSourceMode = dataSourceMode,
+          )
           Dashboard.Failures -> FailuresDashboard(
               onNavigateToScreen = { screenName ->
                   // Switch to Navigation tab and highlight the screen
@@ -230,6 +324,8 @@ fun AutoMobileToolWindowContent() {
                   // TODO: Use OpenFileDescriptor to navigate to source
                   // FileEditorManager.getInstance(project).openFile(virtualFile, true)
               },
+              dataSourceMode = dataSourceMode,
+              clientProvider = clientProvider,
           )
         }
       }
@@ -250,13 +346,15 @@ fun AutoMobileToolWindowContent() {
           devices = bootedDevices,
           activeDeviceId = activeDeviceId,
           onDeviceSelected = { deviceId ->
-              if (deviceId == activeDeviceId) {
-                  // Tapping active device deactivates it and shows panel
+              if (deviceId.isEmpty() || deviceId == activeDeviceId) {
+                  // Empty string or tapping active device deactivates it and shows panel
                   activeDeviceId = null
                   isDevicePanelExpanded = true
+                  userNavigatedToDevices = true  // User explicitly wants to browse devices
               } else {
                   activeDeviceId = deviceId
                   isDevicePanelExpanded = false
+                  userNavigatedToDevices = false  // Reset when device selected
               }
           },
           isLive = isLive,
@@ -280,14 +378,63 @@ fun AutoMobileToolWindowContent() {
           onDoctorClick = {
               // TODO: Run diagnostics
           },
+          dataSourceMode = dataSourceMode,
+          onDataSourceModeChanged = { mode ->
+              LOG.info("Data source mode changed to: $mode")
+              dataSourceMode = mode
+              when (mode) {
+                  DataSourceMode.Real -> {
+                      // Deselect device to show MCP processes list
+                      LOG.info("Switching to Real mode: clearing activeDeviceId, expanding panel")
+                      activeDeviceId = null
+                      isDevicePanelExpanded = true
+                  }
+                  DataSourceMode.Fake -> {
+                      // Auto-select first device if available, collapse panel
+                      if (mockBootedDevices.isNotEmpty()) {
+                          LOG.info("Switching to Fake mode: selecting device ${mockBootedDevices.first().id}")
+                          activeDeviceId = mockBootedDevices.first().id
+                          isDevicePanelExpanded = false
+                      }
+                  }
+              }
+          },
+          onMcpDeviceSelected = { deviceId, deviceName ->
+              println("=== MCP DEVICE SELECTED: $deviceId (name: $deviceName) ===")
+              println("Setting activeDeviceId to: $deviceId")
+              println("Setting isDevicePanelExpanded to: false")
+              LOG.info("MCP device selected: $deviceId")
+              // Store the real device info
+              realDevice = BootedDevice(
+                  id = deviceId,
+                  name = deviceName ?: deviceId,
+                  type = DeviceType.AndroidEmulator, // TODO: detect actual type
+                  status = "Connected",
+                  foregroundApp = null,
+                  connectedAt = System.currentTimeMillis()
+              )
+              activeDeviceIdState.value = deviceId
+              isDevicePanelExpandedState.value = false
+              userNavigatedToDevices = false  // Reset when device selected
+              showNotification("Device Connected", "Connected to device: $deviceName", NotificationType.INFORMATION)
+          },
+          onProcessConnected = { connectedMcpProcess = it },
+          suppressAutoSelect = userNavigatedToDevices,
       )
 
       // Dashboard Tabs with drag-and-drop reordering - hidden when device panel is expanded
+      println("Tab visibility check: isDevicePanelExpanded=$isDevicePanelExpanded, activeDeviceId=$activeDeviceId")
       if (!isDevicePanelExpanded && activeDeviceId != null) {
+        println("TABS VISIBLE: Showing DraggableTabs")
+        LOG.debug("Showing tabs: isDevicePanelExpanded=$isDevicePanelExpanded, activeDeviceId=$activeDeviceId")
+
         DraggableTabs(
             tabs = dashboardOrder,
             selectedIndex = selectedIndex,
-            onTabSelected = { selectedIndex = it },
+            onTabSelected = { index ->
+                LOG.info("Tab selected: $index (${dashboardOrder[index]})")
+                selectedIndex = index
+            },
             onReorder = { fromIndex, toIndex ->
                 val item = dashboardOrder.removeAt(fromIndex)
                 dashboardOrder.add(toIndex, item)
@@ -304,6 +451,8 @@ fun AutoMobileToolWindowContent() {
             dropTargetIndex = dropTargetIndex,
             onDropTargetChanged = { dropTargetIndex = it },
         )
+      } else {
+        LOG.debug("Tabs hidden: isDevicePanelExpanded=$isDevicePanelExpanded, activeDeviceId=$activeDeviceId")
       }
     }
   }
@@ -325,6 +474,11 @@ private fun GlobalShellHeader(
     needsSetup: Boolean = false,
     onSetupClick: () -> Unit = {},
     onDoctorClick: () -> Unit = {},
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+    onDataSourceModeChanged: (DataSourceMode) -> Unit = {},
+    onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
+    onProcessConnected: (McpProcess?) -> Unit = {},
+    suppressAutoSelect: Boolean = false,
 ) {
   val colors = JewelTheme.globalColors
 
@@ -345,33 +499,102 @@ private fun GlobalShellHeader(
           horizontalArrangement = Arrangement.SpaceBetween,
           verticalAlignment = Alignment.CenterVertically,
       ) {
-        // Left side: Device selection
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-          if (!isCompact) {
-            Text(
-                "Devices:",
-                fontSize = 11.sp,
-                maxLines = 1,
-                softWrap = false,
-                color = colors.text.normal.copy(alpha = 0.5f),
-            )
-          }
-
-          // Device icons
+        // Left side: Device selection (only in Fake mode)
+        if (dataSourceMode == DataSourceMode.Fake) {
           Row(
-              horizontalArrangement = Arrangement.spacedBy(4.dp),
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
               verticalAlignment = Alignment.CenterVertically,
           ) {
-            devices.forEach { device ->
-              DeviceIcon(
-                  device = device,
-                  isActive = device.id == activeDeviceId,
-                  isLive = isLive && device.id == activeDeviceId,
-                  onClick = { onDeviceSelected(device.id) },
+            if (!isCompact) {
+              Text(
+                  "Devices:",
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = colors.text.normal.copy(alpha = 0.5f),
               )
+            }
+
+            // Device icons
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+              devices.forEach { device ->
+                DeviceIcon(
+                    device = device,
+                    isActive = device.id == activeDeviceId,
+                    isLive = isLive && device.id == activeDeviceId,
+                    onClick = { onDeviceSelected(device.id) },
+                )
+              }
+            }
+          }
+        } else {
+          // Real mode: show MCP server indicator or empty space
+          Row(
+              horizontalArrangement = Arrangement.spacedBy(8.dp),
+              verticalAlignment = Alignment.CenterVertically,
+          ) {
+            // Show "Devices:" when a device is selected, "MCP Servers" otherwise
+            if (activeDeviceId != null) {
+              Text(
+                  "Devices:",
+                  fontSize = 11.sp,
+                  maxLines = 1,
+                  softWrap = false,
+                  color = Color(0xFF2196F3),
+                  modifier = Modifier
+                      .clickable {
+                          // Clicking "Devices:" expands the device panel
+                          // We need to deselect the device and expand the panel
+                          onDeviceSelected("")
+                      }
+                      .pointerHoverIcon(PointerIcon.Hand),
+              )
+
+              // Show device buttons next to "Devices:"
+              devices.forEach { device ->
+                val isActive = device.id == activeDeviceId
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isActive) Color(0xFF2196F3).copy(alpha = 0.15f)
+                            else colors.text.normal.copy(alpha = 0.08f),
+                            RoundedCornerShape(4.dp),
+                        )
+                        .clickable {
+                            if (device.id == activeDeviceId) {
+                                // Tapping active device expands panel to show more devices
+                                onDeviceSelected("")
+                            } else {
+                                onDeviceSelected(device.id)
+                            }
+                        }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 10.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        device.name,
+                        fontSize = 11.sp,
+                        color = if (isActive) Color(0xFF2196F3) else colors.text.normal.copy(alpha = 0.7f),
+                    )
+                }
+              }
+            } else {
+              Text(
+                  "🔌",
+                  fontSize = 14.sp,
+              )
+              if (!isCompact) {
+                Text(
+                    "MCP Servers",
+                    fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
+                    color = colors.text.normal.copy(alpha = 0.7f),
+                )
+              }
             }
           }
         }
@@ -414,8 +637,14 @@ private fun GlobalShellHeader(
             }
           }
 
-          // Live toggle (hidden when device panel is expanded)
-          if (!isDevicePanelExpanded) {
+          // Data source toggle (Fake/Real)
+          DataSourceToggle(
+              currentMode = dataSourceMode,
+              onModeChanged = onDataSourceModeChanged,
+          )
+
+          // Live toggle (only in Fake mode when viewing a device)
+          if (dataSourceMode == DataSourceMode.Fake && !isDevicePanelExpanded) {
             Row(
                 horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -438,17 +667,21 @@ private fun GlobalShellHeader(
 
     // Device management panel (expanded when no active device selected)
     if (isDevicePanelExpanded) {
-      DeviceManagementPanel(
-          bootedDevices = devices,
-          availableEmulators = availableEmulators,
-          systemImages = systemImages,
-          onDeviceSelected = { id: String ->
-              onDeviceSelected(id)
-              onCollapsePanel()
-          },
-          onBootEmulator = onBootEmulator,
-          onCreateEmulator = onCreateEmulator,
-      )
+      if (dataSourceMode == DataSourceMode.Real) {
+        McpProcessesPanel(
+            useRealData = true,
+            onDeviceSelected = onMcpDeviceSelected,
+            onProcessConnected = onProcessConnected,
+            suppressAutoSelect = suppressAutoSelect,
+        )
+      } else {
+        McpProcessesPanel(
+            useRealData = false,
+            onDeviceSelected = onMcpDeviceSelected,
+            onProcessConnected = onProcessConnected,
+            suppressAutoSelect = suppressAutoSelect,
+        )
+      }
     }
   }
 }
@@ -546,6 +779,59 @@ private fun AppleDeviceIcon(color: Color) {
 }
 
 @Composable
+private fun DataSourceToggle(
+    currentMode: DataSourceMode,
+    onModeChanged: (DataSourceMode) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+            .padding(4.dp),
+    ) {
+        DataSourceMode.entries.forEach { mode ->
+            val isSelected = mode == currentMode
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(
+                        if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                        RoundedCornerShape(4.dp),
+                    )
+                    .clickable { onModeChanged(mode) }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                // Radio indicator
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            if (isSelected) Color(0xFF4CAF50) else Color.Transparent,
+                            CircleShape,
+                        )
+                        .border(
+                            1.dp,
+                            if (isSelected) Color(0xFF4CAF50)
+                            else colors.text.normal.copy(alpha = 0.4f),
+                            CircleShape,
+                        ),
+                )
+                androidx.compose.foundation.layout.Spacer(Modifier.size(4.dp))
+                Text(
+                    mode.name,
+                    fontSize = 10.sp,
+                    color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun LiveToggle(isLive: Boolean, onToggle: (Boolean) -> Unit) {
   val colors = JewelTheme.globalColors
   val trackColor =
@@ -584,6 +870,7 @@ private fun DraggableTabs(
     dropTargetIndex: Int?,
     onDropTargetChanged: (Int?) -> Unit,
 ) {
+    println("DraggableTabs rendered with ${tabs.size} tabs, selectedIndex=$selectedIndex")
     val colors = JewelTheme.globalColors
     var tabPositions by remember { mutableStateOf<Map<Int, Float>>(emptyMap()) }
     var dragOffset by remember { mutableStateOf(0f) }
@@ -626,8 +913,12 @@ private fun DraggableTabs(
                                 Modifier.border(1.5.dp, Color(0xFF2196F3).copy(alpha = 0.5f), RoundedCornerShape(6.dp))
                             else Modifier
                         )
-                        .clickable { onTabSelected(index) }
-                        .pointerInput(index) {
+                        .clickable {
+                            LOG.info("Tab clicked via clickable: $index (${tabs[index]})")
+                            println("Tab clicked via clickable: $index (${tabs[index]})")
+                            onTabSelected(index)
+                        }
+                        .pointerInput("drag-$index") {
                             detectDragGesturesAfterLongPress(
                                 onDragStart = { onDragStart(index) },
                                 onDragEnd = {
@@ -993,5 +1284,1277 @@ private fun SystemImageListItem(
             )
         }
         Text("Create", fontSize = 10.sp, color = Color(0xFF2196F3))
+    }
+}
+
+// Test result state
+data class TestResult(
+    val pid: Int,
+    val success: Boolean,
+    val latencyMs: Long? = null,
+    val error: String? = null,
+    val timestamp: Long = System.currentTimeMillis(),
+)
+
+@Composable
+private fun McpProcessesPanel(
+    useRealData: Boolean = false,
+    onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
+    onProcessConnected: (McpProcess?) -> Unit = {},  // Called when MCP process connection changes
+    suppressAutoSelect: Boolean = false,  // When true, don't auto-select device (user wants to browse)
+) {
+    val colors = JewelTheme.globalColors
+
+    // Use appropriate detector based on mode
+    val detector = remember(useRealData) {
+        if (useRealData) RealMcpProcessDetector() else FakeMcpProcessDetector()
+    }
+
+    // Detect processes (with refresh capability)
+    var refreshCounter by remember { mutableIntStateOf(0) }
+    var processes by remember { mutableStateOf<List<McpProcess>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+
+    LaunchedEffect(useRealData, refreshCounter) {
+        isLoading = true
+        processes = detector.detectProcesses()
+        isLoading = false
+        println("[McpProcessesPanel] Detected ${processes.size} MCP processes (useRealData=$useRealData)")
+        processes.forEach { p ->
+            println("[McpProcessesPanel]   - ${p.name} (PID ${p.pid}, ${p.connectionType}, socket=${p.socketPath}, port=${p.port})")
+        }
+    }
+
+    // State for connected server
+    var connectedProcess by remember { mutableStateOf<McpProcess?>(null) }
+
+    // Notify parent when connected process changes
+    LaunchedEffect(connectedProcess) {
+        onProcessConnected(connectedProcess)
+    }
+
+    // Auto-connect to the first Unix Socket process if there's only one
+    LaunchedEffect(processes) {
+        val socketProcesses = processes.filter { it.connectionType == McpConnectionType.UnixSocket }
+        if (socketProcesses.size == 1 && connectedProcess == null) {
+            val autoConnectProcess = socketProcesses.first()
+            println("[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})")
+            connectedProcess = autoConnectProcess
+        }
+    }
+
+    // State for details panel
+    var detailsProcess by remember { mutableStateOf<McpProcess?>(null) }
+
+    // State for test results
+    var testResults by remember { mutableStateOf<Map<Int, TestResult>>(emptyMap()) }
+    var testingPid by remember { mutableStateOf<Int?>(null) }
+
+    // State for daemon spawning
+    var isDaemonStarting by remember { mutableStateOf(false) }
+    var daemonStartError by remember { mutableStateOf<String?>(null) }
+
+    // State for device booting
+    var bootingDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var bootErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    // State for device selection
+    var selectingDevice by remember { mutableStateOf<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo?>(null) }
+    var selectError by remember { mutableStateOf<String?>(null) }
+
+    // State for devices (fetched from connected MCP server)
+    var bootedDevices by remember { mutableStateOf<List<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo>>(emptyList()) }
+    var deviceImages by remember { mutableStateOf<List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>>(emptyList()) }
+    var devicesLoading by remember { mutableStateOf(false) }
+    var devicesError by remember { mutableStateOf<String?>(null) }
+
+    // Fetch devices when connected
+    LaunchedEffect(connectedProcess) {
+        val process = connectedProcess
+        if (process != null) {
+            devicesLoading = true
+            devicesError = null
+            try {
+                println("[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}")
+
+                val client = if (useRealData) {
+                    dev.jasonpearson.automobile.ide.mcp.McpResourceClientFactory.create(process)
+                } else {
+                    dev.jasonpearson.automobile.ide.mcp.McpResourceClientFactory.createFake()
+                }
+
+                println("[AutoMobile IDE] Fetching booted devices from automobile:devices/booted")
+                // Fetch booted devices
+                when (val result = client.readResource("automobile:devices/booted")) {
+                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Success -> {
+                        println("[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}...")
+                        val parsed = dev.jasonpearson.automobile.ide.mcp.DeviceResourceParser.parseBootedDevices(result.content)
+                        bootedDevices = parsed?.devices ?: emptyList()
+                        println("[AutoMobile IDE] Parsed ${bootedDevices.size} booted devices")
+                    }
+                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Error -> {
+                        println("[AutoMobile IDE] Error fetching booted devices: ${result.message}")
+                        devicesError = result.message
+                    }
+                }
+
+                println("[AutoMobile IDE] Fetching device images from automobile:devices/images")
+                // Fetch device images
+                when (val result = client.readResource("automobile:devices/images")) {
+                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Success -> {
+                        println("[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}...")
+                        val parsed = dev.jasonpearson.automobile.ide.mcp.DeviceResourceParser.parseDeviceImages(result.content)
+                        deviceImages = parsed?.images ?: emptyList()
+                        println("[AutoMobile IDE] Parsed ${deviceImages.size} device images")
+                    }
+                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Error -> {
+                        println("[AutoMobile IDE] Error fetching device images: ${result.message}")
+                        // Don't overwrite error from booted devices
+                        if (devicesError == null) devicesError = result.message
+                    }
+                }
+
+                client.close()
+            } catch (e: Exception) {
+                val stackTrace = e.stackTraceToString()
+                println("[AutoMobile IDE] Exception fetching devices: ${e.javaClass.name}: ${e.message}")
+                println("[AutoMobile IDE] Stack trace:\n$stackTrace")
+                devicesError = "${e.javaClass.simpleName}: ${e.message}\n\nStack trace:\n${stackTrace.lines().take(5).joinToString("\n")}"
+            }
+            devicesLoading = false
+        } else {
+            // Clear device data when disconnected
+            bootedDevices = emptyList()
+            deviceImages = emptyList()
+            devicesError = null
+        }
+    }
+
+    // Auto-select the first device if there's only one (unless suppressed by user navigation)
+    LaunchedEffect(bootedDevices, suppressAutoSelect) {
+        if (!suppressAutoSelect && bootedDevices.size == 1 && selectingDevice == null) {
+            val autoSelectDevice = bootedDevices.first()
+            println("[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} (${autoSelectDevice.deviceId})")
+            selectingDevice = autoSelectDevice
+            onDeviceSelected(autoSelectDevice.deviceId, autoSelectDevice.name)
+        }
+    }
+
+    // Handlers
+    val onConnect: (McpProcess) -> Unit = { process ->
+        // Toggle: if already connected to this process, disconnect; otherwise connect
+        val wasConnected = connectedProcess?.pid == process.pid
+        connectedProcess = if (wasConnected) null else process
+        println("[McpProcessesPanel] Connect button clicked for ${process.name} (PID ${process.pid})")
+        println("[McpProcessesPanel] ${if (wasConnected) "Disconnecting from" else "Connecting to"} process")
+        println("[McpProcessesPanel] connectedProcess is now: ${connectedProcess?.name ?: "null"}")
+    }
+
+    val onDetails: (McpProcess) -> Unit = { process ->
+        detailsProcess = if (detailsProcess?.pid == process.pid) null else process
+    }
+
+    val onTest: (McpProcess) -> Unit = { process ->
+        testingPid = process.pid
+    }
+
+    val onStartDaemon: () -> Unit = {
+        isDaemonStarting = true
+        daemonStartError = null
+    }
+
+    // Launch daemon when requested
+    LaunchedEffect(isDaemonStarting) {
+        if (isDaemonStarting) {
+            try {
+                println("[AutoMobile IDE] Starting daemon...")
+                val processBuilder = ProcessBuilder("auto-mobile", "daemon", "start")
+                processBuilder.redirectErrorStream(true)
+                val process = processBuilder.start()
+
+                // Read output
+                val output = process.inputStream.bufferedReader().readText()
+                val exitCode = process.waitFor()
+
+                if (exitCode == 0) {
+                    println("[AutoMobile IDE] Daemon started successfully")
+                    // Wait a bit for daemon to initialize, then refresh
+                    kotlinx.coroutines.delay(2000)
+                    refreshCounter++
+                } else {
+                    println("[AutoMobile IDE] Daemon start failed with exit code $exitCode: $output")
+                    daemonStartError = "Failed to start daemon (exit code $exitCode)"
+                }
+            } catch (e: Exception) {
+                println("[AutoMobile IDE] Exception starting daemon: ${e.message}")
+                e.printStackTrace()
+                daemonStartError = "Error starting daemon: ${e.message}"
+            }
+            isDaemonStarting = false
+        }
+    }
+
+    // Boot devices when requested
+    LaunchedEffect(bootingDeviceIds.hashCode()) {
+        bootingDeviceIds.forEach { deviceKey ->
+            try {
+                val image = deviceImages.find { (it.deviceId ?: it.name) == deviceKey }
+                if (image == null || connectedProcess == null) {
+                    bootingDeviceIds = bootingDeviceIds - deviceKey
+                    return@forEach
+                }
+
+                println("[AutoMobile IDE] Booting device: ${image.name}")
+                val client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+
+                val result = client.startDevice(
+                    name = image.name,
+                    platform = image.platform,
+                    deviceId = image.deviceId,
+                )
+
+                if (result.success) {
+                    println("[AutoMobile IDE] Device booted successfully: ${image.name}")
+                    // Refresh device list after successful boot
+                    kotlinx.coroutines.delay(3000)
+                    refreshCounter++
+                } else {
+                    println("[AutoMobile IDE] Failed to boot device: ${result.message}")
+                    bootErrors = bootErrors + (deviceKey to (result.message ?: "Failed to boot"))
+                }
+            } catch (e: Exception) {
+                println("[AutoMobile IDE] Exception booting device: ${e.message}")
+                e.printStackTrace()
+                bootErrors = bootErrors + (deviceKey to (e.message ?: "Error booting device"))
+            }
+            bootingDeviceIds = bootingDeviceIds - deviceKey
+        }
+    }
+
+    // Select device when requested
+    LaunchedEffect(selectingDevice) {
+        println("[AutoMobile IDE] LaunchedEffect triggered. selectingDevice: ${selectingDevice?.name}, connectedProcess: ${connectedProcess?.name}")
+        val device = selectingDevice
+        if (device != null && connectedProcess != null) {
+            try {
+                println("[AutoMobile IDE] Selecting device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}")
+                val client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                println("[AutoMobile IDE] Created client: $client")
+
+                val result = client.setActiveDevice(device.deviceId, device.platform)
+                println("[AutoMobile IDE] setActiveDevice result: success=${result.success}, message=${result.message}")
+
+                if (result.success) {
+                    println("[AutoMobile IDE] Device selected successfully: ${device.name}")
+                    selectError = null
+                } else {
+                    println("[AutoMobile IDE] Failed to select device: ${result.message}")
+                    selectError = result.message
+                }
+            } catch (e: Exception) {
+                println("[AutoMobile IDE] Exception selecting device: ${e.message}")
+                e.printStackTrace()
+                selectError = e.message ?: "Error selecting device"
+            }
+            selectingDevice = null
+            println("[AutoMobile IDE] Reset selectingDevice to null")
+        } else {
+            println("[AutoMobile IDE] Skipping selection - device: ${device?.name}, connectedProcess: ${connectedProcess?.name}")
+        }
+    }
+
+    // Handle test execution via LaunchedEffect
+    LaunchedEffect(testingPid) {
+        if (testingPid != null) {
+            kotlinx.coroutines.delay(500) // Simulate network latency
+            val success = (0..10).random() > 2 // 80% success rate for demo
+            val result = if (success) {
+                TestResult(
+                    pid = testingPid!!,
+                    success = true,
+                    latencyMs = (20..150).random().toLong(),
+                )
+            } else {
+                TestResult(
+                    pid = testingPid!!,
+                    success = false,
+                    error = "Connection refused",
+                )
+            }
+            testResults = testResults + (testingPid!! to result)
+            testingPid = null
+        }
+    }
+
+    // Group by connection type
+    val streamableProcesses = processes.filter { it.connectionType == McpConnectionType.StreamableHttp }
+    val socketProcesses = processes.filter { it.connectionType == McpConnectionType.UnixSocket }
+    val stdioProcesses = processes.filter { it.connectionType == McpConnectionType.Stdio }
+
+    println("[McpProcessesPanel] Process breakdown: streamable=${streamableProcesses.size}, socket=${socketProcesses.size}, stdio=${stdioProcesses.size}")
+
+    val scrollState = rememberScrollState()
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .verticalScroll(scrollState)
+            .background(colors.text.normal.copy(alpha = 0.02f))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        // Header with Start Daemon button
+        if (useRealData && socketProcesses.isEmpty() && !isDaemonStarting) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF4CAF50).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                    .clickable { onStartDaemon() }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                Text(
+                    "Start Daemon",
+                    fontSize = 10.sp,
+                    color = Color(0xFF4CAF50),
+                )
+            }
+        }
+        if (isDaemonStarting) {
+            Text(
+                "Starting...",
+                fontSize = 10.sp,
+                color = Color(0xFF2196F3),
+            )
+        }
+
+        // Daemon start error
+        if (daemonStartError != null) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                    .padding(12.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text("⚠", fontSize = 14.sp, color = Color(0xFFE53935))
+                Text(
+                    daemonStartError!!,
+                    fontSize = 11.sp,
+                    color = Color(0xFFE53935),
+                    modifier = Modifier.weight(1f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    "✕",
+                    fontSize = 14.sp,
+                    color = Color(0xFFE53935).copy(alpha = 0.5f),
+                    modifier = Modifier
+                        .clickable { daemonStartError = null }
+                        .pointerHoverIcon(PointerIcon.Hand),
+                )
+            }
+        }
+
+        if (isLoading && processes.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("⟳", fontSize = 24.sp, color = Color(0xFF2196F3))
+                    Text(
+                        "Detecting MCP servers...",
+                        fontSize = 12.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                }
+            }
+        } else if (processes.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(32.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(if (useRealData) "🔍" else "📋", fontSize = 24.sp)
+                    Text(
+                        if (useRealData) "No AutoMobile servers detected"
+                        else "Mock MCP Servers",
+                        fontSize = 12.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                        modifier = Modifier.padding(top = 8.dp),
+                    )
+                    if (useRealData) {
+                        Text(
+                            "Start a daemon to enable MCP features",
+                            fontSize = 10.sp,
+                            color = colors.text.normal.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            modifier = Modifier.padding(top = 12.dp),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .background(Color(0xFF4CAF50).copy(alpha = 0.15f), RoundedCornerShape(4.dp))
+                                    .clickable(enabled = !isDaemonStarting) { onStartDaemon() }
+                                    .pointerHoverIcon(if (isDaemonStarting) PointerIcon.Default else PointerIcon.Hand)
+                                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    if (isDaemonStarting) "Starting..." else "Start Daemon",
+                                    fontSize = 11.sp,
+                                    color = Color(0xFF4CAF50),
+                                )
+                            }
+                            Text(
+                                "↻ Refresh",
+                                fontSize = 10.sp,
+                                color = Color(0xFF2196F3),
+                                modifier = Modifier
+                                    .clickable { refreshCounter++ }
+                                    .pointerHoverIcon(PointerIcon.Hand),
+                            )
+                        }
+                    } else {
+                        Text(
+                            "Switch to Real mode to detect actual servers",
+                            fontSize = 10.sp,
+                            color = colors.text.normal.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(top = 4.dp),
+                        )
+                    }
+                }
+            }
+        } else {
+            // Streamable HTTP servers
+            if (streamableProcesses.isNotEmpty()) {
+                ProcessSection(
+                    title = "Streamable HTTP",
+                    icon = "🌐",
+                    processes = streamableProcesses,
+                    connectedPid = connectedProcess?.pid,
+                    testResults = testResults,
+                    testingPid = testingPid,
+                    detailsPid = detailsProcess?.pid,
+                    onConnect = onConnect,
+                    onDetails = onDetails,
+                    onTest = onTest,
+                )
+            }
+
+            // Unix Socket servers
+            if (socketProcesses.isNotEmpty()) {
+                ProcessSection(
+                    title = "Unix Socket",
+                    icon = "🔌",
+                    processes = socketProcesses,
+                    connectedPid = connectedProcess?.pid,
+                    testResults = testResults,
+                    testingPid = testingPid,
+                    detailsPid = detailsProcess?.pid,
+                    onConnect = onConnect,
+                    onDetails = onDetails,
+                    onTest = onTest,
+                )
+            }
+
+            // Devices section (when connected)
+            println("[McpProcessesPanel] connectedProcess=$connectedProcess, bootedDevices.size=${bootedDevices.size}")
+            if (connectedProcess != null) {
+                println("[McpProcessesPanel] Showing DevicesSection")
+                DevicesSection(
+                    bootedDevices = bootedDevices,
+                    deviceImages = deviceImages,
+                    isLoading = devicesLoading,
+                    error = devicesError,
+                    bootingDeviceIds = bootingDeviceIds,
+                    bootErrors = bootErrors,
+                    onSelectDevice = { device ->
+                        println("[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}")
+                        selectingDevice = device
+                        selectError = null
+                        println("[AutoMobile IDE] Set selectingDevice to: ${device.name}")
+                        // Notify parent to transition to dashboard view
+                        onDeviceSelected(device.deviceId, device.name)
+                    },
+                    onBootDevice = { image ->
+                        val deviceKey = image.deviceId ?: image.name
+                        bootingDeviceIds = bootingDeviceIds + deviceKey
+                        bootErrors = bootErrors - deviceKey
+                    },
+                )
+            }
+
+            // Potential ports info
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+                    .padding(12.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "Connection Info",
+                        fontSize = 11.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        color = colors.text.normal.copy(alpha = 0.7f),
+                    )
+                    Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                        Column {
+                            Text("Active Ports", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                            Text(
+                                streamableProcesses.mapNotNull { it.port }.joinToString(", ") { ":$it" }.ifEmpty { "None" },
+                                fontSize = 11.sp,
+                                color = colors.text.normal,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        Column {
+                            Text("Socket Paths", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                            Text(
+                                socketProcesses.mapNotNull { it.socketPath }.joinToString("\n").ifEmpty { "None" },
+                                fontSize = 11.sp,
+                                color = colors.text.normal,
+                                maxLines = 3,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ProcessSection(
+    title: String,
+    icon: String,
+    processes: List<McpProcess>,
+    connectedPid: Int?,
+    testResults: Map<Int, TestResult>,
+    testingPid: Int?,
+    detailsPid: Int?,
+    onConnect: (McpProcess) -> Unit,
+    onDetails: (McpProcess) -> Unit,
+    onTest: (McpProcess) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(icon, fontSize = 12.sp)
+            Text(
+                title,
+                fontSize = 11.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                color = colors.text.normal.copy(alpha = 0.7f),
+            )
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                    .padding(horizontal = 6.dp, vertical = 2.dp),
+            ) {
+                Text(
+                    "${processes.size}",
+                    fontSize = 9.sp,
+                    color = Color(0xFF4CAF50),
+                )
+            }
+        }
+
+        processes.forEach { process ->
+            McpProcessItem(
+                process = process,
+                isConnected = connectedPid == process.pid,
+                testResult = testResults[process.pid],
+                isTesting = testingPid == process.pid,
+                showDetails = detailsPid == process.pid,
+                onConnect = onConnect,
+                onDetails = onDetails,
+                onTest = onTest,
+            )
+        }
+    }
+}
+
+@Composable
+private fun McpProcessItem(
+    process: McpProcess,
+    isConnected: Boolean = false,
+    testResult: TestResult? = null,
+    isTesting: Boolean = false,
+    showDetails: Boolean = false,
+    onConnect: (McpProcess) -> Unit = {},
+    onDetails: (McpProcess) -> Unit = {},
+    onTest: (McpProcess) -> Unit = {},
+) {
+    val colors = JewelTheme.globalColors
+    val uptimeText = formatUptime(process.uptimeMs)
+
+    Column {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.1f)
+                    else colors.text.normal.copy(alpha = 0.05f),
+                    RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp),
+                )
+                .then(
+                    if (isConnected) Modifier.border(1.dp, Color(0xFF4CAF50).copy(alpha = 0.3f), RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp))
+                    else Modifier
+                )
+                .padding(10.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            // Status indicator
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .background(
+                        if (isConnected) Color(0xFF4CAF50) else Color(0xFF4CAF50).copy(alpha = 0.5f),
+                        CircleShape,
+                    ),
+            )
+
+            // Process info
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        process.name,
+                        fontSize = 12.sp,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    Text(
+                        "PID ${process.pid}",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                    )
+                    if (isConnected) {
+                        Text(
+                            "● Active",
+                            fontSize = 9.sp,
+                            color = Color(0xFF4CAF50),
+                        )
+                    }
+                }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    when (process.connectionType) {
+                        McpConnectionType.StreamableHttp -> {
+                            Text(
+                                "http://localhost:${process.port}",
+                                fontSize = 10.sp,
+                                color = Color(0xFF2196F3),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        McpConnectionType.UnixSocket -> {
+                            Text(
+                                process.socketPath ?: "Unknown socket",
+                                fontSize = 10.sp,
+                                color = Color(0xFF9C27B0),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                        McpConnectionType.Stdio -> {
+                            Text(
+                                "Standard I/O",
+                                fontSize = 10.sp,
+                                color = Color(0xFFFF9800),
+                            )
+                        }
+                    }
+                    Text("•", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                    Text(
+                        "Up $uptimeText",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                    )
+
+                    // Test result indicator
+                    if (isTesting) {
+                        Text(
+                            "Testing...",
+                            fontSize = 10.sp,
+                            color = Color(0xFF2196F3),
+                        )
+                    } else if (testResult != null) {
+                        Text("•", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                        if (testResult.success) {
+                            Text(
+                                "✓ ${testResult.latencyMs}ms",
+                                fontSize = 10.sp,
+                                color = Color(0xFF4CAF50),
+                            )
+                        } else {
+                            Text(
+                                "✗ ${testResult.error}",
+                                fontSize = 10.sp,
+                                color = Color(0xFFE53935),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                        }
+                    }
+                }
+            }
+
+            // Action buttons
+            Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                // Test button
+                Box(
+                    modifier = Modifier
+                        .background(
+                            when {
+                                isTesting -> Color(0xFF2196F3).copy(alpha = 0.15f)
+                                testResult?.success == true -> Color(0xFF4CAF50).copy(alpha = 0.1f)
+                                testResult?.success == false -> Color(0xFFE53935).copy(alpha = 0.1f)
+                                else -> colors.text.normal.copy(alpha = 0.08f)
+                            },
+                            RoundedCornerShape(4.dp),
+                        )
+                        .clickable(enabled = !isTesting) { onTest(process) }
+                        .pointerHoverIcon(if (isTesting) PointerIcon.Default else PointerIcon.Hand)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        if (isTesting) "..." else "Test",
+                        fontSize = 10.sp,
+                        color = when {
+                            isTesting -> Color(0xFF2196F3)
+                            testResult?.success == true -> Color(0xFF4CAF50)
+                            testResult?.success == false -> Color(0xFFE53935)
+                            else -> colors.text.normal.copy(alpha = 0.7f)
+                        },
+                    )
+                }
+
+                // Details button
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (showDetails) Color(0xFF9C27B0).copy(alpha = 0.25f)
+                            else Color(0xFF9C27B0).copy(alpha = 0.15f),
+                            RoundedCornerShape(4.dp),
+                        )
+                        .clickable { onDetails(process) }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        if (showDetails) "Hide" else "Details",
+                        fontSize = 10.sp,
+                        color = Color(0xFF9C27B0),
+                    )
+                }
+
+                // Connect toggle button
+                Box(
+                    modifier = Modifier
+                        .background(
+                            if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.3f)
+                            else Color(0xFF4CAF50).copy(alpha = 0.15f),
+                            RoundedCornerShape(4.dp),
+                        )
+                        .clickable {
+                            println("[McpProcessItem] Connect button clicked for ${process.name}")
+                            onConnect(process)
+                        }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 8.dp, vertical = 6.dp),
+                ) {
+                    Text(
+                        if (isConnected) "Connected ✓" else "Connect",
+                        fontSize = 10.sp,
+                        color = Color(0xFF4CAF50),
+                    )
+                }
+            }
+        }
+
+        // Details panel
+        if (showDetails) {
+            McpProcessDetails(process = process)
+        }
+    }
+}
+
+@Composable
+private fun McpProcessDetails(process: McpProcess) {
+    val colors = JewelTheme.globalColors
+    var resources by remember { mutableStateOf<List<McpResource>?>(null) }
+    var tools by remember { mutableStateOf<List<McpTool>?>(null) }
+    var resourcesExpanded by remember { mutableStateOf(false) }
+    var toolsExpanded by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // Fetch resources and tools from MCP server
+    LaunchedEffect(process.pid) {
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                kotlinx.coroutines.withTimeout(5000) {
+                    val client = when (process.connectionType) {
+                        McpConnectionType.StreamableHttp -> McpHttpClient("http://localhost:${process.port}")
+                        McpConnectionType.UnixSocket -> McpDaemonClient(process.socketPath ?: "")
+                        McpConnectionType.Stdio -> null // STDIO shouldn't appear
+                    }
+
+                    if (client != null) {
+                        val fetchedResources = client.listResources()
+                        val fetchedTools = client.listTools()
+                        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                            resources = fetchedResources
+                            tools = fetchedTools
+                            error = null
+                        }
+                    }
+                }
+            } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    error = "Timeout fetching data (5s)"
+                }
+            } catch (e: Exception) {
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    error = "Failed: ${e.message}"
+                }
+            }
+        }
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(
+                colors.text.normal.copy(alpha = 0.03f),
+                RoundedCornerShape(bottomStart = 6.dp, bottomEnd = 6.dp),
+            )
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Connection details
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text(
+                "Connection",
+                fontSize = 11.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                color = colors.text.normal.copy(alpha = 0.7f),
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column {
+                    Text("Type", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text(process.connectionType.label, fontSize = 11.sp)
+                }
+                Column {
+                    Text("Endpoint", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text(
+                        when (process.connectionType) {
+                            McpConnectionType.StreamableHttp -> "http://localhost:${process.port}"
+                            McpConnectionType.UnixSocket -> process.socketPath ?: "Unknown"
+                            McpConnectionType.Stdio -> "stdin/stdout"
+                        },
+                        fontSize = 11.sp,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+                Column {
+                    Text("PID", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text("${process.pid}", fontSize = 11.sp)
+                }
+            }
+        }
+
+        // Resources
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val currentError = error
+            val currentResources = resources
+            val currentResourcesExpanded = resourcesExpanded
+
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Resources",
+                    fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    color = colors.text.normal.copy(alpha = 0.7f),
+                )
+                if (currentResources != null && currentResources.size > 5) {
+                    Text(
+                        if (currentResourcesExpanded) "Collapse" else "Expand all",
+                        fontSize = 9.sp,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier
+                            .clickable { resourcesExpanded = !resourcesExpanded }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(horizontal = 4.dp),
+                    )
+                }
+            }
+            if (currentError != null) {
+                Text(currentError, fontSize = 9.sp, color = Color(0xFFE53935))
+            } else if (currentResources == null) {
+                Text("Loading...", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+            } else if (currentResources.isEmpty()) {
+                Text("No resources", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+            } else {
+                val resourcesToShow = if (currentResourcesExpanded) currentResources else currentResources.take(5)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    resourcesToShow.forEach { resource ->
+                        Box(
+                            modifier = Modifier
+                                .background(Color(0xFF2196F3).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 3.dp),
+                        ) {
+                            Text(resource.uri, fontSize = 9.sp, color = Color(0xFF2196F3))
+                        }
+                    }
+                    if (!currentResourcesExpanded && currentResources.size > 5) {
+                        Text(
+                            "+${currentResources.size - 5} more",
+                            fontSize = 9.sp,
+                            color = Color(0xFF2196F3),
+                            modifier = Modifier
+                                .clickable { resourcesExpanded = true }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .padding(horizontal = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+
+        // Tools
+        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            val currentError = error
+            val currentTools = tools
+            val currentToolsExpanded = toolsExpanded
+
+            Row(
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Text(
+                    "Tools",
+                    fontSize = 11.sp,
+                    fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                    color = colors.text.normal.copy(alpha = 0.7f),
+                )
+                if (currentTools != null && currentTools.size > 8) {
+                    Text(
+                        if (currentToolsExpanded) "Collapse" else "Expand all",
+                        fontSize = 9.sp,
+                        color = Color(0xFF9C27B0),
+                        modifier = Modifier
+                            .clickable { toolsExpanded = !toolsExpanded }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(horizontal = 4.dp),
+                    )
+                }
+            }
+            if (currentError != null) {
+                Text(currentError, fontSize = 9.sp, color = Color(0xFFE53935))
+            } else if (currentTools == null) {
+                Text("Loading...", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+            } else if (currentTools.isEmpty()) {
+                Text("No tools", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+            } else {
+                val toolsToShow = if (currentToolsExpanded) currentTools else currentTools.take(8)
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    toolsToShow.chunked(4).forEach { row ->
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            row.forEach { tool ->
+                                Box(
+                                    modifier = Modifier
+                                        .background(Color(0xFF9C27B0).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+                                        .padding(horizontal = 6.dp, vertical = 3.dp),
+                                ) {
+                                    Text(tool.name, fontSize = 9.sp, color = Color(0xFF9C27B0))
+                                }
+                            }
+                        }
+                    }
+                    if (!currentToolsExpanded && currentTools.size > 8) {
+                        Text(
+                            "+${currentTools.size - 8} more",
+                            fontSize = 9.sp,
+                            color = Color(0xFF9C27B0),
+                            modifier = Modifier
+                                .clickable { toolsExpanded = true }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                                .padding(horizontal = 4.dp),
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun formatUptime(ms: Long): String {
+    return when {
+        ms < 60_000 -> "${ms / 1000}s"
+        ms < 3600_000 -> "${ms / 60_000}m"
+        ms < 86400_000 -> "${ms / 3600_000}h ${(ms % 3600_000) / 60_000}m"
+        else -> "${ms / 86400_000}d"
+    }
+}
+
+@Composable
+private fun DevicesSection(
+    bootedDevices: List<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo>,
+    deviceImages: List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>,
+    isLoading: Boolean,
+    error: String?,
+    bootingDeviceIds: Set<String>,
+    bootErrors: Map<String, String>,
+    onSelectDevice: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit,
+    onBootDevice: (dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(6.dp))
+            .padding(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        // Header
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "📱 Devices",
+                fontSize = 12.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                color = colors.text.normal,
+            )
+            if (isLoading) {
+                Text(
+                    "Loading...",
+                    fontSize = 10.sp,
+                    color = Color(0xFF2196F3),
+                )
+            }
+        }
+
+        if (error != null) {
+            Text(
+                "⚠️ $error",
+                fontSize = 10.sp,
+                color = Color(0xFFE53935),
+            )
+        } else if (!isLoading) {
+            // Running devices
+            if (bootedDevices.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Running (${bootedDevices.size})",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.6f),
+                    )
+                    bootedDevices.forEach { device ->
+                        BootedDeviceRow(
+                            device = device,
+                            onSelect = { onSelectDevice(device) },
+                        )
+                    }
+                }
+            }
+
+            // Available images (only show first few to save space)
+            if (deviceImages.isNotEmpty()) {
+                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text(
+                        "Available to Boot (${deviceImages.size})",
+                        fontSize = 10.sp,
+                        color = colors.text.normal.copy(alpha = 0.6f),
+                    )
+                    deviceImages.take(5).forEach { image ->
+                        val deviceKey = image.deviceId ?: image.name
+                        DeviceImageRow(
+                            image = image,
+                            isBooting = deviceKey in bootingDeviceIds,
+                            error = bootErrors[deviceKey],
+                            onBoot = { onBootDevice(image) },
+                        )
+                    }
+                    if (deviceImages.size > 5) {
+                        Text(
+                            "+${deviceImages.size - 5} more",
+                            fontSize = 9.sp,
+                            color = colors.text.normal.copy(alpha = 0.4f),
+                        )
+                    }
+                }
+            }
+
+            if (bootedDevices.isEmpty() && deviceImages.isEmpty()) {
+                Text(
+                    "No devices found",
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun BootedDeviceRow(
+    device: dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo,
+    onSelect: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val platformIcon = if (device.platform == "android") "🤖" else "🍎"
+    val typeIcon = if (device.isVirtual) "📱" else "📲"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(Color(0xFF4CAF50).copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+            .clickable(onClick = {
+                println("[AutoMobile IDE] BootedDeviceRow clicked for: ${device.name}")
+                onSelect()
+            })
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text("$platformIcon$typeIcon", fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                device.name,
+                fontSize = 11.sp,
+                fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            Text(
+                device.deviceId,
+                fontSize = 9.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+        Box(
+            modifier = Modifier
+                .background(Color(0xFF4CAF50).copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        ) {
+            Text(
+                "Select",
+                fontSize = 9.sp,
+                color = Color(0xFF4CAF50),
+            )
+        }
+    }
+}
+
+@Composable
+private fun DeviceImageRow(
+    image: dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo,
+    isBooting: Boolean = false,
+    error: String? = null,
+    onBoot: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val platformIcon = if (image.platform == "android") "🤖" else "🍎"
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+            .clickable(enabled = !isBooting, onClick = onBoot)
+            .pointerHoverIcon(if (isBooting) PointerIcon.Default else PointerIcon.Hand)
+            .padding(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(platformIcon, fontSize = 12.sp)
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                image.name,
+                fontSize = 11.sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+            if (error != null) {
+                Text(
+                    error,
+                    fontSize = 9.sp,
+                    color = Color(0xFFE53935),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            } else {
+                image.target?.let { target ->
+                    Text(
+                        target,
+                        fontSize = 9.sp,
+                        color = colors.text.normal.copy(alpha = 0.5f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                }
+            }
+        }
+        Box(
+            modifier = Modifier
+                .background(
+                    when {
+                        error != null -> Color(0xFFE53935).copy(alpha = 0.15f)
+                        isBooting -> Color(0xFF2196F3).copy(alpha = 0.25f)
+                        else -> Color(0xFF2196F3).copy(alpha = 0.15f)
+                    },
+                    RoundedCornerShape(4.dp),
+                )
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        ) {
+            Text(
+                when {
+                    error != null -> "Error"
+                    isBooting -> "..."
+                    else -> "Boot"
+                },
+                fontSize = 9.sp,
+                color = when {
+                    error != null -> Color(0xFFE53935)
+                    else -> Color(0xFF2196F3)
+                },
+            )
+        }
     }
 }

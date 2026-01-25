@@ -20,6 +20,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -39,6 +40,8 @@ import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Link
 import org.jetbrains.jewel.ui.component.OutlinedButton
 import org.jetbrains.jewel.ui.component.Text
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 
 enum class PerformanceScreen {
     Overview,
@@ -49,17 +52,49 @@ enum class PerformanceScreen {
 fun PerformanceDashboard(
     onNavigateToScreen: (String) -> Unit = {},  // Navigate to a screen in nav graph
     onNavigateToTest: (String) -> Unit = {},  // Navigate to a test
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+    clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
 ) {
     var currentScreen by remember { mutableStateOf(PerformanceScreen.Overview) }
     var selectedMetric by remember { mutableStateOf<PerformanceMetric?>(null) }
     var selectedScreenFilter by remember { mutableStateOf<String?>(null) }
     var compareRunId by remember { mutableStateOf<String?>(null) }
 
-    val currentRun = remember { PerformanceMockData.currentRun }
+    // Fetch performance run from data source
+    var currentRun by remember { mutableStateOf<PerformanceRun?>(null) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(dataSourceMode, clientProvider) {
+        isLoading = true
+        error = null
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
+                when (val result = dataSource.getPerformanceRun()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        currentRun = result.data
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        error = result.message
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Unknown error"
+                isLoading = false
+            }
+        }
+    }
 
     when (currentScreen) {
-        PerformanceScreen.Overview -> PerformanceOverviewScreen(
-            run = currentRun,
+        PerformanceScreen.Overview -> currentRun?.let { run ->
+            PerformanceOverviewScreen(
+                run = run,
             selectedScreenFilter = selectedScreenFilter,
             onScreenFilterChanged = { selectedScreenFilter = it },
             onMetricSelected = { metric ->
@@ -71,15 +106,22 @@ fun PerformanceDashboard(
             },
             onCompareRuns = { compareRunId = it },
         )
-        PerformanceScreen.MetricDetail -> selectedMetric?.let { metric ->
-            MetricDetailScreen(
-                metric = metric,
-                run = currentRun,
-                onBack = { currentScreen = PerformanceScreen.Overview },
-                onScreenClicked = onNavigateToScreen,
-                onTestClicked = onNavigateToTest,
-            )
-        } ?: run { currentScreen = PerformanceScreen.Overview }
+        }
+        PerformanceScreen.MetricDetail -> {
+            val metric = selectedMetric
+            val run = currentRun
+            if (metric != null && run != null) {
+                MetricDetailScreen(
+                    metric = metric,
+                    run = run,
+                    onBack = { currentScreen = PerformanceScreen.Overview },
+                    onScreenClicked = onNavigateToScreen,
+                    onTestClicked = onNavigateToTest,
+                )
+            } else {
+                currentScreen = PerformanceScreen.Overview
+            }
+        }
     }
 }
 

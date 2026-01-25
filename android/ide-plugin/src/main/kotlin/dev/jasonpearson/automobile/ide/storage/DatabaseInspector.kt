@@ -66,13 +66,14 @@ import org.jetbrains.jewel.ui.component.Text
  */
 @Composable
 fun DatabaseInspector(
+    databases: List<DatabaseInfo> = StorageMockData.databases,
     modifier: Modifier = Modifier,
 ) {
     val colors = JewelTheme.globalColors
 
     // State
-    var selectedDatabase by remember { mutableStateOf(StorageMockData.databases.firstOrNull()) }
-    var selectedTable by remember { mutableStateOf(selectedDatabase?.tables?.firstOrNull()) }
+    var selectedDatabase by remember(databases) { mutableStateOf(databases.firstOrNull()) }
+    var selectedTable by remember(selectedDatabase) { mutableStateOf(selectedDatabase?.tables?.firstOrNull()) }
     var viewMode by remember { mutableStateOf(DatabaseViewMode.Data) }
     var queryText by remember { mutableStateOf("SELECT * FROM users WHERE is_active = 1") }
     var queryResult by remember { mutableStateOf<QueryResult?>(null) }
@@ -100,7 +101,7 @@ fun DatabaseInspector(
                     color = colors.text.normal.copy(alpha = 0.5f),
                 )
                 DropdownSelector(
-                    items = StorageMockData.databases,
+                    items = databases,
                     selectedItem = selectedDatabase,
                     onItemSelected = {
                         selectedDatabase = it
@@ -126,6 +127,30 @@ fun DatabaseInspector(
                         selectedItem = selectedTable,
                         onItemSelected = { selectedTable = it },
                         itemLabel = { it?.name ?: "None" },
+                    )
+                }
+            }
+        }
+
+        // Show info banner when no databases are available
+        if (databases.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFF2196F3).copy(alpha = 0.1f))
+                    .padding(12.dp),
+            ) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text(
+                        "No databases detected",
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = Color(0xFF2196F3),
+                    )
+                    Text(
+                        "AutoMobile can inspect databases via adb shell for debuggable apps. The SDK provides a richer inspection experience with live updates.",
+                        fontSize = 11.sp,
+                        color = colors.text.normal.copy(alpha = 0.7f),
                     )
                 }
             }

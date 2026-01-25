@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -18,15 +17,14 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -39,7 +37,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
-import kotlinx.coroutines.launch
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 
@@ -52,23 +50,24 @@ fun FailuresDashboard(
     onNavigateToTest: (String) -> Unit = {},
     onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
     clientProvider: (() -> AutoMobileClient)? = null,
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
     modifier: Modifier = Modifier,
 ) {
-    val scope = rememberCoroutineScope()
 
-    // Data source mode toggle
-    var dataSourceMode by remember { mutableStateOf(DataSourceMode.Fake) }
+    // Retry counter - incrementing triggers LaunchedEffect to reload
+    var retryCounter by remember { mutableIntStateOf(0) }
 
     // Create data sources
     val mockDataSource = remember { MockFailuresDataSource() }
     val mcpDataSource = remember(clientProvider) {
         clientProvider?.let { McpFailuresDataSource(it) }
     }
+    val emptyDataSource = remember { EmptyFailuresDataSource() }
 
     val currentDataSource: FailuresDataSource = when {
         dataSourceMode == DataSourceMode.Fake -> mockDataSource
         mcpDataSource != null -> mcpDataSource
-        else -> mockDataSource
+        else -> emptyDataSource  // Show empty data in Real mode when MCP not available
     }
 
     // Data state
@@ -79,8 +78,8 @@ fun FailuresDashboard(
     var selectedFailure by remember { mutableStateOf<FailureGroup?>(null) }
     var filterType by remember { mutableStateOf<FailureType?>(null) }
 
-    // Load data when data source changes
-    LaunchedEffect(currentDataSource, dataSourceMode) {
+    // Load data when data source changes or retry is triggered
+    LaunchedEffect(currentDataSource, dataSourceMode, retryCounter) {
         isLoading = true
         errorMessage = null
         when (val result = currentDataSource.getFailureGroups()) {
@@ -110,28 +109,11 @@ fun FailuresDashboard(
                 filterType = filterType,
                 onFilterChanged = { filterType = it },
                 onFailureSelected = { selectedFailure = it },
-                dataSourceMode = dataSourceMode,
-                onDataSourceModeChanged = { dataSourceMode = it },
-                mcpAvailable = clientProvider != null,
                 isLoading = isLoading,
                 errorMessage = errorMessage,
-                onRetry = {
-                    scope.launch {
-                        isLoading = true
-                        errorMessage = null
-                        when (val result = currentDataSource.getFailureGroups()) {
-                            is DataSourceResult.Success -> {
-                                failureGroups = result.data
-                                isLoading = false
-                            }
-                            is DataSourceResult.Error -> {
-                                errorMessage = result.message
-                                isLoading = false
-                            }
-                        }
-                    }
-                },
+                onRetry = { retryCounter++ },
                 dataSource = currentDataSource,
+                dataSourceMode = dataSourceMode,
             )
         }
     }
@@ -181,13 +163,11 @@ private fun FailureListView(
     filterType: FailureType?,
     onFilterChanged: (FailureType?) -> Unit,
     onFailureSelected: (FailureGroup) -> Unit,
-    dataSourceMode: DataSourceMode,
-    onDataSourceModeChanged: (DataSourceMode) -> Unit,
-    mcpAvailable: Boolean,
     isLoading: Boolean,
     errorMessage: String?,
     onRetry: () -> Unit,
     dataSource: FailuresDataSource,
+    dataSourceMode: DataSourceMode,
 ) {
     val colors = JewelTheme.globalColors
     val filteredFailures = if (filterType != null) {
@@ -305,25 +285,6 @@ private fun FailureListView(
             }
         }
 
-        // Second row: Data source toggle
-        Row(
-            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
-            horizontalArrangement = Arrangement.End,
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
-            Text(
-                "Data:",
-                fontSize = 10.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-            )
-            Spacer(Modifier.width(8.dp))
-            DataSourceToggle(
-                currentMode = dataSourceMode,
-                onModeChanged = onDataSourceModeChanged,
-                mcpAvailable = mcpAvailable,
-            )
-        }
-
         Spacer(Modifier.height(16.dp))
 
         // Error banner
@@ -439,10 +400,34 @@ private fun FailureListView(
                     modifier = Modifier.fillMaxWidth().padding(32.dp),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Text(
-                        "No failures found",
-                        color = colors.text.normal.copy(alpha = 0.5f),
-                    )
+                    if (dataSourceMode == DataSourceMode.Real && !isLoading) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                "No failures detected",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = colors.text.normal.copy(alpha = 0.7f),
+                            )
+                            Text(
+                                "AutoMobile tracks crashes and ANRs via logcat and tool failures directly.",
+                                fontSize = 11.sp,
+                                color = colors.text.normal.copy(alpha = 0.5f),
+                            )
+                            Text(
+                                "The SDK provides richer context and metadata but is not required.",
+                                fontSize = 11.sp,
+                                color = colors.text.normal.copy(alpha = 0.5f),
+                            )
+                        }
+                    } else {
+                        Text(
+                            "No failures found",
+                            color = colors.text.normal.copy(alpha = 0.5f),
+                        )
+                    }
                 }
             } else {
                 filteredFailures.forEach { failure ->
@@ -475,71 +460,6 @@ private fun FilterChip(
             .padding(horizontal = 10.dp, vertical = 4.dp),
     ) {
         Text(label, fontSize = 11.sp, maxLines = 1)
-    }
-}
-
-@Composable
-private fun DataSourceToggle(
-    currentMode: DataSourceMode,
-    onModeChanged: (DataSourceMode) -> Unit,
-    mcpAvailable: Boolean,
-) {
-    val colors = JewelTheme.globalColors
-
-    Row(
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        modifier = Modifier
-            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
-            .padding(4.dp),
-    ) {
-        DataSourceMode.entries.forEach { mode ->
-            val isSelected = mode == currentMode
-            val isDisabled = mode == DataSourceMode.Real && !mcpAvailable
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier
-                    .background(
-                        if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
-                        RoundedCornerShape(4.dp),
-                    )
-                    .then(
-                        if (!isDisabled) {
-                            Modifier
-                                .clickable { onModeChanged(mode) }
-                                .pointerHoverIcon(PointerIcon.Hand)
-                        } else Modifier
-                    )
-                    .padding(horizontal = 8.dp, vertical = 4.dp),
-            ) {
-                // Radio indicator
-                Box(
-                    modifier = Modifier
-                        .size(10.dp)
-                        .background(
-                            if (isSelected) Color(0xFF4CAF50) else Color.Transparent,
-                            CircleShape,
-                        )
-                        .border(
-                            1.dp,
-                            if (isDisabled) colors.text.normal.copy(alpha = 0.2f)
-                            else if (isSelected) Color(0xFF4CAF50)
-                            else colors.text.normal.copy(alpha = 0.4f),
-                            CircleShape,
-                        ),
-                )
-                Spacer(Modifier.width(4.dp))
-                Text(
-                    mode.name,
-                    fontSize = 10.sp,
-                    color = when {
-                        isDisabled -> colors.text.normal.copy(alpha = 0.3f)
-                        isSelected -> colors.text.normal
-                        else -> colors.text.normal.copy(alpha = 0.6f)
-                    },
-                )
-            }
-        }
     }
 }
 

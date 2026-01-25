@@ -21,6 +21,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -41,6 +42,9 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.TextField
 import dev.jasonpearson.automobile.ide.BootedDevice
 import dev.jasonpearson.automobile.ide.DeviceType
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
+import dev.jasonpearson.automobile.ide.datasource.DataSourceFactory
 
 enum class TestScreen {
     Dashboard,
@@ -54,13 +58,47 @@ enum class TestScreen {
 fun TestDashboard(
     onOpenFile: (String) -> Unit = {},  // Callback to open file in editor
     onNavigateToGraph: (List<String>) -> Unit = {},  // Navigate to nav graph with highlighted screens
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
+    clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
 ) {
     var currentScreen by remember { mutableStateOf(TestScreen.Dashboard) }
     var selectedTestRun by remember { mutableStateOf<TestRun?>(null) }
     var recordedActions by remember { mutableStateOf<List<RecordedAction>>(emptyList()) }
 
+    // Fetch test runs from data source
+    var testRuns by remember { mutableStateOf<List<TestRun>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(dataSourceMode, clientProvider) {
+        isLoading = true
+        error = null
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val dataSource = DataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
+                when (val result = dataSource.getTestRuns()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        testRuns = result.data
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        error = result.message
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Unknown error"
+                isLoading = false
+            }
+        }
+    }
+
     when (currentScreen) {
         TestScreen.Dashboard -> TestDashboardHome(
+            testRuns = testRuns,
             onExploratoryTest = { currentScreen = TestScreen.ExploratoryTest },
             onRecordTest = { currentScreen = TestScreen.RecordingTest },
             onTestRunClick = { run ->
@@ -110,6 +148,7 @@ private enum class TestFilter { Recent, Popular, Both }
 
 @Composable
 private fun TestDashboardHome(
+    testRuns: List<TestRun>,
     onExploratoryTest: () -> Unit,
     onRecordTest: () -> Unit,
     onTestRunClick: (TestRun) -> Unit,
@@ -119,8 +158,8 @@ private fun TestDashboardHome(
     var selectedFilter by remember { mutableStateOf(TestFilter.Both) }
 
     // Get test runs with their associated test case data for sorting
-    val testRunsWithPopularity = remember {
-        TestMockData.recentRuns.map { run ->
+    val testRunsWithPopularity = remember(testRuns) {
+        testRuns.map { run ->
             val testCase = TestMockData.testCases.find { it.id == run.testId }
             run to (testCase?.runCount ?: 0)
         }

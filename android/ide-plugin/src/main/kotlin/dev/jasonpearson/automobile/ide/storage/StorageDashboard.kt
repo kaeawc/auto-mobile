@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -25,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
+import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 
 /**
  * Storage tab options.
@@ -40,9 +42,57 @@ enum class StorageTab(val title: String, val icon: String) {
 @Composable
 fun StorageDashboard(
     modifier: Modifier = Modifier,
+    dataSourceMode: DataSourceMode = DataSourceMode.Fake,
 ) {
     val colors = JewelTheme.globalColors
     var selectedTab by remember { mutableStateOf(StorageTab.Database) }
+
+    // Fetch storage data from data source
+    var databases by remember { mutableStateOf<List<DatabaseInfo>>(emptyList()) }
+    var keyValueEntries by remember { mutableStateOf<List<KeyValueEntry>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(dataSourceMode) {
+        isLoading = true
+        error = null
+        kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            try {
+                val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createStorageDataSource(dataSourceMode)
+
+                // Fetch databases
+                when (val result = dataSource.getDatabases()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        databases = result.data
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        error = result.message
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+
+                // Fetch key-value pairs
+                when (val result = dataSource.getKeyValuePairs()) {
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                        keyValueEntries = result.data
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                        if (error == null) error = result.message
+                        isLoading = false
+                    }
+                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                        // Keep loading state
+                    }
+                }
+            } catch (e: Exception) {
+                error = e.message ?: "Unknown error"
+                isLoading = false
+            }
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize()) {
         // Tab bar
@@ -84,7 +134,10 @@ fun StorageDashboard(
 
         // Content
         when (selectedTab) {
-            StorageTab.Database -> DatabaseInspector(modifier = Modifier.fillMaxSize())
+            StorageTab.Database -> DatabaseInspector(
+                databases = databases,
+                modifier = Modifier.fillMaxSize()
+            )
             StorageTab.KeyValue -> KeyValueInspector(modifier = Modifier.fillMaxSize())
         }
     }

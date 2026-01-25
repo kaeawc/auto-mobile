@@ -18,9 +18,11 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
@@ -44,8 +46,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.positionInParent
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
@@ -53,6 +58,9 @@ import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.diagnostic.Logger
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
+import dev.jasonpearson.automobile.ide.datasource.DataSourceFactory
+import dev.jasonpearson.automobile.ide.datasource.InstalledApp
+import dev.jasonpearson.automobile.ide.datasource.Result
 import dev.jasonpearson.automobile.ide.failures.FailuresDashboard
 import dev.jasonpearson.automobile.ide.mcp.McpProcess
 import dev.jasonpearson.automobile.ide.mcp.McpConnectionType
@@ -143,6 +151,12 @@ fun AutoMobileToolWindowContent() {
   // Data source mode (Fake/Real) - global toggle for all dashboards
   var dataSourceMode by remember { mutableStateOf(DataSourceMode.Real) }
 
+  // App selector state (for Navigation dashboard filtering)
+  var selectedAppId by remember { mutableStateOf<String?>(null) }
+  var installedApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
+  var isAppListLoading by remember { mutableStateOf(false) }
+  var appDropdownExpanded by remember { mutableStateOf(false) }
+
   // Mock devices list (only used in Fake mode)
   val mockBootedDevices = remember {
     listOf(
@@ -158,8 +172,14 @@ fun AutoMobileToolWindowContent() {
   // Connected MCP process (for creating clients)
   var connectedMcpProcess by remember { mutableStateOf<McpProcess?>(null) }
 
+  // Log when connectedMcpProcess changes
+  LaunchedEffect(connectedMcpProcess) {
+      LOG.info("connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}")
+  }
+
   // Client provider function for dashboards to access MCP data
   val clientProvider: (() -> AutoMobileClient)? = remember(connectedMcpProcess) {
+      LOG.info("clientProvider being computed, connectedMcpProcess=${connectedMcpProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}")
       connectedMcpProcess?.let { process ->
           {
               when (process.connectionType) {
@@ -174,6 +194,74 @@ fun AutoMobileToolWindowContent() {
                   McpConnectionType.Stdio -> {
                       throw UnsupportedOperationException("Cannot connect to STDIO process externally")
                   }
+              }
+          }
+      }
+  }
+
+  // Load installed apps with periodic polling (every 5 seconds) to keep FG state updated
+  LaunchedEffect(dataSourceMode, clientProvider, activeDeviceId) {
+      if (dataSourceMode == DataSourceMode.Real && clientProvider != null && activeDeviceId != null) {
+          // Initial load
+          isAppListLoading = true
+          var isFirstLoad = true
+
+          while (true) {
+              kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                  try {
+                      val appListDataSource = DataSourceFactory.createAppListDataSource(
+                          dataSourceMode,
+                          clientProvider,
+                          activeDeviceId
+                      )
+                      when (val result = appListDataSource.getInstalledApps()) {
+                          is Result.Success -> {
+                              if (isFirstLoad) {
+                                  LOG.info("Loaded ${result.data.size} installed apps")
+                              }
+                              installedApps = result.data
+                              // Auto-select foreground app if none selected (only on first load)
+                              if (isFirstLoad && selectedAppId == null) {
+                                  val foregroundApp = result.data.find { it.isForeground }
+                                  if (foregroundApp != null) {
+                                      selectedAppId = foregroundApp.packageName
+                                      LOG.info("Auto-selected foreground app: ${foregroundApp.packageName}")
+                                  }
+                              }
+                          }
+                          is Result.Error -> {
+                              if (isFirstLoad) {
+                                  LOG.warn("Failed to load installed apps: ${result.message}")
+                              }
+                          }
+                          is Result.Loading -> {}
+                      }
+                  } catch (e: Exception) {
+                      if (isFirstLoad) {
+                          LOG.error("Exception loading installed apps", e)
+                      }
+                  } finally {
+                      if (isFirstLoad) {
+                          isAppListLoading = false
+                          isFirstLoad = false
+                      }
+                  }
+              }
+              // Poll every 5 seconds
+              kotlinx.coroutines.delay(5000)
+          }
+      } else if (dataSourceMode == DataSourceMode.Fake) {
+          // Load fake apps for development (no polling needed)
+          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+              val fakeAppListDataSource = DataSourceFactory.createAppListDataSource(dataSourceMode, null, null)
+              when (val result = fakeAppListDataSource.getInstalledApps()) {
+                  is Result.Success -> {
+                      installedApps = result.data
+                      if (selectedAppId == null) {
+                          selectedAppId = result.data.find { it.isForeground }?.packageName
+                      }
+                  }
+                  else -> {}
               }
           }
       }
@@ -277,6 +365,7 @@ fun AutoMobileToolWindowContent() {
               headerHeightPx = headerHeight.toFloat(),
               dataSourceMode = dataSourceMode,
               clientProvider = clientProvider,
+              selectedAppId = selectedAppId,
           )
           Dashboard.Test -> TestDashboard(
               onOpenFile = { filePath ->
@@ -418,8 +507,23 @@ fun AutoMobileToolWindowContent() {
               userNavigatedToDevices = false  // Reset when device selected
               showNotification("Device Connected", "Connected to device: $deviceName", NotificationType.INFORMATION)
           },
-          onProcessConnected = { connectedMcpProcess = it },
+          onProcessConnected = { process ->
+              LOG.info("onProcessConnected called with: ${process?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}")
+              connectedMcpProcess = process
+          },
           suppressAutoSelect = userNavigatedToDevices,
+          // App selector props
+          installedApps = installedApps,
+          selectedAppId = selectedAppId,
+          isAppListLoading = isAppListLoading,
+          appDropdownExpanded = appDropdownExpanded,
+          onAppDropdownExpandedChange = { appDropdownExpanded = it },
+          onAppSelected = { appId ->
+              selectedAppId = appId
+              appDropdownExpanded = false
+              LOG.info("App selected: $appId")
+          },
+          showAppSelector = activeDeviceId != null && !isDevicePanelExpanded,
       )
 
       // Dashboard Tabs with drag-and-drop reordering - hidden when device panel is expanded
@@ -479,6 +583,14 @@ private fun GlobalShellHeader(
     onMcpDeviceSelected: (deviceId: String, deviceName: String?) -> Unit = { _, _ -> },
     onProcessConnected: (McpProcess?) -> Unit = {},
     suppressAutoSelect: Boolean = false,
+    // App selector props
+    installedApps: List<InstalledApp> = emptyList(),
+    selectedAppId: String? = null,
+    isAppListLoading: Boolean = false,
+    appDropdownExpanded: Boolean = false,
+    onAppDropdownExpandedChange: (Boolean) -> Unit = {},
+    onAppSelected: (String?) -> Unit = {},
+    showAppSelector: Boolean = false,
 ) {
   val colors = JewelTheme.globalColors
 
@@ -597,6 +709,18 @@ private fun GlobalShellHeader(
               }
             }
           }
+        }
+
+        // App selector (shown when device selected and apps loaded)
+        if (showAppSelector && installedApps.isNotEmpty()) {
+          AppSelectorDropdown(
+              installedApps = installedApps,
+              selectedAppId = selectedAppId,
+              isLoading = isAppListLoading,
+              expanded = appDropdownExpanded,
+              onExpandedChange = onAppDropdownExpandedChange,
+              onAppSelected = onAppSelected,
+          )
         }
 
         // Right side: Setup button (conditional), Doctor button, Live toggle (hidden when panel expanded)
@@ -1330,6 +1454,7 @@ private fun McpProcessesPanel(
 
     // Notify parent when connected process changes
     LaunchedEffect(connectedProcess) {
+        println("[McpProcessesPanel] LaunchedEffect(connectedProcess) triggered, connectedProcess=${connectedProcess?.let { "${it.name} (PID ${it.pid})" } ?: "null"}")
         onProcessConnected(connectedProcess)
     }
 
@@ -1340,6 +1465,9 @@ private fun McpProcessesPanel(
             val autoConnectProcess = socketProcesses.first()
             println("[McpProcessesPanel] Auto-connecting to ${autoConnectProcess.name} (PID ${autoConnectProcess.pid})")
             connectedProcess = autoConnectProcess
+            // Call directly - don't rely on LaunchedEffect(connectedProcess) which may not
+            // fire before component is removed from composition due to device auto-selection
+            onProcessConnected(autoConnectProcess)
         }
     }
 
@@ -2554,6 +2682,183 @@ private fun DeviceImageRow(
                     error != null -> Color(0xFFE53935)
                     else -> Color(0xFF2196F3)
                 },
+            )
+        }
+    }
+}
+
+@Composable
+private fun AppSelectorDropdown(
+    installedApps: List<InstalledApp>,
+    selectedAppId: String?,
+    isLoading: Boolean,
+    expanded: Boolean,
+    onExpandedChange: (Boolean) -> Unit,
+    onAppSelected: (String?) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val selectedApp = installedApps.find { it.packageName == selectedAppId }
+    val displayText = when {
+        isLoading -> "Loading..."
+        selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
+        selectedAppId == null -> "All apps"
+        else -> selectedAppId
+    }
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(
+            "App:",
+            fontSize = 11.sp,
+            maxLines = 1,
+            softWrap = false,
+            color = colors.text.normal.copy(alpha = 0.5f),
+        )
+
+        Box {
+            Row(
+                modifier = Modifier
+                    .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                    .border(1.dp, colors.text.normal.copy(alpha = 0.2f), RoundedCornerShape(4.dp))
+                    .clickable(enabled = !isLoading) { onExpandedChange(!expanded) }
+                    .pointerHoverIcon(if (isLoading) PointerIcon.Default else PointerIcon.Hand)
+                    .padding(horizontal = 10.dp, vertical = 4.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Text(
+                    displayText,
+                    fontSize = 11.sp,
+                    color = colors.text.normal,
+                    maxLines = 1,
+                )
+
+                // Foreground indicator
+                if (selectedApp?.isForeground == true) {
+                    Box(
+                        modifier = Modifier
+                            .background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
+                            .padding(horizontal = 4.dp, vertical = 1.dp)
+                    ) {
+                        Text(
+                            "FG",
+                            fontSize = 9.sp,
+                            color = Color.White,
+                        )
+                    }
+                }
+
+                Text(
+                    if (expanded) "\u25B2" else "\u25BC",
+                    fontSize = 8.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
+
+            // Dropdown popup overlay
+            if (expanded) {
+                Popup(
+                    onDismissRequest = { onExpandedChange(false) },
+                    offset = IntOffset(0, 32),
+                    properties = PopupProperties(focusable = true),
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .width(300.dp)
+                            .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
+                            .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
+                            .verticalScroll(rememberScrollState())
+                    ) {
+                        // "All apps" option
+                        AppDropdownItem(
+                            displayName = "All apps",
+                            packageName = null,
+                            isForeground = false,
+                            isSelected = selectedAppId == null,
+                            onClick = {
+                                onAppSelected(null)
+                                onExpandedChange(false)
+                            },
+                        )
+
+                        // Installed apps - foreground first
+                        val sortedApps = installedApps.sortedByDescending { it.isForeground }
+                        sortedApps.forEach { app ->
+                            AppDropdownItem(
+                                displayName = app.displayName,
+                                packageName = app.packageName,
+                                isForeground = app.isForeground,
+                                isSelected = app.packageName == selectedAppId,
+                                onClick = {
+                                    onAppSelected(app.packageName)
+                                    onExpandedChange(false)
+                                },
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun AppDropdownItem(
+    displayName: String?,
+    packageName: String?,
+    isForeground: Boolean,
+    isSelected: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    val bgColor = if (isSelected) Color(0xFF2166B3) else Color.Transparent
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(bgColor)
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 12.dp, vertical = 8.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                displayName ?: packageName ?: "Unknown",
+                fontSize = 12.sp,
+                color = colors.text.normal,
+            )
+            if (packageName != null && displayName != null && displayName != packageName) {
+                Text(
+                    packageName,
+                    fontSize = 10.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
+        }
+
+        if (isForeground) {
+            Box(
+                modifier = Modifier
+                    .background(Color(0xFF4CAF50), RoundedCornerShape(2.dp))
+                    .padding(horizontal = 4.dp, vertical = 1.dp)
+            ) {
+                Text(
+                    "FG",
+                    fontSize = 9.sp,
+                    color = Color.White,
+                )
+            }
+        }
+
+        if (isSelected) {
+            Text(
+                "\u2713",
+                fontSize = 12.sp,
+                color = Color(0xFF4CAF50),
             )
         }
     }

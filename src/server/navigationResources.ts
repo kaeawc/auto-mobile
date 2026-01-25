@@ -12,6 +12,7 @@ import { logger } from "../utils/logger";
 
 export const NAVIGATION_RESOURCE_URIS = {
   GRAPH: "automobile:navigation/graph",
+  GRAPH_WITH_APP_ID: "automobile:navigation/graph?appId={appId}",
   NODE_BY_ID: "automobile:navigation/nodes/{nodeId}",
   NODE_BY_SCREEN: "automobile:navigation/nodes?screen={screenName}",
   HISTORY: "automobile:navigation/history",
@@ -68,18 +69,29 @@ export function setNavigationGraphProvider(provider: NavigationGraphResourceProv
   attachGraphUpdateListener(navigationGraphProvider);
 }
 
-async function getNavigationGraphResource(): Promise<ResourceContent> {
+async function getNavigationGraphResource(appId?: string): Promise<ResourceContent> {
+  const uri = appId
+    ? `automobile:navigation/graph?appId=${encodeURIComponent(appId)}`
+    : NAVIGATION_RESOURCE_URIS.GRAPH;
+
   try {
-    const graph = await navigationGraphProvider.exportGraphSummary();
+    // Use exportGraphSummaryForApp if available and appId is provided
+    let graph;
+    if (appId && navigationGraphProvider.exportGraphSummaryForApp) {
+      graph = await navigationGraphProvider.exportGraphSummaryForApp(appId);
+    } else {
+      graph = await navigationGraphProvider.exportGraphSummary();
+    }
+
     return {
-      uri: NAVIGATION_RESOURCE_URIS.GRAPH,
+      uri,
       mimeType: "application/json",
       text: JSON.stringify(graph, null, 2)
     };
   } catch (error) {
     logger.error(`[NavigationResources] Failed to get navigation graph: ${error}`);
     return {
-      uri: NAVIGATION_RESOURCE_URIS.GRAPH,
+      uri,
       mimeType: "application/json",
       text: JSON.stringify({
         error: `Failed to retrieve navigation graph: ${error}`
@@ -200,9 +212,20 @@ export function registerNavigationResources(options: {
   ResourceRegistry.register(
     NAVIGATION_RESOURCE_URIS.GRAPH,
     "Navigation Graph",
-    "High-level navigation graph for the current app (nodes and edges).",
+    "High-level navigation graph for the current app (nodes and edges). Use ?appId= to filter by specific app.",
     "application/json",
-    getNavigationGraphResource
+    () => getNavigationGraphResource()
+  );
+
+  ResourceRegistry.registerTemplate(
+    NAVIGATION_RESOURCE_URIS.GRAPH_WITH_APP_ID,
+    "Navigation Graph (App-Specific)",
+    "High-level navigation graph filtered by app ID.",
+    "application/json",
+    async params => {
+      const appId = params.appId ? decodeURIComponent(params.appId).trim() : undefined;
+      return getNavigationGraphResource(appId);
+    }
   );
 
   ResourceRegistry.register(

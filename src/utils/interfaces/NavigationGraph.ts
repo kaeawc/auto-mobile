@@ -242,6 +242,7 @@ export interface NavigationGraphHistoryPage {
  */
 export interface NavigationGraphSummaryProvider {
   exportGraphSummary(): Promise<NavigationGraphSummary>;
+  exportGraphSummaryForApp?(appId: string | null): Promise<NavigationGraphSummary>;
   setGraphUpdateListener?(listener: (() => void) | null): void;
 }
 

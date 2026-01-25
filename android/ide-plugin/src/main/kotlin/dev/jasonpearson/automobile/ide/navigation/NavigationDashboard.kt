@@ -13,6 +13,7 @@ import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 import dev.jasonpearson.automobile.ide.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.ide.datasource.NavigationGraph
+import dev.jasonpearson.automobile.ide.datasource.Result
 import com.intellij.openapi.diagnostic.Logger
 
 private val LOG = Logger.getInstance("NavigationDashboard")
@@ -28,6 +29,7 @@ fun NavigationDashboard(
     headerHeightPx: Float = 0f,  // Height of header area to check overlap against
     dataSourceMode: DataSourceMode = DataSourceMode.Fake,
     clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
+    selectedAppId: String? = null,  // App ID to filter navigation graph by (managed by parent)
 ) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
@@ -45,25 +47,29 @@ fun NavigationDashboard(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    LaunchedEffect(dataSourceMode, clientProvider) {
-        LOG.info("Loading navigation data with mode: $dataSourceMode, clientProvider=${if (clientProvider != null) "present" else "null"}")
+    LaunchedEffect(dataSourceMode, clientProvider, selectedAppId) {
+        LOG.info("Loading navigation data with mode: $dataSourceMode, appId: $selectedAppId, clientProvider=${if (clientProvider != null) "present" else "null"}")
         isLoading = true
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = DataSourceFactory.createNavigationDataSource(dataSourceMode, clientProvider)
+                val dataSource = DataSourceFactory.createNavigationDataSource(
+                    dataSourceMode,
+                    clientProvider,
+                    selectedAppId
+                )
                 when (val result = dataSource.getNavigationGraph()) {
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                    is Result.Success -> {
                         LOG.info("Navigation data loaded: ${result.data.screens.size} screens, ${result.data.transitions.size} transitions")
                         navigationGraph = result.data
                         isLoading = false
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                    is Result.Error -> {
                         LOG.warn("Failed to load navigation data: ${result.message}")
                         error = result.message
                         isLoading = false
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                    is Result.Loading -> {
                         // Keep loading state
                     }
                 }
@@ -111,25 +117,33 @@ fun NavigationDashboard(
         NavigationSection.ScreenDetail -> {
             val screen = screens.find { it.id == selectedScreenId }
                 ?: screens.find { it.name == selectedScreenId }
-                ?: screens.first()
+                ?: screens.firstOrNull()
 
-            ScreenDetailView(
-                screen = screen,
-                transitions = transitions,
-                onBack = { currentSection = NavigationSection.FlowMap },
-                onScreenSelected = navigateToScreen,
-            )
+            if (screen != null) {
+                ScreenDetailView(
+                    screen = screen,
+                    transitions = transitions,
+                    onBack = { currentSection = NavigationSection.FlowMap },
+                    onScreenSelected = navigateToScreen,
+                )
+            } else {
+                currentSection = NavigationSection.FlowMap
+            }
         }
 
         NavigationSection.TransitionDetail -> {
             val transition = transitions.find { it.id == selectedTransitionId }
-                ?: transitions.first()
+                ?: transitions.firstOrNull()
 
-            TransitionDetailView(
-                transition = transition,
-                onBack = { currentSection = NavigationSection.FlowMap },
-                onScreenSelected = navigateToScreen,
-            )
+            if (transition != null) {
+                TransitionDetailView(
+                    transition = transition,
+                    onBack = { currentSection = NavigationSection.FlowMap },
+                    onScreenSelected = navigateToScreen,
+                )
+            } else {
+                currentSection = NavigationSection.FlowMap
+            }
         }
     }
 }

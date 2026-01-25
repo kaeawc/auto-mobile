@@ -1002,9 +1002,18 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
 
   /**
    * Export a high-level graph summary for MCP resources.
+   * Uses the current app if no appId is specified.
    */
   public async exportGraphSummary(): Promise<NavigationGraphSummary> {
-    if (!this.currentAppId) {
+    return this.exportGraphSummaryForApp(this.currentAppId);
+  }
+
+  /**
+   * Export a high-level graph summary for a specific app.
+   * @param appId The app ID to export the graph for, or null for empty graph.
+   */
+  public async exportGraphSummaryForApp(appId: string | null): Promise<NavigationGraphSummary> {
+    if (!appId) {
       return {
         appId: null,
         nodes: [],
@@ -1013,8 +1022,8 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
       };
     }
 
-    const dbNodes = await this.repository.getNodes(this.currentAppId);
-    const dbEdges = await this.repository.getEdges(this.currentAppId);
+    const dbNodes = await this.repository.getNodes(appId);
+    const dbEdges = await this.repository.getEdges(appId);
 
     const nodes: NavigationGraphSummaryNode[] = dbNodes.map(node => ({
       id: node.id,
@@ -1029,11 +1038,14 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
       toolName: edge.tool_name,
     }));
 
+    // Only include currentScreen if this is the currently active app
+    const isCurrentApp = appId === this.currentAppId;
+
     return {
-      appId: this.currentAppId,
+      appId,
       nodes,
       edges,
-      currentScreen: this.currentScreen,
+      currentScreen: isCurrentApp ? this.currentScreen : null,
     };
   }
 

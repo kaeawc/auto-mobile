@@ -12,14 +12,16 @@ object DataSourceFactory {
      * Creates a navigation data source based on the specified mode.
      * @param mode The data source mode (Fake or Real)
      * @param clientProvider Optional function to provide an AutoMobileClient for MCP access
+     * @param appId Optional app ID to filter the navigation graph by specific app
      */
     fun createNavigationDataSource(
         mode: DataSourceMode,
         clientProvider: (() -> AutoMobileClient)? = null,
+        appId: String? = null,
     ): NavigationDataSource {
         return when (mode) {
             DataSourceMode.Fake -> FakeNavigationDataSource()
-            DataSourceMode.Real -> RealNavigationDataSource(clientProvider)
+            DataSourceMode.Real -> RealNavigationDataSource(clientProvider, appId)
         }
     }
 
@@ -76,6 +78,23 @@ object DataSourceFactory {
         return when (mode) {
             DataSourceMode.Fake -> FakeLayoutDataSource()
             DataSourceMode.Real -> RealLayoutDataSource(clientProvider)
+        }
+    }
+
+    /**
+     * Creates an app list data source based on the specified mode.
+     * @param mode The data source mode (Fake or Real)
+     * @param clientProvider Optional function to provide an AutoMobileClient for MCP access
+     * @param deviceId The device ID to fetch apps for (required for Real mode)
+     */
+    fun createAppListDataSource(
+        mode: DataSourceMode,
+        clientProvider: (() -> AutoMobileClient)? = null,
+        deviceId: String? = null,
+    ): AppListDataSource {
+        return when (mode) {
+            DataSourceMode.Fake -> FakeAppListDataSource()
+            DataSourceMode.Real -> RealAppListDataSource(clientProvider, deviceId)
         }
     }
 }

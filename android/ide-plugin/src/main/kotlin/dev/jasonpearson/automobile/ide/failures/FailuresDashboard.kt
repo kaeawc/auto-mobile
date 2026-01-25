@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
@@ -25,6 +26,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -36,6 +38,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import kotlinx.coroutines.launch
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 
@@ -47,13 +51,49 @@ fun FailuresDashboard(
     onNavigateToScreen: (String) -> Unit = {},
     onNavigateToTest: (String) -> Unit = {},
     onNavigateToSource: (fileName: String, lineNumber: Int) -> Unit = { _, _ -> },
+    clientProvider: (() -> AutoMobileClient)? = null,
     modifier: Modifier = Modifier,
 ) {
-    // Mock failure data
-    val failureGroups = remember { createMockFailureGroups() }
+    val scope = rememberCoroutineScope()
+
+    // Data source mode toggle
+    var dataSourceMode by remember { mutableStateOf(DataSourceMode.Fake) }
+
+    // Create data sources
+    val mockDataSource = remember { MockFailuresDataSource() }
+    val mcpDataSource = remember(clientProvider) {
+        clientProvider?.let { McpFailuresDataSource(it) }
+    }
+
+    val currentDataSource: FailuresDataSource = when {
+        dataSourceMode == DataSourceMode.Fake -> mockDataSource
+        mcpDataSource != null -> mcpDataSource
+        else -> mockDataSource
+    }
+
+    // Data state
+    var failureGroups by remember { mutableStateOf<List<FailureGroup>>(emptyList()) }
+    var isLoading by remember { mutableStateOf(true) }
+    var errorMessage by remember { mutableStateOf<String?>(null) }
 
     var selectedFailure by remember { mutableStateOf<FailureGroup?>(null) }
     var filterType by remember { mutableStateOf<FailureType?>(null) }
+
+    // Load data when data source changes
+    LaunchedEffect(currentDataSource, dataSourceMode) {
+        isLoading = true
+        errorMessage = null
+        when (val result = currentDataSource.getFailureGroups()) {
+            is DataSourceResult.Success -> {
+                failureGroups = result.data
+                isLoading = false
+            }
+            is DataSourceResult.Error -> {
+                errorMessage = result.message
+                isLoading = false
+            }
+        }
+    }
 
     Column(modifier = modifier.fillMaxSize().padding(16.dp)) {
         if (selectedFailure != null) {
@@ -70,30 +110,31 @@ fun FailuresDashboard(
                 filterType = filterType,
                 onFilterChanged = { filterType = it },
                 onFailureSelected = { selectedFailure = it },
+                dataSourceMode = dataSourceMode,
+                onDataSourceModeChanged = { dataSourceMode = it },
+                mcpAvailable = clientProvider != null,
+                isLoading = isLoading,
+                errorMessage = errorMessage,
+                onRetry = {
+                    scope.launch {
+                        isLoading = true
+                        errorMessage = null
+                        when (val result = currentDataSource.getFailureGroups()) {
+                            is DataSourceResult.Success -> {
+                                failureGroups = result.data
+                                isLoading = false
+                            }
+                            is DataSourceResult.Error -> {
+                                errorMessage = result.message
+                                isLoading = false
+                            }
+                        }
+                    }
+                },
+                dataSource = currentDataSource,
             )
         }
     }
-}
-
-/**
- * Date range options for the timeline
- */
-private enum class DateRange(val label: String, val durationMs: Long) {
-    OneHour("1h", 60 * 60 * 1000L),
-    TwentyFourHours("24h", 24 * 60 * 60 * 1000L),
-    ThreeDays("3d", 3 * 24 * 60 * 60 * 1000L),
-    SevenDays("7d", 7 * 24 * 60 * 60 * 1000L),
-    ThirtyDays("30d", 30 * 24 * 60 * 60 * 1000L),
-}
-
-/**
- * Time aggregation options for the timeline
- */
-private enum class TimeAggregation(val label: String, val durationMs: Long) {
-    Minute("Min", 60 * 1000L),
-    Hour("Hour", 60 * 60 * 1000L),
-    Day("Day", 24 * 60 * 60 * 1000L),
-    Week("Week", 7 * 24 * 60 * 60 * 1000L),
 }
 
 // Maximum number of buckets we can reasonably display
@@ -134,56 +175,19 @@ private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation
     return valid.lastOrNull() ?: TimeAggregation.Minute
 }
 
-/**
- * Data point for timeline chart
- */
-private data class TimelineDataPoint(
-    val label: String,
-    val crashes: Int,
-    val anrs: Int,
-    val toolFailures: Int,
-) {
-    val total: Int get() = crashes + anrs + toolFailures
-}
-
-/**
- * Totals for a period (used for previous period comparison)
- */
-private data class PeriodTotals(
-    val crashes: Int,
-    val anrs: Int,
-    val toolFailures: Int,
-)
-
-/**
- * Generate mock totals for the previous equivalent period
- */
-private fun generateMockPreviousPeriodTotals(dateRange: DateRange): PeriodTotals {
-    // Use a different seed based on date range to get consistent but different values
-    val random = kotlin.random.Random(dateRange.ordinal + 100)
-
-    // Generate totals that are somewhat similar to current period but with variance
-    val baseCrashes = when (dateRange) {
-        DateRange.OneHour -> random.nextInt(50, 150)
-        DateRange.TwentyFourHours -> random.nextInt(200, 600)
-        DateRange.ThreeDays -> random.nextInt(500, 1500)
-        DateRange.SevenDays -> random.nextInt(1000, 3000)
-        DateRange.ThirtyDays -> random.nextInt(3000, 8000)
-    }
-
-    return PeriodTotals(
-        crashes = baseCrashes,
-        anrs = baseCrashes / 3,
-        toolFailures = baseCrashes / 2,
-    )
-}
-
 @Composable
 private fun FailureListView(
     failures: List<FailureGroup>,
     filterType: FailureType?,
     onFilterChanged: (FailureType?) -> Unit,
     onFailureSelected: (FailureGroup) -> Unit,
+    dataSourceMode: DataSourceMode,
+    onDataSourceModeChanged: (DataSourceMode) -> Unit,
+    mcpAvailable: Boolean,
+    isLoading: Boolean,
+    errorMessage: String?,
+    onRetry: () -> Unit,
+    dataSource: FailuresDataSource,
 ) {
     val colors = JewelTheme.globalColors
     val filteredFailures = if (filterType != null) {
@@ -204,7 +208,24 @@ private fun FailureListView(
         }
     }
 
-    val timelineData = remember(dateRange, timeAggregation) { generateMockTimelineData(dateRange, timeAggregation) }
+    // Timeline data state
+    var timelineData by remember { mutableStateOf<TimelineData?>(null) }
+    var timelineLoading by remember { mutableStateOf(true) }
+
+    // Load timeline data
+    LaunchedEffect(dataSource, dateRange, timeAggregation) {
+        timelineLoading = true
+        when (val result = dataSource.getTimelineData(dateRange, timeAggregation)) {
+            is DataSourceResult.Success -> {
+                timelineData = result.data
+                timelineLoading = false
+            }
+            is DataSourceResult.Error -> {
+                timelineData = null
+                timelineLoading = false
+            }
+        }
+    }
 
     Column(
         modifier = Modifier
@@ -284,24 +305,100 @@ private fun FailureListView(
             }
         }
 
+        // Second row: Data source toggle
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(top = 8.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                "Data:",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+            )
+            Spacer(Modifier.width(8.dp))
+            DataSourceToggle(
+                currentMode = dataSourceMode,
+                onModeChanged = onDataSourceModeChanged,
+                mcpAvailable = mcpAvailable,
+            )
+        }
+
         Spacer(Modifier.height(16.dp))
+
+        // Error banner
+        if (errorMessage != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFE53935).copy(alpha = 0.1f), RoundedCornerShape(8.dp))
+                    .padding(12.dp),
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            "Failed to load data",
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = Color(0xFFE53935),
+                        )
+                        Text(
+                            errorMessage,
+                            fontSize = 10.sp,
+                            color = colors.text.normal.copy(alpha = 0.6f),
+                        )
+                    }
+                    Text(
+                        "Retry",
+                        fontSize = 11.sp,
+                        color = Color(0xFF2196F3),
+                        modifier = Modifier
+                            .clickable(onClick = onRetry)
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(8.dp),
+                    )
+                }
+            }
+            Spacer(Modifier.height(16.dp))
+        }
 
         // Event Trends section
         val canDrillDown = getNextSmallerDateRange(dateRange) != null
-        EventTrendsSection(
-            data = timelineData,
-            dateRange = dateRange,
-            aggregation = timeAggregation,
-            onBarClick = if (canDrillDown) {
-                {
-                    // Drill down to smaller time range
-                    val nextRange = getNextSmallerDateRange(dateRange)
-                    if (nextRange != null) {
-                        dateRange = nextRange
+        val currentTimelineData = timelineData
+        if (currentTimelineData != null) {
+            EventTrendsSection(
+                data = currentTimelineData,
+                dateRange = dateRange,
+                aggregation = timeAggregation,
+                onBarClick = if (canDrillDown) {
+                    {
+                        // Drill down to smaller time range
+                        val nextRange = getNextSmallerDateRange(dateRange)
+                        if (nextRange != null) {
+                            dateRange = nextRange
+                        }
                     }
-                }
-            } else null,
-        )
+                } else null,
+            )
+        } else if (timelineLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(140.dp)
+                    .background(colors.text.normal.copy(alpha = 0.03f), RoundedCornerShape(8.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    "Loading timeline...",
+                    fontSize = 12.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
+        }
 
         Spacer(Modifier.height(16.dp))
 
@@ -326,7 +423,7 @@ private fun FailureListView(
 
         // Issues header
         Text(
-            "Issues (${filteredFailures.size})",
+            if (isLoading) "Issues (loading...)" else "Issues (${filteredFailures.size})",
             fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = colors.text.normal.copy(alpha = 0.7f),
@@ -382,6 +479,71 @@ private fun FilterChip(
 }
 
 @Composable
+private fun DataSourceToggle(
+    currentMode: DataSourceMode,
+    onModeChanged: (DataSourceMode) -> Unit,
+    mcpAvailable: Boolean,
+) {
+    val colors = JewelTheme.globalColors
+
+    Row(
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        modifier = Modifier
+            .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(6.dp))
+            .padding(4.dp),
+    ) {
+        DataSourceMode.entries.forEach { mode ->
+            val isSelected = mode == currentMode
+            val isDisabled = mode == DataSourceMode.Real && !mcpAvailable
+
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier
+                    .background(
+                        if (isSelected) colors.text.normal.copy(alpha = 0.15f) else Color.Transparent,
+                        RoundedCornerShape(4.dp),
+                    )
+                    .then(
+                        if (!isDisabled) {
+                            Modifier
+                                .clickable { onModeChanged(mode) }
+                                .pointerHoverIcon(PointerIcon.Hand)
+                        } else Modifier
+                    )
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+            ) {
+                // Radio indicator
+                Box(
+                    modifier = Modifier
+                        .size(10.dp)
+                        .background(
+                            if (isSelected) Color(0xFF4CAF50) else Color.Transparent,
+                            CircleShape,
+                        )
+                        .border(
+                            1.dp,
+                            if (isDisabled) colors.text.normal.copy(alpha = 0.2f)
+                            else if (isSelected) Color(0xFF4CAF50)
+                            else colors.text.normal.copy(alpha = 0.4f),
+                            CircleShape,
+                        ),
+                )
+                Spacer(Modifier.width(4.dp))
+                Text(
+                    mode.name,
+                    fontSize = 10.sp,
+                    color = when {
+                        isDisabled -> colors.text.normal.copy(alpha = 0.3f)
+                        isSelected -> colors.text.normal
+                        else -> colors.text.normal.copy(alpha = 0.6f)
+                    },
+                )
+            }
+        }
+    }
+}
+
+@Composable
 private fun StatBox(
     label: String,
     value: String,
@@ -415,7 +577,7 @@ private fun StatBox(
 
 @Composable
 private fun EventTrendsSection(
-    data: List<TimelineDataPoint>,
+    data: TimelineData,
     dateRange: DateRange,
     aggregation: TimeAggregation,
     onBarClick: (() -> Unit)?,
@@ -423,12 +585,12 @@ private fun EventTrendsSection(
     val colors = JewelTheme.globalColors
 
     // Calculate totals for current period
-    val totalCrashes = data.sumOf { it.crashes }
-    val totalAnrs = data.sumOf { it.anrs }
-    val totalToolFailures = data.sumOf { it.toolFailures }
+    val totalCrashes = data.dataPoints.sumOf { it.crashes }
+    val totalAnrs = data.dataPoints.sumOf { it.anrs }
+    val totalToolFailures = data.dataPoints.sumOf { it.toolFailures }
 
-    // Calculate delta vs previous period (e.g., this 24h vs previous 24h)
-    val previousPeriodTotals = remember(dateRange) { generateMockPreviousPeriodTotals(dateRange) }
+    // Use previous period totals from data source
+    val previousPeriodTotals = data.previousPeriodTotals
     val crashDelta = if (previousPeriodTotals.crashes > 0) {
         ((totalCrashes - previousPeriodTotals.crashes) * 100 / previousPeriodTotals.crashes)
     } else 0
@@ -469,7 +631,7 @@ private fun EventTrendsSection(
         }
 
         // Bar chart
-        FailureBarChart(data = data, aggregation = aggregation, onBarClick = onBarClick)
+        FailureBarChart(data = data.dataPoints, aggregation = aggregation, onBarClick = onBarClick)
     }
 }
 
@@ -570,94 +732,6 @@ private fun FailureBarChart(
                         color = colors.text.normal.copy(alpha = 0.4f),
                     )
                 }
-        }
-    }
-}
-
-/**
- * Generate mock timeline data with relative time labels
- */
-private fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
-    val random = kotlin.random.Random(42) // Fixed seed for consistent data
-
-    // Calculate number of buckets, capped at displayable limit
-    val buckets = (dateRange.durationMs / aggregation.durationMs).toInt().coerceIn(1, MAX_DISPLAYABLE_BUCKETS)
-
-    return (0 until buckets).map { i ->
-        // Calculate time offset from now (bucket 0 is most recent)
-        val bucketIndex = buckets - 1 - i  // Reverse so oldest first
-        val timeAgoMs = bucketIndex * aggregation.durationMs
-
-        // Generate relative time label
-        val label = formatRelativeTimeLabel(timeAgoMs, aggregation)
-
-        // Generate realistic-looking failure data with some variance
-        val baseCrashes = when (aggregation) {
-            TimeAggregation.Minute -> random.nextInt(0, 5)
-            TimeAggregation.Hour -> random.nextInt(2, 15)
-            TimeAggregation.Day -> random.nextInt(10, 50)
-            TimeAggregation.Week -> random.nextInt(30, 150)
-        }
-        val baseAnrs = baseCrashes / 3
-        val baseToolFailures = baseCrashes / 2
-
-        TimelineDataPoint(
-            label = label,
-            crashes = baseCrashes,
-            anrs = baseAnrs,
-            toolFailures = baseToolFailures,
-        )
-    }
-}
-
-/**
- * Format a local human-readable time label for the timeline
- */
-private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregation): String {
-    val now = System.currentTimeMillis()
-    val timestamp = now - timeAgoMs
-    val calendar = java.util.Calendar.getInstance()
-    calendar.timeInMillis = timestamp
-
-    return when (aggregation) {
-        TimeAggregation.Minute -> {
-            // Show local time like "7:45 PM"
-            if (timeAgoMs == 0L) {
-                "now"
-            } else {
-                val hour = calendar.get(java.util.Calendar.HOUR)
-                val minute = calendar.get(java.util.Calendar.MINUTE)
-                val amPm = if (calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
-                val displayHour = if (hour == 0) 12 else hour
-                "${displayHour}:${minute.toString().padStart(2, '0')} $amPm"
-            }
-        }
-        TimeAggregation.Hour -> {
-            // Show local hour like "3 PM", "11 AM"
-            if (timeAgoMs == 0L) {
-                "now"
-            } else {
-                val hour = calendar.get(java.util.Calendar.HOUR)
-                val amPm = if (calendar.get(java.util.Calendar.AM_PM) == java.util.Calendar.AM) "AM" else "PM"
-                val displayHour = if (hour == 0) 12 else hour
-                "$displayHour $amPm"
-            }
-        }
-        TimeAggregation.Day -> {
-            // Show actual date like "Jan 18"
-            val month = calendar.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.SHORT, java.util.Locale.getDefault()) ?: ""
-            val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
-            "$month $day"
-        }
-        TimeAggregation.Week -> {
-            // Calculate the Monday of the week
-            val dayOfWeek = calendar.get(java.util.Calendar.DAY_OF_WEEK)
-            val daysToMonday = if (dayOfWeek == java.util.Calendar.SUNDAY) -6 else java.util.Calendar.MONDAY - dayOfWeek
-            calendar.add(java.util.Calendar.DAY_OF_MONTH, daysToMonday)
-
-            val month = calendar.getDisplayName(java.util.Calendar.MONTH, java.util.Calendar.SHORT, java.util.Locale.getDefault()) ?: ""
-            val day = calendar.get(java.util.Calendar.DAY_OF_MONTH)
-            "$month $day"
         }
     }
 }
@@ -1379,203 +1453,4 @@ private fun ActionCard(
             )
         }
     }
-}
-
-/**
- * Create mock failure data for demonstration with aggregated data across multiple occurrences
- */
-private fun createMockFailureGroups(): List<FailureGroup> {
-    val now = System.currentTimeMillis()
-
-    return listOf(
-        // Crash with data from multiple devices, versions, and sessions
-        FailureGroup(
-            id = "crash-1",
-            type = FailureType.Crash,
-            signature = "NullPointerException at LoginViewModel.kt:42",
-            title = "NullPointerException in LoginViewModel",
-            message = "java.lang.NullPointerException: Attempt to invoke virtual method 'String com.example.User.getName()' on a null object reference",
-            firstOccurrence = now - 86400000 * 3,
-            lastOccurrence = now - 3600000,
-            totalCount = 23,
-            uniqueSessions = 18,
-            severity = FailureSeverity.Critical,
-            deviceBreakdown = listOf(
-                DeviceBreakdown("Pixel 8", "Android 15", 9, 39f),
-                DeviceBreakdown("Pixel 7", "Android 14", 6, 26f),
-                DeviceBreakdown("Samsung S24", "Android 14", 5, 22f),
-                DeviceBreakdown("OnePlus 12", "Android 14", 3, 13f),
-            ),
-            versionBreakdown = listOf(
-                VersionBreakdown("2.4.1-debug", 15, 65f),
-                VersionBreakdown("2.4.0", 6, 26f),
-                VersionBreakdown("2.3.9", 2, 9f),
-            ),
-            screenBreakdown = listOf(
-                ScreenBreakdown("Splash", 23, 0, 100f),
-                ScreenBreakdown("Login", 23, 23, 100f),
-            ),
-            failureScreens = mapOf("Login" to 23),
-            stackTraceElements = listOf(
-                StackTraceElement("com.example.app.LoginViewModel", "validateUser", "LoginViewModel.kt", 42, true),
-                StackTraceElement("com.example.app.LoginViewModel", "onLoginClicked", "LoginViewModel.kt", 28, true),
-                StackTraceElement("com.example.app.LoginFragment", "onClick", "LoginFragment.kt", 67, true),
-                StackTraceElement("android.view.View", "performClick", "View.java", 7448, false),
-            ),
-            toolCallInfo = null,
-            affectedTests = mapOf("testLoginFlow" to 15, "testSignupValidation" to 8),
-            recentCaptures = listOf(
-                FailureCapture("cap-1", CaptureType.Screenshot, "/captures/crash-1/1.png", now - 3600000, "Pixel 8"),
-                FailureCapture("cap-2", CaptureType.Screenshot, "/captures/crash-1/2.png", now - 7200000, "Samsung S24"),
-                FailureCapture("cap-3", CaptureType.Video, "/captures/crash-1/3.mp4", now - 10800000, "Pixel 7"),
-            ),
-            sampleOccurrences = listOf(
-                FailureOccurrence("occ-1", now - 3600000, "Pixel 8", "Android 15", "2.4.1-debug", "session-1", "Login", listOf("Splash", "Login"), "testLoginFlow", "/captures/crash-1/1.png", CaptureType.Screenshot),
-                FailureOccurrence("occ-2", now - 7200000, "Samsung S24", "Android 14", "2.4.1-debug", "session-2", "Login", listOf("Splash", "Login"), "testLoginFlow", "/captures/crash-1/2.png", CaptureType.Screenshot),
-                FailureOccurrence("occ-3", now - 10800000, "Pixel 7", "Android 14", "2.4.0", "session-3", "Login", listOf("Splash", "Login"), "testSignupValidation", "/captures/crash-1/3.mp4", CaptureType.Video),
-                FailureOccurrence("occ-4", now - 14400000, "OnePlus 12", "Android 14", "2.4.1-debug", "session-4", "Login", listOf("Splash", "Login"), "testLoginFlow", null, null),
-                FailureOccurrence("occ-5", now - 18000000, "Pixel 8", "Android 15", "2.4.0", "session-5", "Login", listOf("Splash", "Login"), "testSignupValidation", null, null),
-                FailureOccurrence("occ-6", now - 21600000, "Pixel 7", "Android 14", "2.3.9", "session-6", "Login", listOf("Splash", "Login"), "testLoginFlow", null, null),
-            ),
-        ),
-
-        // ANR with multiple occurrences
-        FailureGroup(
-            id = "anr-1",
-            type = FailureType.ANR,
-            signature = "ANR in HomeFragment.onResume",
-            title = "ANR: Main thread blocked during DB query",
-            message = "Application Not Responding: Main thread blocked for 5+ seconds during database query",
-            firstOccurrence = now - 86400000 * 2,
-            lastOccurrence = now - 7200000,
-            totalCount = 8,
-            uniqueSessions = 7,
-            severity = FailureSeverity.High,
-            deviceBreakdown = listOf(
-                DeviceBreakdown("Pixel 7", "Android 14", 4, 50f),
-                DeviceBreakdown("Pixel 6", "Android 13", 3, 37f),
-                DeviceBreakdown("Samsung A54", "Android 13", 1, 13f),
-            ),
-            versionBreakdown = listOf(
-                VersionBreakdown("2.4.1-debug", 6, 75f),
-                VersionBreakdown("2.4.0", 2, 25f),
-            ),
-            screenBreakdown = listOf(
-                ScreenBreakdown("Splash", 8, 0, 100f),
-                ScreenBreakdown("Login", 8, 0, 100f),
-                ScreenBreakdown("Home", 8, 8, 100f),
-            ),
-            failureScreens = mapOf("Home" to 8),
-            stackTraceElements = listOf(
-                StackTraceElement("com.example.app.data.UserDao", "getAllUsers", "UserDao.kt", 23, true),
-                StackTraceElement("com.example.app.HomeViewModel", "loadUsers", "HomeViewModel.kt", 45, true),
-                StackTraceElement("com.example.app.HomeFragment", "onResume", "HomeFragment.kt", 31, true),
-                StackTraceElement("androidx.fragment.app.Fragment", "performResume", "Fragment.java", 3135, false),
-            ),
-            toolCallInfo = null,
-            affectedTests = mapOf("testHomeLoad" to 5, "testProfileEdit" to 3),
-            recentCaptures = listOf(
-                FailureCapture("cap-4", CaptureType.Video, "/captures/anr-1/1.mp4", now - 7200000, "Pixel 7"),
-                FailureCapture("cap-5", CaptureType.Video, "/captures/anr-1/2.mp4", now - 14400000, "Pixel 6"),
-            ),
-            sampleOccurrences = listOf(
-                FailureOccurrence("occ-7", now - 7200000, "Pixel 7", "Android 14", "2.4.1-debug", "session-7", "Home", listOf("Splash", "Login", "Home"), "testHomeLoad", "/captures/anr-1/1.mp4", CaptureType.Video),
-                FailureOccurrence("occ-8", now - 14400000, "Pixel 6", "Android 13", "2.4.1-debug", "session-8", "Home", listOf("Splash", "Login", "Home"), "testProfileEdit", "/captures/anr-1/2.mp4", CaptureType.Video),
-                FailureOccurrence("occ-9", now - 21600000, "Samsung A54", "Android 13", "2.4.0", "session-9", "Home", listOf("Splash", "Login", "Home"), "testHomeLoad", null, null),
-            ),
-        ),
-
-        // Tool call failure with aggregated duration stats and parameter variants
-        FailureGroup(
-            id = "tool-1",
-            type = FailureType.ToolCallFailure,
-            signature = "tapOn failed: Element not found",
-            title = "tapOn: Element not found",
-            message = "Element with text not found within timeout. Check element visibility and timing.",
-            firstOccurrence = now - 86400000,
-            lastOccurrence = now - 1800000,
-            totalCount = 12,
-            uniqueSessions = 10,
-            severity = FailureSeverity.Medium,
-            deviceBreakdown = listOf(
-                DeviceBreakdown("iPhone 15 Pro", "iOS 17.2", 5, 42f),
-                DeviceBreakdown("iPhone 14", "iOS 17.1", 4, 33f),
-                DeviceBreakdown("Pixel 8", "Android 15", 3, 25f),
-            ),
-            versionBreakdown = listOf(
-                VersionBreakdown("2.4.0", 8, 67f),
-                VersionBreakdown("2.4.1-debug", 4, 33f),
-            ),
-            screenBreakdown = listOf(
-                ScreenBreakdown("Home", 12, 0, 100f),
-                ScreenBreakdown("Cart", 12, 0, 100f),
-                ScreenBreakdown("Checkout", 12, 12, 100f),
-            ),
-            failureScreens = mapOf("Checkout" to 12),
-            stackTraceElements = emptyList(),
-            toolCallInfo = AggregatedToolCallInfo(
-                toolName = "tapOn",
-                errorCodes = mapOf("ELEMENT_NOT_FOUND" to 10, "TIMEOUT" to 2),
-                parameterVariants = mapOf(
-                    "text" to listOf("Submit", "Complete Order", "Place Order"),
-                    "timeout" to listOf("5000", "10000"),
-                ),
-                durationStats = DurationStats(
-                    minMs = 5001,
-                    maxMs = 10234,
-                    avgMs = 6543,
-                    medianMs = 5500,
-                    p95Ms = 9800,
-                ),
-            ),
-            affectedTests = mapOf("testFormSubmission" to 7, "testCheckout" to 5),
-            recentCaptures = listOf(
-                FailureCapture("cap-6", CaptureType.Screenshot, "/captures/tool-1/1.png", now - 1800000, "iPhone 15 Pro"),
-                FailureCapture("cap-7", CaptureType.Screenshot, "/captures/tool-1/2.png", now - 3600000, "Pixel 8"),
-                FailureCapture("cap-8", CaptureType.Screenshot, "/captures/tool-1/3.png", now - 7200000, "iPhone 14"),
-            ),
-            sampleOccurrences = listOf(
-                FailureOccurrence("occ-10", now - 1800000, "iPhone 15 Pro", "iOS 17.2", "2.4.0", "session-10", "Checkout", listOf("Home", "Cart", "Checkout"), "testCheckout", "/captures/tool-1/1.png", CaptureType.Screenshot),
-                FailureOccurrence("occ-11", now - 3600000, "Pixel 8", "Android 15", "2.4.1-debug", "session-11", "Checkout", listOf("Home", "Cart", "Checkout"), "testFormSubmission", "/captures/tool-1/2.png", CaptureType.Screenshot),
-                FailureOccurrence("occ-12", now - 7200000, "iPhone 14", "iOS 17.1", "2.4.0", "session-12", "Checkout", listOf("Home", "Cart", "Checkout"), "testCheckout", "/captures/tool-1/3.png", CaptureType.Screenshot),
-            ),
-        ),
-
-        // Low severity crash
-        FailureGroup(
-            id = "crash-2",
-            type = FailureType.Crash,
-            signature = "IndexOutOfBoundsException at RecyclerView",
-            title = "IndexOutOfBoundsException in MessageList",
-            message = "java.lang.IndexOutOfBoundsException: Inconsistency detected. Invalid view holder adapter position",
-            firstOccurrence = now - 86400000 * 5,
-            lastOccurrence = now - 86400000,
-            totalCount = 5,
-            uniqueSessions = 5,
-            severity = FailureSeverity.Low,
-            deviceBreakdown = listOf(
-                DeviceBreakdown("Pixel 8", "Android 15", 3, 60f),
-                DeviceBreakdown("Pixel 7", "Android 14", 2, 40f),
-            ),
-            versionBreakdown = listOf(
-                VersionBreakdown("2.4.1-debug", 5, 100f),
-            ),
-            screenBreakdown = listOf(
-                ScreenBreakdown("Home", 5, 0, 100f),
-                ScreenBreakdown("Messages", 5, 5, 100f),
-            ),
-            failureScreens = mapOf("Messages" to 5),
-            stackTraceElements = listOf(
-                StackTraceElement("androidx.recyclerview.widget.RecyclerView", "findViewHolderForPosition", "RecyclerView.java", 1345, false),
-                StackTraceElement("com.example.app.MessageListAdapter", "onBindViewHolder", "MessageListAdapter.kt", 67, true),
-            ),
-            toolCallInfo = null,
-            affectedTests = mapOf("testSendMessage" to 5),
-            recentCaptures = emptyList(),
-            sampleOccurrences = listOf(
-                FailureOccurrence("occ-13", now - 86400000, "Pixel 8", "Android 15", "2.4.1-debug", "session-13", "Messages", listOf("Home", "Messages"), "testSendMessage", null, null),
-                FailureOccurrence("occ-14", now - 86400000 * 2, "Pixel 7", "Android 14", "2.4.1-debug", "session-14", "Messages", listOf("Home", "Messages"), "testSendMessage", null, null),
-            ),
-        ),
-    )
 }

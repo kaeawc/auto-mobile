@@ -112,8 +112,8 @@ private fun getBestAggregation(dateRange: DateRange, currentAgg: TimeAggregation
     val valid = getValidAggregations(dateRange)
     // If current is valid, keep it
     if (currentAgg in valid) return currentAgg
-    // Otherwise pick the finest valid granularity
-    return valid.firstOrNull() ?: TimeAggregation.Minute
+    // Otherwise pick the coarsest (largest) valid granularity
+    return valid.lastOrNull() ?: TimeAggregation.Minute
 }
 
 /**

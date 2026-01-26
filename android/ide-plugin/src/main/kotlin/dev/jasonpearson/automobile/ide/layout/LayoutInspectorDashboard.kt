@@ -53,15 +53,23 @@ fun LayoutInspectorDashboard(
     val state = rememberLayoutInspectorState()
     val colors = JewelTheme.globalColors
 
+    // Logger for dashboard - initialized early
+    val dashboardLog = com.intellij.openapi.diagnostic.Logger.getInstance("LayoutInspectorDashboard")
+
     // Use provided stream client, or create a local one for backwards compatibility
     val streamClient = observationStreamClient ?: remember { ObservationStreamClient() }
     val isLocalClient = observationStreamClient == null
 
+    // Log the client instance being used
+    dashboardLog.info("Dashboard using streamClient: ${streamClient.hashCode()}, isLocalClient=$isLocalClient, observationStreamClient=${observationStreamClient?.hashCode()}")
+
     // Only manage connection if we created a local client
     if (isLocalClient) {
         DisposableEffect(Unit) {
+            dashboardLog.info("Local client created, connecting...")
             streamClient.connect()
             onDispose {
+                dashboardLog.info("Local client disposing, disconnecting...")
                 streamClient.disconnect()
             }
         }
@@ -69,11 +77,18 @@ fun LayoutInspectorDashboard(
 
     // Collect hierarchy updates from the stream
     LaunchedEffect(streamClient) {
+        dashboardLog.info("Starting hierarchy updates collection from stream client: ${streamClient.hashCode()}")
         streamClient.hierarchyUpdates.collect { update ->
+            dashboardLog.info("Received hierarchy update in dashboard - deviceId=${update.deviceId}, hasData=${update.data != null}")
             update.data?.let { hierarchyJson ->
+                dashboardLog.info("Parsing hierarchy JSON...")
                 val hierarchy = parseHierarchyFromJson(hierarchyJson)
                 if (hierarchy != null) {
+                    dashboardLog.info("Parsed hierarchy: root=${hierarchy.className}, children=${hierarchy.children.size}")
                     state.updateHierarchy(hierarchy)
+                    dashboardLog.info("Updated state with new hierarchy")
+                } else {
+                    dashboardLog.warn("Failed to parse hierarchy from JSON")
                 }
             }
         }
@@ -81,16 +96,20 @@ fun LayoutInspectorDashboard(
 
     // Collect screenshot updates from the stream
     LaunchedEffect(streamClient) {
+        dashboardLog.info("Starting screenshot updates collection from stream client: ${streamClient.hashCode()}")
         streamClient.screenshotUpdates.collect { update ->
+            dashboardLog.info("Received screenshot update in dashboard - deviceId=${update.deviceId}, hasScreenshot=${update.screenshotBase64 != null}")
             update.screenshotBase64?.let { base64 ->
                 // Decode base64 to byte array
                 val screenshotData = java.util.Base64.getDecoder().decode(base64)
+                dashboardLog.info("Decoded screenshot: ${screenshotData.size} bytes")
                 state.updateScreenshot(
                     data = screenshotData,
                     width = update.screenWidth,
                     height = update.screenHeight,
                     timestamp = update.timestamp,
                 )
+                dashboardLog.info("Updated state with new screenshot")
             }
         }
     }

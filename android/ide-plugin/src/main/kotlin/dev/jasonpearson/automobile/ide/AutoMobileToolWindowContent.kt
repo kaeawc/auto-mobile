@@ -240,10 +240,11 @@ fun AutoMobileToolWindowContent() {
   val observationStreamClient = remember { ObservationStreamClient() }
 
   // Connect/disconnect observation stream based on active device
-  DisposableEffect(activeDeviceId) {
+  // Include client in keys to ensure reconnection after hot-reload creates a new instance
+  DisposableEffect(activeDeviceId, observationStreamClient) {
       val deviceId = activeDeviceId  // Capture the value at effect start
       if (deviceId != null) {
-          LOG.info("Connecting observation stream for device: $deviceId")
+          LOG.info("Connecting observation stream for device: $deviceId (client: ${observationStreamClient.hashCode()})")
           observationStreamClient.connect(deviceId)
       }
       onDispose {
@@ -251,6 +252,36 @@ fun AutoMobileToolWindowContent() {
           if (deviceId != null) {
               LOG.info("Disconnecting observation stream (was connected to: $deviceId)")
               observationStreamClient.disconnect()
+          }
+      }
+  }
+
+  // Periodic connection health check - reconnect if connection dropped
+  LaunchedEffect(activeDeviceId, observationStreamClient) {
+      val deviceId = activeDeviceId ?: return@LaunchedEffect
+      while (true) {
+          kotlinx.coroutines.delay(5000) // Check every 5 seconds
+          if (!observationStreamClient.isConnected()) {
+              LOG.info("Observation stream disconnected, attempting reconnect for device: $deviceId")
+              observationStreamClient.connect(deviceId)
+          }
+      }
+  }
+
+  // Listen for hierarchy updates to update foreground app state in real-time
+  LaunchedEffect(observationStreamClient) {
+      observationStreamClient.hierarchyUpdates.collect { update ->
+          val newForegroundApp = update.packageName
+          if (newForegroundApp != null && installedApps.isNotEmpty()) {
+              // Check if foreground app changed
+              val currentForeground = installedApps.find { it.isForeground }?.packageName
+              if (currentForeground != newForegroundApp) {
+                  LOG.info("Foreground app changed: $currentForeground -> $newForegroundApp")
+                  // Update the installed apps list with new foreground state
+                  installedApps = installedApps.map { app ->
+                      app.copy(isForeground = app.packageName == newForegroundApp)
+                  }
+              }
           }
       }
   }
@@ -446,11 +477,14 @@ fun AutoMobileToolWindowContent() {
               dataSourceMode = dataSourceMode,
               clientProvider = clientProvider,
           )
-          Dashboard.Layout -> LayoutInspectorDashboard(
-              dataSourceMode = dataSourceMode,
-              clientProvider = clientProvider,
-              observationStreamClient = observationStreamClient,
-          )
+          Dashboard.Layout -> {
+              LOG.info("Rendering LayoutInspectorDashboard with observationStreamClient: ${observationStreamClient.hashCode()}")
+              LayoutInspectorDashboard(
+                  dataSourceMode = dataSourceMode,
+                  clientProvider = clientProvider,
+                  observationStreamClient = observationStreamClient,
+              )
+          }
           Dashboard.Storage -> StorageDashboard(
               dataSourceMode = dataSourceMode,
           )

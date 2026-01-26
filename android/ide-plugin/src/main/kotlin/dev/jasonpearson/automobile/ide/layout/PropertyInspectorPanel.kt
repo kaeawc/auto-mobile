@@ -192,7 +192,6 @@ private fun PropertyRow(
 
     Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -201,16 +200,14 @@ private fun PropertyRow(
             color = colors.text.normal.copy(alpha = if (isSecondary) 0.4f else 0.6f),
             maxLines = 1,
             softWrap = false,
-            modifier = Modifier.widthIn(min = 60.dp),
+            modifier = Modifier.width(80.dp),
         )
-        Spacer(Modifier.width(8.dp))
         Text(
             value,
             fontSize = 11.sp,
-            color = colors.text.normal.copy(alpha = if (isSecondary) 0.5f else 0.9f),
+            color = colors.text.normal.copy(alpha = if (isSecondary) 0.6f else 1f),
             maxLines = 1,
             softWrap = false,
-            modifier = Modifier.weight(1f),
         )
     }
 }

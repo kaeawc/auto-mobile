@@ -23,6 +23,9 @@ import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 
 /**
  * Client for the observation stream Unix socket server.
@@ -185,44 +188,57 @@ class ObservationStreamClient {
 
         try {
             _connectionState.emit(StreamConnectionState.Connected)
+            log.info("Starting message read loop")
 
             while (connected.get()) {
                 val line = currentReader.readLine() ?: break
                 if (line.isBlank()) continue
 
+                log.info("Received message (${line.length} chars): ${line.take(200)}...")
+
                 try {
                     handleMessage(line)
                 } catch (e: Exception) {
-                    log.warn("Failed to parse observation stream message: ${e.message}")
+                    log.warn("Failed to parse observation stream message: ${e.message}", e)
                 }
             }
+            log.info("Read loop ended - connected=${connected.get()}")
         } catch (e: Exception) {
-            log.warn("Error reading from observation stream: ${e.message}")
+            log.warn("Error reading from observation stream: ${e.message}", e)
         }
 
         connected.set(false)
         subscribed.set(false)
         _connectionState.emit(StreamConnectionState.Disconnected("Stream ended"))
+        log.info("Observation stream disconnected")
     }
 
     private suspend fun handleMessage(message: String) {
         val response = json.decodeFromString(StreamResponse.serializer(), message)
+        log.info("Handling message type: ${response.type}")
 
         when (response.type) {
             "subscription_response" -> {
+                log.info("Subscription response: success=${response.success}")
                 if (response.success != true) {
                     log.warn("Subscription failed: ${response.error}")
                 }
             }
             "hierarchy_update" -> {
+                // Extract packageName from the data if present
+                val packageName = extractPackageName(response.data)
+                log.info("Hierarchy update received - deviceId=${response.deviceId}, timestamp=${response.timestamp}, packageName=$packageName, dataPresent=${response.data != null}")
                 val update = HierarchyStreamUpdate(
                     deviceId = response.deviceId,
                     timestamp = response.timestamp ?: System.currentTimeMillis(),
                     data = response.data,
+                    packageName = packageName,
                 )
                 _hierarchyUpdates.emit(update)
+                log.info("Emitted hierarchy update to flow")
             }
             "screenshot_update" -> {
+                log.info("Screenshot update received - deviceId=${response.deviceId}, hasScreenshot=${response.screenshotBase64 != null}")
                 val update = ScreenshotStreamUpdate(
                     deviceId = response.deviceId,
                     timestamp = response.timestamp ?: System.currentTimeMillis(),
@@ -231,6 +247,11 @@ class ObservationStreamClient {
                     screenHeight = response.screenHeight ?: 2340,
                 )
                 _screenshotUpdates.emit(update)
+                log.info("Emitted screenshot update to flow")
+            }
+            "ping" -> {
+                log.info("Received ping, sending pong")
+                sendPong()
             }
             "error" -> {
                 log.warn("Observation stream error: ${response.error}")
@@ -238,6 +259,30 @@ class ObservationStreamClient {
             else -> {
                 log.warn("Unknown message type: ${response.type}")
             }
+        }
+    }
+
+    private fun sendPong() {
+        val request = StreamRequest(
+            id = UUID.randomUUID().toString(),
+            command = "pong",
+        )
+        sendRequest(request)
+    }
+
+    /**
+     * Extract packageName from the hierarchy data.
+     * The data structure is: { "hierarchy": {...}, "packageName": "com.example.app", ... }
+     */
+    private fun extractPackageName(data: JsonElement?): String? {
+        if (data == null) return null
+        return try {
+            val obj = data as? JsonObject ?: return null
+            val packageNameElement = obj["packageName"] as? JsonPrimitive
+            packageNameElement?.contentOrNull?.takeIf { it.isNotEmpty() }
+        } catch (e: Exception) {
+            log.warn("Failed to extract packageName: ${e.message}")
+            null
         }
     }
 }
@@ -267,6 +312,7 @@ data class HierarchyStreamUpdate(
     val deviceId: String?,
     val timestamp: Long,
     val data: JsonElement?,
+    val packageName: String? = null,
 )
 
 data class ScreenshotStreamUpdate(

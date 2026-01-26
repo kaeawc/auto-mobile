@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from "bun:test";
 import {
-  ScreenshotBackoffSchedulerImpl,
+  DefaultScreenshotBackoffScheduler,
   FakeScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
   computeChecksum,
@@ -28,7 +28,7 @@ describe("computeChecksum", () => {
   });
 });
 
-describe("ScreenshotBackoffSchedulerImpl", () => {
+describe("DefaultScreenshotBackoffScheduler", () => {
   let fakeTimer: FakeTimer;
   let capturedScreenshots: string[];
   let emittedScreenshots: string[];
@@ -57,7 +57,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
 
   describe("startBackoffSequence", () => {
     it("schedules captures at default intervals", () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         undefined,
@@ -72,7 +72,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
     });
 
     it("captures immediately at t=0", async () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         undefined,
@@ -89,7 +89,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
     });
 
     it("captures at all backoff intervals", async () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         undefined,
@@ -113,7 +113,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
     });
 
     it("uses custom intervals when provided", async () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 50, 150] },
@@ -131,7 +131,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
     });
 
     it("cancels previous sequence when starting new one", async () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
@@ -165,7 +165,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data: "same-data" };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
@@ -194,7 +194,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200, 300, 400] },
@@ -226,7 +226,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
@@ -246,7 +246,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
 
   describe("cancelPendingCaptures", () => {
     it("cancels all pending captures", async () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200, 300] },
@@ -270,7 +270,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
     });
 
     it("handles cancel when no sequence is active", () => {
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         undefined,
@@ -294,7 +294,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data: `screenshot-${callCount}` };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
@@ -320,7 +320,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data: `screenshot-${callCount}` };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100, 200] },
@@ -339,7 +339,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
 
   describe("sequence invalidation", () => {
     it("discards captures from old sequence if new sequence starts", async () => {
-      let captureDelay = 0;
+      const captureDelay = 0;
       captureCallback = async () => {
         captureCount++;
         // Simulate slow capture that takes 150ms
@@ -349,7 +349,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data: `screenshot-${captureCount}` };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0, 100] },
@@ -378,7 +378,7 @@ describe("ScreenshotBackoffSchedulerImpl", () => {
         return { success: true, data: "same-data" };
       };
 
-      const scheduler = new ScreenshotBackoffSchedulerImpl(
+      const scheduler = new DefaultScreenshotBackoffScheduler(
         captureCallback,
         emitCallback,
         { intervals: [0] },

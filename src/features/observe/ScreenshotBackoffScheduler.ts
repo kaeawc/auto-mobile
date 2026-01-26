@@ -77,9 +77,9 @@ export function computeChecksum(data: string): string {
 }
 
 /**
- * Real implementation of ScreenshotBackoffScheduler
+ * Default implementation of ScreenshotBackoffScheduler
  */
-export class ScreenshotBackoffSchedulerImpl implements ScreenshotBackoffScheduler {
+export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffScheduler {
   private timer: Timer;
   private captureCallback: ScreenshotCaptureCallback;
   private emitCallback: ScreenshotEmitCallback;

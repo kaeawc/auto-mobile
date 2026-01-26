@@ -31,7 +31,7 @@ import { RequestManager } from "../../utils/RequestManager";
 import { getObservationStreamServer } from "../../daemon/observationStreamSocketServer";
 import {
   ScreenshotBackoffScheduler,
-  ScreenshotBackoffSchedulerImpl,
+  DefaultScreenshotBackoffScheduler,
   ScreenshotCaptureResult,
   computeChecksum,
 } from "./ScreenshotBackoffScheduler";
@@ -1835,7 +1835,7 @@ export class AccessibilityServiceClient implements AccessibilityService {
    */
   private getScreenshotBackoffScheduler(): ScreenshotBackoffScheduler {
     if (!this.screenshotBackoffScheduler) {
-      this.screenshotBackoffScheduler = new ScreenshotBackoffSchedulerImpl(
+      this.screenshotBackoffScheduler = new DefaultScreenshotBackoffScheduler(
         // Capture callback
         async (): Promise<ScreenshotCaptureResult> => {
           return this.captureScreenshotForBackoff();

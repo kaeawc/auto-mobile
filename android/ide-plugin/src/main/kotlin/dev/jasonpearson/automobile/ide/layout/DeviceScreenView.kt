@@ -71,6 +71,7 @@ fun DeviceScreenView(
     onElementSelected: (String?) -> Unit,
     onElementHovered: (String?) -> Unit,
     modifier: Modifier = Modifier,
+    refitTrigger: Any? = null,  // When this changes, refit the view to center
 ) {
     val colors = JewelTheme.globalColors
 
@@ -79,6 +80,9 @@ fun DeviceScreenView(
     var offsetX by remember { mutableFloatStateOf(0f) }
     var offsetY by remember { mutableFloatStateOf(0f) }
     var hasInitialFit by remember { mutableStateOf(false) }
+
+    // Track refitTrigger to reset fit state when panels change
+    var lastRefitTrigger by remember { mutableStateOf<Any?>(null) }
 
     // Decode screenshot to ImageBitmap
     val imageBitmap = remember(screenshotData) {
@@ -116,8 +120,13 @@ fun DeviceScreenView(
             val viewportWidth = constraints.maxWidth.toFloat()
             val viewportHeight = constraints.maxHeight.toFloat()
 
+            // Use actual image dimensions if available, otherwise fall back to screen dimensions
+            // This ensures frame sizing and hit testing match the actual screenshot
+            val effectiveWidth = imageBitmap?.width ?: screenWidth
+            val effectiveHeight = imageBitmap?.height ?: screenHeight
+
             // Calculate device frame size that fits viewport while maintaining aspect ratio
-            val deviceAspectRatio = if (screenWidth > 0) screenHeight.toFloat() / screenWidth.toFloat() else 2.16f
+            val deviceAspectRatio = if (effectiveWidth > 0) effectiveHeight.toFloat() / effectiveWidth.toFloat() else 2.16f
             val padding = 32f
             val maxFrameWidth = (viewportWidth - padding * 2).coerceAtLeast(1f)
             val maxFrameHeight = (viewportHeight - padding * 2).coerceAtLeast(1f)
@@ -136,10 +145,18 @@ fun DeviceScreenView(
             }
 
             // Scale factor from frame pixels to device pixels (for hit testing)
-            val frameToDeviceScale = if (frameWidthPx > 0) screenWidth.toFloat() / frameWidthPx else 1f
+            val frameToDeviceScale = if (frameWidthPx > 0) effectiveWidth.toFloat() / frameWidthPx else 1f
 
-            // Auto-fit on initial load - scale to fit if viewport is constrained
-            LaunchedEffect(viewportWidth, viewportHeight, frameWidthPx, frameHeightPx) {
+            // Reset fit state when refitTrigger changes (e.g., panels toggled)
+            LaunchedEffect(refitTrigger) {
+                if (refitTrigger != null && refitTrigger != lastRefitTrigger) {
+                    lastRefitTrigger = refitTrigger
+                    hasInitialFit = false  // Allow refit to happen
+                }
+            }
+
+            // Auto-fit on initial load or when refit is triggered
+            LaunchedEffect(viewportWidth, viewportHeight, frameWidthPx, frameHeightPx, hasInitialFit) {
                 if (!hasInitialFit && viewportWidth > 0 && viewportHeight > 0 && frameWidthPx > 0) {
                     // Calculate scale needed to fit device in viewport
                     // The frame is already sized to fit, so scale 1.0 should fit
@@ -252,8 +269,13 @@ fun DeviceScreenView(
                                     drawContent()
 
                                     // Scale factor: drawing context is in frame pixels, bounds are in device pixels
-                                    // size.width is the frame width in pixels, screenWidth is device pixels
-                                    val deviceToFrameScale = if (screenWidth > 0) size.width / screenWidth.toFloat() else 1f
+                                    // Use actual image dimensions for accurate overlay positioning.
+                                    // This is critical because screenWidth/screenHeight from stream may not match
+                                    // the actual screenshot dimensions (e.g., if derived from app window bounds
+                                    // which exclude status bar, while screenshot includes full screen).
+                                    val imageWidth = imageBitmap.width
+                                    val imageHeight = imageBitmap.height
+                                    val deviceToFrameScale = if (imageWidth > 0) size.width / imageWidth.toFloat() else 1f
 
                                     // Draw element overlays
                                     // Hovered element (gray)

@@ -158,6 +158,11 @@ fun LayoutInspectorDashboard(
     val minPanelWidthPx = with(density) { 150.dp.toPx() }
     val maxPanelWidthPx = with(density) { 500.dp.toPx() }
 
+    // Refit trigger - changes when panel collapse states change to recenter the device view
+    val refitTrigger = remember(isHierarchyCollapsed, isPropertiesCollapsed) {
+        "$isHierarchyCollapsed-$isPropertiesCollapsed-${System.currentTimeMillis()}"
+    }
+
     // Main content with 3 panels
     Row(modifier = modifier.fillMaxSize()) {
         // Left panel: Device Screen (flexible - expands when others collapse)
@@ -177,6 +182,7 @@ fun LayoutInspectorDashboard(
                 onElementSelected = { state.selectElement(it) },
                 onElementHovered = { state.hoverElement(it) },
                 modifier = Modifier.fillMaxSize(),
+                refitTrigger = refitTrigger,  // Trigger refit when panels toggle
             )
         }
 

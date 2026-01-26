@@ -45,24 +45,33 @@ fun LayoutInspectorDashboard(
     val state = rememberLayoutInspectorState()
     val colors = JewelTheme.globalColors
 
-    // Fetch view hierarchy from data source
+    // Fetch observation data (hierarchy + screenshot) from data source
     LaunchedEffect(dataSourceMode, clientProvider) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
                 val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider)
-                when (val result = dataSource.getViewHierarchy()) {
+                when (val result = dataSource.getObservation()) {
                     is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
-                        state.updateHierarchy(result.data)
+                        val observation = result.data
+                        state.updateHierarchy(observation.hierarchy)
+                        observation.screenshotData?.let { screenshot ->
+                            state.updateScreenshot(
+                                data = screenshot,
+                                width = observation.screenWidth,
+                                height = observation.screenHeight,
+                                timestamp = observation.timestamp,
+                            )
+                        }
                     }
                     is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
-                        // Keep current hierarchy or show error
+                        // Keep current state or show error
                     }
                     is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
                         // Keep loading state
                     }
                 }
             } catch (e: Exception) {
-                // Keep current hierarchy or show error
+                // Keep current state or show error
             }
         }
     }

@@ -13,4 +13,19 @@ class FakeLayoutDataSource : LayoutDataSource {
 
         return Result.Success(LayoutInspectorMockData.mockHierarchy)
     }
+
+    override suspend fun getObservation(): Result<ObservationData> {
+        // Simulate network delay
+        delay(100)
+
+        return Result.Success(
+            ObservationData(
+                hierarchy = LayoutInspectorMockData.mockHierarchy,
+                screenshotData = null, // No mock screenshot
+                screenWidth = 1080,
+                screenHeight = 2340,
+                timestamp = System.currentTimeMillis(),
+            )
+        )
+    }
 }

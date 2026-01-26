@@ -6,10 +6,12 @@ import dev.jasonpearson.automobile.ide.layout.ElementBounds
 import dev.jasonpearson.automobile.ide.layout.UIElementInfo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import java.util.Base64
 
 /**
  * Real layout data source that fetches from MCP resources.
- * Uses the observation/latest resource to get the view hierarchy.
+ * Uses the observation/latest resource to get the view hierarchy
+ * and observation/latest/screenshot for the screenshot image.
  */
 class RealLayoutDataSource(
     private val clientProvider: (() -> AutoMobileClient)? = null,
@@ -17,39 +19,79 @@ class RealLayoutDataSource(
     private val json = Json { ignoreUnknownKeys = true }
 
     override suspend fun getViewHierarchy(): Result<UIElementInfo> {
-        val provider = clientProvider ?: return Result.Success(createEmptyHierarchy())
+        return when (val result = getObservation()) {
+            is Result.Success -> Result.Success(result.data.hierarchy)
+            is Result.Error -> Result.Error(result.message)
+            is Result.Loading -> Result.Loading
+        }
+    }
+
+    override suspend fun getObservation(): Result<ObservationData> {
+        val provider = clientProvider ?: return Result.Success(
+            ObservationData(hierarchy = createEmptyHierarchy())
+        )
 
         return try {
             val client = provider()
-            val contents = client.readResource("automobile:observation/latest")
 
-            val text = contents.firstOrNull { !it.text.isNullOrBlank() }?.text
-                ?: return Result.Success(createEmptyHierarchy())
+            // Fetch observation data (hierarchy + metadata)
+            val observationContents = client.readResource("automobile:observation/latest")
+            val observationText = observationContents.firstOrNull { !it.text.isNullOrBlank() }?.text
+
+            if (observationText == null) {
+                return Result.Success(
+                    ObservationData(
+                        hierarchy = createEmptyHierarchy("No observation data available.")
+                    )
+                )
+            }
 
             // Check for error response
-            val jsonElement = json.parseToJsonElement(text)
+            val jsonElement = json.parseToJsonElement(observationText)
             if (jsonElement is kotlinx.serialization.json.JsonObject) {
                 val error = jsonElement["error"]?.let {
                     (it as? kotlinx.serialization.json.JsonPrimitive)?.content
                 }
                 if (!error.isNullOrBlank()) {
-                    // No observation available yet - return empty hierarchy
-                    return Result.Success(createEmptyHierarchy("No observation captured. Call 'observe' to capture screen state."))
+                    return Result.Success(
+                        ObservationData(
+                            hierarchy = createEmptyHierarchy("No observation captured. Call 'observe' to capture screen state.")
+                        )
+                    )
                 }
             }
 
             // Parse the observation response
-            val response = json.decodeFromString(ObservationResponse.serializer(), text)
+            val response = json.decodeFromString(ObservationResponse.serializer(), observationText)
 
             // Convert to UIElementInfo tree
-            val hierarchy = response.hierarchy?.let { parseHierarchy(it, 0) }
+            val hierarchy = response.viewHierarchy?.elements?.firstOrNull()?.let { parseHierarchy(it, 0) }
+                ?: response.hierarchy?.let { parseHierarchy(it, 0) }
                 ?: createEmptyHierarchy()
 
-            Result.Success(hierarchy)
+            // Fetch screenshot separately
+            val screenshotData = try {
+                val screenshotContents = client.readResource("automobile:observation/latest/screenshot")
+                val screenshotBlob = screenshotContents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
+                screenshotBlob?.let { Base64.getDecoder().decode(it) }
+            } catch (e: Exception) {
+                // Screenshot fetch failed - continue without it
+                null
+            }
+
+            Result.Success(
+                ObservationData(
+                    hierarchy = hierarchy,
+                    screenshotData = screenshotData,
+                    screenWidth = response.screenSize?.width ?: 1080,
+                    screenHeight = response.screenSize?.height ?: 2340,
+                    timestamp = response.updatedAt ?: System.currentTimeMillis(),
+                )
+            )
         } catch (e: McpConnectionException) {
             Result.Error("MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to load view hierarchy: ${e.message}")
+            Result.Error("Failed to load observation: ${e.message}")
         }
     }
 
@@ -105,11 +147,22 @@ class RealLayoutDataSource(
 
 @Serializable
 private data class ObservationResponse(
+    val updatedAt: Long? = null,
+    val screenSize: ScreenSizeDto? = null,
+    val viewHierarchy: ViewHierarchyDto? = null,
+    // Legacy fallback for simpler hierarchy format
     val hierarchy: HierarchyNodeDto? = null,
-    val screenshot: String? = null,
-    val screenWidth: Int? = null,
-    val screenHeight: Int? = null,
-    val timestamp: Long? = null,
+)
+
+@Serializable
+private data class ScreenSizeDto(
+    val width: Int? = null,
+    val height: Int? = null,
+)
+
+@Serializable
+private data class ViewHierarchyDto(
+    val elements: List<HierarchyNodeDto>? = null,
 )
 
 @Serializable

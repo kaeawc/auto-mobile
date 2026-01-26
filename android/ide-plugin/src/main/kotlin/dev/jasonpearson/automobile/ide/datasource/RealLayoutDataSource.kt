@@ -65,9 +65,12 @@ class RealLayoutDataSource(
             val response = json.decodeFromString(ObservationResponse.serializer(), observationText)
 
             // Convert to UIElementInfo tree
-            val hierarchy = response.viewHierarchy?.elements?.firstOrNull()?.let { parseHierarchy(it, 0) }
-                ?: response.hierarchy?.let { parseHierarchy(it, 0) }
-                ?: createEmptyHierarchy()
+            // The actual structure is viewHierarchy.hierarchy.node (can be array or single)
+            val hierarchy = response.viewHierarchy?.hierarchy?.node?.let { nodes ->
+                if (nodes.isNotEmpty()) {
+                    parseHierarchy(nodes.first(), 0)
+                } else null
+            } ?: createEmptyHierarchy()
 
             // Fetch screenshot separately
             val screenshotData = try {
@@ -96,30 +99,49 @@ class RealLayoutDataSource(
     }
 
     private fun parseHierarchy(node: HierarchyNodeDto, depth: Int): UIElementInfo {
+        // Parse bounds from string format "[left,top][right,bottom]"
+        val bounds = node.bounds?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
+
+        // Generate a unique ID from available properties
+        val id = node.resourceId
+            ?: node.contentDesc?.let { "desc:$it" }
+            ?: node.text?.let { "text:$it" }
+            ?: "node-$depth-${bounds.hashCode()}"
+
         return UIElementInfo(
-            id = node.id ?: "node-$depth-${node.className?.hashCode() ?: 0}",
+            id = id,
             className = node.className ?: "android.view.View",
             resourceId = node.resourceId,
             text = node.text,
-            contentDescription = node.contentDescription,
-            bounds = node.bounds?.let {
-                ElementBounds(
-                    left = it.left ?: 0,
-                    top = it.top ?: 0,
-                    right = it.right ?: 0,
-                    bottom = it.bottom ?: 0,
-                )
-            } ?: ElementBounds(0, 0, 0, 0),
-            isClickable = node.clickable ?: false,
-            isEnabled = node.enabled ?: true,
-            isFocused = node.focused ?: false,
-            isSelected = node.selected ?: false,
-            isScrollable = node.scrollable ?: false,
-            isCheckable = node.checkable ?: false,
-            isChecked = node.checked ?: false,
+            contentDescription = node.contentDesc,
+            bounds = bounds,
+            isClickable = node.clickable == "true",
+            isEnabled = node.enabled != "false",
+            isFocused = node.focused == "true",
+            isSelected = node.selected == "true",
+            isScrollable = node.scrollable == "true",
+            isCheckable = node.checkable == "true",
+            isChecked = node.checked == "true",
             depth = depth,
-            children = node.children?.map { parseHierarchy(it, depth + 1) } ?: emptyList(),
+            children = node.children.map { parseHierarchy(it, depth + 1) },
         )
+    }
+
+    private fun parseBoundsString(boundsStr: String): ElementBounds {
+        // Parse format "[left,top][right,bottom]"
+        val regex = """\[(\d+),(\d+)\]\[(\d+),(\d+)\]""".toRegex()
+        val match = regex.find(boundsStr)
+        return if (match != null) {
+            val (left, top, right, bottom) = match.destructured
+            ElementBounds(
+                left = left.toIntOrNull() ?: 0,
+                top = top.toIntOrNull() ?: 0,
+                right = right.toIntOrNull() ?: 0,
+                bottom = bottom.toIntOrNull() ?: 0,
+            )
+        } else {
+            ElementBounds(0, 0, 0, 0)
+        }
     }
 
     private fun createEmptyHierarchy(message: String? = null): UIElementInfo {
@@ -149,9 +171,7 @@ class RealLayoutDataSource(
 private data class ObservationResponse(
     val updatedAt: Long? = null,
     val screenSize: ScreenSizeDto? = null,
-    val viewHierarchy: ViewHierarchyDto? = null,
-    // Legacy fallback for simpler hierarchy format
-    val hierarchy: HierarchyNodeDto? = null,
+    val viewHierarchy: ViewHierarchyResultDto? = null,
 )
 
 @Serializable
@@ -161,32 +181,58 @@ private data class ScreenSizeDto(
 )
 
 @Serializable
-private data class ViewHierarchyDto(
-    val elements: List<HierarchyNodeDto>? = null,
+private data class ViewHierarchyResultDto(
+    val hierarchy: HierarchyContainerDto? = null,
+    val packageName: String? = null,
+)
+
+@Serializable
+private data class HierarchyContainerDto(
+    val node: List<HierarchyNodeDto>? = null,
 )
 
 @Serializable
 private data class HierarchyNodeDto(
-    val id: String? = null,
     val className: String? = null,
+    @kotlinx.serialization.SerialName("resource-id")
     val resourceId: String? = null,
     val text: String? = null,
-    val contentDescription: String? = null,
-    val bounds: BoundsDto? = null,
-    val clickable: Boolean? = null,
-    val enabled: Boolean? = null,
-    val focused: Boolean? = null,
-    val selected: Boolean? = null,
-    val scrollable: Boolean? = null,
-    val checkable: Boolean? = null,
-    val checked: Boolean? = null,
-    val children: List<HierarchyNodeDto>? = null,
-)
-
-@Serializable
-private data class BoundsDto(
-    val left: Int? = null,
-    val top: Int? = null,
-    val right: Int? = null,
-    val bottom: Int? = null,
-)
+    @kotlinx.serialization.SerialName("content-desc")
+    val contentDesc: String? = null,
+    val bounds: String? = null,
+    val clickable: String? = null,
+    val enabled: String? = null,
+    val focused: String? = null,
+    val focusable: String? = null,
+    val selected: String? = null,
+    val scrollable: String? = null,
+    val checkable: String? = null,
+    val checked: String? = null,
+    // node can be either a single object or array - use JsonElement
+    val node: kotlinx.serialization.json.JsonElement? = null,
+) {
+    // Parse children from the polymorphic node field
+    val children: List<HierarchyNodeDto>
+        get() {
+            val nodeElement = node ?: return emptyList()
+            return when {
+                nodeElement is kotlinx.serialization.json.JsonArray -> {
+                    nodeElement.mapNotNull { elem ->
+                        try {
+                            Json { ignoreUnknownKeys = true }.decodeFromJsonElement(HierarchyNodeDto.serializer(), elem)
+                        } catch (e: Exception) {
+                            null
+                        }
+                    }
+                }
+                nodeElement is kotlinx.serialization.json.JsonObject -> {
+                    try {
+                        listOf(Json { ignoreUnknownKeys = true }.decodeFromJsonElement(HierarchyNodeDto.serializer(), nodeElement))
+                    } catch (e: Exception) {
+                        emptyList()
+                    }
+                }
+                else -> emptyList()
+            }
+        }
+}

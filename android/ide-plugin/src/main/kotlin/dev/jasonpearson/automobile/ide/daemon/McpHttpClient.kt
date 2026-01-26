@@ -117,6 +117,11 @@ class McpHttpClient(
     return decodeResourceResponse(json, contents, TestTimingSummary.serializer())
   }
 
+  override fun getTestRuns(query: TestRunQuery): TestRunSummary {
+    val contents = readResource(query.toResourceUri())
+    return decodeResourceResponse(json, contents, TestRunSummary.serializer())
+  }
+
   override fun startTestRecording(platform: String): TestRecordingStartResult {
     return testRecordingClient.startTestRecording(platform)
   }

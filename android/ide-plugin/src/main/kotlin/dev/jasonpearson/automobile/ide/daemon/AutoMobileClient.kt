@@ -39,6 +39,8 @@ interface AutoMobileClient {
 
   fun getTestTimings(query: TestTimingQuery = TestTimingQuery()): TestTimingSummary
 
+  fun getTestRuns(query: TestRunQuery = TestRunQuery()): TestRunSummary
+
   fun startTestRecording(platform: String = "android"): TestRecordingStartResult
 
   fun stopTestRecording(

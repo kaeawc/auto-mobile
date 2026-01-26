@@ -44,6 +44,7 @@ import { registerDeviceImageResources } from "./deviceImageResources";
 import { registerAppResources } from "./appResources";
 import { registerNavigationResources } from "./navigationResources";
 import { registerTestTimingResources } from "./testTimingResources";
+import { registerTestRunResources } from "./testRunResources";
 import { registerPerformanceResources } from "./performanceResources";
 import { registerVideoRecordingResources } from "./videoRecordingResources";
 import { registerLocalizationResources } from "./localizationResources";
@@ -153,6 +154,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerAppResources();
   registerNavigationResources();
   registerTestTimingResources();
+  registerTestRunResources();
   registerPerformanceResources();
   registerVideoRecordingResources();
   registerLocalizationResources();

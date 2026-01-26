@@ -2,14 +2,15 @@ package dev.jasonpearson.automobile.ide.datasource
 
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.ide.daemon.McpConnectionException
-import dev.jasonpearson.automobile.ide.daemon.TestTimingQuery
+import dev.jasonpearson.automobile.ide.daemon.TestRunQuery
 import dev.jasonpearson.automobile.ide.test.TestPlatform
 import dev.jasonpearson.automobile.ide.test.TestRun
 import dev.jasonpearson.automobile.ide.test.TestStatus
+import dev.jasonpearson.automobile.ide.test.TestStep
 
 /**
  * Real test data source that fetches from MCP resources.
- * Uses the test-timings resource to get actual test data.
+ * Uses the test-runs resource to get actual test data with steps and screens.
  */
 class RealTestDataSource(
     private val clientProvider: (() -> AutoMobileClient)? = null,
@@ -19,34 +20,57 @@ class RealTestDataSource(
 
         return try {
             val client = provider()
-            val summary = client.getTestTimings(TestTimingQuery(limit = 100))
+            val summary = client.getTestRuns(TestRunQuery(limit = 100))
 
-            // Map TestTimingEntry to TestRun
-            val testRuns = summary.testTimings.mapIndexed { index, entry ->
-                val status = when {
-                    entry.statusCounts?.failed ?: 0 > 0 -> TestStatus.Failed
-                    entry.successRate >= 1.0 -> TestStatus.Passed
-                    entry.successRate > 0 -> TestStatus.Passed
+            // Map TestRunEntry to TestRun
+            val testRuns = summary.testRuns.map { entry ->
+                val status = when (entry.status) {
+                    "passed" -> TestStatus.Passed
+                    "failed" -> TestStatus.Failed
+                    "skipped" -> TestStatus.Skipped
                     else -> TestStatus.Skipped
                 }
 
+                val steps = entry.steps.map { step ->
+                    val stepStatus = when (step.status) {
+                        "completed" -> TestStatus.Passed
+                        "failed" -> TestStatus.Failed
+                        "skipped" -> TestStatus.Skipped
+                        else -> TestStatus.Skipped
+                    }
+                    TestStep(
+                        id = "step-${step.id}",
+                        index = step.index,
+                        action = step.action,
+                        target = step.target ?: "",
+                        screenshotPath = step.screenshotPath,
+                        screenName = step.screenName,
+                        durationMs = step.durationMs,
+                        status = stepStatus,
+                        errorMessage = step.errorMessage,
+                    )
+                }
+
+                val platform = when (entry.platform?.lowercase()) {
+                    "ios" -> TestPlatform.iOS
+                    else -> TestPlatform.Android
+                }
+
                 TestRun(
-                    id = "test-$index",
+                    id = "run-${entry.id}",
                     testId = "${entry.testClass}.${entry.testMethod}",
-                    testName = entry.testMethod,
+                    testName = entry.testName,
                     status = status,
-                    startTime = entry.lastRunTimestampMs ?: System.currentTimeMillis(),
-                    durationMs = entry.averageDurationMs,
-                    steps = emptyList(), // Test timings don't include step details
-                    screensVisited = emptyList(), // Not available from timings
-                    errorMessage = if (status == TestStatus.Failed) {
-                        "Failed ${entry.statusCounts?.failed ?: 0} of ${entry.sampleSize} runs"
-                    } else null,
-                    deviceId = "unknown",
-                    deviceName = "Multiple devices",
-                    platform = TestPlatform.Android, // Default, could be inferred
-                    videoPath = null,
-                    snapshotPath = null,
+                    startTime = entry.startTime,
+                    durationMs = entry.durationMs,
+                    steps = steps,
+                    screensVisited = entry.screensVisited,
+                    errorMessage = entry.errorMessage,
+                    deviceId = entry.deviceId ?: "unknown",
+                    deviceName = entry.deviceName ?: "Unknown device",
+                    platform = platform,
+                    videoPath = entry.videoPath,
+                    snapshotPath = entry.snapshotPath,
                     sampleSize = entry.sampleSize,
                 )
             }

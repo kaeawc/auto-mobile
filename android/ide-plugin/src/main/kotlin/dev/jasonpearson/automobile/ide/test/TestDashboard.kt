@@ -132,11 +132,13 @@ fun TestDashboard(
         TestScreen.TestRunDetail -> selectedTestRun?.let { run ->
             TestRunDetailScreen(
                 testRun = run,
+                allTestRuns = testRuns,
                 onBack = { currentScreen = TestScreen.Dashboard },
                 onViewInGraph = { onNavigateToGraph(run.screensVisited) },
                 onNavigateToRun = { runId ->
                     // Navigate to another test run by ID
-                    val targetRun = TestMockData.recentRuns.find { it.id == runId }
+                    val targetRun = testRuns.find { it.id == runId }
+                        ?: TestMockData.recentRuns.find { it.id == runId }
                     if (targetRun != null) {
                         selectedTestRun = targetRun
                     }
@@ -843,6 +845,7 @@ private data class HistoricalRun(
 @Composable
 private fun TestRunDetailScreen(
     testRun: TestRun,
+    allTestRuns: List<TestRun> = emptyList(),
     onBack: () -> Unit,
     onViewInGraph: () -> Unit,
     onNavigateToRun: (String) -> Unit = {},  // Navigate to another test run by ID
@@ -884,22 +887,26 @@ private fun TestRunDetailScreen(
         }
     }
 
-    // Mock historical runs - some have IDs for navigation, some are just indicators
-    val historicalRuns = remember {
-        listOf(
-            HistoricalRun("run1", true),
-            HistoricalRun(null, true),
-            HistoricalRun("run2", false),
-            HistoricalRun(null, true),
-            HistoricalRun(null, true),
-            HistoricalRun("run3", true),
-            HistoricalRun(null, false),
-            HistoricalRun(null, true),
-            HistoricalRun(null, true),
-            HistoricalRun(testRun.id, true),  // Current run
-        )
+    // Historical runs for the same test, sorted by start time
+    val historicalRuns = remember(testRun.testId, allTestRuns) {
+        allTestRuns
+            .filter { it.testId == testRun.testId }
+            .sortedBy { it.startTime }
+            .takeLast(10)  // Show last 10 runs
+            .map { run ->
+                HistoricalRun(
+                    runId = run.id,
+                    passed = run.status == TestStatus.Passed,
+                )
+            }
+            .ifEmpty {
+                // Fallback: just show the current run if no history
+                listOf(HistoricalRun(testRun.id, testRun.status == TestStatus.Passed))
+            }
     }
-    val passRate = (historicalRuns.count { it.passed } * 100) / historicalRuns.size
+    val passRate = if (historicalRuns.isNotEmpty()) {
+        (historicalRuns.count { it.passed } * 100) / historicalRuns.size
+    } else 0
 
     BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
         val isWideLayout = maxWidth >= 400.dp

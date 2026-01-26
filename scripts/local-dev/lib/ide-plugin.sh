@@ -25,7 +25,6 @@ PLUGIN_NAME="auto-mobile-ide-plugin"
 SELECTED_IDE_NAME=""
 SELECTED_IDE_PATH=""
 SELECTED_IDE_TYPE=""  # "android-studio" or "intellij"
-SELECTED_IDE_VERSION=""
 
 # Detect IDEs from JetBrains Toolbox state.json (primary method)
 # Outputs: Lines of "type|name|path|launch_command"

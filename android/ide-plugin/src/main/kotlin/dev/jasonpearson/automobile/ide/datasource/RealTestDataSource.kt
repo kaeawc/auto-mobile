@@ -47,6 +47,7 @@ class RealTestDataSource(
                     platform = TestPlatform.Android, // Default, could be inferred
                     videoPath = null,
                     snapshotPath = null,
+                    sampleSize = entry.sampleSize,
                 )
             }
 

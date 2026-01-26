@@ -8,6 +8,7 @@ data class ScreenNode(
     val testCoverage: Int, // percentage
     val transitionCount: Int,
     val discoveredAt: Long, // epoch millis - older = discovered earlier during exploration
+    val screenshotUri: String? = null, // MCP resource URI for screenshot thumbnail
 )
 
 data class ScreenTransition(

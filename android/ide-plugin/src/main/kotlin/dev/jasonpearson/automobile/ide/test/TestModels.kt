@@ -33,6 +33,7 @@ data class TestRun(
     val platform: TestPlatform,  // Platform this test ran on
     val videoPath: String? = null,  // Path to screen recording video
     val snapshotPath: String? = null,  // Path to app snapshot (platform-specific)
+    val sampleSize: Int = 0,  // Number of times this test has been run (from timing data)
 )
 
 data class TestStep(

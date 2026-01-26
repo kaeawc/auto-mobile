@@ -21,6 +21,7 @@ import { AndroidAccessibilityServiceManager } from "../../utils/AccessibilitySer
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { NavigationGraphManager, NavigationEvent } from "../navigation/NavigationGraphManager";
+import { NavigationScreenshotManager } from "../navigation/NavigationScreenshotManager";
 import { HierarchyNavigationDetector } from "../navigation/HierarchyNavigationDetector";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { ElementParser } from "../utility/ElementParser";
@@ -876,6 +877,24 @@ export class AccessibilityServiceClient implements AccessibilityService {
         NavigationGraphManager.getInstance(),
         { timer: this.timer }
       );
+
+      // Wire up screenshot capture for hierarchy-based navigation
+      this.hierarchyNavigationDetector.setNavigationCallback(info => {
+        if (info.packageName && info.screenFingerprint) {
+          const appId = info.packageName;
+          const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
+          NavigationScreenshotManager.getInstance()
+            .captureAndStore(this.device, this.adb, appId, screenName)
+            .then(screenshotPath => {
+              if (screenshotPath) {
+                NavigationGraphManager.getInstance()
+                  .updateNodeScreenshot(appId, screenName, screenshotPath)
+                  .catch(err => logger.warn(`[ACCESSIBILITY_SERVICE] Failed to update hierarchy screenshot: ${err}`));
+              }
+            })
+            .catch(err => logger.debug(`[ACCESSIBILITY_SERVICE] Hierarchy screenshot capture skipped: ${err}`));
+        }
+      });
     }
     return this.hierarchyNavigationDetector;
   }
@@ -1688,6 +1707,22 @@ export class AccessibilityServiceClient implements AccessibilityService {
             `(source: ${event.source}, app: ${event.applicationId || "unknown"}, timestamp: ${event.timestamp})`
           );
           await NavigationGraphManager.getInstance().recordNavigationEvent(event);
+
+          // Fire-and-forget screenshot capture for navigation graph thumbnails
+          if (event.applicationId && event.destination) {
+            const appId = event.applicationId;
+            const screenName = event.destination;
+            NavigationScreenshotManager.getInstance()
+              .captureAndStore(this.device, this.adb, appId, screenName)
+              .then(screenshotPath => {
+                if (screenshotPath) {
+                  NavigationGraphManager.getInstance()
+                    .updateNodeScreenshot(appId, screenName, screenshotPath)
+                    .catch(err => logger.warn(`[ACCESSIBILITY_SERVICE] Failed to update screenshot: ${err}`));
+                }
+              })
+              .catch(err => logger.debug(`[ACCESSIBILITY_SERVICE] Screenshot capture skipped: ${err}`));
+          }
         }
       }
 

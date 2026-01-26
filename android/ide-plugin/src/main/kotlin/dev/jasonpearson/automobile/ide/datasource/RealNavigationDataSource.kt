@@ -59,6 +59,7 @@ class RealNavigationDataSource(
                     testCoverage = 0, // Not available from MCP yet
                     transitionCount = outgoingEdgeCounts[node.screenName] ?: 0,
                     discoveredAt = System.currentTimeMillis(), // Not available from summary
+                    screenshotUri = node.screenshotPath, // MCP resource URI for screenshot
                 )
             }
 
@@ -130,6 +131,7 @@ private data class McpNavigationNode(
     val id: Int,
     val screenName: String,
     val visitCount: Int,
+    val screenshotPath: String? = null, // MCP resource URI for screenshot thumbnail
 )
 
 @Serializable

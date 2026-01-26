@@ -38,6 +38,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
+import dev.jasonpearson.automobile.ide.time.Clock
+import dev.jasonpearson.automobile.ide.time.SystemClock
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 
@@ -1262,8 +1264,8 @@ private val numberFormat = java.text.NumberFormat.getNumberInstance()
 
 private fun formatNumber(value: Int): String = numberFormat.format(value)
 
-private fun formatTimeAgo(timestamp: Long): String {
-    val diff = System.currentTimeMillis() - timestamp
+internal fun formatTimeAgo(timestamp: Long, clock: Clock = SystemClock): String {
+    val diff = clock.nowMs() - timestamp
     return when {
         diff < 60_000 -> "Just now"
         diff < 3600_000 -> "${diff / 60_000}m ago"

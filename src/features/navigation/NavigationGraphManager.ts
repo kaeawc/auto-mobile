@@ -1029,6 +1029,10 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
       id: node.id,
       screenName: node.screen_name,
       visitCount: node.visit_count,
+      // Include screenshot path as resource URI if available
+      screenshotPath: node.screenshot_path
+        ? `automobile:navigation/nodes/${node.id}/screenshot`
+        : null,
     }));
 
     const edges: NavigationGraphSummaryEdge[] = dbEdges.map(edge => ({
@@ -1143,6 +1147,20 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
       nodes: historyNodes,
       edges: historyEdges,
     };
+  }
+
+  /**
+   * Update the screenshot path for a navigation node.
+   * Called after async screenshot capture completes.
+   */
+  public async updateNodeScreenshot(
+    appId: string,
+    screenName: string,
+    screenshotPath: string | null
+  ): Promise<void> {
+    await this.repository.updateNodeScreenshot(appId, screenName, screenshotPath);
+    logger.debug(`[NAVIGATION_GRAPH] Updated screenshot for ${screenName}: ${screenshotPath}`);
+    this.notifyGraphUpdated();
   }
 
   /**

@@ -3,7 +3,8 @@ package dev.jasonpearson.automobile.ide.failures
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.ide.daemon.McpConnectionException
 import dev.jasonpearson.automobile.ide.daemon.decodeResourceResponse
-import kotlinx.serialization.SerialName
+import dev.jasonpearson.automobile.ide.time.Clock
+import dev.jasonpearson.automobile.ide.time.SystemClock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
@@ -88,9 +89,11 @@ interface FailuresDataSource {
 /**
  * Mock data source that uses local mock data
  */
-class MockFailuresDataSource : FailuresDataSource {
+class MockFailuresDataSource(
+    private val clock: Clock = SystemClock,
+) : FailuresDataSource {
     override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
-        return DataSourceResult.Success(createMockFailureGroups())
+        return DataSourceResult.Success(createMockFailureGroups(clock))
     }
 
     override suspend fun getTimelineData(
@@ -99,7 +102,7 @@ class MockFailuresDataSource : FailuresDataSource {
     ): DataSourceResult<TimelineData> {
         return DataSourceResult.Success(
             TimelineData(
-                dataPoints = generateMockTimelineData(dateRange, aggregation),
+                dataPoints = generateMockTimelineData(dateRange, aggregation, clock),
                 previousPeriodTotals = generateMockPreviousPeriodTotals(dateRange),
             )
         )
@@ -382,7 +385,11 @@ private const val MAX_DISPLAYABLE_BUCKETS = 100
 /**
  * Generate mock timeline data with relative time labels
  */
-internal fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAggregation): List<TimelineDataPoint> {
+internal fun generateMockTimelineData(
+    dateRange: DateRange,
+    aggregation: TimeAggregation,
+    clock: Clock = SystemClock,
+): List<TimelineDataPoint> {
     val random = kotlin.random.Random(42) // Fixed seed for consistent data
 
     // Calculate number of buckets, capped at displayable limit
@@ -394,7 +401,7 @@ internal fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAgg
         val timeAgoMs = bucketIndex * aggregation.durationMs
 
         // Generate relative time label
-        val label = formatRelativeTimeLabel(timeAgoMs, aggregation)
+        val label = formatRelativeTimeLabel(timeAgoMs, aggregation, clock)
 
         // Generate realistic-looking failure data with some variance
         val baseCrashes = when (aggregation) {
@@ -418,8 +425,12 @@ internal fun generateMockTimelineData(dateRange: DateRange, aggregation: TimeAgg
 /**
  * Format a local human-readable time label for the timeline
  */
-private fun formatRelativeTimeLabel(timeAgoMs: Long, aggregation: TimeAggregation): String {
-    val now = System.currentTimeMillis()
+private fun formatRelativeTimeLabel(
+    timeAgoMs: Long,
+    aggregation: TimeAggregation,
+    clock: Clock = SystemClock,
+): String {
+    val now = clock.nowMs()
     val timestamp = now - timeAgoMs
     val calendar = java.util.Calendar.getInstance()
     calendar.timeInMillis = timestamp
@@ -493,8 +504,8 @@ internal fun generateMockPreviousPeriodTotals(dateRange: DateRange): PeriodTotal
 /**
  * Create mock failure data for demonstration with aggregated data across multiple occurrences
  */
-internal fun createMockFailureGroups(): List<FailureGroup> {
-    val now = System.currentTimeMillis()
+internal fun createMockFailureGroups(clock: Clock = SystemClock): List<FailureGroup> {
+    val now = clock.nowMs()
 
     return listOf(
         // Crash with data from multiple devices, versions, and sessions

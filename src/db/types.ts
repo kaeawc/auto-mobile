@@ -85,6 +85,7 @@ export interface NavigationNodesTable {
   visit_count: number;
   back_stack_depth: number | null;
   task_id: number | null;
+  screenshot_path: string | null;
   created_at: Generated<string>;
 }
 

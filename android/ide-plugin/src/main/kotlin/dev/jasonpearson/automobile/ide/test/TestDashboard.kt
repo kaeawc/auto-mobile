@@ -99,6 +99,8 @@ fun TestDashboard(
     when (currentScreen) {
         TestScreen.Dashboard -> TestDashboardHome(
             testRuns = testRuns,
+            isLoading = isLoading,
+            error = error,
             onExploratoryTest = { currentScreen = TestScreen.ExploratoryTest },
             onRecordTest = { currentScreen = TestScreen.RecordingTest },
             onTestRunClick = { run ->
@@ -149,6 +151,8 @@ private enum class TestFilter { Recent, Popular, Both }
 @Composable
 private fun TestDashboardHome(
     testRuns: List<TestRun>,
+    isLoading: Boolean = false,
+    error: String? = null,
     onExploratoryTest: () -> Unit,
     onRecordTest: () -> Unit,
     onTestRunClick: (TestRun) -> Unit,
@@ -157,23 +161,21 @@ private fun TestDashboardHome(
     val scrollState = rememberScrollState()
     var selectedFilter by remember { mutableStateOf(TestFilter.Both) }
 
-    // Get test runs with their associated test case data for sorting
-    val testRunsWithPopularity = remember(testRuns) {
-        testRuns.map { run ->
-            val testCase = TestMockData.testCases.find { it.id == run.testId }
-            run to (testCase?.runCount ?: 0)
-        }
-    }
-
-    // Sort based on filter
-    val sortedRuns = remember(selectedFilter) {
+    // Sort based on filter - use sampleSize for popularity (fallback to TestMockData for fake data)
+    val sortedRuns = remember(selectedFilter, testRuns) {
         when (selectedFilter) {
-            TestFilter.Recent -> testRunsWithPopularity.sortedByDescending { it.first.startTime }
-            TestFilter.Popular -> testRunsWithPopularity.sortedByDescending { it.second }
-            TestFilter.Both -> testRunsWithPopularity.sortedByDescending {
-                it.first.startTime + it.second * 100_000
+            TestFilter.Recent -> testRuns.sortedByDescending { it.startTime }
+            TestFilter.Popular -> testRuns.sortedByDescending { run ->
+                // Use sampleSize if available, otherwise look up from mock data
+                if (run.sampleSize > 0) run.sampleSize
+                else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
             }
-        }.map { it.first }
+            TestFilter.Both -> testRuns.sortedByDescending { run ->
+                val popularity = if (run.sampleSize > 0) run.sampleSize
+                    else TestMockData.testCases.find { it.id == run.testId }?.runCount ?: 0
+                run.startTime + popularity * 100_000
+            }
+        }
     }
 
     Column(
@@ -233,16 +235,63 @@ private fun TestDashboardHome(
 
         Spacer(Modifier.height(8.dp))
 
-        sortedRuns.forEach { run ->
-            // Get associated test case for extra info
-            val testCase = TestMockData.testCases.find { it.id == run.testId }
-            TestRunRowEnhanced(
-                run = run,
-                runCount = testCase?.runCount ?: 0,
-                flakinessScore = testCase?.flakinessScore ?: 0f,
-                onClick = { onTestRunClick(run) },
-            )
-            Spacer(Modifier.height(6.dp))
+        // Loading state
+        if (isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text("Loading test data...", fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.6f))
+            }
+        }
+        // Error state
+        else if (error != null) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(Color(0xFFFF5722).copy(alpha = 0.1f), RoundedCornerShape(6.dp))
+                    .padding(16.dp),
+            ) {
+                Text(error, fontSize = 12.sp, color = Color(0xFFFF5722))
+            }
+        }
+        // Empty state
+        else if (sortedRuns.isEmpty()) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(colors.text.normal.copy(alpha = 0.04f), RoundedCornerShape(6.dp))
+                    .padding(16.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("No test runs yet", fontSize = 13.sp, color = colors.text.normal.copy(alpha = 0.6f))
+                    Text(
+                        "Record or run exploratory tests to see them here",
+                        fontSize = 11.sp,
+                        color = colors.text.normal.copy(alpha = 0.4f),
+                        modifier = Modifier.padding(top = 4.dp),
+                    )
+                }
+            }
+        }
+        // Data state
+        else {
+            sortedRuns.forEach { run ->
+                // Use sampleSize from run if available, otherwise fall back to mock data
+                val testCase = TestMockData.testCases.find { it.id == run.testId }
+                val runCount = if (run.sampleSize > 0) run.sampleSize else testCase?.runCount ?: 0
+                TestRunRowEnhanced(
+                    run = run,
+                    runCount = runCount,
+                    flakinessScore = testCase?.flakinessScore ?: 0f,
+                    onClick = { onTestRunClick(run) },
+                )
+                Spacer(Modifier.height(6.dp))
+            }
         }
     }
 }
@@ -305,8 +354,14 @@ private fun TestRunRowEnhanced(
             )
             Column {
                 Text(run.testName, fontSize = 13.sp)
+                // Show steps if available, otherwise show sample count as "runs"
+                val detailText = if (run.steps.isNotEmpty()) {
+                    "${run.deviceName} • ${run.steps.size} steps • $runCount runs"
+                } else {
+                    "${run.deviceName} • $runCount runs"
+                }
                 Text(
-                    "${run.deviceName} • ${run.steps.size} steps • $runCount runs",
+                    detailText,
                     fontSize = 11.sp,
                     color = colors.text.normal.copy(alpha = 0.5f),
                 )

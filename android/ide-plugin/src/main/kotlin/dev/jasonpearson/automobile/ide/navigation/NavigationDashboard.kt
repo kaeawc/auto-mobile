@@ -35,6 +35,15 @@ fun NavigationDashboard(
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
     var selectedTransitionId by remember { mutableStateOf<String?>(null) }
 
+    // Screenshot loader for navigation graph thumbnails (only for real data mode)
+    val screenshotLoader = remember(clientProvider, dataSourceMode) {
+        if (dataSourceMode == DataSourceMode.Real && clientProvider != null) {
+            NavigationScreenshotLoader(clientProvider)
+        } else {
+            null
+        }
+    }
+
     // Reset focus mode when navigating away from FlowMap
     LaunchedEffect(currentSection) {
         if (currentSection != NavigationSection.FlowMap) {
@@ -111,6 +120,7 @@ fun NavigationDashboard(
                     currentReplayScreen = currentStepScreen,
                     onFocusModeChanged = onFocusModeChanged,
                     headerHeightPx = headerHeightPx,
+                    screenshotLoader = screenshotLoader,
                 )
             }
 

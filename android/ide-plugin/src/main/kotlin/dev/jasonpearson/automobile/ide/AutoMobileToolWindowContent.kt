@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -126,6 +127,39 @@ data class SystemImage(
     val apiLevel: String,
 )
 
+// Common launcher package names
+private val ANDROID_LAUNCHERS = listOf(
+    "com.google.android.apps.nexuslauncher",  // Pixel Launcher
+    "com.android.launcher3",                   // AOSP Launcher
+    "com.sec.android.app.launcher",            // Samsung One UI
+    "com.huawei.android.launcher",             // Huawei
+    "com.miui.home",                           // Xiaomi MIUI
+)
+private const val IOS_SPRINGBOARD = "com.apple.springboard"
+
+/**
+ * Select the default app to show in the navigation graph.
+ * Priority: foreground app > launcher/springboard > first app in list
+ */
+private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?): String? {
+    // First priority: foreground app
+    apps.find { it.isForeground }?.let { return it.packageName }
+
+    // Second priority: launcher (Android) or springboard (iOS)
+    val isIOS = deviceType == DeviceType.iOSSimulator || deviceType == DeviceType.iOSPhysical
+    if (isIOS) {
+        apps.find { it.packageName == IOS_SPRINGBOARD }?.let { return it.packageName }
+    } else {
+        // Android - try common launcher packages
+        for (launcher in ANDROID_LAUNCHERS) {
+            apps.find { it.packageName == launcher }?.let { return it.packageName }
+        }
+    }
+
+    // Fallback: first app in list
+    return apps.firstOrNull()?.packageName
+}
+
 @Composable
 fun AutoMobileToolWindowContent() {
   var selectedIndex by remember { mutableIntStateOf(0) }
@@ -222,11 +256,8 @@ fun AutoMobileToolWindowContent() {
                               installedApps = result.data
                               // Auto-select foreground app if none selected (only on first load)
                               if (isFirstLoad && selectedAppId == null) {
-                                  val foregroundApp = result.data.find { it.isForeground }
-                                  if (foregroundApp != null) {
-                                      selectedAppId = foregroundApp.packageName
-                                      LOG.info("Auto-selected foreground app: ${foregroundApp.packageName}")
-                                  }
+                                  selectedAppId = selectDefaultApp(result.data, realDevice?.type)
+                                  LOG.info("Auto-selected app: $selectedAppId")
                               }
                           }
                           is Result.Error -> {
@@ -258,7 +289,7 @@ fun AutoMobileToolWindowContent() {
                   is Result.Success -> {
                       installedApps = result.data
                       if (selectedAppId == null) {
-                          selectedAppId = result.data.find { it.isForeground }?.packageName
+                          selectedAppId = selectDefaultApp(result.data, null)
                       }
                   }
                   else -> {}
@@ -2701,8 +2732,9 @@ private fun AppSelectorDropdown(
     val displayText = when {
         isLoading -> "Loading..."
         selectedApp != null -> selectedApp.displayName ?: selectedApp.packageName
-        selectedAppId == null -> "All apps"
-        else -> selectedAppId
+        selectedAppId != null -> selectedAppId // Show package name if app not in list
+        installedApps.isEmpty() -> "No apps"
+        else -> "Select app"
     }
 
     Row(
@@ -2767,22 +2799,11 @@ private fun AppSelectorDropdown(
                     Column(
                         modifier = Modifier
                             .width(300.dp)
+                            .heightIn(max = 200.dp) // Show ~5 items, scroll for more
                             .background(Color(0xFF2D2D2D), RoundedCornerShape(4.dp))
                             .border(1.dp, Color(0xFF404040), RoundedCornerShape(4.dp))
                             .verticalScroll(rememberScrollState())
                     ) {
-                        // "All apps" option
-                        AppDropdownItem(
-                            displayName = "All apps",
-                            packageName = null,
-                            isForeground = false,
-                            isSelected = selectedAppId == null,
-                            onClick = {
-                                onAppSelected(null)
-                                onExpandedChange(false)
-                            },
-                        )
-
                         // Installed apps - foreground first
                         val sortedApps = installedApps.sortedByDescending { it.isForeground }
                         sortedApps.forEach { app ->

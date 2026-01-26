@@ -451,8 +451,10 @@ function generateMockPreviousPeriodTotals(dateRange: string): PeriodTotals {
 
 async function getFailuresResource(uri: string): Promise<ResourceContent> {
   try {
+    // Return empty data - real failure tracking not yet implemented
+    // When failure monitoring is added, this will return actual failures from logcat/SDK
     const response: FailuresResponse = {
-      groups: createMockFailureGroups(),
+      groups: [],
       generatedAt: new Date().toISOString(),
     };
 
@@ -476,11 +478,12 @@ async function getTimelineResource(params: Record<string, string>): Promise<Reso
     const dateRange = params.dateRange || "24h";
     const aggregation = params.aggregation || "hour";
 
+    // Return empty timeline - real failure tracking not yet implemented
     const response: TimelineResponse = {
-      dataPoints: generateMockTimelineData(dateRange, aggregation),
+      dataPoints: [],
       dateRange,
       aggregation,
-      previousPeriodTotals: generateMockPreviousPeriodTotals(dateRange),
+      previousPeriodTotals: { crashes: 0, anrs: 0, toolFailures: 0 },
     };
 
     const uri = `${FAILURES_RESOURCE_URIS.TIMELINE}?dateRange=${dateRange}&aggregation=${aggregation}`;

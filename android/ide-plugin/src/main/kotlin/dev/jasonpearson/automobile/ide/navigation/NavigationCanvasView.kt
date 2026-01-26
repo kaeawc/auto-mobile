@@ -31,10 +31,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlin.math.abs
 import kotlin.math.min
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -70,6 +75,7 @@ fun NavigationCanvasView(
     currentReplayScreen: String? = null,  // Currently active screen during replay
     onFocusModeChanged: (Boolean) -> Unit = {},  // Called when zoom causes content to extend beyond canvas
     headerHeightPx: Float = 0f,  // Height of header area to check overlap against
+    screenshotLoader: NavigationScreenshotLoader? = null,  // Loader for screenshot thumbnails
 ) {
     val density = LocalDensity.current
     val colors = JewelTheme.globalColors
@@ -606,6 +612,7 @@ fun NavigationCanvasView(
                         onHoverChange = { isHovered ->
                             hoveredScreenName = if (isHovered) screen.name else null
                         },
+                        screenshotLoader = screenshotLoader,
                     )
                 }
             }
@@ -640,7 +647,25 @@ private fun ScreenNodeCard(
     isDimmed: Boolean,
     onClick: () -> Unit,
     onHoverChange: (Boolean) -> Unit,
+    screenshotLoader: NavigationScreenshotLoader? = null,
 ) {
+    // Screenshot loading state
+    var screenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
+    var isLoadingScreenshot by remember { mutableStateOf(false) }
+
+    // Load screenshot when available
+    LaunchedEffect(screen.screenshotUri) {
+        if (screen.screenshotUri != null && screenshotLoader != null) {
+            isLoadingScreenshot = true
+            screenshotBitmap = withContext(Dispatchers.IO) {
+                screenshotLoader.load(screen.screenshotUri)
+            }
+            isLoadingScreenshot = false
+        } else {
+            screenshotBitmap = null
+        }
+    }
+
     val colors = JewelTheme.globalColors
     val coverageColor = when {
         screen.testCoverage >= 80 -> Color(0xFF4CAF50)
@@ -699,7 +724,7 @@ private fun ScreenNodeCard(
                 .padding(6.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
-            // Screen preview placeholder (portrait phone shape)
+            // Screen preview (screenshot or placeholder)
             Box(
                 modifier = Modifier
                     .weight(1f)
@@ -708,7 +733,25 @@ private fun ScreenNodeCard(
                     .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp)),
                 contentAlignment = Alignment.Center,
             ) {
-                // Could show actual screenshot thumbnail here
+                when {
+                    screenshotBitmap != null -> {
+                        Image(
+                            bitmap = screenshotBitmap!!,
+                            contentDescription = "Screenshot of ${screen.name}",
+                            modifier = Modifier.fillMaxSize(),
+                            contentScale = ContentScale.Crop,
+                        )
+                    }
+                    isLoadingScreenshot -> {
+                        // Show subtle loading indicator (dimmed placeholder)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(colors.text.normal.copy(alpha = 0.04f)),
+                        )
+                    }
+                    // else: empty placeholder (no screenshot available)
+                }
             }
 
             // Screen name (truncated)

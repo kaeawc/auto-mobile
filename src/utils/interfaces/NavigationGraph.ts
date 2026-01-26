@@ -164,6 +164,8 @@ export interface NavigationGraphSummaryNode {
   id: number;
   screenName: string;
   visitCount: number;
+  /** Path to screenshot file, or resource URI for fetching */
+  screenshotPath?: string | null;
 }
 
 /**

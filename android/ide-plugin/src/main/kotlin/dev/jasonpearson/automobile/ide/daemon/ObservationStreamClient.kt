@@ -65,6 +65,10 @@ class ObservationStreamClient {
     private val _screenshotUpdates = MutableSharedFlow<ScreenshotStreamUpdate>(replay = 1)
     val screenshotUpdates: SharedFlow<ScreenshotStreamUpdate> = _screenshotUpdates.asSharedFlow()
 
+    // Flow for navigation graph updates
+    private val _navigationUpdates = MutableSharedFlow<NavigationGraphStreamUpdate>(replay = 1)
+    val navigationUpdates: SharedFlow<NavigationGraphStreamUpdate> = _navigationUpdates.asSharedFlow()
+
     // Flow for connection state
     private val _connectionState = MutableSharedFlow<StreamConnectionState>(replay = 1)
     val connectionState: SharedFlow<StreamConnectionState> = _connectionState.asSharedFlow()
@@ -249,6 +253,21 @@ class ObservationStreamClient {
                 _screenshotUpdates.emit(update)
                 log.info("Emitted screenshot update to flow")
             }
+            "navigation_update" -> {
+                val navGraph = response.navigationGraph
+                log.info("Navigation update received - appId=${navGraph?.appId}, nodes=${navGraph?.nodes?.size}, edges=${navGraph?.edges?.size}")
+                if (navGraph != null) {
+                    val update = NavigationGraphStreamUpdate(
+                        timestamp = response.timestamp ?: System.currentTimeMillis(),
+                        appId = navGraph.appId,
+                        nodes = navGraph.nodes,
+                        edges = navGraph.edges,
+                        currentScreen = navGraph.currentScreen,
+                    )
+                    _navigationUpdates.emit(update)
+                    log.info("Emitted navigation update to flow")
+                }
+            }
             "ping" -> {
                 log.info("Received ping, sending pong")
                 sendPong()
@@ -306,6 +325,32 @@ data class StreamResponse(
     val screenshotBase64: String? = null,
     val screenWidth: Int? = null,
     val screenHeight: Int? = null,
+    val navigationGraph: NavigationGraphStreamData? = null,
+)
+
+@Serializable
+data class NavigationGraphStreamData(
+    val appId: String?,
+    val nodes: List<NavigationNodeData>,
+    val edges: List<NavigationEdgeData>,
+    val currentScreen: String?,
+)
+
+@Serializable
+data class NavigationNodeData(
+    val id: Int,
+    val screenName: String,
+    val visitCount: Int,
+    val screenshotPath: String? = null,
+)
+
+@Serializable
+data class NavigationEdgeData(
+    val id: Int,
+    val from: String,
+    val to: String,
+    val toolName: String? = null,
+    val traversalCount: Int = 1,
 )
 
 data class HierarchyStreamUpdate(
@@ -321,6 +366,14 @@ data class ScreenshotStreamUpdate(
     val screenshotBase64: String?,
     val screenWidth: Int,
     val screenHeight: Int,
+)
+
+data class NavigationGraphStreamUpdate(
+    val timestamp: Long,
+    val appId: String?,
+    val nodes: List<NavigationNodeData>,
+    val edges: List<NavigationEdgeData>,
+    val currentScreen: String?,
 )
 
 sealed class StreamConnectionState {

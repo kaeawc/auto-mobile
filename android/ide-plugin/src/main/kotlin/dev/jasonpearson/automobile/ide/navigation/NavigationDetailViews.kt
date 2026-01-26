@@ -206,11 +206,20 @@ fun TransitionRow(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(
-                "${transition.avgLatencyMs}ms",
-                fontSize = 11.sp,
-                color = colors.text.normal.copy(alpha = 0.5f),
-            )
+            // Show traversal count (or latency if available)
+            if (transition.avgLatencyMs > 0) {
+                Text(
+                    "${transition.avgLatencyMs}ms",
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            } else {
+                Text(
+                    "${transition.traversalCount}x",
+                    fontSize = 11.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
+            }
             if (transition.failureRate > 0) {
                 Text(
                     "${(transition.failureRate * 100).toInt()}% fail",
@@ -356,8 +365,13 @@ fun TransitionDetailView(
         // Details
         DetailRow("Trigger", transition.trigger.replaceFirstChar { it.uppercase() })
         transition.element?.let { DetailRow("Element", it) }
-        DetailRow("Avg Latency", "${transition.avgLatencyMs}ms")
-        DetailRow("Failure Rate", "${(transition.failureRate * 100)}%")
+        DetailRow("Traversals", "${transition.traversalCount}")
+        if (transition.avgLatencyMs > 0) {
+            DetailRow("Avg Latency", "${transition.avgLatencyMs}ms")
+        }
+        if (transition.failureRate > 0) {
+            DetailRow("Failure Rate", "${(transition.failureRate * 100)}%")
+        }
 
         Spacer(Modifier.height(20.dp))
 

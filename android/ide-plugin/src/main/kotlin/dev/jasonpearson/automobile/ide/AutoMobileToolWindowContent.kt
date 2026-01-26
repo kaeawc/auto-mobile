@@ -450,6 +450,7 @@ fun AutoMobileToolWindowContent() {
               dataSourceMode = dataSourceMode,
               clientProvider = clientProvider,
               selectedAppId = selectedAppId,
+              observationStreamClient = observationStreamClient,
           )
           Dashboard.Test -> TestDashboard(
               onOpenFile = { filePath ->

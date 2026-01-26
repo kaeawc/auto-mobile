@@ -22,11 +22,33 @@ interface ObservationStreamRequest {
 }
 
 /**
+ * Navigation graph summary for streaming to IDE plugins.
+ */
+export interface NavigationGraphStreamData {
+  appId: string | null;
+  nodes: Array<{
+    id: number;
+    screenName: string;
+    visitCount: number;
+    screenshotPath?: string | null;
+  }>;
+  edges: Array<{
+    id: number;
+    from: string;
+    to: string;
+    toolName: string | null;
+    /** Number of times this transition has been traversed */
+    traversalCount: number;
+  }>;
+  currentScreen: string | null;
+}
+
+/**
  * Response/push message format
  */
 interface ObservationStreamMessage {
   id?: string;
-  type: "subscription_response" | "hierarchy_update" | "screenshot_update" | "ping" | "pong" | "error";
+  type: "subscription_response" | "hierarchy_update" | "screenshot_update" | "navigation_update" | "ping" | "pong" | "error";
   success?: boolean;
   error?: string;
   deviceId?: string;
@@ -35,6 +57,7 @@ interface ObservationStreamMessage {
   screenshotBase64?: string;
   screenWidth?: number;
   screenHeight?: number;
+  navigationGraph?: NavigationGraphStreamData;
 }
 
 /**
@@ -260,6 +283,20 @@ export class ObservationStreamSocketServer {
   }
 
   /**
+   * Push a navigation graph update to all subscribers.
+   * Navigation graph updates are broadcast to all subscribers (not device-specific).
+   */
+  pushNavigationGraphUpdate(navigationGraph: NavigationGraphStreamData): void {
+    const message: ObservationStreamMessage = {
+      type: "navigation_update",
+      timestamp: Date.now(),
+      navigationGraph,
+    };
+
+    this.broadcastToAllSubscribers(message);
+  }
+
+  /**
    * Get the number of active subscribers.
    */
   getSubscriberCount(): number {
@@ -304,6 +341,44 @@ export class ObservationStreamSocketServer {
 
     if (sentCount > 0) {
       logger.info(`[ObservationStream] Pushed ${message.type} to ${sentCount} subscribers (device: ${deviceId})`);
+    }
+  }
+
+  private broadcastToAllSubscribers(message: ObservationStreamMessage): void {
+    const json = JSON.stringify(message) + "\n";
+    let sentCount = 0;
+    const deadSubscribers: string[] = [];
+
+    for (const [subscriptionId, subscriber] of this.subscribers) {
+      // Check if socket is already destroyed
+      if (subscriber.socket.destroyed) {
+        logger.warn(`[ObservationStream] Subscriber ${subscriptionId} socket already destroyed, skipping`);
+        deadSubscribers.push(subscriptionId);
+        continue;
+      }
+
+      try {
+        const result = subscriber.socket.write(json);
+        logger.debug(`[ObservationStream] Write to ${subscriptionId} returned: ${result}, bytes: ${json.length}`);
+        if (result) {
+          // Update last activity on successful write
+          subscriber.lastActivity = Date.now();
+        }
+        sentCount++;
+      } catch (error) {
+        logger.warn(`[ObservationStream] Failed to send to subscriber ${subscriptionId}: ${error}`);
+        deadSubscribers.push(subscriptionId);
+      }
+    }
+
+    // Remove dead subscribers
+    for (const subscriptionId of deadSubscribers) {
+      this.subscribers.delete(subscriptionId);
+      logger.info(`[ObservationStream] Removed dead subscriber ${subscriptionId}`);
+    }
+
+    if (sentCount > 0) {
+      logger.info(`[ObservationStream] Pushed ${message.type} to ${sentCount} subscribers`);
     }
   }
 

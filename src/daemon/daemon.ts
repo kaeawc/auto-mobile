@@ -29,6 +29,7 @@ import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appea
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
 import { startObservationStreamSocketServer, stopObservationStreamSocketServer, getObservationStreamServer } from "./observationStreamSocketServer";
 import { AccessibilityServiceClient } from "../features/observe/AccessibilityServiceClient";
+import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
@@ -534,6 +535,55 @@ export class Daemon {
     });
 
     logger.info("[Daemon] Observation stream callback configured");
+
+    // Wire up navigation graph updates to stream to IDE plugins
+    this.setupNavigationGraphStreamListener(server);
+  }
+
+  /**
+   * Set up listener for navigation graph changes.
+   * When the navigation graph changes, push updates to all subscribed IDE plugins.
+   */
+  private setupNavigationGraphStreamListener(server: ReturnType<typeof getObservationStreamServer>): void {
+    if (!server) {
+      return;
+    }
+
+    const navGraphManager = NavigationGraphManager.getInstance();
+
+    navGraphManager.setGraphUpdateListener(async () => {
+      logger.info("[Daemon] Navigation graph listener triggered, exporting summary...");
+      try {
+        // Get the current graph summary
+        const summary = await navGraphManager.exportGraphSummary();
+        logger.info(`[Daemon] Got summary: appId=${summary.appId}, nodes=${summary.nodes.length}, edges=${summary.edges.length}`);
+
+        // Push to all subscribers
+        server.pushNavigationGraphUpdate({
+          appId: summary.appId,
+          nodes: summary.nodes.map(node => ({
+            id: node.id,
+            screenName: node.screenName,
+            visitCount: node.visitCount,
+            screenshotPath: node.screenshotPath,
+          })),
+          edges: summary.edges.map(edge => ({
+            id: edge.id,
+            from: edge.from,
+            to: edge.to,
+            toolName: edge.toolName,
+            traversalCount: edge.traversalCount,
+          })),
+          currentScreen: summary.currentScreen,
+        });
+
+        logger.info(`[Daemon] Pushed navigation graph update: ${summary.nodes.length} nodes, ${summary.edges.length} edges`);
+      } catch (error) {
+        logger.warn(`[Daemon] Failed to push navigation graph update: ${error}`);
+      }
+    });
+
+    logger.info("[Daemon] Navigation graph stream listener configured");
   }
 
   /**

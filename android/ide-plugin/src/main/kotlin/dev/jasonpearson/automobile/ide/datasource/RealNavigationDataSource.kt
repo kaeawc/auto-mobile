@@ -73,6 +73,7 @@ class RealNavigationDataSource(
                     element = null, // Would need detailed edge data
                     avgLatencyMs = 0, // Not available from MCP yet
                     failureRate = 0f, // Not available from MCP yet
+                    traversalCount = edge.traversalCount,
                 )
             }
 
@@ -140,4 +141,5 @@ private data class McpNavigationEdge(
     val from: String,
     val to: String,
     val toolName: String?,
+    val traversalCount: Int = 1,
 )

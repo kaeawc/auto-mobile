@@ -19,6 +19,7 @@ data class ScreenTransition(
     val element: String?, // UI element that triggers
     val avgLatencyMs: Int,
     val failureRate: Float,
+    val traversalCount: Int = 1, // Number of times this transition has been traversed
 )
 
 // Mock data for development - Messaging app (18 screens)

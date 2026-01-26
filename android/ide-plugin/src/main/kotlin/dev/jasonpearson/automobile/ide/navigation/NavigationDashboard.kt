@@ -10,6 +10,8 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.daemon.NavigationGraphStreamUpdate
+import dev.jasonpearson.automobile.ide.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 import dev.jasonpearson.automobile.ide.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.ide.datasource.NavigationGraph
@@ -30,6 +32,7 @@ fun NavigationDashboard(
     dataSourceMode: DataSourceMode = DataSourceMode.Fake,
     clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
     selectedAppId: String? = null,  // App ID to filter navigation graph by (managed by parent)
+    observationStreamClient: ObservationStreamClient? = null,  // Real-time stream client for navigation updates
 ) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
@@ -86,6 +89,25 @@ fun NavigationDashboard(
                 LOG.error("Exception loading navigation data", e)
                 error = e.message ?: "Unknown error"
                 isLoading = false
+            }
+        }
+    }
+
+    // Collect real-time navigation updates from the stream
+    LaunchedEffect(observationStreamClient, selectedAppId) {
+        if (observationStreamClient == null) return@LaunchedEffect
+
+        LOG.info("Starting navigation updates collection from stream client")
+        observationStreamClient.navigationUpdates.collect { update ->
+            // Only update if it's for the selected app (or if no app filter is set)
+            if (selectedAppId == null || update.appId == selectedAppId) {
+                LOG.info("Received navigation update - appId=${update.appId}, nodes=${update.nodes.size}, edges=${update.edges.size}")
+                // Ensure state updates happen on the main thread for proper recomposition
+                kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
+                    navigationGraph = convertStreamUpdateToGraph(update)
+                    isLoading = false
+                    error = null
+                }
             }
         }
     }
@@ -156,4 +178,37 @@ fun NavigationDashboard(
             }
         }
     }
+}
+
+/**
+ * Convert a navigation graph stream update to the NavigationGraph format used by the UI.
+ */
+private fun convertStreamUpdateToGraph(update: NavigationGraphStreamUpdate): NavigationGraph {
+    val screens = update.nodes.map { node ->
+        ScreenNode(
+            id = node.id.toString(),
+            name = node.screenName,
+            type = "Screen",  // Default type
+            packageName = update.appId ?: "",
+            testCoverage = 0,  // Not available from stream
+            transitionCount = node.visitCount,
+            discoveredAt = 0L,  // Not available from stream
+            screenshotUri = node.screenshotPath,
+        )
+    }
+
+    val transitions = update.edges.map { edge ->
+        ScreenTransition(
+            id = edge.id.toString(),
+            fromScreen = edge.from,
+            toScreen = edge.to,
+            trigger = edge.toolName ?: "unknown",
+            element = null,  // Not available from stream
+            avgLatencyMs = 0,  // Not available from stream
+            failureRate = 0f,  // Not available from stream
+            traversalCount = edge.traversalCount,
+        )
+    }
+
+    return NavigationGraph(screens = screens, transitions = transitions)
 }

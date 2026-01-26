@@ -170,12 +170,15 @@ export interface NavigationGraphSummaryNode {
 
 /**
  * High-level summary edge for navigation graph resources.
+ * When aggregated, represents a unique transition (from → to via toolName) with a traversal count.
  */
 export interface NavigationGraphSummaryEdge {
   id: number;
   from: string;
   to: string;
   toolName: string | null;
+  /** Number of times this transition has been traversed */
+  traversalCount: number;
 }
 
 /**

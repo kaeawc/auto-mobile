@@ -17,7 +17,7 @@ const DEFAULT_SOCKET_PATH = isExternalMode
  */
 interface ObservationStreamRequest {
   id: string;
-  command: "subscribe" | "unsubscribe" | "request_observation";
+  command: "subscribe" | "unsubscribe" | "request_observation" | "pong";
   deviceId?: string; // Optional: subscribe to specific device
 }
 
@@ -26,7 +26,7 @@ interface ObservationStreamRequest {
  */
 interface ObservationStreamMessage {
   id?: string;
-  type: "subscription_response" | "hierarchy_update" | "screenshot_update" | "error";
+  type: "subscription_response" | "hierarchy_update" | "screenshot_update" | "ping" | "pong" | "error";
   success?: boolean;
   error?: string;
   deviceId?: string;
@@ -44,6 +44,7 @@ interface Subscriber {
   socket: Socket;
   deviceId: string | null; // null means subscribe to all devices
   subscriptionId: string;
+  lastActivity: number; // Timestamp of last activity (subscribe, pong, or successful write)
 }
 
 /**
@@ -64,12 +65,17 @@ export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
  * - Server pushes: {"type": "hierarchy_update", "deviceId": "emulator-5554", "timestamp": 123, "data": {...}}
  * - Server pushes: {"type": "screenshot_update", "deviceId": "emulator-5554", "timestamp": 123, "screenshotBase64": "..."}
  */
+// Keepalive configuration
+const KEEPALIVE_INTERVAL_MS = 10_000; // Send ping every 10 seconds
+const KEEPALIVE_TIMEOUT_MS = 30_000; // Consider dead if no activity for 30 seconds
+
 export class ObservationStreamSocketServer {
   private server: NetServer | null = null;
   private socketPath: string;
   private subscribers: Map<string, Subscriber> = new Map();
   private subscriptionCounter = 0;
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(socketPath: string = DEFAULT_SOCKET_PATH) {
     this.socketPath = socketPath;
@@ -100,6 +106,7 @@ export class ObservationStreamSocketServer {
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
         logger.info(`[ObservationStream] Socket listening on ${this.socketPath}`);
+        this.startKeepalive();
         resolve();
       });
 
@@ -110,7 +117,85 @@ export class ObservationStreamSocketServer {
     });
   }
 
+  /**
+   * Start the keepalive interval to detect dead connections.
+   */
+  private startKeepalive(): void {
+    if (this.keepaliveInterval) {
+      return;
+    }
+
+    this.keepaliveInterval = setInterval(() => {
+      this.checkKeepalive();
+    }, KEEPALIVE_INTERVAL_MS);
+  }
+
+  /**
+   * Stop the keepalive interval.
+   */
+  private stopKeepalive(): void {
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+    }
+  }
+
+  /**
+   * Check all subscribers for keepalive timeout and send pings.
+   */
+  private checkKeepalive(): void {
+    const now = Date.now();
+    const deadSubscribers: string[] = [];
+
+    for (const [subscriptionId, subscriber] of this.subscribers) {
+      // Check if socket is destroyed
+      if (subscriber.socket.destroyed) {
+        logger.info(`[ObservationStream] Subscriber ${subscriptionId} socket destroyed, removing`);
+        deadSubscribers.push(subscriptionId);
+        continue;
+      }
+
+      // Check for timeout (no activity for too long)
+      const timeSinceActivity = now - subscriber.lastActivity;
+      if (timeSinceActivity > KEEPALIVE_TIMEOUT_MS) {
+        logger.warn(`[ObservationStream] Subscriber ${subscriptionId} timed out (${timeSinceActivity}ms since last activity), removing`);
+        deadSubscribers.push(subscriptionId);
+        try {
+          subscriber.socket.destroy();
+        } catch {
+          // Ignore errors when destroying
+        }
+        continue;
+      }
+
+      // Send ping to keep connection alive and detect broken pipes
+      const pingMessage: ObservationStreamMessage = {
+        type: "ping",
+        timestamp: now,
+      };
+      try {
+        const written = subscriber.socket.write(JSON.stringify(pingMessage) + "\n");
+        if (!written) {
+          // Write was buffered, socket might be slow or dead
+          logger.debug(`[ObservationStream] Ping to ${subscriptionId} was buffered (backpressure)`);
+        }
+      } catch (error) {
+        logger.warn(`[ObservationStream] Failed to ping ${subscriptionId}: ${error}`);
+        deadSubscribers.push(subscriptionId);
+      }
+    }
+
+    // Remove dead subscribers
+    for (const subscriptionId of deadSubscribers) {
+      this.subscribers.delete(subscriptionId);
+      logger.info(`[ObservationStream] Removed dead subscriber ${subscriptionId}`);
+    }
+  }
+
   async close(): Promise<void> {
+    // Stop keepalive
+    this.stopKeepalive();
+
     // Close all subscriber connections
     for (const [, subscriber] of this.subscribers) {
       try {
@@ -184,20 +269,37 @@ export class ObservationStreamSocketServer {
   private broadcastToSubscribers(deviceId: string, message: ObservationStreamMessage): void {
     const json = JSON.stringify(message) + "\n";
     let sentCount = 0;
+    const deadSubscribers: string[] = [];
 
     for (const [subscriptionId, subscriber] of this.subscribers) {
       // Send to subscribers that want all devices or specifically this device
       if (subscriber.deviceId === null || subscriber.deviceId === deviceId) {
+        // Check if socket is already destroyed
+        if (subscriber.socket.destroyed) {
+          logger.warn(`[ObservationStream] Subscriber ${subscriptionId} socket already destroyed, skipping`);
+          deadSubscribers.push(subscriptionId);
+          continue;
+        }
+
         try {
           const result = subscriber.socket.write(json);
           logger.info(`[ObservationStream] Write to ${subscriptionId} returned: ${result}, bytes: ${json.length}`);
+          if (result) {
+            // Update last activity on successful write
+            subscriber.lastActivity = Date.now();
+          }
           sentCount++;
         } catch (error) {
           logger.warn(`[ObservationStream] Failed to send to subscriber ${subscriptionId}: ${error}`);
-          // Remove dead subscriber
-          this.subscribers.delete(subscriptionId);
+          deadSubscribers.push(subscriptionId);
         }
       }
+    }
+
+    // Remove dead subscribers
+    for (const subscriptionId of deadSubscribers) {
+      this.subscribers.delete(subscriptionId);
+      logger.info(`[ObservationStream] Removed dead subscriber ${subscriptionId}`);
     }
 
     if (sentCount > 0) {
@@ -256,6 +358,7 @@ export class ObservationStreamSocketServer {
             socket,
             deviceId: request.deviceId ?? null,
             subscriptionId,
+            lastActivity: Date.now(),
           });
 
           const response: ObservationStreamMessage = {
@@ -307,6 +410,18 @@ export class ObservationStreamSocketServer {
             success: true,
           };
           socket.write(JSON.stringify(response) + "\n");
+          return;
+        }
+
+        case "pong": {
+          // Client responded to ping - update last activity for their subscription
+          for (const [, subscriber] of this.subscribers) {
+            if (subscriber.socket === socket) {
+              subscriber.lastActivity = Date.now();
+              logger.debug(`[ObservationStream] Received pong from ${subscriber.subscriptionId}`);
+              break;
+            }
+          }
           return;
         }
 

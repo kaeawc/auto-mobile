@@ -6,12 +6,13 @@ import dev.jasonpearson.automobile.ide.layout.ElementBounds
 import dev.jasonpearson.automobile.ide.layout.UIElementInfo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.decodeFromJsonElement
 import java.util.Base64
 
 /**
- * Real layout data source that fetches from MCP resources.
- * Uses the observation/latest resource to get the view hierarchy
- * and observation/latest/screenshot for the screenshot image.
+ * Real layout data source that fetches from MCP.
+ * Calls the 'observe' tool to capture fresh screen state,
+ * then reads the screenshot from the observation/latest/screenshot resource.
  */
 class RealLayoutDataSource(
     private val clientProvider: (() -> AutoMobileClient)? = null,
@@ -34,45 +35,27 @@ class RealLayoutDataSource(
         return try {
             val client = provider()
 
-            // Fetch observation data (hierarchy + metadata)
-            val observationContents = client.readResource("automobile:observation/latest")
-            val observationText = observationContents.firstOrNull { !it.text.isNullOrBlank() }?.text
+            // Call the observe tool to capture fresh screen state
+            val observeResult = client.observe(platform = "android")
 
-            if (observationText == null) {
-                return Result.Success(
-                    ObservationData(
-                        hierarchy = createEmptyHierarchy("No observation data available.")
+            // Parse the view hierarchy from the observe result
+            val hierarchy = observeResult.viewHierarchy?.let { viewHierarchyJson ->
+                try {
+                    val viewHierarchyResult = json.decodeFromJsonElement(
+                        ViewHierarchyResultDto.serializer(),
+                        viewHierarchyJson
                     )
-                )
-            }
-
-            // Check for error response
-            val jsonElement = json.parseToJsonElement(observationText)
-            if (jsonElement is kotlinx.serialization.json.JsonObject) {
-                val error = jsonElement["error"]?.let {
-                    (it as? kotlinx.serialization.json.JsonPrimitive)?.content
+                    viewHierarchyResult.hierarchy?.node?.let { nodes ->
+                        if (nodes.isNotEmpty()) {
+                            parseHierarchy(nodes.first(), 0)
+                        } else null
+                    }
+                } catch (e: Exception) {
+                    null
                 }
-                if (!error.isNullOrBlank()) {
-                    return Result.Success(
-                        ObservationData(
-                            hierarchy = createEmptyHierarchy("No observation captured. Call 'observe' to capture screen state.")
-                        )
-                    )
-                }
-            }
-
-            // Parse the observation response
-            val response = json.decodeFromString(ObservationResponse.serializer(), observationText)
-
-            // Convert to UIElementInfo tree
-            // The actual structure is viewHierarchy.hierarchy.node (can be array or single)
-            val hierarchy = response.viewHierarchy?.hierarchy?.node?.let { nodes ->
-                if (nodes.isNotEmpty()) {
-                    parseHierarchy(nodes.first(), 0)
-                } else null
             } ?: createEmptyHierarchy()
 
-            // Fetch screenshot separately
+            // Fetch screenshot from the resource (observe populates it)
             val screenshotData = try {
                 val screenshotContents = client.readResource("automobile:observation/latest/screenshot")
                 val screenshotBlob = screenshotContents.firstOrNull { !it.blob.isNullOrBlank() }?.blob
@@ -86,9 +69,9 @@ class RealLayoutDataSource(
                 ObservationData(
                     hierarchy = hierarchy,
                     screenshotData = screenshotData,
-                    screenWidth = response.screenSize?.width ?: 1080,
-                    screenHeight = response.screenSize?.height ?: 2340,
-                    timestamp = response.updatedAt ?: System.currentTimeMillis(),
+                    screenWidth = observeResult.screenSize?.width ?: 1080,
+                    screenHeight = observeResult.screenSize?.height ?: 2340,
+                    timestamp = observeResult.updatedAt ?: System.currentTimeMillis(),
                 )
             )
         } catch (e: McpConnectionException) {

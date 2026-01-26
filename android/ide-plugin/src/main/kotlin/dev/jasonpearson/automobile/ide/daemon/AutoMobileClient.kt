@@ -63,6 +63,8 @@ interface AutoMobileClient {
 
   fun setActiveDevice(deviceId: String, platform: String): SetActiveDeviceResult
 
+  fun observe(platform: String = "android"): ObserveResult
+
   fun close() {}
 }
 
@@ -77,6 +79,19 @@ data class StartDeviceResult(
 data class SetActiveDeviceResult(
     val success: Boolean = true,
     val message: String? = null,
+)
+
+@Serializable
+data class ObserveResult(
+    val updatedAt: Long? = null,
+    val screenSize: ObserveScreenSize? = null,
+    val viewHierarchy: JsonElement? = null,
+)
+
+@Serializable
+data class ObserveScreenSize(
+    val width: Int? = null,
+    val height: Int? = null,
 )
 
 open class McpConnectionException(message: String, cause: Throwable? = null) :

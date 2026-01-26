@@ -197,6 +197,21 @@ class McpHttpClient(
     }
   }
 
+  override fun observe(platform: String): ObserveResult {
+    val response =
+        callTool(
+            "observe",
+            buildJsonObject {
+              put("platform", JsonPrimitive(platform))
+            },
+        )
+    return try {
+      decodeToolResponse(json, response, ObserveResult.serializer())
+    } catch (e: Exception) {
+      ObserveResult()
+    }
+  }
+
   private fun callTool(name: String, arguments: JsonObject): JsonElement {
     ensureInitialized()
     val response =

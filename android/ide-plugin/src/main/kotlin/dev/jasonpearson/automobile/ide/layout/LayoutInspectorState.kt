@@ -13,6 +13,7 @@ import androidx.compose.runtime.setValue
  * - View hierarchy
  * - Selection state
  * - Connection status
+ * - Changed element tracking for visual feedback
  *
  * Phase 1: Uses mock data
  * Phase 2: Will add WebSocket connection for live data
@@ -40,6 +41,11 @@ class LayoutInspectorState {
 
     // Hierarchy state
     var hierarchy by mutableStateOf<UIElementInfo?>(null)
+        private set
+
+    // Changed elements tracking - IDs of elements that changed in the last update
+    // Used to trigger flash animations in the tree view
+    var changedElementIds by mutableStateOf<Set<String>>(emptySet())
         private set
 
     // Selection state
@@ -134,29 +140,83 @@ class LayoutInspectorState {
     /**
      * Update hierarchy data.
      * Called when receiving hierarchy updates from device.
-     * Only updates if the hierarchy has actually changed to avoid unnecessary re-renders.
+     * Detects changed elements and tracks them for visual feedback.
      */
     fun updateHierarchy(newHierarchy: UIElementInfo) {
-        // Skip update if the hierarchy root ID is the same and has the same structure
-        val currentHierarchy = hierarchy
-        if (currentHierarchy != null && isSameHierarchy(currentHierarchy, newHierarchy)) {
-            return
+        // Detect changed elements by comparing with the previous hierarchy
+        val oldHierarchy = hierarchy
+        changedElementIds = if (oldHierarchy != null) {
+            findChangedElements(oldHierarchy, newHierarchy)
+        } else {
+            emptySet()
         }
+
+        // Always update - Compose will efficiently diff the actual UI changes.
         hierarchy = newHierarchy
     }
 
     /**
-     * Check if two hierarchies are structurally the same.
-     * Compares root IDs and child counts recursively (shallow comparison).
+     * Clear the changed elements set.
+     * Called after flash animation completes.
      */
-    private fun isSameHierarchy(a: UIElementInfo, b: UIElementInfo): Boolean {
-        if (a.id != b.id) return false
-        if (a.children.size != b.children.size) return false
-        if (a.bounds != b.bounds) return false
-        // Check first few children to detect changes without deep recursion
-        return a.children.take(3).zip(b.children.take(3)).all { (childA, childB) ->
-            childA.id == childB.id && childA.children.size == childB.children.size
+    fun clearChangedElements() {
+        changedElementIds = emptySet()
+    }
+
+    /**
+     * Find elements that changed between two hierarchies.
+     * Compares elements by their stable ID and detects property changes.
+     */
+    private fun findChangedElements(old: UIElementInfo, new: UIElementInfo): Set<String> {
+        val changedIds = mutableSetOf<String>()
+        val oldElementsById = flattenToMap(old)
+        val newElementsById = flattenToMap(new)
+
+        // Find elements that exist in both but have changed properties
+        for ((id, newElement) in newElementsById) {
+            val oldElement = oldElementsById[id]
+            if (oldElement == null) {
+                // New element appeared
+                changedIds.add(id)
+            } else if (hasElementChanged(oldElement, newElement)) {
+                // Existing element changed
+                changedIds.add(id)
+            }
         }
+
+        // Elements that were removed don't need to flash (they're gone)
+
+        return changedIds
+    }
+
+    /**
+     * Check if an element's visible properties have changed.
+     */
+    private fun hasElementChanged(old: UIElementInfo, new: UIElementInfo): Boolean {
+        return old.text != new.text ||
+            old.contentDescription != new.contentDescription ||
+            old.bounds != new.bounds ||
+            old.isClickable != new.isClickable ||
+            old.isEnabled != new.isEnabled ||
+            old.isFocused != new.isFocused ||
+            old.isSelected != new.isSelected ||
+            old.isScrollable != new.isScrollable ||
+            old.isCheckable != new.isCheckable ||
+            old.isChecked != new.isChecked ||
+            old.children.size != new.children.size
+    }
+
+    /**
+     * Flatten hierarchy into a map by element ID for efficient lookup.
+     */
+    private fun flattenToMap(root: UIElementInfo): Map<String, UIElementInfo> {
+        val result = mutableMapOf<String, UIElementInfo>()
+        fun traverse(element: UIElementInfo) {
+            result[element.id] = element
+            element.children.forEach { traverse(it) }
+        }
+        traverse(root)
+        return result
     }
 
     /**

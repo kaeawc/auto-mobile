@@ -27,6 +27,8 @@ import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from ".
 import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from "./deviceSnapshotSocketServer";
 import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./appearanceSocketServer";
 import { startPerformanceStreamSocketServer, stopPerformanceStreamSocketServer } from "./performanceStreamSocketServer";
+import { startObservationStreamSocketServer, stopObservationStreamSocketServer, getObservationStreamServer } from "./observationStreamSocketServer";
+import { AccessibilityServiceClient } from "../features/observe/AccessibilityServiceClient";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
@@ -128,6 +130,11 @@ export class Daemon {
     await startDeviceSnapshotSocketServer();
     await startAppearanceSocketServer();
     await startPerformanceStreamSocketServer();
+    await startObservationStreamSocketServer();
+
+    // Wire up callback to establish WebSocket connections when IDE plugins subscribe
+    this.setupObservationStreamCallback();
+
     startAppearanceSyncScheduler();
     this.startDeviceDisconnectMonitor();
 
@@ -468,6 +475,68 @@ export class Daemon {
   }
 
   /**
+   * Set up callback for observation stream to trigger device WebSocket connections.
+   * When an IDE plugin subscribes to the observation stream, we need to ensure
+   * the WebSocket connections to Android devices are established so that
+   * hierarchy updates can flow continuously.
+   */
+  private setupObservationStreamCallback(): void {
+    const server = getObservationStreamServer();
+    if (!server) {
+      logger.warn("[Daemon] Observation stream server not available for callback setup");
+      return;
+    }
+
+    server.setOnSubscriberConnected((deviceId: string | null) => {
+      logger.info(`[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`);
+
+      // Get all Android devices from the device pool
+      const allDevices = this.devicePool.getAllDevices();
+      const androidDevices = allDevices.filter(d => d.platform === "android");
+
+      if (androidDevices.length === 0) {
+        logger.info("[Daemon] No Android devices in pool to connect");
+        return;
+      }
+
+      // For each Android device, ensure the accessibility service WebSocket is connected
+      for (const pooledDevice of androidDevices) {
+        // If a specific device was requested, only connect to that one
+        if (deviceId !== null && pooledDevice.id !== deviceId) {
+          continue;
+        }
+
+        try {
+          // Create a BootedDevice from the pooled device info
+          const bootedDevice = {
+            deviceId: pooledDevice.id,
+            name: pooledDevice.name,
+            platform: pooledDevice.platform as "android",
+          };
+
+          // Get or create the accessibility service client for this device
+          const client = AccessibilityServiceClient.getInstance(bootedDevice, null);
+
+          // Trigger WebSocket connection (async, fire-and-forget)
+          client.ensureConnected().then(connected => {
+            if (connected) {
+              logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);
+            } else {
+              logger.warn(`[Daemon] Failed to connect WebSocket to ${pooledDevice.id}`);
+            }
+          }).catch(error => {
+            logger.warn(`[Daemon] Error connecting WebSocket to ${pooledDevice.id}: ${error}`);
+          });
+        } catch (error) {
+          logger.warn(`[Daemon] Error setting up WebSocket for ${pooledDevice.id}: ${error}`);
+        }
+      }
+    });
+
+    logger.info("[Daemon] Observation stream callback configured");
+  }
+
+  /**
    * Start periodic health checks
    */
   private startHealthCheckTimer(): void {
@@ -799,6 +868,7 @@ export class Daemon {
     await stopDeviceSnapshotSocketServer();
     await stopAppearanceSocketServer();
     await stopPerformanceStreamSocketServer();
+    await stopObservationStreamSocketServer();
     stopAppearanceSyncScheduler();
 
     // Close all active HTTP sessions

@@ -251,14 +251,22 @@ fun DeviceScreenView(
                                 .drawWithContent {
                                     drawContent()
 
+                                    // Scale factor: drawing context is in frame pixels, bounds are in device pixels
+                                    // size.width is the frame width in pixels, screenWidth is device pixels
+                                    val deviceToFrameScale = if (screenWidth > 0) size.width / screenWidth.toFloat() else 1f
+
                                     // Draw element overlays
                                     // Hovered element (gray)
                                     if (hoveredElement != null && hoveredElement.id != selectedElementId) {
                                         val bounds = hoveredElement.bounds
+                                        val scaledLeft = bounds.left * deviceToFrameScale
+                                        val scaledTop = bounds.top * deviceToFrameScale
+                                        val scaledWidth = bounds.width * deviceToFrameScale
+                                        val scaledHeight = bounds.height * deviceToFrameScale
                                         drawRect(
                                             color = Color.Gray.copy(alpha = 0.5f),
-                                            topLeft = Offset(bounds.left.toFloat(), bounds.top.toFloat()),
-                                            size = Size(bounds.width.toFloat(), bounds.height.toFloat()),
+                                            topLeft = Offset(scaledLeft, scaledTop),
+                                            size = Size(scaledWidth, scaledHeight),
                                             style = Stroke(width = 2f),
                                         )
                                     }
@@ -266,17 +274,21 @@ fun DeviceScreenView(
                                     // Selected element (blue)
                                     if (selectedElement != null) {
                                         val bounds = selectedElement.bounds
+                                        val scaledLeft = bounds.left * deviceToFrameScale
+                                        val scaledTop = bounds.top * deviceToFrameScale
+                                        val scaledWidth = bounds.width * deviceToFrameScale
+                                        val scaledHeight = bounds.height * deviceToFrameScale
                                         drawRect(
                                             color = Color(0xFF2196F3),
-                                            topLeft = Offset(bounds.left.toFloat(), bounds.top.toFloat()),
-                                            size = Size(bounds.width.toFloat(), bounds.height.toFloat()),
+                                            topLeft = Offset(scaledLeft, scaledTop),
+                                            size = Size(scaledWidth, scaledHeight),
                                             style = Stroke(width = 3f),
                                         )
                                         // Fill with semi-transparent blue
                                         drawRect(
                                             color = Color(0xFF2196F3).copy(alpha = 0.1f),
-                                            topLeft = Offset(bounds.left.toFloat(), bounds.top.toFloat()),
-                                            size = Size(bounds.width.toFloat(), bounds.height.toFloat()),
+                                            topLeft = Offset(scaledLeft, scaledTop),
+                                            size = Size(scaledWidth, scaledHeight),
                                         )
                                     }
                                 }

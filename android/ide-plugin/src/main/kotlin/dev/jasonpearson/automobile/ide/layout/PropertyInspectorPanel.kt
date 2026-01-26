@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ide.layout
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -11,6 +12,8 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -39,14 +42,20 @@ fun PropertyInspectorPanel(
     modifier: Modifier = Modifier,
 ) {
     val colors = JewelTheme.globalColors
-    val scrollState = rememberScrollState()
+    val verticalScrollState = rememberScrollState()
+    val horizontalScrollState = rememberScrollState()
 
-    Column(
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .verticalScroll(scrollState)
-            .padding(12.dp),
+            .horizontalScroll(horizontalScrollState)
     ) {
+        Column(
+            modifier = Modifier
+                .widthIn(min = 180.dp)
+                .verticalScroll(verticalScrollState)
+                .padding(12.dp),
+        ) {
         if (element == null) {
             Box(
                 modifier = Modifier.fillMaxSize(),
@@ -138,6 +147,7 @@ fun PropertyInspectorPanel(
                 PropertyRow("Children", "${element.children.size}")
             }
         }
+        }
     }
 }
 
@@ -153,6 +163,8 @@ private fun PropertySection(
             title,
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = 0.7f),
+            maxLines = 1,
+            softWrap = false,
         )
         Box(
             modifier = Modifier
@@ -181,19 +193,24 @@ private fun PropertyRow(
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.Top,
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = if (isSecondary) 0.4f else 0.6f),
-            modifier = Modifier.weight(0.4f),
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.widthIn(min = 60.dp),
         )
+        Spacer(Modifier.width(8.dp))
         Text(
             value,
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = if (isSecondary) 0.5f else 0.9f),
-            modifier = Modifier.weight(0.6f),
+            maxLines = 1,
+            softWrap = false,
+            modifier = Modifier.weight(1f),
         )
     }
 }
@@ -214,6 +231,8 @@ private fun StateCheckbox(
             label,
             fontSize = 11.sp,
             color = colors.text.normal.copy(alpha = 0.6f),
+            maxLines = 1,
+            softWrap = false,
         )
         Box(
             modifier = Modifier

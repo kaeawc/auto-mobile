@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ide.layout
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -13,8 +14,10 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -23,11 +26,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.ide.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
 
 /**
@@ -41,11 +48,54 @@ fun LayoutInspectorDashboard(
     modifier: Modifier = Modifier,
     dataSourceMode: DataSourceMode = DataSourceMode.Fake,
     clientProvider: (() -> AutoMobileClient)? = null,  // MCP client for real data
+    observationStreamClient: ObservationStreamClient? = null,  // Shared stream client (managed at app level)
 ) {
     val state = rememberLayoutInspectorState()
     val colors = JewelTheme.globalColors
 
-    // Fetch observation data (hierarchy + screenshot) from data source
+    // Use provided stream client, or create a local one for backwards compatibility
+    val streamClient = observationStreamClient ?: remember { ObservationStreamClient() }
+    val isLocalClient = observationStreamClient == null
+
+    // Only manage connection if we created a local client
+    if (isLocalClient) {
+        DisposableEffect(Unit) {
+            streamClient.connect()
+            onDispose {
+                streamClient.disconnect()
+            }
+        }
+    }
+
+    // Collect hierarchy updates from the stream
+    LaunchedEffect(streamClient) {
+        streamClient.hierarchyUpdates.collect { update ->
+            update.data?.let { hierarchyJson ->
+                val hierarchy = parseHierarchyFromJson(hierarchyJson)
+                if (hierarchy != null) {
+                    state.updateHierarchy(hierarchy)
+                }
+            }
+        }
+    }
+
+    // Collect screenshot updates from the stream
+    LaunchedEffect(streamClient) {
+        streamClient.screenshotUpdates.collect { update ->
+            update.screenshotBase64?.let { base64 ->
+                // Decode base64 to byte array
+                val screenshotData = java.util.Base64.getDecoder().decode(base64)
+                state.updateScreenshot(
+                    data = screenshotData,
+                    width = update.screenWidth,
+                    height = update.screenHeight,
+                    timestamp = update.timestamp,
+                )
+            }
+        }
+    }
+
+    // Initial fetch as fallback (in case stream hasn't pushed yet)
     LaunchedEffect(dataSourceMode, clientProvider) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
@@ -81,6 +131,14 @@ fun LayoutInspectorDashboard(
     var isHierarchyCollapsed by remember { mutableStateOf(true) }
     var isPropertiesCollapsed by remember { mutableStateOf(true) }
 
+    // Resizable panel widths (in pixels for precise drag handling)
+    val density = LocalDensity.current
+    var hierarchyWidthPx by remember { mutableFloatStateOf(with(density) { 280.dp.toPx() }) }
+    var propertiesWidthPx by remember { mutableFloatStateOf(with(density) { 220.dp.toPx() }) }
+
+    val minPanelWidthPx = with(density) { 150.dp.toPx() }
+    val maxPanelWidthPx = with(density) { 500.dp.toPx() }
+
     // Main content with 3 panels
     Row(modifier = modifier.fillMaxSize()) {
         // Left panel: Device Screen (flexible - expands when others collapse)
@@ -103,15 +161,16 @@ fun LayoutInspectorDashboard(
             )
         }
 
-        // Vertical divider
-        VerticalDivider()
-
-        // Center panel: View Hierarchy (collapsible)
-        CollapsiblePanel(
+        // Center panel: View Hierarchy (collapsible + resizable)
+        ResizablePanel(
             title = "Hierarchy",
             isCollapsed = isHierarchyCollapsed,
             onToggle = { isHierarchyCollapsed = !isHierarchyCollapsed },
-            expandedWidth = 250.dp,
+            widthPx = hierarchyWidthPx,
+            onWidthChange = { delta ->
+                hierarchyWidthPx = (hierarchyWidthPx - delta).coerceIn(minPanelWidthPx, maxPanelWidthPx)
+            },
+            resizeHandleOnLeft = true,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 PanelHeader(
@@ -129,17 +188,16 @@ fun LayoutInspectorDashboard(
             }
         }
 
-        // Vertical divider (only when hierarchy is expanded)
-        if (!isHierarchyCollapsed) {
-            VerticalDivider()
-        }
-
-        // Right panel: Properties (collapsible)
-        CollapsiblePanel(
+        // Right panel: Properties (collapsible + resizable)
+        ResizablePanel(
             title = "Properties",
             isCollapsed = isPropertiesCollapsed,
             onToggle = { isPropertiesCollapsed = !isPropertiesCollapsed },
-            expandedWidth = 200.dp,
+            widthPx = propertiesWidthPx,
+            onWidthChange = { delta ->
+                propertiesWidthPx = (propertiesWidthPx - delta).coerceIn(minPanelWidthPx, maxPanelWidthPx)
+            },
+            resizeHandleOnLeft = true,
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
                 PanelHeader(
@@ -156,14 +214,17 @@ fun LayoutInspectorDashboard(
 }
 
 @Composable
-private fun CollapsiblePanel(
+private fun ResizablePanel(
     title: String,
     isCollapsed: Boolean,
     onToggle: () -> Unit,
-    expandedWidth: androidx.compose.ui.unit.Dp,
+    widthPx: Float,
+    onWidthChange: (Float) -> Unit,
+    resizeHandleOnLeft: Boolean = true,
     content: @Composable () -> Unit,
 ) {
     val colors = JewelTheme.globalColors
+    val density = LocalDensity.current
 
     if (isCollapsed) {
         // Collapsed state: vertical tab aligned to top
@@ -195,15 +256,59 @@ private fun CollapsiblePanel(
             }
         }
     } else {
-        // Expanded state: full panel
-        Box(
+        // Expanded state: panel with resize handle
+        Row(
             modifier = Modifier
-                .width(expandedWidth)
+                .width(with(density) { widthPx.toDp() })
                 .fillMaxHeight(),
         ) {
-            content()
+            if (resizeHandleOnLeft) {
+                ResizeHandle(
+                    onDrag = { delta -> onWidthChange(delta) },
+                )
+            }
+
+            Box(modifier = Modifier.weight(1f).fillMaxHeight()) {
+                content()
+            }
+
+            if (!resizeHandleOnLeft) {
+                ResizeHandle(
+                    onDrag = { delta -> onWidthChange(-delta) },
+                )
+            }
         }
     }
+}
+
+@Composable
+private fun ResizeHandle(
+    onDrag: (Float) -> Unit,
+) {
+    val colors = JewelTheme.globalColors
+    var isDragging by remember { mutableStateOf(false) }
+
+    Box(
+        modifier = Modifier
+            .width(4.dp)
+            .fillMaxHeight()
+            .background(
+                if (isDragging) colors.text.normal.copy(alpha = 0.3f)
+                else colors.text.normal.copy(alpha = 0.1f)
+            )
+            .pointerHoverIcon(PointerIcon.Crosshair)
+            .pointerInput(Unit) {
+                detectDragGestures(
+                    onDragStart = { isDragging = true },
+                    onDragEnd = { isDragging = false },
+                    onDragCancel = { isDragging = false },
+                    onDrag = { change, dragAmount ->
+                        change.consume()
+                        onDrag(dragAmount.x)
+                    }
+                )
+            },
+    )
 }
 
 @Composable
@@ -239,16 +344,4 @@ private fun PanelHeader(
             )
         }
     }
-}
-
-@Composable
-private fun VerticalDivider() {
-    val colors = JewelTheme.globalColors
-
-    Box(
-        modifier = Modifier
-            .width(1.dp)
-            .fillMaxHeight()
-            .background(colors.text.normal.copy(alpha = 0.1f))
-    )
 }

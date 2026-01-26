@@ -27,6 +27,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -73,6 +74,7 @@ import dev.jasonpearson.automobile.ide.daemon.McpTool
 import dev.jasonpearson.automobile.ide.daemon.McpHttpClient
 import dev.jasonpearson.automobile.ide.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.ide.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.ide.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.ide.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
@@ -229,6 +231,26 @@ fun AutoMobileToolWindowContent() {
                       throw UnsupportedOperationException("Cannot connect to STDIO process externally")
                   }
               }
+          }
+      }
+  }
+
+  // Observation stream client for real-time hierarchy/screenshot updates
+  // Created once and shared across the app lifecycle
+  val observationStreamClient = remember { ObservationStreamClient() }
+
+  // Connect/disconnect observation stream based on active device
+  DisposableEffect(activeDeviceId) {
+      val deviceId = activeDeviceId  // Capture the value at effect start
+      if (deviceId != null) {
+          LOG.info("Connecting observation stream for device: $deviceId")
+          observationStreamClient.connect(deviceId)
+      }
+      onDispose {
+          // Always disconnect if we connected (deviceId was captured when effect started)
+          if (deviceId != null) {
+              LOG.info("Disconnecting observation stream (was connected to: $deviceId)")
+              observationStreamClient.disconnect()
           }
       }
   }
@@ -427,6 +449,7 @@ fun AutoMobileToolWindowContent() {
           Dashboard.Layout -> LayoutInspectorDashboard(
               dataSourceMode = dataSourceMode,
               clientProvider = clientProvider,
+              observationStreamClient = observationStreamClient,
           )
           Dashboard.Storage -> StorageDashboard(
               dataSourceMode = dataSourceMode,

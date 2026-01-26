@@ -134,9 +134,29 @@ class LayoutInspectorState {
     /**
      * Update hierarchy data.
      * Called when receiving hierarchy updates from device.
+     * Only updates if the hierarchy has actually changed to avoid unnecessary re-renders.
      */
     fun updateHierarchy(newHierarchy: UIElementInfo) {
+        // Skip update if the hierarchy root ID is the same and has the same structure
+        val currentHierarchy = hierarchy
+        if (currentHierarchy != null && isSameHierarchy(currentHierarchy, newHierarchy)) {
+            return
+        }
         hierarchy = newHierarchy
+    }
+
+    /**
+     * Check if two hierarchies are structurally the same.
+     * Compares root IDs and child counts recursively (shallow comparison).
+     */
+    private fun isSameHierarchy(a: UIElementInfo, b: UIElementInfo): Boolean {
+        if (a.id != b.id) return false
+        if (a.children.size != b.children.size) return false
+        if (a.bounds != b.bounds) return false
+        // Check first few children to detect changes without deep recursion
+        return a.children.take(3).zip(b.children.take(3)).all { (childA, childB) ->
+            childA.id == childB.id && childA.children.size == childB.children.size
+        }
     }
 
     /**

@@ -4,6 +4,7 @@ package dev.jasonpearson.automobile.ide.layout
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -15,9 +16,11 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.BasicTextField
 import androidx.compose.runtime.Composable
@@ -82,10 +85,17 @@ fun HierarchyTreeView(
         debouncedQuery = searchQuery
     }
 
-    // Expanded state for tree nodes
+    // Expanded state for tree nodes - initialize with all nodes expanded up to depth 10
     var expandedIds by remember { mutableStateOf(setOf<String>()) }
 
-    // Auto-expand to selected element when selection changes
+    // Auto-expand nodes up to depth 10 when hierarchy changes
+    LaunchedEffect(hierarchy) {
+        if (hierarchy != null) {
+            expandedIds = collectIdsUpToDepth(hierarchy, maxDepth = 10)
+        }
+    }
+
+    // Also expand to selected element when selection changes
     LaunchedEffect(selectedElementId, hierarchy) {
         if (selectedElementId != null && hierarchy != null) {
             val path = LayoutInspectorMockData.getPathToElement(hierarchy, selectedElementId)
@@ -144,27 +154,37 @@ fun HierarchyTreeView(
                 }
             }
         } else {
-            LazyColumn(
-                state = listState,
-                modifier = Modifier.fillMaxSize(),
-            ) {
-                items(flatNodes, key = { it.element.id }) { node ->
-                    TreeNodeRow(
-                        node = node,
-                        isSelected = node.element.id == selectedElementId,
-                        isHovered = node.element.id == hoveredElementId,
-                        onToggleExpand = {
-                            expandedIds = if (node.isExpanded) {
-                                expandedIds - node.element.id
-                            } else {
-                                expandedIds + node.element.id
-                            }
-                        },
-                        onSelect = { onElementSelected(node.element.id) },
-                        onHoverChange = { isHovered ->
-                            onElementHovered(if (isHovered) node.element.id else null)
-                        },
-                    )
+            // Horizontal scroll state for the tree
+            val horizontalScrollState = rememberScrollState()
+
+            // Calculate max depth for determining content width
+            val maxDepth = flatNodes.maxOfOrNull { it.depth } ?: 0
+            // Estimate content width based on deepest nesting + typical content
+            val estimatedContentWidth = ((maxDepth + 1) * 16 + 400).dp
+
+            Box(modifier = Modifier.fillMaxSize().horizontalScroll(horizontalScrollState)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.widthIn(min = estimatedContentWidth),
+                ) {
+                    items(flatNodes, key = { it.element.id }) { node ->
+                        TreeNodeRow(
+                            node = node,
+                            isSelected = node.element.id == selectedElementId,
+                            isHovered = node.element.id == hoveredElementId,
+                            onToggleExpand = {
+                                expandedIds = if (node.isExpanded) {
+                                    expandedIds - node.element.id
+                                } else {
+                                    expandedIds + node.element.id
+                                }
+                            },
+                            onSelect = { onElementSelected(node.element.id) },
+                            onHoverChange = { isHovered ->
+                                onElementHovered(if (isHovered) node.element.id else null)
+                            },
+                        )
+                    }
                 }
             }
         }
@@ -249,7 +269,7 @@ private fun TreeNodeRow(
 
     Row(
         modifier = Modifier
-            .fillMaxWidth()
+            .widthIn(min = 200.dp)  // Minimum width to ensure content doesn't wrap
             .background(bgColor)
             .clickable(onClick = onSelect)
             .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
@@ -271,6 +291,7 @@ private fun TreeNodeRow(
                     if (node.isExpanded) "\u25BC" else "\u25B6", // Down/right triangle
                     fontSize = 8.sp,
                     color = colors.text.normal.copy(alpha = 0.5f),
+                    maxLines = 1,
                     modifier = Modifier
                         .clickable(onClick = onToggleExpand)
                         .pointerHoverIcon(PointerIcon.Hand),
@@ -285,44 +306,45 @@ private fun TreeNodeRow(
 
         Spacer(Modifier.width(6.dp))
 
-        // Element display name
-        Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-            ) {
-                // Class name (simplified)
-                Text(
-                    getSimpleClassName(node.element.className),
-                    fontSize = 11.sp,
-                    color = if (isSelected) Color(0xFF2196F3) else colors.text.normal,
-                )
+        // Class name (simplified)
+        Text(
+            getSimpleClassName(node.element.className),
+            fontSize = 11.sp,
+            color = if (isSelected) Color(0xFF2196F3) else colors.text.normal,
+            maxLines = 1,
+            softWrap = false,
+        )
 
-                // Resource ID if present
-                node.element.resourceId?.let { resId ->
-                    val simpleName = resId.substringAfterLast("/")
-                    Text(
-                        "@$simpleName",
-                        fontSize = 10.sp,
-                        color = colors.text.normal.copy(alpha = 0.5f),
-                    )
-                }
-            }
-
-            // Text content preview if present
-            node.element.text?.takeIf { it.isNotEmpty() }?.let { text ->
-                Text(
-                    "\"${text.take(30)}${if (text.length > 30) "..." else ""}\"",
-                    fontSize = 10.sp,
-                    color = colors.text.normal.copy(alpha = 0.4f),
-                )
-            }
+        // Resource ID if present
+        node.element.resourceId?.let { resId ->
+            val simpleName = resId.substringAfterLast("/")
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "@$simpleName",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.5f),
+                maxLines = 1,
+                softWrap = false,
+            )
         }
+
+        // Text content preview if present
+        node.element.text?.takeIf { it.isNotEmpty() }?.let { text ->
+            Spacer(Modifier.width(4.dp))
+            Text(
+                "\"${text.take(30)}${if (text.length > 30) "..." else ""}\"",
+                fontSize = 10.sp,
+                color = colors.text.normal.copy(alpha = 0.4f),
+                maxLines = 1,
+                softWrap = false,
+            )
+        }
+
+        Spacer(Modifier.width(8.dp))
 
         // State indicators
         Row(
             horizontalArrangement = Arrangement.spacedBy(2.dp),
-            modifier = Modifier.padding(end = 4.dp),
         ) {
             if (node.element.isClickable) {
                 StateIndicator("\u261B", "Clickable") // Pointing hand
@@ -334,6 +356,9 @@ private fun TreeNodeRow(
                 StateIndicator("\u2195", "Scrollable") // Up-down arrow
             }
         }
+
+        // Right padding
+        Spacer(Modifier.width(8.dp))
     }
 }
 
@@ -430,6 +455,25 @@ private fun flattenTree(
                 element.children.forEach { child ->
                     traverse(child, depth + 1)
                 }
+            }
+        }
+    }
+
+    traverse(root, 0)
+    return result
+}
+
+/**
+ * Collects all element IDs up to a given depth for auto-expansion.
+ */
+private fun collectIdsUpToDepth(root: UIElementInfo, maxDepth: Int): Set<String> {
+    val result = mutableSetOf<String>()
+
+    fun traverse(element: UIElementInfo, depth: Int) {
+        if (depth < maxDepth && element.children.isNotEmpty()) {
+            result.add(element.id)
+            element.children.forEach { child ->
+                traverse(child, depth + 1)
             }
         }
     }

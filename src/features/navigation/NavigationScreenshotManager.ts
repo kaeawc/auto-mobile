@@ -7,6 +7,7 @@ import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { BootedDevice } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { getTempDir, TEMP_SUBDIRS, SECURE_DIR_MODE } from "../../utils/tempDir";
 
 /**
  * Screenshot capture interface for dependency injection.
@@ -34,7 +35,8 @@ export interface FileSystem {
  */
 export class DefaultFileSystem implements FileSystem {
   async ensureDir(dir: string): Promise<void> {
-    await fs.ensureDir(dir);
+    // Use restrictive permissions (owner-only) for security
+    await fs.ensureDir(dir, { mode: SECURE_DIR_MODE });
   }
 
   async pathExists(p: string): Promise<boolean> {
@@ -97,7 +99,7 @@ export class NavigationScreenshotManager {
   private pendingCaptures: Map<string, Promise<string | null>> = new Map();
 
   constructor(options: NavigationScreenshotManagerOptions = {}) {
-    this.screenshotDir = options.screenshotDir ?? "/tmp/auto-mobile/navigation-screenshots";
+    this.screenshotDir = options.screenshotDir ?? getTempDir(TEMP_SUBDIRS.NAVIGATION_SCREENSHOTS);
     this.maxCacheSizeBytes = options.maxCacheSizeBytes ?? 100 * 1024 * 1024; // 100MB
     this.targetWidth = options.targetWidth ?? 400;
     this.targetHeight = options.targetHeight ?? 800;

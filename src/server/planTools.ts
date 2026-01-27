@@ -3,7 +3,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, ExecutePlanResult } from "../models";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse } from "../utils/toolUtils";
+import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { TestExecutionRepository, TestExecutionStatus, TestStepRecord } from "../db/testExecutionRepository";
 import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";
@@ -413,7 +413,7 @@ const executePlanTool = async (device: BootedDevice, params: {
     };
 
     logger.info(`[PERF +${Date.now() - perfStart}ms] Returning from executePlanTool (deviceId=${device.deviceId})`);
-    return createJSONToolResponse(response);
+    return createStructuredToolResponse(response);
   } catch (error) {
     logger.error(`[PERF] Failed to execute plan: ${error}`);
 
@@ -431,7 +431,7 @@ const executePlanTool = async (device: BootedDevice, params: {
     };
 
     logger.info(`[PERF] Returning error from executePlanTool (deviceId=${device.deviceId})`);
-    return createJSONToolResponse(response);
+    return createStructuredToolResponse(response);
   }
 };
 

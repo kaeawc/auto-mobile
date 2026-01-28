@@ -8,7 +8,7 @@ import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
-@Ignore("Live demo tests - require connected device and specific apps installed")
+//@Ignore("Live demo tests - require connected device and specific apps installed")
 @RunWith(AutoMobileRunner::class)
 class LiveDemoTest {
 
@@ -21,44 +21,72 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
+  @Ignore
   @Test
   fun `AutoMobile playground`() {
 
     val result =
-        AutoMobilePlan("test-plans/auto-mobile-playground.yaml", { "slide" to "46" }).execute()
+      AutoMobilePlan("test-plans/auto-mobile-playground.yaml").execute()
 
     assertTrue(result.success)
   }
 
+  @Ignore
+  @Test
+  fun `Bug Reproduction Demo`() {
+
+    val result =
+      AutoMobilePlan("test-plans/bug-repro.yaml").execute()
+
+    assertTrue(result.success)
+  }
+
+  @Ignore
+  @Test
+  fun `Browse YouTube`() {
+
+    val result =
+      AutoMobilePlan("test-plans/youtube-search.yaml").execute()
+
+    assertTrue(result.success)
+  }
+
+  @Ignore
+  @Test
+  fun `Browse Google Maps`() {
+
+    val result =
+      AutoMobilePlan("test-plans/google-maps.yaml").execute()
+
+    assertTrue(result.success)
+  }
+
+  @Ignore
+  @Test
+  fun `Explore Camera App`() {
+
+    val result =
+      AutoMobilePlan("test-plans/camera-app.yaml").execute()
+
+    assertTrue(result.success)
+  }
+
+  @Ignore
   @Test
   fun `AutoMobile restart slide`() {
 
     val result =
-        AutoMobilePlan("test-plans/auto-mobile-restart-slide.yaml", { "slide" to "81" }).execute()
+      AutoMobilePlan("test-plans/auto-mobile-restart-slide.yaml", { "slide" to "81" }).execute()
 
     assertTrue(result.success)
   }
 
-  @Test @AutoMobileTest(plan = "test-plans/bluesky-ready-to-go.yaml") fun `Ready for the talk`() {}
-
+  @Ignore
   @Test
   fun `Announce AutoMobile is OSS on GitHub`() {
 
     val result =
-        AutoMobilePlan("test-plans/bluesky-announcement.yaml", { "slide" to "83" }).execute()
-
-    assertTrue(result.success)
-  }
-
-  @Test
-  fun `Victory Fanfare`() {
-
-    val result =
-        AutoMobilePlan(
-                "test-plans/system-notification-youtube-music-play.yaml",
-                { "slide" to "83" },
-            )
-            .execute()
+      AutoMobilePlan("test-plans/bluesky-announcement.yaml", { "slide" to "83" }).execute()
 
     assertTrue(result.success)
   }

@@ -3,7 +3,7 @@ import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, ExecutePlanResult } from "../models";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { logger } from "../utils/logger";
-import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
+import { createStructuredToolResponse } from "../utils/toolUtils";
 import { Platform } from "../models";
 import { TestExecutionRepository, TestExecutionStatus, TestStepRecord } from "../db/testExecutionRepository";
 import { DEVICE_LABEL_DESCRIPTION } from "./toolSchemaHelpers";

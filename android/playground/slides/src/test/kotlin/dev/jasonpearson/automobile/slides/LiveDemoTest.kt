@@ -8,7 +8,7 @@ import org.junit.Ignore
 import org.junit.Test
 import org.junit.runner.RunWith
 
-//@Ignore("Live demo tests - require connected device and specific apps installed")
+@Ignore("Live demo tests - require connected device and specific apps installed")
 @RunWith(AutoMobileRunner::class)
 class LiveDemoTest {
 
@@ -21,7 +21,6 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
   @Test
   fun `AutoMobile playground`() {
 
@@ -41,7 +40,6 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
   @Test
   fun `Browse YouTube`() {
 
@@ -51,7 +49,6 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
   @Test
   fun `Browse Google Maps`() {
 
@@ -61,7 +58,6 @@ class LiveDemoTest {
     assertTrue(result.success)
   }
 
-  @Ignore
   @Test
   fun `Explore Camera App`() {
 

@@ -351,8 +351,8 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
     const fingerprintData = event.fingerprintData || JSON.stringify({ hash: fingerprintHash });
     const timestamp = event.timestamp;
 
-    // Case 1: Check if fingerprint is already correlated to a named node
-    const existingNode = await this.repository.getNodeByFingerprint(fingerprintHash);
+    // Case 1: Check if fingerprint is already correlated to a named node (scoped to this app)
+    const existingNode = await this.repository.getNodeByFingerprint(this.currentAppId, fingerprintHash);
     if (existingNode) {
       // Update the existing node's visit count and last_seen_at
       await this.repository.updateNodeVisit(existingNode.id, timestamp);
@@ -383,8 +383,9 @@ export class NavigationGraphManager implements NavigationGraph, NavigationGraphS
       const timeSinceNavigation = timestamp - this.activeNavigation.startTime;
 
       if (timeSinceNavigation >= 0 && timeSinceNavigation <= this.ACTIVE_NAVIGATION_WINDOW_MS) {
-        // Correlate this fingerprint to the active named node
+        // Correlate this fingerprint to the active named node (scoped to this app)
         await this.repository.getOrCreateFingerprint(
+          this.currentAppId,
           this.activeNavigation.nodeId,
           fingerprintHash,
           fingerprintData,

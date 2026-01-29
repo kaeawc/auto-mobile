@@ -789,9 +789,10 @@ export class NavigationRepository {
 
   /**
    * Get or create a fingerprint record for a node.
-   * Returns existing fingerprint if hash already exists (globally unique).
+   * Fingerprints are scoped per app to prevent cross-app collisions.
    */
   async getOrCreateFingerprint(
+    appId: string,
     nodeId: number,
     hash: string,
     data: string,
@@ -799,10 +800,11 @@ export class NavigationRepository {
   ): Promise<NavigationNodeFingerprint> {
     const db = getDatabase();
 
-    // Check if fingerprint already exists (globally unique by hash)
+    // Check if fingerprint already exists for this app
     const existing = await db
       .selectFrom("navigation_node_fingerprints")
       .selectAll()
+      .where("app_id", "=", appId)
       .where("fingerprint_hash", "=", hash)
       .executeTakeFirst();
 
@@ -826,6 +828,7 @@ export class NavigationRepository {
 
     // Create new fingerprint record
     const newFingerprint: NewNavigationNodeFingerprint = {
+      app_id: appId,
       node_id: nodeId,
       fingerprint_hash: hash,
       fingerprint_data: data,
@@ -848,15 +851,16 @@ export class NavigationRepository {
   }
 
   /**
-   * Find a navigation node by fingerprint hash.
-   * Returns the node if found, undefined otherwise.
+   * Find a navigation node by fingerprint hash within a specific app.
+   * Fingerprints are scoped per app to prevent cross-app collisions.
    */
-  async getNodeByFingerprint(hash: string): Promise<NavigationNode | undefined> {
+  async getNodeByFingerprint(appId: string, hash: string): Promise<NavigationNode | undefined> {
     const db = getDatabase();
 
     const fingerprint = await db
       .selectFrom("navigation_node_fingerprints")
       .select("node_id")
+      .where("app_id", "=", appId)
       .where("fingerprint_hash", "=", hash)
       .executeTakeFirst();
 
@@ -966,8 +970,9 @@ export class NavigationRepository {
       throw new Error(`Suggestion not found: ${suggestionId}`);
     }
 
-    // Create fingerprint record
+    // Create fingerprint record (using app_id from suggestion)
     const fingerprint = await this.getOrCreateFingerprint(
+      suggestion.app_id,
       nodeId,
       suggestion.fingerprint_hash,
       suggestion.fingerprint_data,

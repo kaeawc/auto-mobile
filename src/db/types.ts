@@ -152,8 +152,9 @@ export interface ScrollPositionsTable {
 // Navigation node fingerprints table - tracks fingerprints associated with named nodes
 export interface NavigationNodeFingerprintsTable {
   id: Generated<number>;
+  app_id: string; // Scoped per app to prevent cross-app collisions
   node_id: number;
-  fingerprint_hash: string; // Globally unique
+  fingerprint_hash: string; // Unique per app (not globally)
   fingerprint_data: string; // Full fingerprint JSON
   first_seen_at: number;
   last_seen_at: number;

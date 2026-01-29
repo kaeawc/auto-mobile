@@ -8,13 +8,17 @@ export async function up(db: Kysely<unknown>): Promise<void> {
 
   // 2. Create navigation_node_fingerprints table
   // Tracks view hierarchy fingerprints associated with named navigation nodes
+  // Fingerprints are scoped per app to prevent cross-app collisions
   await db.schema
     .createTable("navigation_node_fingerprints")
     .addColumn("id", "integer", col => col.primaryKey().autoIncrement())
+    .addColumn("app_id", "text", col =>
+      col.notNull().references("navigation_apps.app_id").onDelete("cascade")
+    )
     .addColumn("node_id", "integer", col =>
       col.notNull().references("navigation_nodes.id").onDelete("cascade")
     )
-    .addColumn("fingerprint_hash", "text", col => col.notNull().unique())
+    .addColumn("fingerprint_hash", "text", col => col.notNull())
     .addColumn("fingerprint_data", "text", col => col.notNull())
     .addColumn("first_seen_at", "integer", col => col.notNull())
     .addColumn("last_seen_at", "integer", col => col.notNull())
@@ -22,6 +26,14 @@ export async function up(db: Kysely<unknown>): Promise<void> {
     .addColumn("created_at", "text", col =>
       col.notNull().defaultTo("datetime('now')")
     )
+    .execute();
+
+  // Create unique index on (app_id, fingerprint_hash) - fingerprints are unique per app
+  await db.schema
+    .createIndex("idx_navigation_node_fingerprints_app_hash")
+    .on("navigation_node_fingerprints")
+    .columns(["app_id", "fingerprint_hash"])
+    .unique()
     .execute();
 
   // Create index on node_id for efficient lookups

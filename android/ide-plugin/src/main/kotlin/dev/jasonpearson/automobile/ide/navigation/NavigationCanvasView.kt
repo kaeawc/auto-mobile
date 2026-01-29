@@ -318,8 +318,9 @@ fun NavigationCanvasView(
                     if (t.toScreen == screen) next.add(t.fromScreen)
                 }
             }
-            result.addAll(next)
+            // Compute new frontier BEFORE adding to result, otherwise frontier is always empty
             frontier = next - result
+            result.addAll(next)
         }
         return result
     }

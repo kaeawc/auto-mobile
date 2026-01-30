@@ -3457,16 +3457,6 @@ class AutoMobileAccessibilityService : AccessibilityService() {
     }
   }
 
-  /** Escape special characters for JSON string values */
-  private fun escapeJsonString(value: String): String {
-    return value
-        .replace("\\", "\\\\")
-        .replace("\"", "\\\"")
-        .replace("\n", "\\n")
-        .replace("\r", "\\r")
-        .replace("\t", "\\t")
-  }
-
   /** Get permission state and optionally request missing permissions. */
   private fun handleGetPermission(
       requestId: String?,

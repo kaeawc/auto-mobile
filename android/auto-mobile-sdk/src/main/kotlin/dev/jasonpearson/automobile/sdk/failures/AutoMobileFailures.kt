@@ -34,6 +34,9 @@ object AutoMobileFailures {
     private const val TAG = "AutoMobileFailures"
     private const val MAX_EVENTS = 100
 
+    /** Package name of the AutoMobile AccessibilityService that receives broadcasts */
+    private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice"
+
     const val ACTION_HANDLED_EXCEPTION = "dev.jasonpearson.automobile.sdk.HANDLED_EXCEPTION"
     const val EXTRA_TIMESTAMP = "timestamp"
     const val EXTRA_EXCEPTION_CLASS = "exception_class"
@@ -170,6 +173,9 @@ object AutoMobileFailures {
         try {
             val intent =
                 Intent(ACTION_HANDLED_EXCEPTION).apply {
+                    // Scope broadcast to only the accessibility service to prevent data leakage
+                    // and spoofing from other installed apps
+                    setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
                     putExtra(EXTRA_TIMESTAMP, event.timestamp)
                     putExtra(EXTRA_EXCEPTION_CLASS, event.exceptionClass)
                     putExtra(EXTRA_EXCEPTION_MESSAGE, event.exceptionMessage)

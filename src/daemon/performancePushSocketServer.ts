@@ -4,6 +4,7 @@ import { unlink, mkdir } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { logger } from "../utils/logger";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
 
 // Use /tmp for socket when running with external emulator (Docker container with mounted home)
 const isExternalMode = process.env.AUTOMOBILE_EMULATOR_EXTERNAL === "true";
@@ -128,9 +129,11 @@ export class PerformancePushSocketServer {
   private subscribers: Map<string, Subscriber> = new Map();
   private subscriptionCounter = 0;
   private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
+  private timer: Timer;
 
-  constructor(socketPath: string = DEFAULT_SOCKET_PATH) {
+  constructor(socketPath: string = DEFAULT_SOCKET_PATH, timer: Timer = defaultTimer) {
     this.socketPath = socketPath;
+    this.timer = timer;
   }
 
   async start(): Promise<void> {
@@ -166,20 +169,20 @@ export class PerformancePushSocketServer {
       return;
     }
 
-    this.keepaliveInterval = setInterval(() => {
+    this.keepaliveInterval = this.timer.setInterval(() => {
       this.checkKeepalive();
     }, KEEPALIVE_INTERVAL_MS);
   }
 
   private stopKeepalive(): void {
     if (this.keepaliveInterval) {
-      clearInterval(this.keepaliveInterval);
+      this.timer.clearInterval(this.keepaliveInterval);
       this.keepaliveInterval = null;
     }
   }
 
   private checkKeepalive(): void {
-    const now = Date.now();
+    const now = this.timer.now();
     const deadSubscribers: string[] = [];
 
     for (const [subscriptionId, subscriber] of this.subscribers) {
@@ -255,7 +258,7 @@ export class PerformancePushSocketServer {
   pushPerformanceData(data: LivePerformanceData): void {
     const message: PerformancePushMessage = {
       type: "performance_push",
-      timestamp: Date.now(),
+      timestamp: this.timer.now(),
       data,
     };
 
@@ -280,7 +283,7 @@ export class PerformancePushSocketServer {
       try {
         const result = subscriber.socket.write(json);
         if (result) {
-          subscriber.lastActivity = Date.now();
+          subscriber.lastActivity = this.timer.now();
         }
         sentCount++;
       } catch (error) {
@@ -400,7 +403,7 @@ export class PerformancePushSocketServer {
             deviceId: request.deviceId ?? null,
             packageName: request.packageName ?? null,
             subscriptionId,
-            lastActivity: Date.now(),
+            lastActivity: this.timer.now(),
           });
 
           const response: PerformancePushMessage = {
@@ -435,7 +438,7 @@ export class PerformancePushSocketServer {
         case "pong": {
           for (const [, subscriber] of this.subscribers) {
             if (subscriber.socket === socket) {
-              subscriber.lastActivity = Date.now();
+              subscriber.lastActivity = this.timer.now();
               logger.debug(`[PerformancePush] Received pong from ${subscriber.subscriptionId}`);
               break;
             }

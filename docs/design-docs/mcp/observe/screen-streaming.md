@@ -84,8 +84,8 @@ The capture mechanism differs significantly between platforms:
 | iOS | On Mac | Raw BGRA | No |
 
 See platform-specific documentation for implementation details:
-- **[Android Screen Streaming](../../android/screen-streaming.md)** - VirtualDisplay + MediaCodec via shell-user JAR
-- **[iOS Screen Streaming](../../ios/screen-streaming.md)** - AVFoundation + ScreenCaptureKit on macOS
+- **[Android Screen Streaming](../../plat/android/screen-streaming.md)** - VirtualDisplay + MediaCodec via shell-user JAR
+- **[iOS Screen Streaming](../../plat/ios/screen-streaming.md)** - AVFoundation + ScreenCaptureKit on macOS
 
 ## Video Stream Socket Protocol
 
@@ -218,6 +218,6 @@ When video streaming is unavailable:
 
 ## References
 
-- [Android Screen Streaming](../../android/screen-streaming.md)
-- [iOS Screen Streaming](../../ios/screen-streaming.md)
+- [Android Screen Streaming](../../plat/android/screen-streaming.md)
+- [iOS Screen Streaming](../../plat/ios/screen-streaming.md)
 - [Video Recording Design](./video-recording.md)

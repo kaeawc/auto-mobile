@@ -241,8 +241,12 @@ prompt_ide() {
   # Disown background watchers before exec so they keep running
   # when the shell process is replaced
   disown_watchers() {
-    [[ -n "${TS_WATCHER_PID}" ]] && disown "${TS_WATCHER_PID}" 2>/dev/null || true
-    [[ -n "${WATCHER_PID}" ]] && disown "${WATCHER_PID}" 2>/dev/null || true
+    if [[ -n "${TS_WATCHER_PID}" ]]; then
+      disown "${TS_WATCHER_PID}" 2>/dev/null || true
+    fi
+    if [[ -n "${WATCHER_PID}" ]]; then
+      disown "${WATCHER_PID}" 2>/dev/null || true
+    fi
     # Disable cleanup trap since we want watchers to keep running
     trap - EXIT INT TERM
   }

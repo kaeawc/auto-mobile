@@ -455,6 +455,7 @@ setup_ide_plugin() {
   fi
 
   log_info "Plugins directory: ${IDE_PLUGINS_DIR}"
+  # shellcheck disable=SC2153  # IDE_PLUGIN_DIR is defined in lib/ide-plugin.sh
   log_info "IDE plugin source: ${IDE_PLUGIN_DIR}/src"
 
   # Initial build

@@ -204,6 +204,18 @@ hash_ts_state() {
   done | sort | hash_stream
 }
 
+# Build TypeScript before daemon restart
+build_typescript() {
+  log_info "Building TypeScript..."
+  if (cd "${PROJECT_ROOT}" && bun run build); then
+    log_info "TypeScript build complete."
+    return 0
+  else
+    log_warn "TypeScript build failed."
+    return 1
+  fi
+}
+
 # Watch TypeScript files and reload daemon on changes
 watch_ts_loop() {
   local poll_interval="${1:-2}"
@@ -216,8 +228,10 @@ watch_ts_loop() {
     local next_ts_hash
     next_ts_hash="$(hash_ts_state)"
     if [[ "${next_ts_hash}" != "${last_ts_hash}" ]]; then
-      log_info "TypeScript change detected. Reloading MCP daemon..."
-      reload_mcp_daemon
+      log_info "TypeScript change detected. Rebuilding and reloading MCP daemon..."
+      if build_typescript; then
+        reload_mcp_daemon
+      fi
       last_ts_hash="${next_ts_hash}"
     fi
   done

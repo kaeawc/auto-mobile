@@ -90,7 +90,7 @@ function createTestServer(): {
   server: TestableUnifiedSocketServer;
   timer: FakeTimer;
   handler: TestDomainHandler;
-} {
+  } {
   const timer = new FakeTimer();
   const server = new TestableUnifiedSocketServer("/fake/path/api.sock", timer);
   const handler = new TestDomainHandler();

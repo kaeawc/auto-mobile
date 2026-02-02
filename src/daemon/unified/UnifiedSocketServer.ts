@@ -14,7 +14,6 @@ import {
   createErrorResponse,
   createPush,
   createPing,
-  createPong,
   isRequest,
   isSubscribe,
   isUnsubscribe,

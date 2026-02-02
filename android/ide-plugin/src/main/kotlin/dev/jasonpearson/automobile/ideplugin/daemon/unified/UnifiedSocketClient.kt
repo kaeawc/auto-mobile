@@ -464,7 +464,12 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
         val response = withTimeoutOrNull(30_000) {
             deferred.await()
-        } ?: throw RequestTimeoutException("Subscribe timed out")
+        }
+
+        if (response == null) {
+            pendingRequests.remove(id)
+            throw RequestTimeoutException("Subscribe timed out")
+        }
 
         if (response.error != null) {
             throw RequestErrorException(response.error.code, response.error.message)
@@ -484,7 +489,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     }
 
     override suspend fun unsubscribe(subscriptionId: String) {
-        subscriptions.remove(subscriptionId)
+        val subscription = subscriptions.remove(subscriptionId)
 
         if (!connected.get()) {
             return
@@ -496,6 +501,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         val unsubscribeMessage = UnifiedMessage(
             id = id,
             type = MessageTypes.UNSUBSCRIBE,
+            domain = subscription?.domain,
             params = params,
             timestamp = System.currentTimeMillis(),
         )

@@ -181,7 +181,10 @@ jobs:
           ORG_GRADLE_PROJECT_signingInMemoryKeyId: ${{ secrets.SIGNING_IN_MEMORY_KEY_ID }}
         run: |
           cd android
-          ./gradlew :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral --no-configuration-cache
+          # Override VERSION_NAME with the release version from git tag (not the SNAPSHOT in gradle.properties)
+          ./gradlew :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral \
+            -PVERSION_NAME=${{ steps.version.outputs.version }} \
+            --no-configuration-cache
 
       - name: Free Disk Space
         uses: endersonmenezes/free-disk-space@v3

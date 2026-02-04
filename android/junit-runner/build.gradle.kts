@@ -15,7 +15,7 @@ java {
   withSourcesJar()
 }
 
-version = "0.0.9-SNAPSHOT"
+version = "0.0.9"
 
 dependencies {
   // Shared validation module

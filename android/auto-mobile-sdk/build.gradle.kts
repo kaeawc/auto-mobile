@@ -33,7 +33,7 @@ android {
   buildFeatures { compose = true }
 }
 
-version = "0.0.9-SNAPSHOT"
+version = "0.0.9"
 
 dependencies {
   // Protocol module for type-safe event serialization
@@ -112,8 +112,3 @@ mavenPublishing {
   }
 }
 
-tasks.configureEach {
-  if (name == "generateMetadataFileForMavenPublication") {
-    dependsOn("plainJavadocJar")
-  }
-}

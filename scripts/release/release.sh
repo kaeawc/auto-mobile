@@ -74,7 +74,7 @@ if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 # Calculate next snapshot version (bump minor, reset patch)
-IFS='.' read -r major minor patch <<< "$version"
+IFS='.' read -r major minor _patch <<< "$version"
 next_minor=$((minor + 1))
 next_snapshot="${major}.${next_minor}.0-SNAPSHOT"
 

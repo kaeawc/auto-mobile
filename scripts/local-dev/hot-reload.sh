@@ -846,11 +846,11 @@ if [[ "${RUN_ONCE}" == "true" ]]; then
   exit 0
 fi
 
+# Kill previous processes before writing our PID
+kill_previous
+
 # Save PID for later cleanup
 echo "$$" > "${PID_FILE}"
-
-# Kill previous processes
-kill_previous
 
 # Update config files
 update_mcp_json

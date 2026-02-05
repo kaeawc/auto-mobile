@@ -149,7 +149,7 @@ reload_mcp_daemon() {
     local count=0
     while kill -0 "${daemon_pid}" 2>/dev/null && [[ ${count} -lt 30 ]]; do
       sleep 1
-      ((count++))
+      count=$((count + 1))
     done
 
     if kill -0 "${daemon_pid}" 2>/dev/null; then

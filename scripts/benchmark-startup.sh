@@ -41,6 +41,13 @@ track_child_pid() {
 untrack_child_pid() {
   local pid="$1"
   child_pids=("${child_pids[@]/$pid}")
+  # Also remove from the file-backed tracker so _kill_all_tracked_pids
+  # won't signal a reused PID during cleanup.
+  if [[ -f "$_pid_tracking_file" ]]; then
+    local tmp="${_pid_tracking_file}.tmp"
+    grep -vxF "$pid" "$_pid_tracking_file" > "$tmp" 2>/dev/null || true
+    mv "$tmp" "$_pid_tracking_file"
+  fi
 }
 
 # Kill all tracked child processes (from both in-memory array and PID file).

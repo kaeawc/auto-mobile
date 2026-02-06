@@ -671,7 +671,7 @@ run_mcp_server() {
 
   AUTOMOBILE_STARTUP_BENCHMARK=1 \
   AUTOMOBILE_STARTUP_BENCHMARK_LABEL="mcp-server-$mode" \
-  bun run dist/src/index.js --startup-benchmark \
+  bun run dist/src/index.js --startup-benchmark --direct \
     <"$stdin_fifo" >"$stdout_fifo" 2>"$stderr_fifo" &
   local server_pid=$!
   track_child_pid "$server_pid"

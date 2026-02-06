@@ -2208,27 +2208,31 @@ private fun McpProcessesPanel(
                     Text(
                         "Connection Info",
                         fontSize = 11.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                         color = colors.text.normal.copy(alpha = 0.7f),
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                         Column {
-                            Text("Active Ports", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                            Text("Active Ports", fontSize = 9.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.5f))
                             Text(
                                 streamableProcesses.mapNotNull { it.port }.joinToString(", ") { ":$it" }.ifEmpty { "None" },
                                 fontSize = 11.sp,
                                 color = colors.text.normal,
                                 maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
                         Column {
-                            Text("Socket Paths", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                            Text("Socket Paths", fontSize = 9.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.5f))
                             Text(
-                                socketProcesses.mapNotNull { it.socketPath }.joinToString("\n").ifEmpty { "None" },
+                                socketProcesses.mapNotNull { it.socketPath }.joinToString(", ").ifEmpty { "None" },
                                 fontSize = 11.sp,
                                 color = colors.text.normal,
-                                maxLines = 3,
+                                maxLines = 1,
+                                softWrap = false,
                                 overflow = TextOverflow.Ellipsis,
                             )
                         }
@@ -2263,6 +2267,8 @@ private fun ProcessSection(
             Text(
                 title,
                 fontSize = 11.sp,
+                maxLines = 1,
+                softWrap = false,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                 color = colors.text.normal.copy(alpha = 0.7f),
             )
@@ -2308,23 +2314,25 @@ private fun McpProcessItem(
     val colors = JewelTheme.globalColors
     val uptimeText = formatUptime(process.uptimeMs)
 
-    Column {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.1f)
-                    else colors.text.normal.copy(alpha = 0.05f),
-                    RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp),
-                )
-                .then(
-                    if (isConnected) Modifier.border(1.dp, Color(0xFF4CAF50).copy(alpha = 0.3f), RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp))
-                    else Modifier
-                )
-                .padding(10.dp),
-            horizontalArrangement = Arrangement.spacedBy(12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-        ) {
+    BoxWithConstraints {
+        val isCompressed = maxWidth < 300.dp
+        Column {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(
+                        if (isConnected) Color(0xFF4CAF50).copy(alpha = 0.1f)
+                        else colors.text.normal.copy(alpha = 0.05f),
+                        RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp),
+                    )
+                    .then(
+                        if (isConnected) Modifier.border(1.dp, Color(0xFF4CAF50).copy(alpha = 0.3f), RoundedCornerShape(topStart = 6.dp, topEnd = 6.dp, bottomStart = if (showDetails) 0.dp else 6.dp, bottomEnd = if (showDetails) 0.dp else 6.dp))
+                        else Modifier
+                    )
+                    .padding(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
             // Status indicator
             Box(
                 modifier = Modifier
@@ -2351,12 +2359,16 @@ private fun McpProcessItem(
                     Text(
                         "PID ${process.pid}",
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = colors.text.normal.copy(alpha = 0.5f),
                     )
                     if (isConnected) {
                         Text(
                             "● Active",
                             fontSize = 9.sp,
+                            maxLines = 1,
+                            softWrap = false,
                             color = Color(0xFF4CAF50),
                         )
                     }
@@ -2388,14 +2400,18 @@ private fun McpProcessItem(
                             Text(
                                 "Standard I/O",
                                 fontSize = 10.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = Color(0xFFFF9800),
                             )
                         }
                     }
-                    Text("•", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                    Text("•", fontSize = 10.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.3f))
                     Text(
                         "Up $uptimeText",
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = colors.text.normal.copy(alpha = 0.5f),
                     )
 
@@ -2404,14 +2420,18 @@ private fun McpProcessItem(
                         Text(
                             "Testing...",
                             fontSize = 10.sp,
+                            maxLines = 1,
+                            softWrap = false,
                             color = Color(0xFF2196F3),
                         )
                     } else if (testResult != null) {
-                        Text("•", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                        Text("•", fontSize = 10.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.3f))
                         if (testResult.success) {
                             Text(
                                 "✓ ${testResult.latencyMs}ms",
                                 fontSize = 10.sp,
+                                maxLines = 1,
+                                softWrap = false,
                                 color = Color(0xFF4CAF50),
                             )
                         } else {
@@ -2446,8 +2466,14 @@ private fun McpProcessItem(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        if (isTesting) "..." else "Test",
+                        when {
+                            isTesting -> "..."
+                            isCompressed -> "🧪"
+                            else -> "Test"
+                        },
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = when {
                             isTesting -> Color(0xFF2196F3)
                             testResult?.success == true -> Color(0xFF4CAF50)
@@ -2470,8 +2496,10 @@ private fun McpProcessItem(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        if (showDetails) "Hide" else "Details",
+                        if (isCompressed) "📋" else if (showDetails) "Hide" else "Details",
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = Color(0xFF9C27B0),
                     )
                 }
@@ -2492,17 +2520,25 @@ private fun McpProcessItem(
                         .padding(horizontal = 8.dp, vertical = 6.dp),
                 ) {
                     Text(
-                        if (isConnected) "Connected ✓" else "Connect",
+                        when {
+                            isCompressed && isConnected -> "✓"
+                            isCompressed -> "🔌"
+                            isConnected -> "Connected ✓"
+                            else -> "Connect"
+                        },
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = Color(0xFF4CAF50),
                     )
                 }
             }
         }
 
-        // Details panel
-        if (showDetails) {
-            McpProcessDetails(process = process)
+            // Details panel
+            if (showDetails) {
+                McpProcessDetails(process = process)
+            }
         }
     }
 }
@@ -2564,16 +2600,18 @@ private fun McpProcessDetails(process: McpProcess) {
             Text(
                 "Connection",
                 fontSize = 11.sp,
+                maxLines = 1,
+                softWrap = false,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                 color = colors.text.normal.copy(alpha = 0.7f),
             )
             Row(horizontalArrangement = Arrangement.spacedBy(16.dp)) {
                 Column {
-                    Text("Type", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
-                    Text(process.connectionType.label, fontSize = 11.sp)
+                    Text("Type", fontSize = 9.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text(process.connectionType.label, fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
                 Column {
-                    Text("Endpoint", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text("Endpoint", fontSize = 9.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.5f))
                     Text(
                         when (process.connectionType) {
                             McpConnectionType.StreamableHttp -> "http://localhost:${process.port}"
@@ -2582,12 +2620,13 @@ private fun McpProcessDetails(process: McpProcess) {
                         },
                         fontSize = 11.sp,
                         maxLines = 1,
+                        softWrap = false,
                         overflow = TextOverflow.Ellipsis,
                     )
                 }
                 Column {
-                    Text("PID", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f))
-                    Text("${process.pid}", fontSize = 11.sp)
+                    Text("PID", fontSize = 9.sp, maxLines = 1, softWrap = false, color = colors.text.normal.copy(alpha = 0.5f))
+                    Text("${process.pid}", fontSize = 11.sp, maxLines = 1, softWrap = false)
                 }
             }
         }
@@ -2606,6 +2645,8 @@ private fun McpProcessDetails(process: McpProcess) {
                 Text(
                     "Resources",
                     fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                     color = colors.text.normal.copy(alpha = 0.7f),
                 )
@@ -2668,6 +2709,8 @@ private fun McpProcessDetails(process: McpProcess) {
                 Text(
                     "Tools",
                     fontSize = 11.sp,
+                    maxLines = 1,
+                    softWrap = false,
                     fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                     color = colors.text.normal.copy(alpha = 0.7f),
                 )
@@ -2760,6 +2803,8 @@ private fun DevicesSection(
             Text(
                 "📱 Devices",
                 fontSize = 12.sp,
+                maxLines = 1,
+                softWrap = false,
                 fontWeight = androidx.compose.ui.text.font.FontWeight.Medium,
                 color = colors.text.normal,
             )
@@ -2767,6 +2812,8 @@ private fun DevicesSection(
                 Text(
                     "Loading...",
                     fontSize = 10.sp,
+                    maxLines = 1,
+                    softWrap = false,
                     color = Color(0xFF2196F3),
                 )
             }
@@ -2785,6 +2832,8 @@ private fun DevicesSection(
                     Text(
                         "Running (${bootedDevices.size})",
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = colors.text.normal.copy(alpha = 0.6f),
                     )
                     bootedDevices.forEach { device ->
@@ -2802,6 +2851,8 @@ private fun DevicesSection(
                     Text(
                         "Available to Boot (${deviceImages.size})",
                         fontSize = 10.sp,
+                        maxLines = 1,
+                        softWrap = false,
                         color = colors.text.normal.copy(alpha = 0.6f),
                     )
                     deviceImages.take(5).forEach { image ->
@@ -2827,6 +2878,8 @@ private fun DevicesSection(
                 Text(
                     "No devices found",
                     fontSize = 10.sp,
+                    maxLines = 1,
+                    softWrap = false,
                     color = colors.text.normal.copy(alpha = 0.5f),
                 )
             }
@@ -2881,6 +2934,8 @@ private fun BootedDeviceRow(
             Text(
                 "Select",
                 fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
                 color = Color(0xFF4CAF50),
             )
         }
@@ -2954,6 +3009,8 @@ private fun DeviceImageRow(
                     else -> "Boot"
                 },
                 fontSize = 9.sp,
+                maxLines = 1,
+                softWrap = false,
                 color = when {
                     error != null -> Color(0xFFE53935)
                     else -> Color(0xFF2196F3)

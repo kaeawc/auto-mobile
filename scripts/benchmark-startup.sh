@@ -106,30 +106,24 @@ global_timeout_handler() {
 start_global_timeout_monitor() {
   script_start_ms=$(get_time_ms)
 
-  local sleep_seconds=$(( GLOBAL_TIMEOUT_MS / 1000 ))
   # Redirect stdout/stderr to /dev/null so the subshell and its sleep child
   # do not inherit the parent's FDs (which on CI are the runner's pipes).
   # Orphaned children holding runner FDs prevent the CI step from finishing.
-  sleep "$sleep_seconds" >/dev/null 2>&1 &
-  global_timeout_sleep_pid=$!
   (
-    wait "$global_timeout_sleep_pid" 2>/dev/null
+    sleep_seconds=$(( GLOBAL_TIMEOUT_MS / 1000 ))
+    sleep "$sleep_seconds"
     # Signal parent to run timeout handler
     kill -USR1 $$ 2>/dev/null || true
-  ) </dev/null >/dev/null 2>&1 &
+  ) >/dev/null 2>&1 &
   global_timeout_pid=$!
-  disown "$global_timeout_sleep_pid" 2>/dev/null || true
   disown "$global_timeout_pid" 2>/dev/null || true
 }
 
 # Stop global timeout monitor
 stop_global_timeout_monitor() {
-  if [[ -n "${global_timeout_sleep_pid:-}" ]]; then
-    kill "$global_timeout_sleep_pid" 2>/dev/null || true
-    wait "$global_timeout_sleep_pid" 2>/dev/null || true
-    global_timeout_sleep_pid=""
-  fi
   if [[ -n "${global_timeout_pid:-}" ]]; then
+    # Kill children (the sleep process) first, then the subshell
+    pkill -P "$global_timeout_pid" 2>/dev/null || true
     kill "$global_timeout_pid" 2>/dev/null || true
     wait "$global_timeout_pid" 2>/dev/null || true
     global_timeout_pid=""

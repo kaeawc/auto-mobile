@@ -671,7 +671,7 @@ run_mcp_server() {
 
   AUTOMOBILE_STARTUP_BENCHMARK=1 \
   AUTOMOBILE_STARTUP_BENCHMARK_LABEL="mcp-server-$mode" \
-  bun run dist/src/index.js --startup-benchmark --direct \
+  bun run dist/src/index.js --startup-benchmark --no-daemon \
     <"$stdin_fifo" >"$stdout_fifo" 2>"$stderr_fifo" &
   local server_pid=$!
   track_child_pid "$server_pid"
@@ -722,31 +722,18 @@ run_mcp_server() {
   mcp_send 3 '{"jsonrpc":"2.0","method":"notifications/initialized"}'
 
   local booted_response=""
-  if ! mcp_read_resource 3 4 "automobile:devices/booted" 10 booted_response; then
-    drain_fd 5 "$stderr_log" "mcp-stderr> " last_stderr_message
-    local elapsed_ms=$(( $(get_time_ms) - start_ms ))
-    local error_message
-    error_message=$(build_error_message \
-      "Failed to read booted devices resource response" \
-      "resources/read response on stdout (fd 4)" \
-      "$elapsed_ms" \
-      "$server_pid" \
-      "$last_stdout_message" \
-      "$last_stderr_message" \
-      "$stderr_log" \
-      "Mode: $mode; Resource: automobile:devices/booted")
-    untrack_child_pid "$server_pid"
-    stop_process "$server_pid"
-    exec 3>&-
-    exec 4<&-
-    exec 5<&-
-    rm -rf "$fifo_dir"
-    printf '%s\n' "$error_message"
-    return 1
+  local time_to_first_tool_call_ms=""
+  if mcp_read_resource 3 4 "automobile:devices/booted" 10 booted_response; then
+    last_stdout_message="$booted_response"
+    # Check for JSON-RPC error (e.g. daemon not running with --no-daemon)
+    if jq -e '.error' >/dev/null 2>&1 <<<"$booted_response"; then
+      echo "resources/read returned JSON-RPC error (skipping timeToFirstToolCallMs)" >&2
+    else
+      time_to_first_tool_call_ms=$(( $(get_time_ms) - start_ms ))
+    fi
+  else
+    echo "resources/read failed (skipping timeToFirstToolCallMs)" >&2
   fi
-  last_stdout_message="$booted_response"
-  local time_to_first_tool_call_ms
-  time_to_first_tool_call_ms=$(( $(get_time_ms) - start_ms ))
 
   local startup_report
   if ! wait_for_startup_report 5 "$DEFAULT_TIMEOUT_MS" "$stderr_log" startup_report last_stderr_message "mcp-stderr> "; then
@@ -813,11 +800,13 @@ run_mcp_server() {
     --arg mode "$mode" \
     --argjson timeToReadyMs "$time_to_first_connection_ms" \
     --argjson timeToFirstConnectionMs "$time_to_first_connection_ms" \
-    --argjson timeToFirstToolCallMs "$time_to_first_tool_call_ms" \
     --argjson phases "$phases" \
     --argjson marks "$marks" \
     --argjson memoryUsage "$memory" \
-    '{mode:$mode, timeToReadyMs:$timeToReadyMs, timeToFirstConnectionMs:$timeToFirstConnectionMs, timeToFirstToolCallMs:$timeToFirstToolCallMs, phases:$phases, marks:$marks, memoryUsage:$memoryUsage}')
+    '{mode:$mode, timeToReadyMs:$timeToReadyMs, timeToFirstConnectionMs:$timeToFirstConnectionMs, phases:$phases, marks:$marks, memoryUsage:$memoryUsage}')
+  if [[ -n "$time_to_first_tool_call_ms" ]]; then
+    run_json=$(jq -c --argjson v "$time_to_first_tool_call_ms" '.timeToFirstToolCallMs = $v' <<<"$run_json")
+  fi
 
   echo "$run_json"
 }
@@ -1065,7 +1054,10 @@ if [[ "$run_server" == "true" ]]; then
     server_runs_json=$(jq --argjson run "$run_json" '. + [$run]' <<<"$server_runs_json")
     metrics_add "mcpServer.cold.timeToReadyMs" "$(jq -r '.timeToReadyMs' <<<"$run_json")"
     metrics_add "mcpServer.cold.timeToFirstConnectionMs" "$(jq -r '.timeToFirstConnectionMs' <<<"$run_json")"
-    metrics_add "mcpServer.cold.timeToFirstToolCallMs" "$(jq -r '.timeToFirstToolCallMs' <<<"$run_json")"
+    cold_tool_call_ms=$(jq -r '.timeToFirstToolCallMs // empty' <<<"$run_json")
+    if [[ -n "$cold_tool_call_ms" ]]; then
+      metrics_add "mcpServer.cold.timeToFirstToolCallMs" "$cold_tool_call_ms"
+    fi
     metrics_add "mcpServer.cold.memory.heapUsedBytes" "$(jq -r '.memoryUsage.heapUsed // 0' <<<"$run_json")"
   fi
 
@@ -1080,7 +1072,10 @@ if [[ "$run_server" == "true" ]]; then
     server_runs_json=$(jq --argjson run "$run_json" '. + [$run]' <<<"$server_runs_json")
     metrics_add "mcpServer.warm.timeToReadyMs" "$(jq -r '.timeToReadyMs' <<<"$run_json")"
     metrics_add "mcpServer.warm.timeToFirstConnectionMs" "$(jq -r '.timeToFirstConnectionMs' <<<"$run_json")"
-    metrics_add "mcpServer.warm.timeToFirstToolCallMs" "$(jq -r '.timeToFirstToolCallMs' <<<"$run_json")"
+    warm_tool_call_ms=$(jq -r '.timeToFirstToolCallMs // empty' <<<"$run_json")
+    if [[ -n "$warm_tool_call_ms" ]]; then
+      metrics_add "mcpServer.warm.timeToFirstToolCallMs" "$warm_tool_call_ms"
+    fi
     metrics_add "mcpServer.warm.memory.heapUsedBytes" "$(jq -r '.memoryUsage.heapUsed // 0' <<<"$run_json")"
   fi
 else

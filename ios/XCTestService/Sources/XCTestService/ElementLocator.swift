@@ -532,16 +532,18 @@ public class ElementLocator: ElementLocating {
         /// Get alerts from the foreground app.
         /// Some iOS versions surface permission dialogs as alerts on the foreground app
         /// rather than (or in addition to) springboard.
+        /// IMPORTANT: Creates a fresh XCUIApplication instance to avoid stale cached state.
         private func getAlertsFromForegroundApp() -> [UIElementInfo] {
-            guard let app = foregroundApp else { return [] }
+            guard let bundleId = foregroundBundleId else { return [] }
 
             let alertSnapshots: [XCUIElementSnapshot] = runOnMainThread {
-                let alertCount = app.alerts.count
+                let freshApp = XCUIApplication(bundleIdentifier: bundleId)
+                let alertCount = freshApp.alerts.count
                 guard alertCount > 0 else { return [] }
 
                 var snapshots: [XCUIElementSnapshot] = []
                 for i in 0 ..< alertCount {
-                    let alert = app.alerts.element(boundBy: i)
+                    let alert = freshApp.alerts.element(boundBy: i)
                     do {
                         let snapshot = try alert.snapshot()
                         snapshots.append(snapshot)

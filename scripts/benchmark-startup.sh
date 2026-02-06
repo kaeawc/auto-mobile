@@ -53,7 +53,7 @@ untrack_child_pid() {
 # Kill all tracked child processes (from both in-memory array and PID file).
 # Also kills direct children of this script to catch command-substitution
 # subshells whose PIDs are never explicitly tracked.
-# shellcheck disable=SC2329  # Function is invoked indirectly via cleanup/timeout handlers
+# shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via cleanup/timeout handlers
 _kill_all_tracked_pids() {
   local signal="${1:-KILL}"
   local seen=""

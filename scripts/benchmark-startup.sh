@@ -121,10 +121,13 @@ start_global_timeout_monitor() {
 
 # Stop global timeout monitor
 stop_global_timeout_monitor() {
+  # Ignore USR1 first to prevent a race: killing the sleep child causes the
+  # subshell's wait to return, which fires kill -USR1 before we can kill the
+  # subshell itself.
+  trap '' USR1
   if [[ -n "${global_timeout_pid:-}" ]]; then
-    # Kill children (the sleep process) first, then the subshell
-    pkill -P "$global_timeout_pid" 2>/dev/null || true
     kill "$global_timeout_pid" 2>/dev/null || true
+    pkill -P "$global_timeout_pid" 2>/dev/null || true
     wait "$global_timeout_pid" 2>/dev/null || true
     global_timeout_pid=""
   fi

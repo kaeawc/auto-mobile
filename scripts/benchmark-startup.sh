@@ -28,15 +28,50 @@ verbose="false"
 script_start_ms=""
 current_operation=""
 child_pids=()
+# File-backed PID tracking so subshells (from command substitutions) can
+# share tracked PIDs with the main shell's cleanup handlers.
+_pid_tracking_file=$(mktemp)
 
 # Track child process PIDs for cleanup
 track_child_pid() {
   child_pids+=("$1")
+  echo "$1" >> "$_pid_tracking_file"
 }
 
 untrack_child_pid() {
   local pid="$1"
   child_pids=("${child_pids[@]/$pid}")
+}
+
+# Kill all tracked child processes (from both in-memory array and PID file).
+# Also kills direct children of this script to catch command-substitution
+# subshells whose PIDs are never explicitly tracked.
+# shellcheck disable=SC2329  # Function is invoked indirectly via cleanup/timeout handlers
+_kill_all_tracked_pids() {
+  local signal="${1:-KILL}"
+  local seen=""
+
+  # In-memory array (only has PIDs tracked in the main shell)
+  for pid in "${child_pids[@]}"; do
+    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+      pkill "-$signal" -P "$pid" 2>/dev/null || true
+      kill "-$signal" "$pid" 2>/dev/null || true
+      seen="$seen $pid"
+    fi
+  done
+
+  # PID file (has PIDs tracked in subshells too)
+  if [[ -f "$_pid_tracking_file" ]]; then
+    while IFS= read -r pid; do
+      if [[ -n "$pid" && "$seen" != *" $pid"* ]] && kill -0 "$pid" 2>/dev/null; then
+        pkill "-$signal" -P "$pid" 2>/dev/null || true
+        kill "-$signal" "$pid" 2>/dev/null || true
+      fi
+    done < "$_pid_tracking_file"
+  fi
+
+  # Kill direct children of this script (catches command-substitution subshells)
+  pkill "-$signal" -P $$ 2>/dev/null || true
 }
 
 # Global timeout handler - logs diagnostics and exits
@@ -60,8 +95,13 @@ global_timeout_handler() {
     pstree -p $$ 2>/dev/null | sed 's/^/  /' >&2 || true
   else
     echo "  (pstree not available)" >&2
-    echo "  Child PIDs tracked: ${child_pids[*]:-none}" >&2
-    for pid in "${child_pids[@]}"; do
+    echo "  Child PIDs (in-memory): ${child_pids[*]:-none}" >&2
+    if [[ -f "$_pid_tracking_file" && -s "$_pid_tracking_file" ]]; then
+      echo "  Child PIDs (file): $(tr '\n' ' ' < "$_pid_tracking_file")" >&2
+    fi
+    local all_pids
+    all_pids=$(cat "$_pid_tracking_file" 2>/dev/null; printf '%s\n' "${child_pids[@]}")
+    for pid in $(echo "$all_pids" | sort -u); do
       if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
         echo "    PID $pid: running" >&2
       fi
@@ -84,19 +124,11 @@ global_timeout_handler() {
   echo "Environment: $env_info" >&2
   echo "" >&2
 
-  # Kill all tracked child processes
+  # Kill all tracked child processes (including those tracked in subshells)
   echo "Killing child processes..." >&2
-  for pid in "${child_pids[@]}"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -TERM "$pid" 2>/dev/null || true
-    fi
-  done
+  _kill_all_tracked_pids TERM
   sleep 0.5
-  for pid in "${child_pids[@]}"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
-  done
+  _kill_all_tracked_pids KILL
 
   echo "Benchmark terminated due to global timeout." >&2
   exit 1
@@ -978,13 +1010,11 @@ require_command jq
 # Cleanup handler to kill all tracked children on exit
 # shellcheck disable=SC2317,SC2329  # Function is invoked indirectly via trap
 cleanup_on_exit() {
-  for pid in "${child_pids[@]}"; do
-    if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
-      pkill -KILL -P "$pid" 2>/dev/null || true
-      kill -KILL "$pid" 2>/dev/null || true
-    fi
-  done
+  # Stop the timeout monitor first to prevent a USR1 race when pkill kills
+  # the timeout subshell inside _kill_all_tracked_pids.
   stop_global_timeout_monitor
+  _kill_all_tracked_pids KILL
+  rm -f "$_pid_tracking_file"
 }
 
 # Setup global timeout handler

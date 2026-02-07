@@ -135,7 +135,7 @@ export class DefaultFileSystem implements FileSystem {
   }
 
   async writeFileBuffer(filePath: string, data: Buffer): Promise<void> {
-    await fsExtra.writeFile(filePath, data);
+    await fs.promises.writeFile(filePath, data, { mode: 0o600 });
   }
 
   async ensureDir(dirPath: string): Promise<void> {

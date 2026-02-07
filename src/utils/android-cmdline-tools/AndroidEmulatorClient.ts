@@ -926,7 +926,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     const pollingPromise = backgroundPoller();
 
     // Main timeout loop
-    while (this.timer.now() - startTime < timeoutMs && pollingActive) {
+    while (this.timer.now() - startTime < timeoutMs) {
       if (foundDeviceId) {
         pollingActive = false;
         logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);

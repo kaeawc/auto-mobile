@@ -12,7 +12,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AccessibilityServiceClient } from "../observe/AccessibilityServiceClient";
-import { createGlobalPerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidAccessibilityServiceManager } from "../../utils/AccessibilityServiceManager";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -20,7 +20,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
-import { logger } from "../../utils/logger";
+import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 
 const PRESS_DURATION_MIN_MS = 600;
 const PRESS_DURATION_MAX_MS = 3000;
@@ -239,32 +239,15 @@ export class DragAndDrop extends BaseVisualChange {
   }
 
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
-    const syncResult = await this.accessibilityService.requestHierarchySync(
-      new NoOpPerformanceTracker(),
-      serverConfig.isRawElementSearchEnabled(),
-      signal,
-      HIERARCHY_REFRESH_TIMEOUT_MS
+    const rawHierarchy = await refreshAndroidViewHierarchy(
+      this.accessibilityService,
+      this.viewHierarchy,
+      HIERARCHY_REFRESH_TIMEOUT_MS,
+      signal
     );
 
-    let rawHierarchy = syncResult
-      ? this.accessibilityService.convertToViewHierarchyResult(syncResult.hierarchy)
-      : null;
     if (!rawHierarchy) {
       return null;
-    }
-
-    // Check if accessibility service hierarchy is incomplete and merge with uiautomator
-    if (rawHierarchy.accessibilityServiceIncomplete) {
-      logger.debug("[DRAG_AND_DROP] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback");
-      try {
-        const uiautomatorHierarchy = await this.viewHierarchy.getUiAutomatorHierarchy(
-          signal,
-          !serverConfig.isRawElementSearchEnabled()
-        );
-        rawHierarchy = this.viewHierarchy.mergeHierarchies(rawHierarchy, uiautomatorHierarchy);
-      } catch (fallbackErr) {
-        logger.warn(`[DRAG_AND_DROP] Failed to get uiautomator fallback: ${fallbackErr}`);
-      }
     }
 
     if (!serverConfig.isRawElementSearchEnabled()) {

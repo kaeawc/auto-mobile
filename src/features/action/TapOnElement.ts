@@ -21,7 +21,7 @@ import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { logger } from "../../utils/logger";
 import { AccessibilityServiceClient } from "../observe/AccessibilityServiceClient";
 import { XCTestServiceClient } from "../observe/XCTestServiceClient";
-import { createGlobalPerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { VisionFallback, DEFAULT_VISION_CONFIG, type VisionFallbackConfig } from "../../vision/index";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { buildElementSearchDebugContext } from "../../utils/DebugContextBuilder";
@@ -35,6 +35,7 @@ import { NodeCryptoService } from "../../utils/crypto";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
+import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -236,29 +237,12 @@ export class TapOnElement extends BaseVisualChange {
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
     switch (this.device.platform) {
       case "android": {
-        const syncResult = await this.accessibilityService.requestHierarchySync(
-          new NoOpPerformanceTracker(),
-          serverConfig.isRawElementSearchEnabled(),
-          signal,
-          effectiveTimeoutMs
+        const rawHierarchy = await refreshAndroidViewHierarchy(
+          this.accessibilityService,
+          this.viewHierarchy,
+          effectiveTimeoutMs,
+          signal
         );
-        let rawHierarchy = syncResult
-          ? this.accessibilityService.convertToViewHierarchyResult(syncResult.hierarchy)
-          : null;
-
-        // Check if accessibility service hierarchy is incomplete and merge with uiautomator
-        if (rawHierarchy?.accessibilityServiceIncomplete) {
-          logger.debug("[TAP_ON_ELEMENT] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback");
-          try {
-            const uiautomatorHierarchy = await this.viewHierarchy.getUiAutomatorHierarchy(
-              signal,
-              !serverConfig.isRawElementSearchEnabled()
-            );
-            rawHierarchy = this.viewHierarchy.mergeHierarchies(rawHierarchy, uiautomatorHierarchy);
-          } catch (fallbackErr) {
-            logger.warn(`[TAP_ON_ELEMENT] Failed to get uiautomator fallback: ${fallbackErr}`);
-          }
-        }
 
         return rawHierarchy
           ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)

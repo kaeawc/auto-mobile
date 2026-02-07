@@ -27,9 +27,9 @@ export interface DebugSearchOptions {
   };
 
   /**
-   * Whether to use fuzzy matching (default: true)
+   * Whether to use partial matching (substring containment, default: true)
    */
-  fuzzyMatch?: boolean;
+  partialMatch?: boolean;
 
   /**
    * Whether to use case-sensitive matching (default: false)
@@ -75,7 +75,7 @@ export class DebugSearch {
    */
   async execute(options: DebugSearchOptions): Promise<DebugSearchResult> {
     const startTime = this.timer.now();
-    const fuzzyMatch = options.fuzzyMatch !== false;
+    const partialMatch = options.partialMatch !== false;
     const caseSensitive = options.caseSensitive === true;
     const includeNearMisses = options.includeNearMisses !== false;
     const maxNearMisses = options.maxNearMisses || 10;
@@ -93,7 +93,7 @@ export class DebugSearch {
           text: options.text,
           resourceId: options.resourceId,
           container: options.container,
-          fuzzyMatch,
+          partialMatch,
           caseSensitive
         },
         matches: [],
@@ -107,7 +107,7 @@ export class DebugSearch {
     let totalElements = 0;
 
     // Create text matcher
-    const matchesText = this.createTextMatcher(options.text || "", fuzzyMatch, caseSensitive);
+    const matchesText = this.createTextMatcher(options.text || "", partialMatch, caseSensitive);
 
     // Traverse the hierarchy and find all matches
     const rootNodes = this.extractRootNodes(searchHierarchy);
@@ -116,7 +116,7 @@ export class DebugSearch {
     let containerNode: any = null;
     if (options.container) {
       const containerMatcher = options.container.text
-        ? this.createTextMatcher(options.container.text, fuzzyMatch, caseSensitive)
+        ? this.createTextMatcher(options.container.text, partialMatch, caseSensitive)
         : null;
       for (const rootNode of rootNodes) {
         this.traverseNode(rootNode, (node: any) => {
@@ -264,7 +264,7 @@ export class DebugSearch {
         text: options.text,
         resourceId: options.resourceId,
         container: options.container,
-        fuzzyMatch,
+        partialMatch,
         caseSensitive
       },
       matches,
@@ -287,7 +287,7 @@ export class DebugSearch {
    */
   private createTextMatcher(
     text: string,
-    fuzzyMatch: boolean,
+    partialMatch: boolean,
     caseSensitive: boolean
   ): (value: string) => boolean {
     if (!text) {return () => false;}
@@ -296,7 +296,7 @@ export class DebugSearch {
 
     return (value: string) => {
       const compareValue = caseSensitive ? value : value.toLowerCase();
-      if (fuzzyMatch) {
+      if (partialMatch) {
         return compareValue.includes(searchText);
       }
       return compareValue === searchText;

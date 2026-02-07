@@ -738,7 +738,7 @@ export class DefaultElementFinder implements ElementFinder {
       return false; // Expected text but element has no text
     }
 
-    // Use fuzzy matching for text validation
-    return this.textMatcher.fuzzyTextMatch(foundElement.text, expectedText, false);
+    // Use partial matching for text validation
+    return this.textMatcher.partialTextMatch(foundElement.text, expectedText, false);
   }
 }

@@ -1,7 +1,9 @@
+import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
+
 /**
  * Handles text matching algorithms for element search
  */
-export class TextMatcher {
+export class DefaultTextMatcher implements TextMatcher {
   /**
    * Perform fuzzy text matching between two strings
    * @param text1 - First string to compare

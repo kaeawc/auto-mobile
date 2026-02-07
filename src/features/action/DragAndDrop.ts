@@ -7,7 +7,10 @@ import {
   ObserveResult,
   ViewHierarchyResult
 } from "../../models";
-import { ElementUtils } from "../utility/ElementUtils";
+import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
+import { DefaultElementFinder } from "../utility/ElementFinder";
+import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AccessibilityServiceClient } from "../observe/AccessibilityServiceClient";
 import { createGlobalPerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -30,7 +33,8 @@ const DRAG_TIMEOUT_BUFFER_MS = 500;
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
 
 export class DragAndDrop extends BaseVisualChange {
-  private elementUtils: ElementUtils;
+  private finder: ElementFinder;
+  private geometry: ElementGeometry;
   private accessibilityService: AccessibilityServiceClient;
   private viewHierarchy: ViewHierarchy;
 
@@ -40,7 +44,8 @@ export class DragAndDrop extends BaseVisualChange {
     timer: Timer = defaultTimer
   ) {
     super(device, adb, timer);
-    this.elementUtils = new ElementUtils();
+    this.finder = new DefaultElementFinder();
+    this.geometry = new DefaultElementGeometry();
     this.accessibilityService = AccessibilityServiceClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
   }
@@ -100,8 +105,8 @@ export class DragAndDrop extends BaseVisualChange {
 
           const source = this.resolveTarget(viewHierarchy, options.source, "source");
           const target = this.resolveTarget(viewHierarchy, options.target, "target");
-          const sourcePoint = this.elementUtils.getElementCenter(source);
-          const targetPoint = this.elementUtils.getElementCenter(target);
+          const sourcePoint = this.geometry.getElementCenter(source);
+          const targetPoint = this.geometry.getElementCenter(target);
 
           const dragResult = await this.executeAndroidDrag(
             sourcePoint.x,
@@ -200,14 +205,14 @@ export class DragAndDrop extends BaseVisualChange {
       throw new ActionableError(`dragAndDrop ${label} must specify exactly one of text or elementId`);
     }
     if (target.elementId) {
-      const element = this.elementUtils.findElementByResourceId(viewHierarchy, target.elementId);
+      const element = this.finder.findElementByResourceId(viewHierarchy, target.elementId);
       if (!element) {
         throw new ActionableError(`dragAndDrop ${label} not found with elementId '${target.elementId}'`);
       }
       return element;
     }
     if (target.text) {
-      const element = this.elementUtils.findElementByText(viewHierarchy, target.text);
+      const element = this.finder.findElementByText(viewHierarchy, target.text);
       if (!element) {
         throw new ActionableError(`dragAndDrop ${label} not found with text '${target.text}'`);
       }

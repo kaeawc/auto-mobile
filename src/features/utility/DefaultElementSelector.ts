@@ -3,14 +3,15 @@ import type { ElementSelectionResult } from "../../models/ElementSelectionResult
 import type { ViewHierarchyResult } from "../../models/ViewHierarchyResult";
 import type { ElementSelectionStrategy } from "../../models/ElementSelectionStrategy";
 import type { ElementSelector } from "../../utils/interfaces/ElementSelector";
-import { ElementFinder } from "./ElementFinder";
+import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import { DefaultElementFinder } from "./ElementFinder";
 
 export class DefaultElementSelector implements ElementSelector {
   private finder: ElementFinder;
   private random: () => number;
 
   constructor(
-    finder: ElementFinder = new ElementFinder(),
+    finder: ElementFinder = new DefaultElementFinder(),
     random: () => number = Math.random
   ) {
     this.finder = finder;

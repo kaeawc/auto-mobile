@@ -1,19 +1,25 @@
 import { Element } from "../../models/Element";
 import { ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { logger } from "../../utils/logger";
-import { ElementParser } from "./ElementParser";
-import { TextMatcher } from "./TextMatcher";
+import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
+import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
+import { DefaultElementParser } from "./ElementParser";
+import { DefaultTextMatcher } from "./TextMatcher";
 
 /**
  * Handles searching and selection of elements in view hierarchy
  */
-export class ElementFinder {
+export class DefaultElementFinder implements ElementFinder {
   private parser: ElementParser;
   private textMatcher: TextMatcher;
 
-  constructor() {
-    this.parser = new ElementParser();
-    this.textMatcher = new TextMatcher();
+  constructor(
+    parser: ElementParser = new DefaultElementParser(),
+    textMatcher: TextMatcher = new DefaultTextMatcher()
+  ) {
+    this.parser = parser;
+    this.textMatcher = textMatcher;
   }
 
   hasContainerElement(

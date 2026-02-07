@@ -4,7 +4,6 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { BootedDevice, Element, ViewHierarchyResult, DebugSearchResult, DebugSearchMatch } from "../../models";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
-import { ElementUtils } from "../utility/ElementUtils";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 
@@ -56,7 +55,6 @@ export class DebugSearch {
   private device: BootedDevice;
   private readonly adb: AdbExecutor;
   private viewHierarchy: ViewHierarchy;
-  private elementUtils: ElementUtils;
   private timer: Timer;
 
   constructor(
@@ -67,7 +65,6 @@ export class DebugSearch {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.viewHierarchy = new ViewHierarchy(device, adbFactory);
-    this.elementUtils = new ElementUtils();
     this.timer = timer;
   }
 

@@ -113,7 +113,7 @@ export class DaemonManager {
       }
 
       // Wait for processes to terminate
-      await defaultTimer.sleep(1000);
+      await this.timer.sleep(1000);
     }
 
     // Enforce single daemon policy: stop any existing daemon before starting
@@ -125,7 +125,7 @@ export class DaemonManager {
       );
       await this.stop();
       // Wait briefly for cleanup
-      await defaultTimer.sleep(500);
+      await this.timer.sleep(500);
     }
 
     // Clean up stale socket and PID files from previous sessions
@@ -249,7 +249,7 @@ export class DaemonManager {
         process.kill(pid, "SIGKILL");
 
         // Wait a bit more
-        await defaultTimer.sleep(1000);
+        await this.timer.sleep(1000);
       }
 
       // Clean up stale PID file if it exists
@@ -319,7 +319,7 @@ export class DaemonManager {
     console.log("Restarting daemon...");
     await this.stop();
     // Wait a bit before starting
-    await defaultTimer.sleep(1000);
+    await this.timer.sleep(1000);
     await this.start(options);
   }
 
@@ -340,7 +340,7 @@ export class DaemonManager {
         }
       }
 
-      await defaultTimer.sleep(pollInterval);
+      await this.timer.sleep(pollInterval);
     }
 
     return false;
@@ -357,7 +357,7 @@ export class DaemonManager {
       if (!this.isProcessRunning(pid)) {
         return true;
       }
-      await defaultTimer.sleep(pollInterval);
+      await this.timer.sleep(pollInterval);
     }
 
     return false;

@@ -20,7 +20,7 @@ import {
 } from "./debugTools";
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
-import { defaultTimer } from "../utils/SystemTimer";
+import { Timer, defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Daemon Manager
@@ -34,13 +34,16 @@ import { defaultTimer } from "../utils/SystemTimer";
 export class DaemonManager {
   private readonly clientFactory: DaemonClientFactory;
   private readonly stateProvider: () => DaemonStateLike;
+  private readonly timer: Timer;
 
   constructor(
     clientFactory: DaemonClientFactory = () => new DaemonClient(),
-    stateProvider: () => DaemonStateLike = () => DaemonState.getInstance()
+    stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
+    timer: Timer = defaultTimer
   ) {
     this.clientFactory = clientFactory;
     this.stateProvider = stateProvider;
+    this.timer = timer;
   }
 
   createClient(): DaemonClientLike {
@@ -324,10 +327,10 @@ export class DaemonManager {
    * Wait for daemon to be ready (socket listening)
    */
   async waitForReady(timeout: number): Promise<boolean> {
-    const startTime = Date.now();
+    const startTime = this.timer.now();
     const pollInterval = 100; // Poll every 100ms
 
-    while (Date.now() - startTime < timeout) {
+    while (this.timer.now() - startTime < timeout) {
       // Check if socket exists
       if (existsSync(SOCKET_PATH)) {
         // Check if daemon is responding
@@ -347,10 +350,10 @@ export class DaemonManager {
    * Wait for daemon process to stop
    */
   private async waitForStop(pid: number, timeout: number): Promise<boolean> {
-    const startTime = Date.now();
+    const startTime = this.timer.now();
     const pollInterval = 100;
 
-    while (Date.now() - startTime < timeout) {
+    while (this.timer.now() - startTime < timeout) {
       if (!this.isProcessRunning(pid)) {
         return true;
       }

@@ -61,11 +61,14 @@ jobs:
           release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
           release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
 
+      - name: "Copy APK to output directory"
+        run: cp android/accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk /tmp/accessibility-service-debug.apk
+
       - name: "Upload Accessibility Service APK"
         uses: actions/upload-artifact@v4
         with:
           name: accessibility-service-apk
-          path: android/accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk
+          path: /tmp/accessibility-service-debug.apk
 
   prepare:
     runs-on: ubuntu-latest

@@ -6,7 +6,7 @@ export interface ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     text: string,
     container?: { elementId?: string; text?: string } | null,
-    fuzzyMatch?: boolean,
+    partialMatch?: boolean,
     caseSensitive?: boolean
   ): Element[];
 
@@ -14,7 +14,7 @@ export interface ElementFinder {
     viewHierarchy: ViewHierarchyResult,
     text: string,
     container?: { elementId?: string; text?: string } | null,
-    fuzzyMatch?: boolean,
+    partialMatch?: boolean,
     caseSensitive?: boolean
   ): Element | null;
 

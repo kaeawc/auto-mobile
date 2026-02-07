@@ -19,17 +19,17 @@ export class FakeElementFinder implements ElementFinder {
   nextIsElementFocused: boolean = false;
   nextValidateElementText: boolean = true;
 
-  lastFindByTextArgs?: { text: string; container?: any; fuzzyMatch?: boolean; caseSensitive?: boolean };
+  lastFindByTextArgs?: { text: string; container?: any; partialMatch?: boolean; caseSensitive?: boolean };
   lastFindByResourceIdArgs?: { resourceId: string; container?: any; partialMatch?: boolean };
 
   findElementsByText(
     _viewHierarchy: ViewHierarchyResult,
     text: string,
     container?: { elementId?: string; text?: string } | null,
-    fuzzyMatch?: boolean,
+    partialMatch?: boolean,
     caseSensitive?: boolean
   ): Element[] {
-    this.lastFindByTextArgs = { text, container, fuzzyMatch, caseSensitive };
+    this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
     return this.nextElementsByText;
   }
 
@@ -37,10 +37,10 @@ export class FakeElementFinder implements ElementFinder {
     _viewHierarchy: ViewHierarchyResult,
     text: string,
     container?: { elementId?: string; text?: string } | null,
-    fuzzyMatch?: boolean,
+    partialMatch?: boolean,
     caseSensitive?: boolean
   ): Element | null {
-    this.lastFindByTextArgs = { text, container, fuzzyMatch, caseSensitive };
+    this.lastFindByTextArgs = { text, container, partialMatch, caseSensitive };
     return this.nextElementByText;
   }
 

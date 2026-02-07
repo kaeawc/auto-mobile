@@ -240,7 +240,7 @@ const resolveHighlightShapeFromSelector = async (
   const selection = args.text
     ? elementSelector.selectByText(viewHierarchy, args.text, {
       container,
-      fuzzyMatch: true,
+      partialMatch: true,
       caseSensitive: false,
       strategy
     })

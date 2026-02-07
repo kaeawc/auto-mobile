@@ -173,7 +173,7 @@ export class TapOnElement extends BaseVisualChange {
       return {
         selection: this.elementSelector.selectByText(viewHierarchy, options.text, {
           container: options.container,
-          fuzzyMatch: true,
+          partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy
         }),

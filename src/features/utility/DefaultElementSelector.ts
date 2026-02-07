@@ -23,7 +23,7 @@ export class DefaultElementSelector implements ElementSelector {
     text: string,
     options?: {
       container?: { elementId?: string; text?: string } | null;
-      fuzzyMatch?: boolean;
+      partialMatch?: boolean;
       caseSensitive?: boolean;
       strategy?: ElementSelectionStrategy;
     }
@@ -33,7 +33,7 @@ export class DefaultElementSelector implements ElementSelector {
       viewHierarchy,
       text,
       options?.container ?? null,
-      options?.fuzzyMatch ?? true,
+      options?.partialMatch ?? true,
       options?.caseSensitive ?? false
     );
     return this.pickMatch(matches, strategy);

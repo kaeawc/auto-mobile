@@ -202,6 +202,24 @@ describe("BugReport", () => {
       expect(result.viewHierarchy.clickableElements[1].resourceId).toBe("bool-clickable");
     });
 
+    test("counts nodes using children fallback for accessibility/iOS hierarchies", async () => {
+      const { bugReport, elementParser, viewHierarchy } = setup();
+      // Hierarchy uses "children" instead of "node"
+      const rootNode = {
+        $: {},
+        children: [{ $: {} }, { $: {} }]
+      };
+      viewHierarchy.configureHierarchy({ hierarchy: { node: rootNode } });
+      elementParser.nextRootNodes = [rootNode];
+      elementParser.nextFlattenedElements = [
+        { element: makeElement(), index: 0, depth: 0 }
+      ];
+
+      const result = await executeHierarchyOnly(bugReport);
+      // 3 traversed (root + 2 children), 1 flattened = 2 filtered
+      expect(result.viewHierarchy.filteredNodeCount).toBe(2);
+    });
+
     test("falls back to className when class is not set", async () => {
       const { bugReport, elementParser, viewHierarchy } = setup();
       viewHierarchy.configureHierarchy({ hierarchy: { node: {} } });

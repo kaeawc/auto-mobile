@@ -178,5 +178,44 @@ describe("BugReport", () => {
       expect(result.viewHierarchy.clickableElements).toHaveLength(1);
       expect(result.viewHierarchy.clickableElements[0].resourceId).toBe("button");
     });
+
+    test("accepts string 'true' clickable values from accessibility hierarchies", async () => {
+      const { bugReport, elementParser, viewHierarchy } = setup();
+      viewHierarchy.configureHierarchy({ hierarchy: { node: {} } });
+      elementParser.nextRootNodes = [{ $: {} }];
+      elementParser.nextFlattenedElements = [
+        {
+          element: makeElement({ "clickable": "true" as any, "resource-id": "string-clickable" }),
+          index: 0,
+          depth: 0
+        },
+        {
+          element: makeElement({ "clickable": true, "resource-id": "bool-clickable" }),
+          index: 1,
+          depth: 0
+        }
+      ];
+
+      const result = await executeHierarchyOnly(bugReport);
+      expect(result.viewHierarchy.clickableElements).toHaveLength(2);
+      expect(result.viewHierarchy.clickableElements[0].resourceId).toBe("string-clickable");
+      expect(result.viewHierarchy.clickableElements[1].resourceId).toBe("bool-clickable");
+    });
+
+    test("falls back to className when class is not set", async () => {
+      const { bugReport, elementParser, viewHierarchy } = setup();
+      viewHierarchy.configureHierarchy({ hierarchy: { node: {} } });
+      elementParser.nextRootNodes = [{ $: {} }];
+      elementParser.nextFlattenedElements = [
+        {
+          element: makeElement({ "clickable": true, "className": "android.widget.TextView" }),
+          index: 0,
+          depth: 0
+        }
+      ];
+
+      const result = await executeHierarchyOnly(bugReport);
+      expect(result.viewHierarchy.clickableElements[0].className).toBe("android.widget.TextView");
+    });
   });
 });

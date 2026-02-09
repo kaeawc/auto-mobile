@@ -24,8 +24,9 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): UIElementInfo? {
         val jsonObj = hierarchyJson.jsonObject
         val hierarchy = jsonObj["hierarchy"]?.jsonObject ?: return null
         val nodeElement = hierarchy["node"] ?: return null
+        val counter = intArrayOf(0)
 
-        parseNodeElement(nodeElement, 0, 0)
+        parseNodeElement(nodeElement, 0, 0, counter)
     } catch (e: Exception) {
         log.warn("Failed to parse hierarchy JSON: ${e.message}", e)
         null
@@ -35,12 +36,12 @@ fun parseHierarchyFromJson(hierarchyJson: JsonElement): UIElementInfo? {
 /**
  * Parse a node JsonElement which can be either a single node or array of nodes.
  */
-private fun parseNodeElement(nodeElement: JsonElement, depth: Int, siblingIndex: Int): UIElementInfo? {
+private fun parseNodeElement(nodeElement: JsonElement, depth: Int, siblingIndex: Int, counter: IntArray): UIElementInfo? {
     return when (nodeElement) {
-        is JsonObject -> parseJsonObjectNode(nodeElement, depth, siblingIndex)
+        is JsonObject -> parseJsonObjectNode(nodeElement, depth, siblingIndex, counter)
         is JsonArray -> {
             // If it's an array, parse the first element
-            nodeElement.firstOrNull()?.let { parseNodeElement(it, depth, siblingIndex) }
+            nodeElement.firstOrNull()?.let { parseNodeElement(it, depth, siblingIndex, counter) }
         }
         else -> null
     }
@@ -49,7 +50,7 @@ private fun parseNodeElement(nodeElement: JsonElement, depth: Int, siblingIndex:
 /**
  * Parse a single node JsonObject into UIElementInfo.
  */
-private fun parseJsonObjectNode(nodeObj: JsonObject, depth: Int, siblingIndex: Int): UIElementInfo {
+private fun parseJsonObjectNode(nodeObj: JsonObject, depth: Int, siblingIndex: Int, counter: IntArray): UIElementInfo {
     // Check if attributes are in "$" or at root level
     val attrs = nodeObj["\$"]?.jsonObject ?: nodeObj
 
@@ -77,14 +78,15 @@ private fun parseJsonObjectNode(nodeObj: JsonObject, depth: Int, siblingIndex: I
 
     // Parse children from "node" field
     val childrenElement = nodeObj["node"]
-    val children = parseChildren(childrenElement, depth + 1)
+    val children = parseChildren(childrenElement, depth + 1, counter)
 
-    // Generate stable ID
+    // Generate unique ID — nodeIndex ensures no collisions across subtrees
+    val nodeIndex = counter[0]++
     val baseId = resourceId
         ?: contentDesc?.let { "desc:$it" }
         ?: text?.take(20)?.let { "text:$it" }
         ?: "view"
-    val id = "$baseId@d${depth}s${siblingIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
+    val id = "$baseId@d${depth}s${siblingIndex}n${nodeIndex}:${bounds.left},${bounds.top}-${bounds.right},${bounds.bottom}"
 
     return UIElementInfo(
         id = id,
@@ -158,17 +160,17 @@ private fun parseBoundsString(boundsStr: String): ElementBounds {
 /**
  * Parse child nodes from the "node" field which can be a single object or array.
  */
-private fun parseChildren(childrenElement: JsonElement?, parentDepth: Int): List<UIElementInfo> {
+private fun parseChildren(childrenElement: JsonElement?, parentDepth: Int, counter: IntArray): List<UIElementInfo> {
     if (childrenElement == null) return emptyList()
 
     return when (childrenElement) {
         is JsonArray -> {
             childrenElement.mapIndexedNotNull { index, elem ->
-                parseNodeElement(elem, parentDepth, index)
+                parseNodeElement(elem, parentDepth, index, counter)
             }
         }
         is JsonObject -> {
-            listOfNotNull(parseJsonObjectNode(childrenElement, parentDepth, 0))
+            listOfNotNull(parseJsonObjectNode(childrenElement, parentDepth, 0, counter))
         }
         else -> emptyList()
     }

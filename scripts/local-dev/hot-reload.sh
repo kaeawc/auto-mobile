@@ -843,6 +843,7 @@ WATCHER_LOG="${PROJECT_ROOT}/scratch/hot-reload.log"
 
 (
   # Background watcher cleanup — stops XCTestService and removes PID file
+  # shellcheck disable=SC2317,SC2329 # invoked indirectly via trap
   watcher_cleanup() {
     log_info "Watcher stopping..."
     stop_xctestservice

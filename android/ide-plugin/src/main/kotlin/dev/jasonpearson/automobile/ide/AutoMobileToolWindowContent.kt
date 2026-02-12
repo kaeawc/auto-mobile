@@ -41,7 +41,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.PointerIcon
@@ -99,6 +98,7 @@ import dev.jasonpearson.automobile.ide.settings.AutoMobileSettings
 import dev.jasonpearson.automobile.ide.tabs.HorizontalTab
 import dev.jasonpearson.automobile.ide.tabs.HorizontalTabBar
 import dev.jasonpearson.automobile.ide.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.ide.navigation.NavigationScreenshotLoader
 import dev.jasonpearson.automobile.ide.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.ide.storage.StorageDashboard
 import dev.jasonpearson.automobile.ide.storage.StoragePlatform
@@ -580,11 +580,9 @@ fun AutoMobileToolWindowContent() {
   var currentReplayIndex by remember { mutableIntStateOf(0) }
   var isReplaying by remember { mutableStateOf(false) }
 
-  // Navigation focus mode state (when zoomed and content extends beyond canvas)
-  var isNavigationFocused by remember { mutableStateOf(false) }
-
   // Toggle between Layout Inspector and Navigation in the main content area
   var showNavigationView by remember { mutableStateOf(false) }
+  var isNavigationDetailView by remember { mutableStateOf(false) }
 
   // Setup state - true when AutoMobile service/daemon not detected or accessibility service not running
   // TODO: Replace with actual service detection
@@ -617,13 +615,6 @@ fun AutoMobileToolWindowContent() {
   }
 
   val colors = JewelTheme.globalColors
-  val isCurrentlyOnNavigation = showNavigationView
-
-  // Chrome should fade when navigation nodes exceed bounds and user isn't hovering chrome
-  var isHeaderHovered by remember { mutableStateOf(false) }
-  var isTabBarHovered by remember { mutableStateOf(false) }
-  val chromeShouldFade = isNavigationFocused && isCurrentlyOnNavigation && !isHeaderHovered && !isTabBarHovered
-  val chromeAlpha = if (chromeShouldFade) 0.2f else 1f
 
   // Track header height for padding non-navigation content
   var headerHeight by remember { mutableStateOf(0) }
@@ -639,9 +630,6 @@ fun AutoMobileToolWindowContent() {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .graphicsLayer { alpha = chromeAlpha }
-            .onPointerEvent(PointerEventType.Enter) { isHeaderHovered = true }
-            .onPointerEvent(PointerEventType.Exit) { isHeaderHovered = false }
             .onGloballyPositioned { coordinates ->
                 headerHeight = coordinates.size.height
             }
@@ -754,12 +742,20 @@ fun AutoMobileToolWindowContent() {
           // Main content: Layout Inspector (central) + Failures/Performance (right vertical panels)
           Row(
               modifier = if (selectedHorizontalTabId != null) {
-                  Modifier.fillMaxWidth().height(250.dp).graphicsLayer { alpha = chromeAlpha }
+                  Modifier.fillMaxWidth().height(250.dp)
               } else {
-                  Modifier.fillMaxWidth().height(containerHeight).graphicsLayer { alpha = chromeAlpha }
+                  Modifier.fillMaxWidth().height(containerHeight)
               }
           ) {
             // Central content area: Layout Inspector or Navigation (toggled)
+            // Screenshot loader hoisted here so its cache persists across toggles
+            val navScreenshotLoader = remember(clientProvider, dataSourceMode) {
+                if (dataSourceMode == DataSourceMode.Real && clientProvider != null) {
+                    NavigationScreenshotLoader(clientProvider)
+                } else {
+                    null
+                }
+            }
             Box(modifier = Modifier.weight(1f)) {
                 val streamClient = observationStreamClient
                 if (showNavigationView) {
@@ -769,15 +765,14 @@ fun AutoMobileToolWindowContent() {
                             testFlowScreens = emptyList()
                             isReplaying = false
                         },
-                        onFocusModeChanged = { focused ->
-                            isNavigationFocused = focused
+                        onDetailViewChanged = { isDetail ->
+                            isNavigationDetailView = isDetail
                         },
-                        headerHeightPx = headerHeight.toFloat(),
-                        chromeAlpha = chromeAlpha,
                         dataSourceMode = dataSourceMode,
                         clientProvider = clientProvider,
                         selectedAppId = selectedAppId,
                         observationStreamClient = observationStreamClient,
+                        screenshotLoader = navScreenshotLoader,
                     )
                 } else if (streamClient != null) {
                     LayoutInspectorDashboard(
@@ -793,14 +788,16 @@ fun AutoMobileToolWindowContent() {
                     )
                 }
 
-                // Segmented toggle overlay at top-start
-                MainContentViewToggle(
-                    showNavigation = showNavigationView,
-                    onToggle = { showNavigationView = it },
-                    modifier = Modifier
-                        .align(Alignment.TopStart)
-                        .padding(8.dp),
-                )
+                // Segmented toggle overlay at top-start (hidden on detail views)
+                if (!isNavigationDetailView) {
+                    MainContentViewToggle(
+                        showNavigation = showNavigationView,
+                        onToggle = { showNavigationView = it },
+                        modifier = Modifier
+                            .align(Alignment.TopStart)
+                            .padding(8.dp),
+                    )
+                }
             }
 
             // Right vertical panels: Failures and Performance
@@ -905,10 +902,7 @@ fun AutoMobileToolWindowContent() {
               onTabSelected = { tabId ->
                   selectedHorizontalTabId = tabId
               },
-              modifier = Modifier
-                  .graphicsLayer { alpha = chromeAlpha }
-                  .onPointerEvent(PointerEventType.Enter) { isTabBarHovered = true }
-                  .onPointerEvent(PointerEventType.Exit) { isTabBarHovered = false },
+              modifier = Modifier,
           )
 
           // Expanded horizontal tab content

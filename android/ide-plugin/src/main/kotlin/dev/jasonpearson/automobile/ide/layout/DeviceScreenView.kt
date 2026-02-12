@@ -171,11 +171,12 @@ fun DeviceScreenView(
     }
 
     Column(modifier = modifier) {
-        // Tap target compliance toggle
+        // Tap target compliance toggle - top padding to clear the Layout/Navigation toggle overlay
         TapTargetComplianceToggle(
             enabled = showTapTargetIssues,
             issueCount = nonCompliantElements.size,
             onToggle = onToggleTapTargetIssues,
+            modifier = Modifier.padding(top = 36.dp),
         )
 
         // Screenshot viewport
@@ -642,6 +643,7 @@ private fun TapTargetComplianceToggle(
     enabled: Boolean,
     issueCount: Int,
     onToggle: () -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val colors = JewelTheme.globalColors
     val backgroundColor = if (enabled) {
@@ -656,7 +658,7 @@ private fun TapTargetComplianceToggle(
     }
 
     BoxWithConstraints(
-        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+        modifier = modifier.padding(horizontal = 8.dp, vertical = 4.dp),
     ) {
         val isCompact = maxWidth < 150.dp
 

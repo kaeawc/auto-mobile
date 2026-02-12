@@ -585,9 +585,11 @@ export class Daemon {
     });
 
     // Wire up on-demand navigation graph requests from IDE plugins
-    server.setOnNavigationGraphRequested(async () => {
+    server.setOnNavigationGraphRequested(async (appId?: string | null) => {
       try {
-        const summary = await navGraphManager.exportGraphSummary();
+        const summary = appId
+          ? await navGraphManager.exportGraphSummaryForApp(appId)
+          : await navGraphManager.exportGraphSummary();
         return convertSummaryToStreamData(summary);
       } catch (error) {
         logger.warn(`[Daemon] Failed to export navigation graph on request: ${error}`);

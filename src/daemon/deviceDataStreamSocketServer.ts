@@ -120,7 +120,7 @@ export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
  * Callback invoked when a client requests the current navigation graph.
  * Returns the current graph data, or null if no graph is available.
  */
-export type OnNavigationGraphRequestedCallback = () => Promise<NavigationGraphStreamData | null>;
+export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Promise<NavigationGraphStreamData | null>;
 
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
@@ -257,7 +257,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    * Override processLine to handle additional commands and the onSubscriberConnected callback.
    */
   protected async processLine(socket: Socket, line: string): Promise<void> {
-    const request = this.parseJson<{ id?: string; command: string; deviceId?: string }>(line);
+    const request = this.parseJson<{ id?: string; command: string; deviceId?: string; appId?: string }>(line);
 
     if (!request) {
       const errorResponse: SubscriptionResponse = {
@@ -295,7 +295,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       }
 
       try {
-        const graphData = await this.onNavigationGraphRequested();
+        const graphData = await this.onNavigationGraphRequested(request.appId ?? null);
         if (graphData) {
           const message: DeviceDataStreamMessage = {
             id: request.id,

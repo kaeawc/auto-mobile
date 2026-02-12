@@ -726,15 +726,15 @@ fun NavigationCanvasView(
                     val fogColor = JewelTheme.globalColors.text.normal
 
                     Canvas(modifier = Modifier.fillMaxSize().zIndex(1f)) {
-                        val maxRadius = maxOf(size.width, size.height) * 0.5f
+                        val maxRadius = maxOf(size.width, size.height) * 0.625f
 
                         drawRect(
                             brush = Brush.radialGradient(
                                 colorStops = arrayOf(
                                     0.0f to Color.Transparent,
-                                    0.3f to fogColor.copy(alpha = 0.10f),
-                                    0.6f to fogColor.copy(alpha = 0.40f),
-                                    1.0f to fogColor.copy(alpha = 0.90f),
+                                    0.3f to fogColor.copy(alpha = 0.05f),
+                                    0.6f to fogColor.copy(alpha = 0.20f),
+                                    1.0f to fogColor.copy(alpha = 0.50f),
                                 ),
                                 center = androidx.compose.ui.geometry.Offset(centerX, centerY),
                                 radius = maxRadius,

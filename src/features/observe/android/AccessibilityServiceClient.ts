@@ -1371,7 +1371,7 @@ export class AccessibilityServiceClient extends DeviceServiceClient implements A
         if (event) {
           // The WebSocket protocol puts timestamp on the outer message, not inside event.
           // Ensure the event has a timestamp for the navigation graph manager.
-          if (event.timestamp == null && navMessage.timestamp != null) {
+          if (event.timestamp === undefined && navMessage.timestamp !== undefined) {
             event.timestamp = navMessage.timestamp;
           }
           if (event.applicationId) {

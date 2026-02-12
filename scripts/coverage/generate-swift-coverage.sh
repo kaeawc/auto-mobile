@@ -34,8 +34,8 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
 
   echo "Testing ${package} with coverage..."
   if ! (cd "${package_dir}" && swift test --enable-code-coverage 2>&1); then
-    echo "Warning: ${package} tests failed, skipping coverage" >&2
-    continue
+    echo "Error: ${package} tests failed" >&2
+    exit 1
   fi
 
   # Find the coverage profile
@@ -46,19 +46,23 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
     continue
   fi
 
-  # Find the test binary
-  test_binary=$(find "${build_dir}" -name "${package}PackageTests.xctest" -o -name "${package}PackageTests" 2>/dev/null | head -1)
-  if [[ -z "$test_binary" ]]; then
-    # Try alternate naming: the .xctest bundle on macOS
-    test_binary=$(find "$(dirname "${build_dir}")" -name "*.xctest" -path "*${package}*" 2>/dev/null | head -1)
+  # Find the test binary (the Mach-O executable inside the .xctest bundle)
+  xctest_bundle="${build_dir}/${package}PackageTests.xctest"
+  test_binary="${xctest_bundle}/Contents/MacOS/${package}PackageTests"
+  if [[ ! -f "$test_binary" ]]; then
+    # Fallback: search for any matching xctest bundle
+    xctest_bundle=$(find "${build_dir}" -name "${package}PackageTests.xctest" -maxdepth 1 2>/dev/null | head -1)
+    if [[ -n "$xctest_bundle" ]]; then
+      test_binary="${xctest_bundle}/Contents/MacOS/${package}PackageTests"
+    fi
   fi
-  if [[ -z "$test_binary" ]]; then
+  if [[ ! -f "$test_binary" ]]; then
     echo "Warning: no test binary found for ${package}" >&2
     continue
   fi
 
-  # Extract line coverage using llvm-cov export
-  coverage_json=$(xcrun llvm-cov export -summary-only -instr-profile "$profile" "$test_binary" 2>/dev/null || true)
+  # Extract line coverage using llvm-cov export (binary must precede -instr-profile)
+  coverage_json=$(xcrun llvm-cov export "$test_binary" -instr-profile "$profile" -summary-only 2>/dev/null || true)
   if [[ -z "$coverage_json" ]]; then
     echo "Warning: llvm-cov export failed for ${package}" >&2
     continue

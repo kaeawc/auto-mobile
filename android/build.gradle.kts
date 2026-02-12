@@ -65,13 +65,13 @@ subprojects {
   }
 
   plugins.withId("com.android.application") {
-    configure<com.android.build.gradle.AppExtension> {
+    configure<com.android.build.api.dsl.ApplicationExtension> {
       buildTypes { getByName("debug") { enableUnitTestCoverage = true } }
     }
   }
 
   plugins.withId("com.android.library") {
-    configure<com.android.build.gradle.LibraryExtension> {
+    configure<com.android.build.api.dsl.LibraryExtension> {
       buildTypes { getByName("debug") { enableUnitTestCoverage = true } }
     }
   }

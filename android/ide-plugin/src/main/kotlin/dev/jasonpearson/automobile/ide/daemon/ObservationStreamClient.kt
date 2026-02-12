@@ -329,6 +329,20 @@ class ObservationStreamClient {
         }
     }
 
+    /**
+     * Request the current navigation graph from the server.
+     * The response arrives through the existing navigation_update flow.
+     */
+    fun requestNavigationGraph() {
+        if (!connected.get()) return
+
+        val request = StreamRequest(
+            id = UUID.randomUUID().toString(),
+            command = "request_navigation_graph",
+        )
+        sendRequest(request)
+    }
+
     private fun sendPong() {
         val request = StreamRequest(
             id = UUID.randomUUID().toString(),

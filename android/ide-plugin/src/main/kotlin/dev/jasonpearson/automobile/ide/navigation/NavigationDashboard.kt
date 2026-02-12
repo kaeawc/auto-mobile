@@ -103,6 +103,16 @@ fun NavigationDashboard(
         }
     }
 
+    // Request latest navigation graph each time this composable enters composition
+    // (i.e., each time the navigation tab is selected)
+    LaunchedEffect(Unit) {
+        if (observationStreamClient != null) {
+            kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+                observationStreamClient.requestNavigationGraph()
+            }
+        }
+    }
+
     // Collect real-time navigation updates from the stream
     LaunchedEffect(observationStreamClient, selectedAppId) {
         if (observationStreamClient == null) return@LaunchedEffect

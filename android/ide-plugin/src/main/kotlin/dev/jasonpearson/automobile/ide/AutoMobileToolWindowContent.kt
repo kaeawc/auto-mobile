@@ -217,7 +217,6 @@ fun AutoMobileToolWindowContent() {
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
       listOf(
-          HorizontalTab("navigation", "Navigation", "🧭"),
           HorizontalTab("test_runs", "Test Runs", "🧪"),
           HorizontalTab("storage", "Storage", "💾"),
           HorizontalTab("diagnostics", "Diagnostics", "🩺"),
@@ -584,6 +583,9 @@ fun AutoMobileToolWindowContent() {
   // Navigation focus mode state (when zoomed and content extends beyond canvas)
   var isNavigationFocused by remember { mutableStateOf(false) }
 
+  // Toggle between Layout Inspector and Navigation in the main content area
+  var showNavigationView by remember { mutableStateOf(false) }
+
   // Setup state - true when AutoMobile service/daemon not detected or accessibility service not running
   // TODO: Replace with actual service detection
   var needsSetup by remember { mutableStateOf(false) }
@@ -615,7 +617,7 @@ fun AutoMobileToolWindowContent() {
   }
 
   val colors = JewelTheme.globalColors
-  val isCurrentlyOnNavigation = selectedHorizontalTabId == "navigation"
+  val isCurrentlyOnNavigation = showNavigationView
 
   // Chrome should fade when navigation nodes exceed bounds and user isn't hovering chrome
   var isHeaderHovered by remember { mutableStateOf(false) }
@@ -757,24 +759,48 @@ fun AutoMobileToolWindowContent() {
                   Modifier.fillMaxWidth().height(containerHeight).graphicsLayer { alpha = chromeAlpha }
               }
           ) {
-            // Central Layout Inspector (expands to fill available space)
-            // observationStreamClient may be null briefly during initialization
-            val streamClient = observationStreamClient
-            if (streamClient != null) {
-                LayoutInspectorDashboard(
-                    modifier = Modifier.weight(1f),
-                    dataSourceMode = dataSourceMode,
-                    clientProvider = clientProvider,
-                    observationStreamClient = streamClient,
-                    platform = platformString,
-                    onRestartDaemon = {
-                        activeDeviceId = null
-                        isDevicePanelExpanded = true
-                    },
+            // Central content area: Layout Inspector or Navigation (toggled)
+            Box(modifier = Modifier.weight(1f)) {
+                val streamClient = observationStreamClient
+                if (showNavigationView) {
+                    NavigationDashboard(
+                        highlightedScreens = replayHighlightedScreens,
+                        onHighlightCleared = {
+                            testFlowScreens = emptyList()
+                            isReplaying = false
+                        },
+                        onFocusModeChanged = { focused ->
+                            isNavigationFocused = focused
+                        },
+                        headerHeightPx = headerHeight.toFloat(),
+                        chromeAlpha = chromeAlpha,
+                        dataSourceMode = dataSourceMode,
+                        clientProvider = clientProvider,
+                        selectedAppId = selectedAppId,
+                        observationStreamClient = observationStreamClient,
+                    )
+                } else if (streamClient != null) {
+                    LayoutInspectorDashboard(
+                        modifier = Modifier.fillMaxSize(),
+                        dataSourceMode = dataSourceMode,
+                        clientProvider = clientProvider,
+                        observationStreamClient = streamClient,
+                        platform = platformString,
+                        onRestartDaemon = {
+                            activeDeviceId = null
+                            isDevicePanelExpanded = true
+                        },
+                    )
+                }
+
+                // Segmented toggle overlay at top-start
+                MainContentViewToggle(
+                    showNavigation = showNavigationView,
+                    onToggle = { showNavigationView = it },
+                    modifier = Modifier
+                        .align(Alignment.TopStart)
+                        .padding(8.dp),
                 )
-            } else {
-                // Placeholder while stream client initializes
-                Box(modifier = Modifier.weight(1f))
             }
 
             // Right vertical panels: Failures and Performance
@@ -791,8 +817,8 @@ fun AutoMobileToolWindowContent() {
                 toolFailureCount = toolFailureCount,
                 nonFatalCount = nonFatalCount,
                 onNavigateToScreen = { screenName ->
-                    // Switch to Navigation and highlight the screen
-                    selectedHorizontalTabId = "navigation"
+                    // Switch to Navigation view in main content area
+                    showNavigationView = true
                 },
                 onNavigateToTest = { testName ->
                     // Switch to Test Runs
@@ -861,7 +887,7 @@ fun AutoMobileToolWindowContent() {
                 currentTouchLatencyMs = currentTouchLatencyMs,
                 updateCounter = perfUpdateCounter,
                 onNavigateToScreen = { screenName ->
-                    selectedHorizontalTabId = "navigation"
+                    showNavigationView = true
                 },
                 onNavigateToTest = { testName ->
                     selectedHorizontalTabId = "test_runs"
@@ -893,22 +919,6 @@ fun AutoMobileToolWindowContent() {
                     .height(containerHeight)
             ) {
               when (selectedHorizontalTabId) {
-                "navigation" -> NavigationDashboard(
-                    highlightedScreens = replayHighlightedScreens,
-                    onHighlightCleared = {
-                        testFlowScreens = emptyList()
-                        isReplaying = false
-                    },
-                    onFocusModeChanged = { focused ->
-                        isNavigationFocused = focused
-                    },
-                    headerHeightPx = headerHeight.toFloat(),
-                    chromeAlpha = chromeAlpha,
-                    dataSourceMode = dataSourceMode,
-                    clientProvider = clientProvider,
-                    selectedAppId = selectedAppId,
-                    observationStreamClient = observationStreamClient,
-                )
                 "test_runs" -> TestDashboard(
                     onOpenFile = { filePath ->
                         // TODO: Open file in IDE editor
@@ -918,7 +928,7 @@ fun AutoMobileToolWindowContent() {
                         testFlowScreens = screens
                         isReplaying = true
                         currentReplayIndex = 0
-                        selectedHorizontalTabId = "navigation"  // Switch to Navigation tab
+                        showNavigationView = true  // Switch to Navigation view
                     },
                     dataSourceMode = dataSourceMode,
                     clientProvider = clientProvider,
@@ -942,6 +952,46 @@ fun AutoMobileToolWindowContent() {
       } // end BoxWithConstraints
     }
   }
+}
+
+@Composable
+private fun MainContentViewToggle(
+    showNavigation: Boolean,
+    onToggle: (Boolean) -> Unit,
+    modifier: Modifier = Modifier,
+) {
+    val colors = JewelTheme.globalColors
+    val bgColor = colors.panelBackground.copy(alpha = 0.85f)
+    val selectedBg = colors.text.normal.copy(alpha = 0.1f)
+    val borderColor = colors.text.normal.copy(alpha = 0.15f)
+
+    Row(
+        modifier = modifier
+            .clip(RoundedCornerShape(6.dp))
+            .background(bgColor)
+            .border(1.dp, borderColor, RoundedCornerShape(6.dp))
+            .padding(2.dp),
+        horizontalArrangement = Arrangement.spacedBy(0.dp),
+    ) {
+        val options = listOf(false to "\uD83D\uDCD0 Layout", true to "\uD83E\uDDED Navigation")
+        options.forEach { (isNav, label) ->
+            val isSelected = showNavigation == isNav
+            Box(
+                modifier = Modifier
+                    .clip(RoundedCornerShape(4.dp))
+                    .then(if (isSelected) Modifier.background(selectedBg) else Modifier)
+                    .clickable { onToggle(isNav) }
+                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = label,
+                    fontSize = 11.sp,
+                    color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                )
+            }
+        }
+    }
 }
 
 @Composable

@@ -65,7 +65,15 @@ import org.jetbrains.jewel.ui.component.Text
 import org.jetbrains.jewel.ui.component.Tooltip
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.isCtrlPressed
+import androidx.compose.ui.input.pointer.isMetaPressed
 import kotlinx.coroutines.launch
+
+private val IS_MAC = System.getProperty("os.name", "").contains("Mac", ignoreCase = true)
+
+private fun PointerEvent.isZoomModifierPressed(): Boolean =
+    if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
 
 // Layout constants
 private val NODE_WIDTH = 80.dp
@@ -542,8 +550,8 @@ fun NavigationCanvasView(
                     hoveredTransitionId = null
                 }
                 .onPointerEvent(PointerEventType.Scroll) { event ->
-                    // Only allow scroll-to-zoom when a graph element is selected (hovered)
-                    if (hoveredScreenName == null && hoveredTransitionId == null) return@onPointerEvent
+                    // Only allow scroll-to-zoom when Cmd (macOS) / Ctrl (other) is held
+                    if (!event.isZoomModifierPressed()) return@onPointerEvent
                     val change = event.changes.firstOrNull() ?: return@onPointerEvent
                     val scrollDelta = change.scrollDelta.y
                     if (scrollDelta != 0f) {

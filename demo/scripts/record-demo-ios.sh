@@ -50,6 +50,18 @@ mkdir -p "$OUTPUT_DIR"
 # Clean previous outputs
 rm -f "$RAW_DEVICE_VIDEO" "$DEVICE_VIDEO" "$CLI_VIDEO" "$FINAL_VIDEO"
 
+# Track the simctl recording PID so we can clean it up on exit
+SIMCTL_PID=""
+cleanup() {
+  if [ -n "$SIMCTL_PID" ] && kill -0 "$SIMCTL_PID" 2>/dev/null; then
+    echo ""
+    echo "🧹 Stopping simctl recording (PID $SIMCTL_PID)..."
+    kill -INT "$SIMCTL_PID" 2>/dev/null || true
+    wait "$SIMCTL_PID" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+
 # Step 1: Start iOS simulator screen recording in background
 echo "📱 Starting iOS simulator screen recording..."
 xcrun simctl io "$DEVICE_ID" recordVideo --codec h264 --force "$RAW_DEVICE_VIDEO" &
@@ -74,6 +86,7 @@ echo ""
 echo "📱 Stopping iOS simulator screen recording..."
 kill -INT "$SIMCTL_PID" 2>/dev/null || true
 wait "$SIMCTL_PID" 2>/dev/null || true
+SIMCTL_PID=""  # Clear so EXIT trap doesn't double-stop
 sleep 1
 echo "   ✓ Recording stopped"
 echo ""

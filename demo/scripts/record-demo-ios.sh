@@ -8,7 +8,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEMO_DIR="$(dirname "$SCRIPT_DIR")"
 OUTPUT_DIR="$DEMO_DIR/output"
-PROJECT_ROOT="$(dirname "$DEMO_DIR")"
 
 # Configuration
 DEMO_NAME="${1:-reminders-ios}"

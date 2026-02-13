@@ -179,48 +179,84 @@ fun DeviceScreenView(
     var prevViewportWidth by remember { mutableFloatStateOf(0f) }
     var prevViewportHeight by remember { mutableFloatStateOf(0f) }
 
-    // Whether the device is in landscape orientation (rotation 1 or 3)
-    val isLandscape = rotation == 1 || rotation == 3
-
-    // Decode screenshot to ImageBitmap, rotating to match the device orientation.
-    // iOS screenshots from the simulator arrive in the native pixel orientation
-    // (portrait pixels even when the device is landscape), so we rotate them here.
-    val imageBitmap = remember(screenshotData, rotation) {
+    // Decode raw screenshot without rotation
+    val rawBitmap = remember(screenshotData) {
         screenshotData?.let {
             try {
-                val skiaImage = Image.makeFromEncoded(it)
-                val original = skiaImage.toComposeImageBitmap()
-
-                if (rotation == 0) return@let original
-
-                // Determine rotation angle in degrees
-                val angleDegrees = when (rotation) {
-                    1 -> 270f  // Landscape: rotate 270° (CW) so top of device is on the left
-                    2 -> 180f  // Reverse portrait
-                    3 -> 90f   // Reverse landscape: rotate 90° (CW) so top of device is on the right
-                    else -> 0f
-                }
-                if (angleDegrees == 0f) return@let original
-
-                val w = original.width
-                val h = original.height
-                val swapDims = rotation == 1 || rotation == 3
-                val newW = if (swapDims) h else w
-                val newH = if (swapDims) w else h
-
-                // Use Skia surface to create a rotated bitmap
-                val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(newW, newH)
-                val canvas = surface.canvas
-                canvas.translate(newW / 2f, newH / 2f)
-                canvas.rotate(angleDegrees)
-                canvas.translate(-w / 2f, -h / 2f)
-                canvas.drawImage(skiaImage, 0f, 0f)
-                surface.makeImageSnapshot().toComposeImageBitmap()
+                Image.makeFromEncoded(it).toComposeImageBitmap()
             } catch (e: Exception) {
                 null
             }
         }
     }
+
+    // Detect rotation needed to align the screenshot with the hierarchy coordinate system.
+    // iOS screenshots may arrive in native pixel orientation (portrait) even when
+    // the device is in landscape, while hierarchy bounds are in display orientation.
+    // We rotate the screenshot to match the hierarchy so text reads correctly.
+    val screenshotRotation = remember(rawBitmap, hierarchy, rotation) {
+        // If the server explicitly reports rotation, use that
+        if (rotation != 0) return@remember rotation
+
+        // Auto-detect from screenshot vs hierarchy dimension mismatch
+        val imgW = rawBitmap?.width ?: 0
+        val imgH = rawBitmap?.height ?: 0
+        val rootW = hierarchy?.bounds?.width ?: 0
+        val rootH = hierarchy?.bounds?.height ?: 0
+        if (imgW <= 0 || imgH <= 0 || rootW <= 0 || rootH <= 0) return@remember 0
+
+        val imageIsPortrait = imgH > imgW
+        val boundsIsPortrait = rootH > rootW
+
+        if (imageIsPortrait && !boundsIsPortrait) {
+            // Portrait screenshot, landscape bounds → rotate 90° CW to landscape
+            3
+        } else if (!imageIsPortrait && boundsIsPortrait) {
+            // Landscape screenshot, portrait bounds → rotate 270° CW to portrait
+            1
+        } else {
+            0
+        }
+    }
+
+    // Apply rotation to align the screenshot with the hierarchy coordinate system.
+    // After this, the image orientation matches the hierarchy bounds so overlays
+    // and hit testing can use direct coordinate mapping without transformation.
+    val imageBitmap = remember(rawBitmap, screenshotRotation, screenshotData) {
+        val original = rawBitmap ?: return@remember null
+        if (screenshotRotation == 0) return@remember original
+
+        val angleDegrees = when (screenshotRotation) {
+            1 -> 270f
+            2 -> 180f
+            3 -> 90f
+            else -> return@remember original
+        }
+
+        try {
+            val w = original.width
+            val h = original.height
+            val swapDims = screenshotRotation == 1 || screenshotRotation == 3
+            val newW = if (swapDims) h else w
+            val newH = if (swapDims) w else h
+
+            val skiaImage = Image.makeFromEncoded(screenshotData!!)
+            val surface = org.jetbrains.skia.Surface.makeRasterN32Premul(newW, newH)
+            val canvas = surface.canvas
+            canvas.translate(newW / 2f, newH / 2f)
+            canvas.rotate(angleDegrees)
+            canvas.translate(-w / 2f, -h / 2f)
+            canvas.drawImage(skiaImage, 0f, 0f)
+            surface.makeImageSnapshot().toComposeImageBitmap()
+        } catch (e: Exception) {
+            original
+        }
+    }
+
+    // Screenshot has been rotated to match hierarchy, so no bounds rotation is needed.
+    // All overlay and hit testing code uses identity transforms (boundsRotation=0).
+    val boundsRotation = 0
+    val isLandscape = false
 
     // Find selected and hovered elements — O(1) map lookups instead of DFS
     val selectedElement = remember(elementMap, selectedElementId) {
@@ -390,7 +426,7 @@ fun DeviceScreenView(
                 // frameX/frameY are in the rotated display space — convert back to hierarchy space
                 val hierX: Int
                 val hierY: Int
-                when (rotation) {
+                when (boundsRotation) {
                     1 -> {
                         // Reverse of: rotated(x,y) = (origY, rootW - origX)
                         // So: origX = rootW - frameY*scale, origY = frameX*scale
@@ -521,7 +557,7 @@ fun DeviceScreenView(
                                     // Helper to get scaled overlay rect from element bounds,
                                     // applying rotation transform before scaling.
                                     fun overlayRect(bounds: ElementBounds): FloatArray {
-                                        val t = transformBoundsForRotation(bounds, rotation, rootBoundsWidth, rootBoundsHeight)
+                                        val t = transformBoundsForRotation(bounds, boundsRotation, rootBoundsWidth, rootBoundsHeight)
                                         // t = [left, top, width, height] in rotated coords
                                         return floatArrayOf(
                                             t[0] * boundsToFrameScale,

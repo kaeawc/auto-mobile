@@ -376,7 +376,10 @@ export class AccessibilityServiceClient extends DeviceServiceClient implements A
   private cachedScreenDimensions: { width: number; height: number } | null = null;
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
+  // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
   private a11yScreenshotSupported: boolean | null = null;
+  private a11yScreenshotFailures: number = 0;
+  private static readonly A11Y_SCREENSHOT_MAX_FAILURES = 3;
 
   // Work profile monitor for polling profiles without accessibility service
   private workProfileMonitor: WorkProfileMonitor | null = null;
@@ -1615,14 +1618,17 @@ export class AccessibilityServiceClient extends DeviceServiceClient implements A
       const result = await screenshotPromise;
 
       if (!result.success || !result.data) {
-        // Mark as unsupported so future calls skip the WebSocket roundtrip
-        if (this.a11yScreenshotSupported === null) {
-          logger.info("[ACCESSIBILITY_SERVICE] Accessibility service screenshot not supported, falling back to ADB screencap");
+        this.a11yScreenshotFailures++;
+        if (this.a11yScreenshotSupported === null &&
+            this.a11yScreenshotFailures >= AccessibilityServiceClient.A11Y_SCREENSHOT_MAX_FAILURES) {
+          logger.info("[ACCESSIBILITY_SERVICE] Accessibility service screenshot not supported after " +
+            `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;
         }
         return this.captureScreenshotViaAdb();
       }
 
+      this.a11yScreenshotFailures = 0;
       this.a11yScreenshotSupported = true;
       const checksum = computeChecksum(result.data);
 

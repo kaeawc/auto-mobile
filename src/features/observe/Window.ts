@@ -175,12 +175,12 @@ export class Window implements WindowInterface {
 
       let parsed: { appId: string; activityName: string } | null = null;
 
-      if (apiLevel != null && apiLevel <= 27) {
-        // API 27 and below: numeric type values (ty=1), isReadyForDisplay(), no imeControlTarget
-        parsed = parseActiveWindowLegacy(stdout);
+      if (apiLevel !== null && apiLevel !== undefined && apiLevel <= 27) {
+        // API 27 and below: try mCurrentFocus/mFocusedApp first (most reliable when present)
+        parsed = parseDumpsysWindowFocus(stdout);
         if (!parsed) {
-          // Try mCurrentFocus/mFocusedApp from the same dumpsys window windows output
-          parsed = parseDumpsysWindowFocus(stdout);
+          // Fall back to window block scanning (ty=1 + isReadyForDisplay)
+          parsed = parseActiveWindowLegacy(stdout);
         }
         if (!parsed) {
           // Try separate dumpsys window command (shorter output)
@@ -359,8 +359,8 @@ export function parseActiveWindowLegacy(stdout: string): { appId: string; activi
     const activity = block[2];
     const content = block[3];
 
-    if (!pkg || !activity) continue;
-    if (pkg.includes("android.systemui") || pkg.includes("nexuslauncher")) continue;
+    if (!pkg || !activity) {continue;}
+    if (pkg.includes("android.systemui") || pkg.includes("nexuslauncher")) {continue;}
 
     // Check for ty=1 (BASE_APPLICATION on legacy) and isReadyForDisplay()=true within this block
     if (/\bty=1\b/.test(content) && /isReadyForDisplay\(\)=true/.test(content)) {

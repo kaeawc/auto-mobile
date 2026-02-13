@@ -175,7 +175,12 @@ jobs:
         run: |
           cd android
           # Override VERSION_NAME with the release version from git tag (not the SNAPSHOT in gradle.properties)
-          ./gradlew :protocol:publish :test-plan-validation:publish :junit-runner:publish :auto-mobile-sdk:publish \
+          # Publish dependency modules first — a separate invocation guarantees they
+          # complete before the consumer modules that reference them as transitive deps.
+          ./gradlew :protocol:publish :test-plan-validation:publish \
+            -PVERSION_NAME=${{ steps.version.outputs.version }} \
+            --no-configuration-cache
+          ./gradlew :junit-runner:publish :auto-mobile-sdk:publish \
             -PVERSION_NAME=${{ steps.version.outputs.version }} \
             --no-configuration-cache
 

@@ -17,14 +17,13 @@ if ! command -v jq &> /dev/null; then
   exit 0
 fi
 
-# Build grep exclusion pattern from non-index ignorePaths
-# (index.ts paths are already filtered by the upstream grep -v 'index\.ts:')
-PATTERN=$(jq -r '.ignorePaths[] | select(test("index\\.ts$") | not)' "$ALLOWLIST" \
-  | sed 's/[.[\*^$()+?{|]/\\&/g' \
+# Build grep exclusion pattern from all ignorePaths
+PATTERN=$(jq -r '.ignorePaths[]' "$ALLOWLIST" \
+  | sed "s/[.[\\*^\$()+?{|]/\\\\&/g" \
   | paste -sd '|' -)
 
 if [ -z "$PATTERN" ]; then
-  cat # No non-index patterns, pass through
+  cat # No patterns, pass through
 else
   grep -vE "$PATTERN" || true
 fi

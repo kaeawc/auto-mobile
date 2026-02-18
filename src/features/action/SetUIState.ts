@@ -180,19 +180,13 @@ export class SetUIState extends BaseVisualChange {
           }
         }
 
-        // Scroll and look for any unprocessed field
-        const nextSelector = this.getNextUnprocessedSelector(options.fields, processed);
-        if (nextSelector) {
-          await this.getSwipeOn().execute(
-            { direction: currentDirection, lookFor: nextSelector },
-            progress
-          );
-        } else {
-          await this.getSwipeOn().execute(
-            { direction: currentDirection },
-            progress
-          );
-        }
+        // Scroll one step without lookFor to avoid jumping past intermediate fields.
+        // Using lookFor would enable scroll-until-visible mode which can skip over
+        // fields that need to be processed first in screen order.
+        await this.getSwipeOn().execute(
+          { direction: currentDirection },
+          progress
+        );
 
         // Re-observe after scroll
         const freshObs = await this.getObserveScreen().execute(undefined, undefined, false, 0, signal);
@@ -248,22 +242,6 @@ export class SetUIState extends BaseVisualChange {
     matches.sort((a, b) => a.element.bounds.top - b.element.bounds.top);
 
     return matches;
-  }
-
-  /**
-   * Get a lookFor selector for the first unprocessed field
-   */
-  private getNextUnprocessedSelector(
-    fields: FieldSpec[],
-    processed: Set<number>
-  ): { text?: string; elementId?: string } | undefined {
-    for (let i = 0; i < fields.length; i++) {
-      if (processed.has(i)) continue;
-      const sel = fields[i].selector;
-      if (sel.text) return { text: sel.text };
-      if (sel.elementId) return { elementId: sel.elementId };
-    }
-    return undefined;
   }
 
   /**

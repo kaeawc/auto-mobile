@@ -230,7 +230,7 @@ export class SetUIState extends BaseVisualChange {
     const matches: Array<{ fieldSpec: FieldSpec; fieldIndex: number; element: Element }> = [];
 
     for (let i = 0; i < fields.length; i++) {
-      if (processed.has(i)) continue;
+      if (processed.has(i)) {continue;}
 
       const element = this.findElement(fields[i].selector, viewHierarchy);
       if (element) {
@@ -335,7 +335,7 @@ export class SetUIState extends BaseVisualChange {
         // - Text-only selector on a mutable field type (typing replaces the label text
         //   used as the selector, so re-lookup by original text fails)
         let verified: boolean | undefined;
-        const hasTextOnlySelector = fieldSpec.selector.text != null && fieldSpec.selector.elementId == null;
+        const hasTextOnlySelector = fieldSpec.selector.text !== undefined && fieldSpec.selector.elementId === undefined;
         const isMutableTextField = fieldType === "text" || fieldType === "dropdown";
         const shouldSkipVerify = this.fieldTypeDetector.isPasswordField(element) ||
           this.fieldTypeDetector.shouldSkipVerification(element, fieldType) ||

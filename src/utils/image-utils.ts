@@ -1,6 +1,5 @@
 // Re-export from new location for backward compatibility
 export { Image } from "./image/ImageTransformer";
-export type { ImageMetadata } from "./image/ImageTransformer";
 
 // Import for the interface implementation
 import { Image, ImageMetadata } from "./image/ImageTransformer";

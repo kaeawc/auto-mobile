@@ -33,19 +33,6 @@ export function getTempDir(subdirectory: string): string {
 }
 
 /**
- * Ensure a secure temp directory exists with restrictive permissions.
- * Creates the directory if it doesn't exist, with mode 0o700 (owner-only access).
- *
- * @param subdirectory - Subdirectory name under auto-mobile temp base
- * @returns Full path to the created/existing temp directory
- */
-export async function ensureSecureTempDir(subdirectory: string): Promise<string> {
-  const dir = getTempDir(subdirectory);
-  await fs.ensureDir(dir, { mode: SECURE_DIR_MODE });
-  return dir;
-}
-
-/**
  * Synchronously ensure a secure temp directory exists with restrictive permissions.
  *
  * @param subdirectory - Subdirectory name under auto-mobile temp base

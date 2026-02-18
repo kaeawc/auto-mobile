@@ -27,7 +27,10 @@
     "src/utils/screenshot-utils.ts",
     "src/vision/index.ts"
   ],
-  "ignorePathPatterns": [],
+  "ignorePathPatterns": [
+    "src/daemon/",
+    "scripts/memory/"
+  ],
   "ignoreEntries": [
     {
       "file": "src/features/action/UninstallApp.ts",

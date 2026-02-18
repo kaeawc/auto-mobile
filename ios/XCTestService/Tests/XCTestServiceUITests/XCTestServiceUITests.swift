@@ -58,12 +58,13 @@ final class XCTestServiceUITests: XCTestCase {
             try service?.start()
         }
 
-        // Keep the test alive using XCTestExpectation instead of RunLoop spinning.
-        // The expectation is never fulfilled — we wait until the timeout elapses
-        // or the process is killed externally (e.g., by MCP stop()).
-        let running = expectation(description: "XCTestService running")
-        _ = running // suppress unused-variable warning
-        waitForExpectations(timeout: getTimeout() ?? .infinity)
+        // Keep the test alive using XCTWaiter instead of RunLoop spinning.
+        // The expectation is intentionally never fulfilled; .timedOut is the
+        // expected result for a normal timed shutdown. The process is killed
+        // externally by the MCP stop() path before the timeout elapses.
+        let keepAlive = expectation(description: "XCTestService keep-alive")
+        let result = XCTWaiter().wait(for: [keepAlive], timeout: getTimeout() ?? 86400)
+        XCTAssertEqual(result, .timedOut, "Expected service to run until timeout")
     }
 
     /// Test that just verifies the service can start
@@ -88,9 +89,9 @@ final class XCTestServiceUITests: XCTestCase {
         service = XCTestService(port: getPort())
         try service?.start(bundleId: bundleId)
 
-        let running = expectation(description: "XCTestService running")
-        _ = running
-        waitForExpectations(timeout: getTimeout() ?? 300)
+        let keepAlive = expectation(description: "XCTestService keep-alive")
+        let result = XCTWaiter().wait(for: [keepAlive], timeout: getTimeout() ?? 300)
+        XCTAssertEqual(result, .timedOut, "Expected service to run until timeout")
     }
 
     // MARK: - Configuration Helpers

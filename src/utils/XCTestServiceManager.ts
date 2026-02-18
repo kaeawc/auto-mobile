@@ -497,9 +497,16 @@ export class IOSXCTestServiceManager implements XCTestServiceManager {
       this.xcTestProcess = null;
     }
 
-    // Also try to kill any lingering simctl spawn / runner processes
+    // Kill any lingering simulator runner processes (simctl spawn path)
     try {
       await this.processExecutor.exec("pkill -f 'XCTestServiceUITests-Runner'");
+    } catch {
+      // Ignore errors if no process found
+    }
+
+    // Kill any lingering xcodebuild test processes (physical device path)
+    try {
+      await this.processExecutor.exec("pkill -f 'xcodebuild.*XCTestServiceUITests'");
     } catch {
       // Ignore errors if no process found
     }

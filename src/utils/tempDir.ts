@@ -13,13 +13,13 @@ import path from "path";
  * Base directory for all auto-mobile temp files.
  * Uses os.tmpdir() for portability (works on macOS, Linux, Windows).
  */
-export const AUTO_MOBILE_TEMP_BASE = path.join(os.tmpdir(), "auto-mobile");
+const AUTO_MOBILE_TEMP_BASE = path.join(os.tmpdir(), "auto-mobile");
 
 /**
  * Restrictive directory permissions (owner read/write/execute only).
  * Prevents other users from accessing temp files.
  */
-export const SECURE_DIR_MODE = 0o700;
+const SECURE_DIR_MODE = 0o700;
 
 /**
  * Get a secure temp directory path for a given subdirectory.

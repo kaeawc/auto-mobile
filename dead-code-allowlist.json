@@ -33,6 +33,16 @@
       "file": "src/features/action/UninstallApp.ts",
       "name": "UninstallApp",
       "reason": "TODO: planned usage in future PR"
+    },
+    {
+      "file": "src/utils/android-cmdline-tools/avdmanager.ts",
+      "name": "COMMON_SYSTEM_IMAGES",
+      "reason": "Used via namespace import in tests (import * as avdmanager)"
+    },
+    {
+      "file": "src/utils/android-cmdline-tools/avdmanager.ts",
+      "name": "COMMON_DEVICES",
+      "reason": "Used via namespace import in tests (import * as avdmanager)"
     }
   ]
 }

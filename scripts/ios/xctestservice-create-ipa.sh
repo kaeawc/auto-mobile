@@ -193,9 +193,11 @@ echo "runner_sha256=${RUNNER_SHA256}"
 
 # Output for GitHub Actions
 if [ -n "${GITHUB_OUTPUT:-}" ]; then
-    echo "ipa_path=${OUTPUT_PATH}" >> "${GITHUB_OUTPUT}"
-    echo "ipa_sha256=${IPA_SHA256}" >> "${GITHUB_OUTPUT}"
-    echo "runner_sha256=${RUNNER_SHA256}" >> "${GITHUB_OUTPUT}"
+    {
+        echo "ipa_path=${OUTPUT_PATH}"
+        echo "ipa_sha256=${IPA_SHA256}"
+        echo "runner_sha256=${RUNNER_SHA256}"
+    } >> "${GITHUB_OUTPUT}"
 fi
 
 # Clean up temporary derived data

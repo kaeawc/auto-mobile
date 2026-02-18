@@ -34,14 +34,13 @@ final class XCTestServiceUITests: XCTestCase {
         // Get configuration from environment
         let port = getPort()
         let bundleId = getBundleId()
-        let timeout = getTimeout()
 
         print("========================================")
         print("  XCTestService")
         print("========================================")
         print("Port: \(port)")
         print("Bundle ID: \(bundleId ?? "default")")
-        print("Timeout: \(timeout == nil ? "forever" : "\(timeout!)s")")
+        print("Timeout: \(getTimeout().map { "\($0)s" } ?? "forever")")
         print("========================================")
         print("")
         print("WebSocket: ws://localhost:\(port)/ws")
@@ -59,12 +58,12 @@ final class XCTestServiceUITests: XCTestCase {
             try service?.start()
         }
 
-        // Run the service
-        if let timeout = timeout {
-            service?.run(for: timeout)
-        } else {
-            service?.runForever()
-        }
+        // Keep the test alive using XCTestExpectation instead of RunLoop spinning.
+        // The expectation is never fulfilled — we wait until the timeout elapses
+        // or the process is killed externally (e.g., by MCP stop()).
+        let running = expectation(description: "XCTestService running")
+        _ = running // suppress unused-variable warning
+        waitForExpectations(timeout: getTimeout() ?? .infinity)
     }
 
     /// Test that just verifies the service can start
@@ -89,9 +88,9 @@ final class XCTestServiceUITests: XCTestCase {
         service = XCTestService(port: getPort())
         try service?.start(bundleId: bundleId)
 
-        // Run for specified timeout or 5 minutes by default
-        let timeout = getTimeout() ?? 300
-        service?.run(for: timeout)
+        let running = expectation(description: "XCTestService running")
+        _ = running
+        waitForExpectations(timeout: getTimeout() ?? 300)
     }
 
     // MARK: - Configuration Helpers
@@ -119,17 +118,3 @@ final class XCTestServiceUITests: XCTestCase {
     }
 }
 
-// MARK: - Quick Start Tests
-
-extension XCTestServiceUITests {
-    /// Convenience test for quick verification (30 seconds)
-    func testQuickStart() throws {
-        let service = XCTestService()
-        try service.start()
-
-        // Run for 30 seconds as a quick test
-        service.run(for: 30)
-
-        service.stop()
-    }
-}

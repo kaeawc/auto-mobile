@@ -275,11 +275,15 @@ class TwoDeviceCriticalSectionPlanTest {
       decodePlanContent(
         capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
       )
-    // Scope the device assertions to only the content inside the criticalSection step so that
-    // device labels on top-level launchApp/terminateApp steps don't mask missing sub-step devices.
-    val criticalSectionBlock =
-      decoded.substringAfter("criticalSection", missingDelimiterValue = "")
-    assertTrue("criticalSection block should be present", criticalSectionBlock.isNotEmpty())
+    // Scope device assertions strictly to the criticalSection step's own params block.
+    // Search for "tool: criticalSection" (not just "criticalSection") to skip any occurrence
+    // in the plan name or description. Then trim at "\n\n  - tool:" which is the blank-line
+    // separator before the next top-level step, ensuring trailing terminateApp "device:" labels
+    // cannot satisfy the assertion if criticalSection sub-steps lose their device assignments.
+    val afterCriticalSection =
+      decoded.substringAfter("tool: criticalSection", missingDelimiterValue = "")
+    assertTrue("criticalSection tool step should be present", afterCriticalSection.isNotEmpty())
+    val criticalSectionBlock = afterCriticalSection.substringBefore("\n\n  - tool:")
     assertTrue(
       "CriticalSection sub-steps should target device A",
       criticalSectionBlock.contains("device: A"),

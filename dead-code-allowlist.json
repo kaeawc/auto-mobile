@@ -1,7 +1,6 @@
 {
   "ignorePaths": [
     "src/daemon/socketServer/index.ts",
-    "src/daemon/unified/index.ts",
     "src/db/index.ts",
     "src/features/accessibility/index.ts",
     "src/features/action/Fling.ts",

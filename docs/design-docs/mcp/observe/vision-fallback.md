@@ -4,7 +4,7 @@
 
 Vision fallback uses Claude's vision API to help locate UI elements when traditional element finding methods fail.
 
-> See the [Status Glossary](../status-glossary.md) for chip definitions.
+> See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Current Implementation
 

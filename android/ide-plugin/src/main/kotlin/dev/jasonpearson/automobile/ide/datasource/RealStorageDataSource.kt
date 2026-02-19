@@ -136,7 +136,7 @@ class RealStorageDataSource(
         return try {
             val client = provider()
             withContext(Dispatchers.IO) {
-                val result = client.setKeyValue(device, pkg, fileName, key, value, type.name)
+                val result = client.setKeyValue(device, pkg, fileName, key, value, type.protocolName)
                 if (result.success) Result.Success(Unit)
                 else Result.Error(result.message ?: "Failed to set key value")
             }

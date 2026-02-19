@@ -320,7 +320,7 @@ class RealStorageDataSourceTest {
         assertEquals("app_prefs", call.fileName)
         assertEquals("theme", call.key)
         assertEquals("dark", call.value)
-        assertEquals("String", call.type)
+        assertEquals("STRING", call.type)
     }
 
     @Test

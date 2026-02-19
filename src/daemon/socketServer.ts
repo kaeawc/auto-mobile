@@ -323,13 +323,17 @@ export class UnixSocketServer {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
         const client = AccessibilityServiceClient.getInstance(targetDevice, defaultAdbClientFactory);
-        await client.setPreference(
-          args.appId,
-          args.fileName,
-          args.key,
-          args.value ?? null,
-          args.type as KeyValueType
-        );
+        if (args.value === null || args.value === undefined) {
+          await client.removePreference(args.appId, args.fileName, args.key);
+        } else {
+          await client.setPreference(
+            args.appId,
+            args.fileName,
+            args.key,
+            args.value,
+            args.type as KeyValueType
+          );
+        }
         return { success: true };
       }
       case "ide/removeKeyValue": {

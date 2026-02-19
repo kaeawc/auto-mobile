@@ -90,7 +90,11 @@ export function registerStorageTools(): void {
 
     try {
       const client = AccessibilityServiceClient.getInstance(device, defaultAdbClientFactory);
-      await client.setPreference(args.appId, args.fileName, args.key, args.value, args.type);
+      if (args.value === null) {
+        await client.removePreference(args.appId, args.fileName, args.key);
+      } else {
+        await client.setPreference(args.appId, args.fileName, args.key, args.value, args.type);
+      }
 
       // Notify subscribers that entries changed so they re-read fresh data
       void ResourceRegistry.notifyResourceUpdated(

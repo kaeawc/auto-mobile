@@ -34,7 +34,9 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -96,7 +98,7 @@ fun DatabaseInspector(
             isLoadingData = true
             tableData = null
             try {
-                tableData = onFetchTableData(db.path, tbl.name)
+                tableData = withContext(Dispatchers.IO) { onFetchTableData(db.path, tbl.name) }
             } catch (_: Exception) {
                 // tableData stays null; DataView will show fallback mock
             } finally {
@@ -231,7 +233,7 @@ fun DatabaseInspector(
                             coroutineScope.launch {
                                 val db = selectedDatabase ?: return@launch
                                 val result = try {
-                                    onExecuteSQL(db.path, queryText)
+                                    withContext(Dispatchers.IO) { onExecuteSQL(db.path, queryText) }
                                 } catch (e: Exception) {
                                     QueryResult(
                                         emptyList(), emptyList(), 0, 0,

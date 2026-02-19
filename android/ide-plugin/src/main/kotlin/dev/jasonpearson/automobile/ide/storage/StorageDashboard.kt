@@ -126,8 +126,11 @@ fun StorageDashboard(
     val onFetchTableData: (suspend (String, String) -> QueryResult)? = remember(dataSource) {
         val ds = dataSource ?: return@remember null
         val callback: suspend (String, String) -> QueryResult = { databasePath, table ->
-            (ds.getTableData(databasePath, table) as? Result.Success)?.data
-                ?: QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to load data")
+            when (val r = ds.getTableData(databasePath, table)) {
+                is Result.Success -> r.data
+                is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
+                else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to load data")
+            }
         }
         callback
     }
@@ -135,8 +138,11 @@ fun StorageDashboard(
     val onExecuteSQL: (suspend (String, String) -> QueryResult)? = remember(dataSource) {
         val ds = dataSource ?: return@remember null
         val callback: suspend (String, String) -> QueryResult = { databasePath, query ->
-            (ds.executeSQL(databasePath, query) as? Result.Success)?.data
-                ?: QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to execute query")
+            when (val r = ds.executeSQL(databasePath, query)) {
+                is Result.Success -> r.data
+                is Result.Error -> QueryResult(emptyList(), emptyList(), 0, 0, error = r.message)
+                else -> QueryResult(emptyList(), emptyList(), 0, 0, error = "Failed to execute query")
+            }
         }
         callback
     }

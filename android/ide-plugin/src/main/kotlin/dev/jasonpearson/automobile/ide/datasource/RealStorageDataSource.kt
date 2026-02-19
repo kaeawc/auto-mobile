@@ -122,10 +122,10 @@ class RealStorageDataSource(
             LOG.info("getDatabases: Returning ${databases.size} databases")
             Result.Success(databases)
         } catch (e: McpConnectionException) {
-            LOG.warn("getDatabases: MCP connection error: ${e.message}")
+            LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
             Result.Error("MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            LOG.warn("getDatabases: Exception: ${e.message}")
+            LOG.warn("getDatabases: Exception: ${e.message}", e)
             Result.Error("Failed to load databases: ${e.message}")
         }
     }
@@ -166,10 +166,10 @@ class RealStorageDataSource(
                 )
             )
         } catch (e: McpConnectionException) {
-            LOG.warn("getTableData: MCP connection error: ${e.message}")
+            LOG.warn("getTableData: MCP connection error: ${e.message}", e)
             Result.Error("MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            LOG.warn("getTableData: Exception: ${e.message}")
+            LOG.warn("getTableData: Exception: ${e.message}", e)
             Result.Error("Failed to load table data: ${e.message}")
         }
     }
@@ -178,11 +178,13 @@ class RealStorageDataSource(
         LOG.info("executeSQL: databasePath=$databasePath, query=$query")
 
         val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
+        val device = deviceId ?: return Result.Error("No device ID provided")
         val pkg = packageName ?: return Result.Error("No package name provided")
 
         return try {
             val client = provider()
             val arguments = buildJsonObject {
+                put("deviceId", device)
                 put("appId", pkg)
                 put("databasePath", databasePath)
                 put("query", query)
@@ -201,7 +203,7 @@ class RealStorageDataSource(
                 QueryResult(
                     columns = listOf("rows_affected"),
                     rows = listOf(listOf(rowsAffected)),
-                    rowCount = 1,
+                    rowCount = rowsAffected,
                     executionTimeMs = 0,
                 )
             } else {
@@ -215,10 +217,10 @@ class RealStorageDataSource(
             }
             Result.Success(queryResult)
         } catch (e: McpConnectionException) {
-            LOG.warn("executeSQL: MCP connection error: ${e.message}")
+            LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
             Result.Error("MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            LOG.warn("executeSQL: Exception: ${e.message}")
+            LOG.warn("executeSQL: Exception: ${e.message}", e)
             Result.Error("Failed to execute SQL: ${e.message}")
         }
     }
@@ -300,10 +302,10 @@ class RealStorageDataSource(
             LOG.info("getKeyValueFiles: Returning ${keyValueFiles.size} files")
             Result.Success(keyValueFiles)
         } catch (e: McpConnectionException) {
-            LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}")
+            LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
             Result.Error("MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}")
+            LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
             Result.Error("Failed to load storage data: ${e.message}")
         }
     }

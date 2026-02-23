@@ -35,6 +35,7 @@
       <!-- AutoMobile CtrlProxy Service -->
       <service
         android:name=".CtrlProxy"
+        android:label="@string/accessibility_service_name"
         android:permission="android.permission.BIND_ACCESSIBILITY_SERVICE"
         android:exported="false">
         <intent-filter>

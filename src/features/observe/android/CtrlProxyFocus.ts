@@ -30,7 +30,7 @@ export class CtrlProxyFocus {
    * Currently logs a warning and does nothing.
    */
   async clearAccessibilityFocus(): Promise<void> {
-    logger.warn("[ACCESSIBILITY_SERVICE] clearAccessibilityFocus() called but not yet implemented (stub)");
+    logger.warn("[CTRL_PROXY] clearAccessibilityFocus() called but not yet implemented (stub)");
     // TODO: Implement accessibility focus clearing
     // This should send a command to the Android accessibility service to clear focus
   }
@@ -44,7 +44,7 @@ export class CtrlProxyFocus {
    * @param resourceId - Resource ID of the element to focus
    */
   async setAccessibilityFocus(resourceId: string): Promise<void> {
-    logger.warn(`[ACCESSIBILITY_SERVICE] setAccessibilityFocus(${resourceId}) called but not yet implemented (stub)`);
+    logger.warn(`[CTRL_PROXY] setAccessibilityFocus(${resourceId}) called but not yet implemented (stub)`);
     // TODO: Implement accessibility focus setting
     // This should send a command to the Android accessibility service to set focus on the element
   }
@@ -65,7 +65,7 @@ export class CtrlProxyFocus {
       // Ensure WebSocket connection is established
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for current focus");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for current focus");
         return {
           focusedElement: null,
           totalTimeMs: this.context.timer.now() - startTime,
@@ -96,7 +96,7 @@ export class CtrlProxyFocus {
         }
         const message = JSON.stringify({ type: "get_current_focus", requestId });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent current focus request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent current focus request (requestId: ${requestId})`);
       });
 
       // Wait for response
@@ -104,15 +104,15 @@ export class CtrlProxyFocus {
 
       const duration = this.context.timer.now() - startTime;
       if (result.error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Current focus failed after ${duration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Current focus failed after ${duration}ms: ${result.error}`);
       } else {
-        logger.info(`[ACCESSIBILITY_SERVICE] Current focus received in ${duration}ms`);
+        logger.info(`[CTRL_PROXY] Current focus received in ${duration}ms`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Current focus request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Current focus request failed after ${duration}ms: ${error}`);
       return {
         focusedElement: null,
         totalTimeMs: duration,
@@ -137,7 +137,7 @@ export class CtrlProxyFocus {
       // Ensure WebSocket connection is established
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for traversal order");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for traversal order");
         return {
           elements: [],
           focusedIndex: null,
@@ -172,7 +172,7 @@ export class CtrlProxyFocus {
         }
         const message = JSON.stringify({ type: "get_traversal_order", requestId });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent traversal order request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent traversal order request (requestId: ${requestId})`);
       });
 
       // Wait for response
@@ -180,15 +180,15 @@ export class CtrlProxyFocus {
 
       const duration = this.context.timer.now() - startTime;
       if (result.error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Traversal order failed after ${duration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Traversal order failed after ${duration}ms: ${result.error}`);
       } else {
-        logger.info(`[ACCESSIBILITY_SERVICE] Traversal order received in ${duration}ms (${result.totalCount} elements)`);
+        logger.info(`[CTRL_PROXY] Traversal order received in ${duration}ms (${result.totalCount} elements)`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Traversal order request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Traversal order request failed after ${duration}ms: ${error}`);
       return {
         elements: [],
         focusedIndex: null,
@@ -214,7 +214,7 @@ export class CtrlProxyFocus {
       const elementParser = new DefaultElementParser();
       return elementParser.parseNodeBounds(converted);
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to convert node to Element: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to convert node to Element: ${error}`);
       return null;
     }
   }

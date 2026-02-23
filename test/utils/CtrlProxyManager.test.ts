@@ -23,7 +23,7 @@ describe("CtrlProxyManager", function() {
   let originalSkipShaEnv: string | undefined;
 
   beforeEach(function() {
-    originalApkPathEnv = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+    originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
     originalSkipShaEnv = process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
@@ -50,9 +50,9 @@ describe("CtrlProxyManager", function() {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
     if (originalApkPathEnv === undefined) {
-      delete process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+      delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
-      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = originalApkPathEnv;
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = originalApkPathEnv;
     }
     if (originalSkipChecksumEnv === undefined) {
       delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
@@ -345,7 +345,7 @@ describe("CtrlProxyManager", function() {
     });
 
     test("should skip version check when local APK override is set", async function() {
-      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = "/tmp/local-accessibility.apk";
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = "/tmp/local-accessibility.apk";
 
       const result = await accessibilityServiceClient.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
@@ -476,7 +476,7 @@ describe("CtrlProxyManager", function() {
       zip.addFile("classes.dex", paddingData);
       zip.writeZip(localApkPath);
 
-      process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH = localApkPath;
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
       process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
 
       const apkPath = await accessibilityServiceClient.downloadApk();

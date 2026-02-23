@@ -52,7 +52,7 @@ export class CtrlProxyHighlights {
     try {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for highlight operation");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for highlight operation");
         return {
           success: false,
           error: "Failed to connect to accessibility service"
@@ -91,22 +91,22 @@ export class CtrlProxyHighlights {
         }
 
         ws.send(JSON.stringify(messagePayload));
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent highlight request (${type}, requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent highlight request (${type}, requestId: ${requestId})`);
       });
 
       const result = await perf.track("waitForHighlight", () => highlightPromise);
       const duration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Highlight ${type} completed in ${duration}ms`);
+        logger.info(`[CTRL_PROXY] Highlight ${type} completed in ${duration}ms`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Highlight ${type} failed after ${duration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Highlight ${type} failed after ${duration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Highlight ${type} request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Highlight ${type} request failed after ${duration}ms: ${error}`);
       return {
         success: false,
         error: `${error}`

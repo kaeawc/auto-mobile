@@ -1,7 +1,7 @@
 /**
- * Accessibility Service Module
+ * CtrlProxy Module
  *
- * This module provides access to Android accessibility service functionality
+ * This module provides access to Android CtrlProxy functionality
  * for UI automation, hierarchy inspection, and device interaction.
  */
 

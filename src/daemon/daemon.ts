@@ -873,7 +873,7 @@ export class Daemon {
 
         await Promise.race([
           deviceSessionManager.verifyIosDevice(device.id, {
-            skipAccessibilityDownload: true  // Skip app download during startup, use cached version
+            skipCtrlProxyDownload: true  // Skip app download during startup, use cached version
           }),
           timeoutPromise
         ]);

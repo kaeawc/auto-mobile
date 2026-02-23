@@ -173,18 +173,18 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public static prefetchApk(): void {
     // Skip if already prefetching or prefetched
     if (AndroidCtrlProxyManager.prefetchPromise !== null) {
-      logger.info("[ACCESSIBILITY_SERVICE] APK prefetch already initiated, skipping");
+      logger.info("[CTRL_PROXY] APK prefetch already initiated, skipping");
       return;
     }
 
     // Skip if there's an override path (local APK)
-    const overridePath = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH?.trim();
+    const overridePath = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH?.trim();
     if (overridePath && overridePath.length > 0) {
-      logger.info("[ACCESSIBILITY_SERVICE] Using local APK override, skipping prefetch");
+      logger.info("[CTRL_PROXY] Using local APK override, skipping prefetch");
       return;
     }
 
-    logger.info("[ACCESSIBILITY_SERVICE] Starting APK prefetch");
+    logger.info("[CTRL_PROXY] Starting APK prefetch");
     const startTime = defaultTimer.now();
 
     AndroidCtrlProxyManager.prefetchPromise = AndroidCtrlProxyManager.doPrefetch()
@@ -192,14 +192,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         const duration = defaultTimer.now() - startTime;
         if (apkPath) {
           AndroidCtrlProxyManager.prefetchedApkPath = apkPath;
-          logger.info(`[ACCESSIBILITY_SERVICE] APK prefetch completed in ${duration}ms`, { path: apkPath });
+          logger.info(`[CTRL_PROXY] APK prefetch completed in ${duration}ms`, { path: apkPath });
         }
         return apkPath;
       })
       .catch(error => {
         const duration = defaultTimer.now() - startTime;
         AndroidCtrlProxyManager.prefetchError = error instanceof Error ? error : new Error(String(error));
-        logger.warn(`[ACCESSIBILITY_SERVICE] APK prefetch failed after ${duration}ms`, {
+        logger.warn(`[CTRL_PROXY] APK prefetch failed after ${duration}ms`, {
           error: AndroidCtrlProxyManager.prefetchError.message
         });
         return null;
@@ -214,7 +214,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const apkPath = path.join(tempDir, "control-proxy.apk");
 
     // Download the APK
-    logger.info("[ACCESSIBILITY_SERVICE] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
+    logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
     await AndroidCtrlProxyManager.defaultFileDownloader.download(APK_URL, apkPath);
 
     // Verify the file exists and has reasonable size
@@ -235,10 +235,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
         throw new Error(`APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`);
       }
-      logger.info("[ACCESSIBILITY_SERVICE] Prefetch: checksum verified", { checksum: actualChecksum });
+      logger.info("[CTRL_PROXY] Prefetch: checksum verified", { checksum: actualChecksum });
     }
 
-    logger.info("[ACCESSIBILITY_SERVICE] Prefetch: APK ready", { path: apkPath, size: stats.size });
+    logger.info("[CTRL_PROXY] Prefetch: APK ready", { path: apkPath, size: stats.size });
     return apkPath;
   }
 
@@ -274,13 +274,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       // Ensure destination directory exists
       await fs.mkdir(path.dirname(destinationPath), { recursive: true });
       await fs.copyFile(prefetchedPath, destinationPath);
-      logger.info("[ACCESSIBILITY_SERVICE] Copied prefetched APK", {
+      logger.info("[CTRL_PROXY] Copied prefetched APK", {
         source: prefetchedPath,
         destination: destinationPath
       });
       return true;
     } catch (error) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Failed to copy prefetched APK", {
+      logger.warn("[CTRL_PROXY] Failed to copy prefetched APK", {
         error: error instanceof Error ? error.message : String(error)
       });
       return false;
@@ -295,9 +295,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       try {
         const tempDir = path.dirname(AndroidCtrlProxyManager.prefetchedApkPath);
         await fs.rm(tempDir, { recursive: true, force: true });
-        logger.info("[ACCESSIBILITY_SERVICE] Cleaned up prefetched APK", { path: tempDir });
+        logger.info("[CTRL_PROXY] Cleaned up prefetched APK", { path: tempDir });
       } catch (error) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to clean up prefetched APK", {
+        logger.warn("[CTRL_PROXY] Failed to clean up prefetched APK", {
           error: error instanceof Error ? error.message : String(error)
         });
       }
@@ -343,7 +343,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     this.cachedInstallation = null;
     this.cachedEnabled = null;
     this.cachedToggleCapabilities = null;
-    logger.info("[ACCESSIBILITY_SERVICE] Cleared all availability caches");
+    logger.info("[CTRL_PROXY] Cleared all availability caches");
   }
 
   /**
@@ -354,7 +354,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   public resetSetupState(): void {
     this.attemptedAutomatedSetup = false;
     this.clearAvailabilityCache();
-    logger.info("[ACCESSIBILITY_SERVICE] Reset setup state - next setup will be a full attempt");
+    logger.info("[CTRL_PROXY] Reset setup state - next setup will be a full attempt");
   }
 
   /**
@@ -365,7 +365,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedInstallation && this.cachedInstallation.isInstalled) {
       const cacheAge = this.timer.now() - this.cachedInstallation.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Using cached installation status (age: ${cacheAge}ms): ${this.cachedInstallation.isInstalled ? "installed" : "not installed"}`);
+        logger.info(`[CTRL_PROXY] Using cached installation status (age: ${cacheAge}ms): ${this.cachedInstallation.isInstalled ? "installed" : "not installed"}`);
         return this.cachedInstallation.isInstalled;
       } else {
         this.cachedInstallation = null;
@@ -373,7 +373,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     try {
-      logger.info("[ACCESSIBILITY_SERVICE] Checking if accessibility service is installed");
+      logger.info("[CTRL_PROXY] Checking if accessibility service is installed");
       const result = await this.adb.executeCommand(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, undefined, undefined, true);
       const isInstalled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
@@ -383,10 +383,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         timestamp: this.timer.now()
       };
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Service installation status: ${isInstalled ? "installed" : "not installed"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.info(`[CTRL_PROXY] Service installation status: ${isInstalled ? "installed" : "not installed"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
       return isInstalled;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Error checking installation status: ${error}`);
+      logger.warn(`[CTRL_PROXY] Error checking installation status: ${error}`);
       return false;
     }
   }
@@ -399,7 +399,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedEnabled && this.cachedEnabled.isEnabled) {
       const cacheAge = this.timer.now() - this.cachedEnabled.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.STATUS_CACHE_TTL) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Using cached enabled status (age: ${cacheAge}ms): ${this.cachedEnabled.isEnabled ? "enabled" : "disabled"}`);
+        logger.info(`[CTRL_PROXY] Using cached enabled status (age: ${cacheAge}ms): ${this.cachedEnabled.isEnabled ? "enabled" : "disabled"}`);
         return this.cachedEnabled.isEnabled;
       } else {
         this.cachedEnabled = null;
@@ -407,7 +407,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     }
 
     try {
-      logger.info("[ACCESSIBILITY_SERVICE] Checking if accessibility service is enabled");
+      logger.info("[CTRL_PROXY] Checking if accessibility service is enabled");
       const result = await this.adb.executeCommand("shell settings get secure enabled_accessibility_services");
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
 
@@ -417,10 +417,10 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         timestamp: this.timer.now()
       };
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Service enabled status: ${isEnabled ? "enabled" : "disabled"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.info(`[CTRL_PROXY] Service enabled status: ${isEnabled ? "enabled" : "disabled"} (cached for ${AndroidCtrlProxyManager.STATUS_CACHE_TTL / 1000 / 60} minutes)`);
       return isEnabled;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Error checking enabled status: ${error}`);
+      logger.warn(`[CTRL_PROXY] Error checking enabled status: ${error}`);
       return false;
     }
   }
@@ -431,13 +431,13 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   async isEnabledForUser(userId: number): Promise<boolean> {
     try {
-      logger.info(`[ACCESSIBILITY_SERVICE] Checking if accessibility service is enabled for user ${userId}`);
+      logger.info(`[CTRL_PROXY] Checking if accessibility service is enabled for user ${userId}`);
       const result = await this.adb.executeCommand(`shell settings --user ${userId} get secure enabled_accessibility_services`);
       const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
-      logger.info(`[ACCESSIBILITY_SERVICE] Service enabled status for user ${userId}: ${isEnabled ? "enabled" : "disabled"}`);
+      logger.info(`[CTRL_PROXY] Service enabled status for user ${userId}: ${isEnabled ? "enabled" : "disabled"}`);
       return isEnabled;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Error checking enabled status for user ${userId}: ${error}`);
+      logger.warn(`[CTRL_PROXY] Error checking enabled status for user ${userId}: ${error}`);
       return false;
     }
   }
@@ -453,14 +453,14 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.cachedAvailability && this.cachedAvailability.isAvailable) {
       const cacheAge = this.timer.now() - this.cachedAvailability.timestamp;
       if (cacheAge < AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Using cached overall availability (age: ${cacheAge}ms): ${this.cachedAvailability.isAvailable}`);
+        logger.info(`[CTRL_PROXY] Using cached overall availability (age: ${cacheAge}ms): ${this.cachedAvailability.isAvailable}`);
         return this.cachedAvailability.isAvailable;
       } else {
         this.cachedAvailability = null;
       }
     }
 
-    logger.info(`[ACCESSIBILITY_SERVICE] Checking availability (no cached result available)`);
+    logger.info(`[CTRL_PROXY] Checking availability (no cached result available)`);
 
     try {
       // Check installation and enabled status in parallel for better performance
@@ -478,11 +478,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         timestamp: this.timer.now()
       };
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Availability check completed in ${duration}ms - Available: ${available} (cached for ${AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL / 1000 / 60} minutes)`);
+      logger.info(`[CTRL_PROXY] Availability check completed in ${duration}ms - Available: ${available} (cached for ${AndroidCtrlProxyManager.AVAILABILITY_CACHE_TTL / 1000 / 60} minutes)`);
       return available;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Availability check failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Availability check failed after ${duration}ms: ${error}`);
 
       // Clear cache on error
       this.cachedAvailability = null;
@@ -505,7 +505,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async isVersionCompatible(): Promise<boolean> {
     const expectedSha = this.getExpectedChecksum();
     if (expectedSha.length === 0) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Version check skipped (no checksum provided)");
+      logger.warn("[CTRL_PROXY] Version check skipped (no checksum provided)");
       return true;
     }
 
@@ -534,7 +534,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const isInstalled = await this.isInstalled();
 
     if (isInstalled && this.shouldSkipDownloadIfInstalled()) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Skipping APK download/version check (preinstalled APK allowed)");
+      logger.warn("[CTRL_PROXY] Skipping APK download/version check (preinstalled APK allowed)");
       return {
         status: "skipped",
         expectedSha256: expectedSha
@@ -558,7 +558,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       needsReinstallDueToUnknownSha = !installedSha;
 
       if (!installedSha && installedShaResult.error) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Unable to determine installed APK checksum, forcing reinstall", {
+        logger.warn("[CTRL_PROXY] Unable to determine installed APK checksum, forcing reinstall", {
           error: installedShaResult.error
         });
       }
@@ -568,15 +568,15 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
 
       if (needsReinstallDueToUnknownSha) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Installed APK checksum unavailable, forcing reinstall");
+        logger.warn("[CTRL_PROXY] Installed APK checksum unavailable, forcing reinstall");
       } else {
-        logger.info("[ACCESSIBILITY_SERVICE] Installed APK SHA mismatch, attempting upgrade", {
+        logger.info("[CTRL_PROXY] Installed APK SHA mismatch, attempting upgrade", {
           expected: expectedSha,
           actual: installedSha
         });
       }
     } else {
-      logger.info("[ACCESSIBILITY_SERVICE] Service not installed, downloading and installing");
+      logger.info("[CTRL_PROXY] Service not installed, downloading and installing");
     }
 
     let apkPath: string | null = null;
@@ -588,7 +588,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         try {
           result.attemptedInstall = true;
           await this.adb.executeCommand(`install -r -d "${apkPath}"`);
-          logger.info("[ACCESSIBILITY_SERVICE] APK upgraded successfully");
+          logger.info("[CTRL_PROXY] APK upgraded successfully");
           this.clearAvailabilityCache();
           return {
             ...result,
@@ -596,7 +596,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           };
         } catch (upgradeError) {
           const upgradeMessage = upgradeError instanceof Error ? upgradeError.message : String(upgradeError);
-          logger.warn("[ACCESSIBILITY_SERVICE] Upgrade failed, attempting reinstall", { error: upgradeMessage });
+          logger.warn("[CTRL_PROXY] Upgrade failed, attempting reinstall", { error: upgradeMessage });
           result.upgradeError = upgradeMessage;
         }
       }
@@ -608,7 +608,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         }
         await this.install(apkPath);
         await this.enable();
-        logger.info(`[ACCESSIBILITY_SERVICE] APK ${isInstalled ? "reinstalled" : "installed"} and service enabled`);
+        logger.info(`[CTRL_PROXY] APK ${isInstalled ? "reinstalled" : "installed"} and service enabled`);
         this.clearAvailabilityCache();
         return {
           ...result,
@@ -755,7 +755,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const capabilities = await this.getToggleCapabilities();
     if (!capabilities.supportsSettingsToggle) {
       const errorMsg = `Settings-based accessibility toggle is not supported on this device. ${capabilities.reason || ""}`;
-      logger.error("[ACCESSIBILITY_SERVICE] " + errorMsg, { capabilities });
+      logger.error("[CTRL_PROXY] " + errorMsg, { capabilities });
       throw new Error(errorMsg);
     }
 
@@ -821,7 +821,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const capabilities = await this.getToggleCapabilities();
     if (!capabilities.supportsSettingsToggle) {
       const errorMsg = `Settings-based accessibility toggle is not supported on this device. ${capabilities.reason || ""}`;
-      logger.error("[ACCESSIBILITY_SERVICE] " + errorMsg, { capabilities });
+      logger.error("[CTRL_PROXY] " + errorMsg, { capabilities });
       throw new Error(errorMsg);
     }
 
@@ -899,12 +899,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const capabilities = await this.getToggleCapabilities();
     if (!capabilities.supportsSettingsToggle) {
       const errorMsg = `Settings-based accessibility toggle is not supported on this device. ${capabilities.reason || ""}`;
-      logger.error("[ACCESSIBILITY_SERVICE] " + errorMsg, { capabilities });
+      logger.error("[CTRL_PROXY] " + errorMsg, { capabilities });
       throw new Error(errorMsg);
     }
 
     try {
-      logger.info(`[ACCESSIBILITY_SERVICE] Enabling Accessibility Service via settings commands for user ${userId}`);
+      logger.info(`[CTRL_PROXY] Enabling Accessibility Service via settings commands for user ${userId}`);
 
       // Get current enabled services for this user
       const result = await this.adb.executeCommand(`shell settings --user ${userId} get secure enabled_accessibility_services`);
@@ -920,7 +920,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       // Check if service is already in the list
       if (currentServices.includes(serviceComponent)) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Accessibility Service is already enabled for user ${userId}`);
+        logger.info(`[CTRL_PROXY] Accessibility Service is already enabled for user ${userId}`);
       } else {
         // Issue #384: append to the colon-separated list instead of overwriting other services.
         const updatedServices = currentServices
@@ -929,12 +929,12 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
         // Set updated list
         await this.adb.executeCommand(`shell settings --user ${userId} put secure enabled_accessibility_services "${updatedServices}"`);
-        logger.info(`[ACCESSIBILITY_SERVICE] Added AutoMobile service to enabled_accessibility_services for user ${userId}`);
+        logger.info(`[CTRL_PROXY] Added AutoMobile service to enabled_accessibility_services for user ${userId}`);
       }
 
       // Enable accessibility globally for this user
       await this.adb.executeCommand(`shell settings --user ${userId} put secure accessibility_enabled 1`);
-      logger.info(`[ACCESSIBILITY_SERVICE] Accessibility Service enabled successfully via settings for user ${userId}`);
+      logger.info(`[CTRL_PROXY] Accessibility Service enabled successfully via settings for user ${userId}`);
 
       // Clear cache after enabling (main user cache - per-user caching not implemented)
       this.clearAvailabilityCache();
@@ -1010,7 +1010,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
           };
         }
       } catch (error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Failed to re-check service status: ${error}`);
+        logger.warn(`[CTRL_PROXY] Failed to re-check service status: ${error}`);
       }
       perf.end();
       return {
@@ -1124,7 +1124,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const model = modelResult.stdout.trim().toLowerCase();
       return [model.includes("emulator") || model.includes("sdk"), false];
     } catch (error) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Error detecting device type", { error });
+      logger.warn("[CTRL_PROXY] Error detecting device type", { error });
       // Default to physical device on error (more conservative), but mark as errored
       return [false, true];
     }
@@ -1140,7 +1140,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       const apiLevel = parseInt(result.stdout.trim(), 10);
       return [isNaN(apiLevel) ? null : apiLevel, false];
     } catch (error) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Error getting API level", { error });
+      logger.warn("[CTRL_PROXY] Error getting API level", { error });
       return [null, true];
     }
   }
@@ -1161,11 +1161,11 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   async getToggleCapabilities(): Promise<ToggleCapabilities> {
     // Return cached result if available
     if (this.cachedToggleCapabilities) {
-      logger.info("[ACCESSIBILITY_SERVICE] Using cached toggle capabilities");
+      logger.info("[CTRL_PROXY] Using cached toggle capabilities");
       return this.cachedToggleCapabilities;
     }
 
-    logger.info("[ACCESSIBILITY_SERVICE] Detecting toggle capabilities");
+    logger.info("[CTRL_PROXY] Detecting toggle capabilities");
 
     const [isEmulator, emulatorDetectionError] = await this.isEmulator();
     const [apiLevel, apiLevelDetectionError] = await this.getApiLevel();
@@ -1180,26 +1180,26 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (hadDetectionError) {
       supportsSettingsToggle = false;
       reason = "Unable to detect device capabilities due to transient error. Retry may succeed.";
-      logger.warn("[ACCESSIBILITY_SERVICE] Detection error - not caching result", {
+      logger.warn("[CTRL_PROXY] Detection error - not caching result", {
         emulatorDetectionError,
         apiLevelDetectionError
       });
     } else if (isEmulator) {
       // Emulators generally support settings-based toggle
       supportsSettingsToggle = true;
-      logger.info("[ACCESSIBILITY_SERVICE] Emulator detected - settings toggle supported");
+      logger.info("[CTRL_PROXY] Emulator detected - settings toggle supported");
     } else {
       // Physical devices may require special permissions
       supportsSettingsToggle = false;
       reason = "Physical devices may require root, device owner status, or special shell permissions for programmatic accessibility toggle";
-      logger.info("[ACCESSIBILITY_SERVICE] Physical device detected - settings toggle may not be supported", { reason });
+      logger.info("[CTRL_PROXY] Physical device detected - settings toggle may not be supported", { reason });
     }
 
     // Additional API level checks could be added here if needed
     if (!hadDetectionError && apiLevel !== null && apiLevel < 16) {
       supportsSettingsToggle = false;
       reason = `API level ${apiLevel} is too old (requires API 16+)`;
-      logger.warn("[ACCESSIBILITY_SERVICE] API level too old for settings toggle", { apiLevel });
+      logger.warn("[CTRL_PROXY] API level too old for settings toggle", { apiLevel });
     }
 
     const capabilities: ToggleCapabilities = {
@@ -1213,9 +1213,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     // This prevents transient errors from creating sticky false negatives
     if (!hadDetectionError) {
       this.cachedToggleCapabilities = capabilities;
-      logger.info("[ACCESSIBILITY_SERVICE] Toggle capabilities detected and cached", capabilities);
+      logger.info("[CTRL_PROXY] Toggle capabilities detected and cached", capabilities);
     } else {
-      logger.info("[ACCESSIBILITY_SERVICE] Toggle capabilities detected but not cached due to detection errors", capabilities);
+      logger.info("[CTRL_PROXY] Toggle capabilities detected but not cached due to detection errors", capabilities);
     }
 
     return capabilities;
@@ -1242,7 +1242,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         };
       }
     } catch (error) {
-      logger.warn("[ACCESSIBILITY_SERVICE] sha256sum unavailable or failed, falling back to host hash", {
+      logger.warn("[CTRL_PROXY] sha256sum unavailable or failed, falling back to host hash", {
         error: error instanceof Error ? error.message : String(error)
       });
     }
@@ -1294,7 +1294,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
       return line.replace("package:", "").trim() || null;
     } catch (error) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Failed to resolve installed APK path", {
+      logger.warn("[CTRL_PROXY] Failed to resolve installed APK path", {
         error: error instanceof Error ? error.message : String(error)
       });
       return null;
@@ -1327,7 +1327,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   private getApkPathOverride(): string | null {
-    const override = process.env.AUTOMOBILE_ACCESSIBILITY_APK_PATH;
+    const override = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     if (!override) {
       return null;
     }

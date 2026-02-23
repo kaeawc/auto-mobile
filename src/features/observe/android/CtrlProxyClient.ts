@@ -397,7 +397,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   public static getInstance(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory): CtrlProxyClient {
     const deviceId = device.deviceId;
     if (!CtrlProxyClient.instances.has(deviceId)) {
-      logger.debug(`[ACCESSIBILITY_SERVICE] Creating singleton for device: ${deviceId}`);
+      logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
       CtrlProxyClient.instances.set(
         deviceId,
         new CtrlProxyClient(device, adbFactory.create(device))
@@ -415,7 +415,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     }
     CtrlProxyClient.instances.clear();
     PortManager.reset();
-    logger.info("[ACCESSIBILITY_SERVICE] Reset all singleton instances and port allocations");
+    logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
 
   /**
@@ -791,12 +791,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for action");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for action");
         return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "Failed to connect to accessibility service" };
       }
 
       const requestId = this.requestManager.generateId("action");
-      logger.info(`[ACCESSIBILITY_SERVICE] Creating action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
+      logger.info(`[CTRL_PROXY] Creating action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
 
       const actionPromise = this.requestManager.register<A11yActionResult>(
         requestId, "action", timeoutMs,
@@ -809,22 +809,22 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         }
         const message = JSON.stringify({ type: "request_action", requestId, action, resourceId });
         this.ws.send(message);
-        logger.info(`[ACCESSIBILITY_SERVICE] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
+        logger.info(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
       });
 
       const result = await perf.track("waitForAction", () => actionPromise);
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`);
+        logger.info(`[CTRL_PROXY] Action completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, action=${result.action}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Action failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Action failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Action request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };
     }
   }
@@ -841,7 +841,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for clipboard");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clipboard");
         return { success: false, action, totalTimeMs: this.timer.now() - startTime, error: "Failed to connect to accessibility service" };
       }
 
@@ -858,22 +858,22 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         }
         const message = JSON.stringify({ type: "request_clipboard", requestId, action, text });
         this.ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent clipboard request (requestId: ${requestId}, action: ${action})`);
+        logger.debug(`[CTRL_PROXY] Sent clipboard request (requestId: ${requestId}, action: ${action})`);
       });
 
       const result = await perf.track("waitForClipboard", () => clipboardPromise);
       const clientDuration = this.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Clipboard ${action} completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms`);
+        logger.info(`[CTRL_PROXY] Clipboard ${action} completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Clipboard ${action} failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Clipboard ${action} failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Clipboard request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Clipboard request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };
     }
   }
@@ -884,7 +884,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for screenshot");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for screenshot");
         return { success: false, error: "Failed to connect to accessibility service" };
       }
 
@@ -901,7 +901,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         }
         const message = JSON.stringify({ type: "request_screenshot", requestId });
         this.ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent screenshot request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent screenshot request (requestId: ${requestId})`);
       });
 
       const result = await perf.track("waitForScreenshot", () => screenshotPromise);
@@ -909,15 +909,15 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       if (result.success) {
         const dataSize = result.data ? result.data.length : 0;
-        logger.info(`[ACCESSIBILITY_SERVICE] Screenshot received in ${duration}ms (${dataSize} base64 chars)`);
+        logger.info(`[CTRL_PROXY] Screenshot received in ${duration}ms (${dataSize} base64 chars)`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Screenshot failed after ${duration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Screenshot failed after ${duration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Screenshot request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
     }
   }
@@ -925,12 +925,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
     const result = await this.retryExecutor.execute(
       async attempt => {
-        logger.info(`[ACCESSIBILITY_SERVICE] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
+        logger.info(`[CTRL_PROXY] Verifying service ready (attempt ${attempt}/${maxAttempts})`);
 
         const hierarchyResult = await this.requestHierarchySync(new NoOpPerformanceTracker(), false, undefined, timeoutMs);
 
         if (hierarchyResult && hierarchyResult.hierarchy) {
-          logger.info(`[ACCESSIBILITY_SERVICE] Service verified ready after ${attempt} attempt(s)`);
+          logger.info(`[CTRL_PROXY] Service verified ready after ${attempt} attempt(s)`);
           return true;
         }
 
@@ -940,14 +940,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         maxAttempts,
         delays: delayMs,
         onRetry: (error, attempt) => {
-          logger.debug(`[ACCESSIBILITY_SERVICE] Verification attempt ${attempt} failed: ${error.message}`);
-          logger.debug(`[ACCESSIBILITY_SERVICE] Waiting ${delayMs}ms before next verification attempt`);
+          logger.debug(`[CTRL_PROXY] Verification attempt ${attempt} failed: ${error.message}`);
+          logger.debug(`[CTRL_PROXY] Waiting ${delayMs}ms before next verification attempt`);
         },
       }
     );
 
     if (!result.success) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Service not ready after ${maxAttempts} verification attempts`);
+      logger.warn(`[CTRL_PROXY] Service not ready after ${maxAttempts} verification attempts`);
       return false;
     }
 
@@ -996,10 +996,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
               if (screenshotPath) {
                 NavigationGraphManager.getInstance()
                   .updateNodeScreenshot(appId, screenName, screenshotPath)
-                  .catch(err => logger.warn(`[ACCESSIBILITY_SERVICE] Failed to update hierarchy screenshot: ${err}`));
+                  .catch(err => logger.warn(`[CTRL_PROXY] Failed to update hierarchy screenshot: ${err}`));
               }
             })
-            .catch(err => logger.debug(`[ACCESSIBILITY_SERVICE] Hierarchy screenshot capture skipped: ${err}`));
+            .catch(err => logger.debug(`[CTRL_PROXY] Hierarchy screenshot capture skipped: ${err}`));
         }
       });
     }
@@ -1040,7 +1040,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       PortManager.release(this.device.deviceId);
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Error during cleanup: ${error}`);
+      logger.warn(`[CTRL_PROXY] Error during cleanup: ${error}`);
     }
   }
 
@@ -1054,15 +1054,15 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     if (this.portForwardingSetup) {
       const isActive = await this.isPortForwardingActive();
       if (isActive) {
-        logger.debug(`[ACCESSIBILITY_SERVICE] Port forwarding already active (localhost:${this.localPort})`);
+        logger.debug(`[CTRL_PROXY] Port forwarding already active (localhost:${this.localPort})`);
         return;
       }
-      logger.info(`[ACCESSIBILITY_SERVICE] Port forwarding was lost, re-establishing...`);
+      logger.info(`[CTRL_PROXY] Port forwarding was lost, re-establishing...`);
       this.portForwardingSetup = false;
     }
 
     try {
-      logger.info(`[ACCESSIBILITY_SERVICE] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`);
+      logger.info(`[CTRL_PROXY] Setting up port forwarding for WebSocket: localhost:${this.localPort} → device:${PortManager.DEVICE_PORT} (device: ${this.device.deviceId})`);
 
       await perf.track("clearPortForward", () =>
         this.adb.executeCommand(`forward --remove tcp:${this.localPort}`).catch(() => {})
@@ -1073,9 +1073,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       );
 
       this.portForwardingSetup = true;
-      logger.info(`[ACCESSIBILITY_SERVICE] Port forwarding setup complete (localhost:${this.localPort})`);
+      logger.info(`[CTRL_PROXY] Port forwarding setup complete (localhost:${this.localPort})`);
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to setup port forwarding: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to setup port forwarding: ${error}`);
       throw error;
     }
   }
@@ -1091,11 +1091,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       // Format is: "serial tcp:localPort tcp:remotePort" per line
       const isActive = result.stdout.includes(expectedForward);
       if (!isActive) {
-        logger.debug(`[ACCESSIBILITY_SERVICE] Port forwarding not found in active forwards. Expected: ${expectedForward}`);
+        logger.debug(`[CTRL_PROXY] Port forwarding not found in active forwards. Expected: ${expectedForward}`);
       }
       return isActive;
     } catch (error) {
-      logger.debug(`[ACCESSIBILITY_SERVICE] Failed to check port forwarding status: ${error}`);
+      logger.debug(`[CTRL_PROXY] Failed to check port forwarding status: ${error}`);
       return false;
     }
   }
@@ -1105,7 +1105,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       const message: WebSocketMessage = JSON.parse(data.toString());
 
       if (message.type === "connected") {
-        logger.debug(`[ACCESSIBILITY_SERVICE] Received connection confirmation`);
+        logger.debug(`[CTRL_PROXY] Received connection confirmation`);
         return;
       }
 
@@ -1124,7 +1124,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle screenshot error
       if (message.type === "screenshot_error" && message.requestId) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Screenshot error (requestId: ${message.requestId}): ${message.error}`);
+        logger.warn(`[CTRL_PROXY] Screenshot error (requestId: ${message.requestId}): ${message.error}`);
         this.requestManager.resolve<ScreenshotResult>(message.requestId, { success: false, error: message.error || "Unknown error" });
       }
 
@@ -1132,7 +1132,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       if (message.type === "swipe_result") {
         const swipeMessage = message as any;
         const perfTiming = swipeMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        logger.debug(`[ACCESSIBILITY_SERVICE] Swipe result (requestId: ${swipeMessage.requestId}, success: ${swipeMessage.success})`);
+        logger.debug(`[CTRL_PROXY] Swipe result (requestId: ${swipeMessage.requestId}, success: ${swipeMessage.success})`);
 
         if (swipeMessage.requestId) {
           this.requestManager.resolve<A11ySwipeResult>(swipeMessage.requestId, {
@@ -1146,7 +1146,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       if (message.type === "tap_coordinates_result") {
         const tapMessage = message as any;
         const perfTiming = tapMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        logger.info(`[ACCESSIBILITY_SERVICE] Tap coordinates result (requestId: ${tapMessage.requestId}, success: ${tapMessage.success})`);
+        logger.info(`[CTRL_PROXY] Tap coordinates result (requestId: ${tapMessage.requestId}, success: ${tapMessage.success})`);
 
         if (tapMessage.requestId) {
           this.requestManager.resolve<A11yTapCoordinatesResult>(tapMessage.requestId, {
@@ -1391,7 +1391,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           if (event.applicationId) {
             this.sdkNavigationAppIds.add(event.applicationId);
           }
-          logger.info(`[ACCESSIBILITY_SERVICE] Navigation event: ${event.destination} (app: ${event.applicationId})`);
+          logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
           await NavigationGraphManager.getInstance().recordNavigationEvent(event);
 
           if (event.applicationId && event.destination) {
@@ -1401,10 +1401,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
                 if (screenshotPath) {
                   NavigationGraphManager.getInstance()
                     .updateNodeScreenshot(event.applicationId!, event.destination!, screenshotPath)
-                    .catch(err => logger.warn(`[ACCESSIBILITY_SERVICE] Failed to update screenshot: ${err}`));
+                    .catch(err => logger.warn(`[CTRL_PROXY] Failed to update screenshot: ${err}`));
                 }
               })
-              .catch(err => logger.debug(`[ACCESSIBILITY_SERVICE] Screenshot capture skipped: ${err}`));
+              .catch(err => logger.debug(`[CTRL_PROXY] Screenshot capture skipped: ${err}`));
           }
         }
       }
@@ -1458,7 +1458,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           valueType: storageMessage.valueType ?? "STRING", timestamp: storageMessage.timestamp ?? this.timer.now(),
           sequenceNumber: storageMessage.sequenceNumber ?? 0,
         };
-        logger.debug(`[ACCESSIBILITY_SERVICE] Storage changed: ${event.packageName}/${event.fileName} key=${event.key}`);
+        logger.debug(`[CTRL_PROXY] Storage changed: ${event.packageName}/${event.fileName} key=${event.key}`);
 
         this.storage.notifyStorageChangeListeners(event);
 
@@ -1468,13 +1468,13 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         }
       }
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Error handling WebSocket message: ${error}`);
+      logger.warn(`[CTRL_PROXY] Error handling WebSocket message: ${error}`);
     }
   }
 
   private handleHierarchyUpdate(data: AccessibilityHierarchy, perfTiming?: AndroidPerfTiming[]): void {
     const now = this.timer.now();
-    logger.debug(`[ACCESSIBILITY_SERVICE] Received hierarchy update (updatedAt: ${data.updatedAt})`);
+    logger.debug(`[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt})`);
 
     // Mark previous cache as stale
     if (this.cachedHierarchy) {
@@ -1508,11 +1508,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
     // Notify hierarchy navigation detector
     if (!data.hierarchy) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Skipping navigation detection: hierarchy missing");
+      logger.warn("[CTRL_PROXY] Skipping navigation detection: hierarchy missing");
     } else if (data.error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Skipping navigation detection due to error: ${data.error}`);
+      logger.warn(`[CTRL_PROXY] Skipping navigation detection due to error: ${data.error}`);
     } else if (!this.shouldUseHierarchyNavigation(data.packageName)) {
-      logger.debug(`[ACCESSIBILITY_SERVICE] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
+      logger.debug(`[CTRL_PROXY] Skipping hierarchy navigation for SDK app: ${data.packageName}`);
     } else {
       this.getHierarchyNavigationDetector().onHierarchyUpdate(data);
     }
@@ -1534,7 +1534,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     try {
       server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to push hierarchy to observation stream: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to push hierarchy to observation stream: ${error}`);
     }
   }
 
@@ -1550,7 +1550,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     try {
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight);
     } catch (error) {
-      logger.debug(`[ACCESSIBILITY_SERVICE] Failed to push screenshot to observation stream: ${error}`);
+      logger.debug(`[CTRL_PROXY] Failed to push screenshot to observation stream: ${error}`);
     }
   }
 
@@ -1629,7 +1629,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         this.a11yScreenshotFailures++;
         if (this.a11yScreenshotSupported === null &&
             this.a11yScreenshotFailures >= CtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES) {
-          logger.info("[ACCESSIBILITY_SERVICE] Accessibility service screenshot not supported after " +
+          logger.info("[CTRL_PROXY] Accessibility service screenshot not supported after " +
             `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;
         }
@@ -1685,7 +1685,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       try {
         listener(event);
       } catch (error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Interaction listener error: ${error}`);
+        logger.warn(`[CTRL_PROXY] Interaction listener error: ${error}`);
       }
     }
   }
@@ -1734,7 +1734,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     }
 
     if (!event.packageName || !Number.isInteger(event.userId) || event.userId < 0) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Ignoring package event with missing data");
+      logger.warn("[CTRL_PROXY] Ignoring package event with missing data");
       return;
     }
 
@@ -1760,12 +1760,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         this.workProfileMonitor.setProfileHasAccessibilityService(event.userId, true);
       }
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to apply package event: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
     }
   }
 
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {
-    logger.info(`[ACCESSIBILITY_SERVICE] Received handled exception: ${event.exceptionClass} from ${event.packageName}`);
+    logger.info(`[CTRL_PROXY] Received handled exception: ${event.exceptionClass} from ${event.packageName}`);
 
     try {
       const failureRecorder = getFailureRecorder();
@@ -1795,14 +1795,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       };
 
       const occurrenceId = await failureRecorder.recordNonFatal(nonFatalInput);
-      logger.info(`[ACCESSIBILITY_SERVICE] Recorded non-fatal exception: ${occurrenceId}`);
+      logger.info(`[CTRL_PROXY] Recorded non-fatal exception: ${occurrenceId}`);
     } catch (error) {
-      logger.error(`[ACCESSIBILITY_SERVICE] Failed to record handled exception: ${error}`);
+      logger.error(`[CTRL_PROXY] Failed to record handled exception: ${error}`);
     }
   }
 
   private async handleCrashEvent(event: CrashEvent): Promise<void> {
-    logger.info(`[ACCESSIBILITY_SERVICE] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
+    logger.info(`[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
 
     try {
       const failureRecorder = getFailureRecorder();
@@ -1832,14 +1832,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       };
 
       const occurrenceId = await failureRecorder.recordCrash(crashInput);
-      logger.info(`[ACCESSIBILITY_SERVICE] Recorded crash: ${occurrenceId}`);
+      logger.info(`[CTRL_PROXY] Recorded crash: ${occurrenceId}`);
     } catch (error) {
-      logger.error(`[ACCESSIBILITY_SERVICE] Failed to record crash: ${error}`);
+      logger.error(`[CTRL_PROXY] Failed to record crash: ${error}`);
     }
   }
 
   private async handleAnrEvent(event: AnrEvent): Promise<void> {
-    logger.info(`[ACCESSIBILITY_SERVICE] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
+    logger.info(`[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
 
     try {
       const failureRecorder = getFailureRecorder();
@@ -1870,9 +1870,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       };
 
       const occurrenceId = await failureRecorder.recordAnr(anrInput);
-      logger.info(`[ACCESSIBILITY_SERVICE] Recorded ANR: ${occurrenceId}`);
+      logger.info(`[CTRL_PROXY] Recorded ANR: ${occurrenceId}`);
     } catch (error) {
-      logger.error(`[ACCESSIBILITY_SERVICE] Failed to record ANR: ${error}`);
+      logger.error(`[CTRL_PROXY] Failed to record ANR: ${error}`);
     }
   }
 
@@ -1910,9 +1910,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
     try {
       await this.getInstalledAppsRepository().markDeviceStale(this.device.deviceId);
-      logger.info(`[ACCESSIBILITY_SERVICE] Marked installed apps cache stale (${reason})`);
+      logger.info(`[CTRL_PROXY] Marked installed apps cache stale (${reason})`);
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to mark installed apps stale: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to mark installed apps stale: ${error}`);
     }
   }
 }

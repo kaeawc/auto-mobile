@@ -136,9 +136,13 @@ export interface DeviceSessionManager {
 }
 
 export interface DeviceReadyOptions {
+  skipCtrlProxyDownload?: boolean;
+  /**
+   * @deprecated Use skipCtrlProxyDownload instead.
+   */
   skipAccessibilityDownload?: boolean;
   /**
-   * @deprecated Use skipAccessibilityDownload instead.
+   * @deprecated Use skipCtrlProxyDownload instead.
    */
   skipAccessibilitySetup?: boolean;
 }
@@ -412,9 +416,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
     let didSetup = false;
 
     try {
-      const skipAccessibilityDownload = options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
+      const skipCtrlProxyDownload = options?.skipCtrlProxyDownload ?? options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
       if (options?.skipAccessibilitySetup !== undefined) {
-        logger.warn("[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipAccessibilityDownload instead.");
+        if (options?.skipAccessibilityDownload !== undefined) { logger.warn("[DeviceSessionManager] skipAccessibilityDownload is deprecated; use skipCtrlProxyDownload instead."); } else { logger.warn("[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipCtrlProxyDownload instead."); }
       }
 
       const accessibilityClient = CtrlProxyClient.getInstance(device);
@@ -441,7 +445,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
           logger.info(`[DeviceSessionManager] Accessibility service version compatible for ${deviceId}`);
           return;
         }
-        const errorMessage = "Accessibility service version mismatch detected. Run without skipAccessibilityDownload to install a compatible version.";
+        const errorMessage = "Accessibility service version mismatch detected. Run without skipCtrlProxyDownload to install a compatible version.";
         logger.warn(`[DeviceSessionManager] ${errorMessage} Device: ${deviceId}`);
         throw new ActionableError(errorMessage);
       };
@@ -458,7 +462,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         // Verify the service is actually working by checking WebSocket connection
         const connected = await perf.track("verifyConnection", () => accessibilityClient.waitForConnection(3, 200));
         if (connected) {
-          if (skipAccessibilityDownload) {
+          if (skipCtrlProxyDownload) {
             await verifyCompatibilityWhenSkipping();
             return;
           }
@@ -471,7 +475,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         }
       }
 
-      if (!isInstalled && skipAccessibilityDownload) {
+      if (!isInstalled && skipCtrlProxyDownload) {
         logger.info(`[DeviceSessionManager] Accessibility service not installed for ${deviceId}, skipping download/install`);
         return;
       }
@@ -489,7 +493,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
             manager.resetSetupState();
             needsSetup = true;
           } else {
-            if (skipAccessibilityDownload) {
+            if (skipCtrlProxyDownload) {
               await verifyCompatibilityWhenSkipping();
               return;
             }
@@ -498,14 +502,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.warn(`[DeviceSessionManager] Failed to enable accessibility service: ${errorMessage}`);
-          if (skipAccessibilityDownload) {
+          if (skipCtrlProxyDownload) {
             return;
           }
           needsSetup = true;
         }
       }
 
-      if (skipAccessibilityDownload && !needsSetup) {
+      if (skipCtrlProxyDownload && !needsSetup) {
         logger.info(`[DeviceSessionManager] Skipping accessibility service download/install for ${deviceId}`);
         return;
       }
@@ -585,7 +589,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     let didSetup = false;
 
     try {
-      const skipXCTestServiceSetup = options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
+      const skipXCTestServiceSetup = options?.skipCtrlProxyDownload ?? options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
 
       const manager = IOSXCTestServiceManager.getInstance(device);
       const xcTestClient = XCTestServiceClient.getInstance(device, manager.getServicePort());

@@ -56,7 +56,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for listPreferenceFiles");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for listPreferenceFiles");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -84,9 +84,9 @@ export class CtrlProxyStorage {
         requestId,
         packageName
       });
-      logger.info(`[ACCESSIBILITY_SERVICE] Sending list_preference_files request (requestId: ${requestId}, packageName: ${packageName}, wsReadyState: ${ws.readyState})`);
+      logger.info(`[CTRL_PROXY] Sending list_preference_files request (requestId: ${requestId}, packageName: ${packageName}, wsReadyState: ${ws.readyState})`);
       ws.send(message);
-      logger.info(`[ACCESSIBILITY_SERVICE] Sent list_preference_files request successfully`);
+      logger.info(`[CTRL_PROXY] Sent list_preference_files request successfully`);
 
       // Wait for response
       const result = await resultPromise;
@@ -98,7 +98,7 @@ export class CtrlProxyStorage {
       return result.files || [];
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] listPreferenceFiles failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] listPreferenceFiles failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -122,7 +122,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for getPreferenceEntries");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for getPreferenceEntries");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -152,7 +152,7 @@ export class CtrlProxyStorage {
         fileName
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent get_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
+      logger.debug(`[CTRL_PROXY] Sent get_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -164,7 +164,7 @@ export class CtrlProxyStorage {
       return result.entries || [];
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] getPreferenceEntries failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] getPreferenceEntries failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -189,7 +189,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for subscribeStorage");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for subscribeStorage");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -219,7 +219,7 @@ export class CtrlProxyStorage {
         fileName
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent subscribe_storage request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
+      logger.debug(`[CTRL_PROXY] Sent subscribe_storage request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -228,11 +228,11 @@ export class CtrlProxyStorage {
         throw new Error(result.error || "Failed to subscribe to storage");
       }
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Subscribed to storage changes: ${packageName}/${fileName} (subscriptionId: ${result.subscription.subscriptionId})`);
+      logger.info(`[CTRL_PROXY] Subscribed to storage changes: ${packageName}/${fileName} (subscriptionId: ${result.subscription.subscriptionId})`);
       return result.subscription;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] subscribeStorage failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] subscribeStorage failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -253,7 +253,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for unsubscribeStorage");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for unsubscribeStorage");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -282,7 +282,7 @@ export class CtrlProxyStorage {
         subscriptionId
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent unsubscribe_storage request (requestId: ${requestId}, subscriptionId: ${subscriptionId})`);
+      logger.debug(`[CTRL_PROXY] Sent unsubscribe_storage request (requestId: ${requestId}, subscriptionId: ${subscriptionId})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -291,10 +291,10 @@ export class CtrlProxyStorage {
         throw new Error(result.error || "Failed to unsubscribe from storage");
       }
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Unsubscribed from storage changes (subscriptionId: ${subscriptionId})`);
+      logger.info(`[CTRL_PROXY] Unsubscribed from storage changes (subscriptionId: ${subscriptionId})`);
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] unsubscribeStorage failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] unsubscribeStorage failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -322,7 +322,7 @@ export class CtrlProxyStorage {
       try {
         listener(event);
       } catch (error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Storage change listener error: ${error}`);
+        logger.warn(`[CTRL_PROXY] Storage change listener error: ${error}`);
       }
     }
   }
@@ -348,7 +348,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for getPreference");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for getPreference");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -380,7 +380,7 @@ export class CtrlProxyStorage {
         key
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent get_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
+      logger.debug(`[CTRL_PROXY] Sent get_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -392,7 +392,7 @@ export class CtrlProxyStorage {
       return result.found && result.entry ? result.entry : null;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] getPreference failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] getPreference failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -421,7 +421,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for setPreference");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for setPreference");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -454,7 +454,7 @@ export class CtrlProxyStorage {
         valueType: type
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent set_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
+      logger.debug(`[CTRL_PROXY] Sent set_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -463,10 +463,10 @@ export class CtrlProxyStorage {
         throw new Error(result.error || "Failed to set preference");
       }
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Set preference: ${packageName}/${fileName}/${key}`);
+      logger.info(`[CTRL_PROXY] Set preference: ${packageName}/${fileName}/${key}`);
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] setPreference failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] setPreference failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -491,7 +491,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for removePreference");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for removePreference");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -522,7 +522,7 @@ export class CtrlProxyStorage {
         key
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent remove_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
+      logger.debug(`[CTRL_PROXY] Sent remove_preference request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName}, key: ${key})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -531,10 +531,10 @@ export class CtrlProxyStorage {
         throw new Error(result.error || "Failed to remove preference");
       }
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Removed preference: ${packageName}/${fileName}/${key}`);
+      logger.info(`[CTRL_PROXY] Removed preference: ${packageName}/${fileName}/${key}`);
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] removePreference failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] removePreference failed after ${duration}ms: ${error}`);
       throw error;
     }
   }
@@ -557,7 +557,7 @@ export class CtrlProxyStorage {
       // Ensure WebSocket connection is established
       const connected = await this.context.ensureConnected();
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for clearPreferenceStore");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for clearPreferenceStore");
         throw new Error("Failed to connect to accessibility service");
       }
 
@@ -587,7 +587,7 @@ export class CtrlProxyStorage {
         fileName
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent clear_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
+      logger.debug(`[CTRL_PROXY] Sent clear_preferences request (requestId: ${requestId}, packageName: ${packageName}, fileName: ${fileName})`);
 
       // Wait for response
       const result = await resultPromise;
@@ -596,10 +596,10 @@ export class CtrlProxyStorage {
         throw new Error(result.error || "Failed to clear preferences");
       }
 
-      logger.info(`[ACCESSIBILITY_SERVICE] Cleared preferences: ${packageName}/${fileName}`);
+      logger.info(`[CTRL_PROXY] Cleared preferences: ${packageName}/${fileName}`);
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] clearPreferenceStore failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] clearPreferenceStore failed after ${duration}ms: ${error}`);
       throw error;
     }
   }

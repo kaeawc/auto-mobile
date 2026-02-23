@@ -68,7 +68,7 @@ describe("DeviceSessionManager", () => {
       } as any);
 
     const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
-    await manager.ensureDeviceReady("android", "device-1", { skipAccessibilityDownload: true });
+    await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
     expect(accessibilityManager.wasMethodCalled("enable")).toBe(false);
@@ -87,7 +87,7 @@ describe("DeviceSessionManager", () => {
       } as any);
 
     const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
-    await manager.ensureDeviceReady("android", "device-1", { skipAccessibilityDownload: true });
+    await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("enable")).toBe(true);
     expect(accessibilityManager.wasMethodCalled("isVersionCompatible")).toBe(true);
@@ -107,7 +107,7 @@ describe("DeviceSessionManager", () => {
       } as any);
 
     const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
-    await manager.ensureDeviceReady("android", "device-1", { skipAccessibilityDownload: true });
+    await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("isVersionCompatible")).toBe(true);
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
@@ -127,7 +127,7 @@ describe("DeviceSessionManager", () => {
 
     const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
     await expect(
-      manager.ensureDeviceReady("android", "device-1", { skipAccessibilityDownload: true })
+      manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true })
     ).rejects.toThrow("Accessibility service version mismatch");
   });
 

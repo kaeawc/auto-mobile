@@ -33,7 +33,7 @@ export async function refreshAndroidViewHierarchy(
     return null;
   }
 
-  if (rawHierarchy.accessibilityServiceIncomplete) {
+  if (rawHierarchy.ctrlProxyIncomplete) {
     logger.debug("[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback");
     try {
       const uiautomatorHierarchy = await viewHierarchy.getUiAutomatorHierarchy(

@@ -266,7 +266,7 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     if (this.shouldSetupFail) {
       return {
         success: false,
-        message: "Failed to setup Accessibility Service",
+        message: "Failed to setup CtrlProxy",
         error: "Mock setup failure"
       };
     }
@@ -274,13 +274,13 @@ export class FakeCtrlProxyManager implements CtrlProxyManager {
     if (force || !this.installedState || !this.enabledState) {
       return {
         success: true,
-        message: "Accessibility Service installed and activated successfully",
+        message: "CtrlProxy installed and activated successfully",
       };
     }
 
     return {
       success: true,
-      message: "Accessibility Service was already installed and has been activated",
+      message: "CtrlProxy was already installed and has been activated",
     };
   }
 }

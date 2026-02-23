@@ -58,7 +58,7 @@ export class CtrlProxyHierarchy {
   invalidateCache(): void {
     const cached = this.context.getCachedHierarchy();
     if (cached) {
-      logger.debug("[ACCESSIBILITY_SERVICE] Invalidating cached hierarchy");
+      logger.debug("[CTRL_PROXY] Invalidating cached hierarchy");
       this.context.setCachedHierarchy(null);
     }
   }
@@ -83,13 +83,13 @@ export class CtrlProxyHierarchy {
     const startTime = this.context.timer.now();
     const cachedHierarchy = this.context.getCachedHierarchy();
 
-    logger.debug(`[ACCESSIBILITY_SERVICE] getLatestHierarchy: cache=${cachedHierarchy ? "exists" : "null"}, waitForFresh=${waitForFresh}, skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp}`);
+    logger.debug(`[CTRL_PROXY] getLatestHierarchy: cache=${cachedHierarchy ? "exists" : "null"}, waitForFresh=${waitForFresh}, skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp}`);
 
     try {
       // Ensure WebSocket connection is established
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
         return {
           hierarchy: null,
           fresh: false
@@ -107,13 +107,13 @@ export class CtrlProxyHierarchy {
 
           if (!freshness.isFresh) {
             const staleReference = freshness.usesUpdatedAt ? freshness.updatedAt : cachedHierarchy.receivedAt;
-            logger.debug(`[ACCESSIBILITY_SERVICE] Cache rejected: ${freshness.usesUpdatedAt ? "updatedAt" : "receivedAt"} ${staleReference} < ${minTimestamp}`);
+            logger.debug(`[CTRL_PROXY] Cache rejected: ${freshness.usesUpdatedAt ? "updatedAt" : "receivedAt"} ${staleReference} < ${minTimestamp}`);
             // Fall through to wait for fresh data or sync
           } else {
             const isFresh = cacheAge < 1000;
             const duration = this.context.timer.now() - startTime;
             logger.debug(
-              `[ACCESSIBILITY_SERVICE] Cache accepted in ${duration}ms: ` +
+              `[CTRL_PROXY] Cache accepted in ${duration}ms: ` +
               `receivedAt=${cachedHierarchy.receivedAt}, ` +
               `updatedAt=${updatedAt}, age=${cacheAge}ms, fresh=${isFresh}`
             );
@@ -129,7 +129,7 @@ export class CtrlProxyHierarchy {
           // No minTimestamp check, return cache
           const isFresh = cacheAge < 1000;
           const duration = this.context.timer.now() - startTime;
-          logger.debug(`[ACCESSIBILITY_SERVICE] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
+          logger.debug(`[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
 
           return {
             hierarchy: cachedHierarchy.hierarchy,
@@ -148,7 +148,7 @@ export class CtrlProxyHierarchy {
         throwIfAborted(signal);
         const waitMinTimestamp = minTimestamp > 0 ? minTimestamp : startTime;
         const useDeviceTimestamp = minTimestamp > 0;
-        logger.debug(`[ACCESSIBILITY_SERVICE] Waiting up to ${timeout}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`);
+        logger.debug(`[CTRL_PROXY] Waiting up to ${timeout}ms for fresh hierarchy data (must be newer than ${waitMinTimestamp})`);
 
         const freshData = await perf.track("waitForFresh", () =>
           this.waitForFreshData(timeout, waitMinTimestamp, useDeviceTimestamp, signal)
@@ -156,7 +156,7 @@ export class CtrlProxyHierarchy {
         const duration = this.context.timer.now() - startTime;
 
         if (freshData) {
-          logger.info(`[ACCESSIBILITY_SERVICE] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
+          logger.info(`[CTRL_PROXY] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
           return {
             hierarchy: freshData.hierarchy,
             fresh: true,
@@ -166,13 +166,13 @@ export class CtrlProxyHierarchy {
         } else {
           // Record timeout so we skip WebSocket wait for a while
           this.context.setLastWebSocketTimeout(this.context.timer.now());
-          logger.warn(`[ACCESSIBILITY_SERVICE] Timeout waiting for fresh data after ${duration}ms, will skip WebSocket wait for ${WEBSOCKET_TIMEOUT_COOLDOWN_MS}ms`);
+          logger.warn(`[CTRL_PROXY] Timeout waiting for fresh data after ${duration}ms, will skip WebSocket wait for ${WEBSOCKET_TIMEOUT_COOLDOWN_MS}ms`);
 
           // Return cached data if available
           const currentCache = this.context.getCachedHierarchy();
           if (currentCache) {
             currentCache.fresh = false;
-            logger.info(`[ACCESSIBILITY_SERVICE] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
+            logger.info(`[CTRL_PROXY] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
             return {
               hierarchy: currentCache.hierarchy,
               fresh: false,
@@ -182,18 +182,18 @@ export class CtrlProxyHierarchy {
           }
         }
       } else if (skipWaitForFresh || this.shouldSkipWebSocketWait()) {
-        logger.debug(`[ACCESSIBILITY_SERVICE] Skipping WebSocket wait (skipWaitForFresh=${skipWaitForFresh}, recentTimeout=${this.shouldSkipWebSocketWait()})`);
+        logger.debug(`[CTRL_PROXY] Skipping WebSocket wait (skipWaitForFresh=${skipWaitForFresh}, recentTimeout=${this.shouldSkipWebSocketWait()})`);
       }
 
       // No cached data available
-      logger.debug("[ACCESSIBILITY_SERVICE] No cached hierarchy data available");
+      logger.debug("[CTRL_PROXY] No cached hierarchy data available");
       return {
         hierarchy: null,
         fresh: false
       };
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to get hierarchy after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to get hierarchy after ${duration}ms: ${error}`);
       return {
         hierarchy: null,
         fresh: false
@@ -225,7 +225,7 @@ export class CtrlProxyHierarchy {
         AndroidCtrlProxyManager.getInstance(this.context.device, this.context.adb).isAvailable()
       );
       if (!available) {
-        logger.info("[ACCESSIBILITY_SERVICE] Service not available, will use fallback");
+        logger.info("[CTRL_PROXY] Service not available, will use fallback");
         perf.end();
         return null;
       }
@@ -243,7 +243,7 @@ export class CtrlProxyHierarchy {
       // If no hierarchy from WebSocket or data is stale, sync to get fresh data
       const needsSync = !hierarchyData || !isFresh;
       if (needsSync) {
-        logger.info(`[ACCESSIBILITY_SERVICE] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`);
+        logger.info(`[CTRL_PROXY] WebSocket returned ${hierarchyData ? "stale" : "no"} data (fresh=${isFresh}), syncing for fresh data`);
 
         const syncResult = await perf.track("syncRequest", () =>
           this.requestHierarchySync(perf, disableAllFiltering, signal)
@@ -255,9 +255,9 @@ export class CtrlProxyHierarchy {
             androidPerfTiming = syncResult.perfTiming;
           }
           isFresh = true;
-          logger.info("[ACCESSIBILITY_SERVICE] Successfully retrieved hierarchy via sync ADB method");
+          logger.info("[CTRL_PROXY] Successfully retrieved hierarchy via sync ADB method");
         } else if (!hierarchyData) {
-          logger.warn("[ACCESSIBILITY_SERVICE] Both WebSocket and sync methods failed, will use fallback");
+          logger.warn("[CTRL_PROXY] Both WebSocket and sync methods failed, will use fallback");
           perf.end();
           return null;
         }
@@ -281,13 +281,13 @@ export class CtrlProxyHierarchy {
       perf.end();
 
       const duration = this.context.timer.now() - startTime;
-      logger.info(`[ACCESSIBILITY_SERVICE] Successfully retrieved and converted hierarchy in ${duration}ms (fresh: ${isFresh}, updatedAt: ${hierarchyData!.updatedAt})`);
+      logger.info(`[CTRL_PROXY] Successfully retrieved and converted hierarchy in ${duration}ms (fresh: ${isFresh}, updatedAt: ${hierarchyData!.updatedAt})`);
 
       return convertedHierarchy;
     } catch (error) {
       perf.end();
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] getAccessibilityHierarchy failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] getAccessibilityHierarchy failed after ${duration}ms: ${error}`);
       return null;
     }
   }
@@ -307,7 +307,7 @@ export class CtrlProxyHierarchy {
     const effectiveTimeoutMs = Math.max(0, timeoutMs);
 
     try {
-      logger.info("[ACCESSIBILITY_SERVICE] Requesting hierarchy sync via WebSocket");
+      logger.info("[CTRL_PROXY] Requesting hierarchy sync via WebSocket");
 
       // Ensure WebSocket connection is established
       await this.context.ensureConnected(perf);
@@ -319,7 +319,7 @@ export class CtrlProxyHierarchy {
 
       // Fall back to ADB broadcast if WebSocket failed
       if (!sentViaWebSocket) {
-        logger.info("[ACCESSIBILITY_SERVICE] Falling back to ADB broadcast");
+        logger.info("[CTRL_PROXY] Falling back to ADB broadcast");
         const uuid = `sync_${this.context.timer.now()}_${generateSecureId()}`;
         await perf.track("sendBroadcast", async () => {
           await this.context.adb.executeCommand(
@@ -339,18 +339,18 @@ export class CtrlProxyHierarchy {
 
       if (freshData) {
         const duration = this.context.timer.now() - startTime;
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sync complete: ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
+        logger.debug(`[CTRL_PROXY] Sync complete: ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
         return {
           hierarchy: freshData.hierarchy,
           perfTiming: freshData.perfTiming
         };
       }
 
-      logger.warn("[ACCESSIBILITY_SERVICE] Timeout waiting for WebSocket push after request");
+      logger.warn("[CTRL_PROXY] Timeout waiting for WebSocket push after request");
       return null;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Sync hierarchy request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Sync hierarchy request failed after ${duration}ms: ${error}`);
       return null;
     }
   }
@@ -362,7 +362,7 @@ export class CtrlProxyHierarchy {
     const startTime = this.context.timer.now();
 
     try {
-      logger.info("[ACCESSIBILITY_SERVICE] Converting accessibility service format to ViewHierarchyResult format");
+      logger.info("[CTRL_PROXY] Converting accessibility service format to ViewHierarchyResult format");
 
       const hierarchyToConvert: AccessibilityNode | undefined = accessibilityHierarchy.hierarchy;
       const resolvedPackageName = accessibilityHierarchy.packageName;
@@ -377,7 +377,7 @@ export class CtrlProxyHierarchy {
           windows: accessibilityHierarchy.windows,
           intentChooserDetected: accessibilityHierarchy.intentChooserDetected,
           notificationPermissionDetected: accessibilityHierarchy.notificationPermissionDetected,
-          accessibilityServiceIncomplete: accessibilityHierarchy.accessibilityServiceIncomplete,
+          ctrlProxyIncomplete: accessibilityHierarchy.ctrlProxyIncomplete,
           sources: ["control-proxy"]
         } as ViewHierarchyResult;
       }
@@ -397,7 +397,7 @@ export class CtrlProxyHierarchy {
         "intentChooserDetected": accessibilityHierarchy.intentChooserDetected,
         "notificationPermissionDetected": accessibilityHierarchy.notificationPermissionDetected,
         "accessibility-focused-element": accessibilityFocusedElement,
-        "accessibilityServiceIncomplete": accessibilityHierarchy.accessibilityServiceIncomplete,
+        "ctrlProxyIncomplete": accessibilityHierarchy.ctrlProxyIncomplete,
         "sources": ["control-proxy"],
         "screenWidth": accessibilityHierarchy.screenWidth,
         "screenHeight": accessibilityHierarchy.screenHeight,
@@ -406,12 +406,12 @@ export class CtrlProxyHierarchy {
       };
 
       const duration = this.context.timer.now() - startTime;
-      logger.info(`[ACCESSIBILITY_SERVICE] Format conversion completed in ${duration}ms`);
+      logger.info(`[CTRL_PROXY] Format conversion completed in ${duration}ms`);
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Format conversion failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Format conversion failed after ${duration}ms: ${error}`);
 
       return {
         hierarchy: {
@@ -434,7 +434,7 @@ export class CtrlProxyHierarchy {
 
     const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
     if (!connected) {
-      logger.debug("[ACCESSIBILITY_SERVICE] Skipping recomposition tracking config; WebSocket not connected");
+      logger.debug("[CTRL_PROXY] Skipping recomposition tracking config; WebSocket not connected");
       return;
     }
 
@@ -442,7 +442,7 @@ export class CtrlProxyHierarchy {
     if (sent) {
       this.recompositionTrackingConfigured = true;
       this.recompositionTrackingEnabled = enabled;
-      logger.info(`[ACCESSIBILITY_SERVICE] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
+      logger.info(`[CTRL_PROXY] Recomposition tracking ${enabled ? "enabled" : "disabled"}`);
     }
   }
 
@@ -519,7 +519,7 @@ export class CtrlProxyHierarchy {
 
           if (freshness.isFresh) {
             this.context.timer.clearInterval(intervalId);
-            logger.debug(`[ACCESSIBILITY_SERVICE] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}`);
+            logger.debug(`[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}`);
             resolve(cachedHierarchy);
             return;
           }
@@ -528,7 +528,7 @@ export class CtrlProxyHierarchy {
         // Send "nudge" after staleCheckDelay
         if (!staleCheckSent && elapsed >= staleCheckDelay) {
           staleCheckSent = true;
-          logger.info(`[ACCESSIBILITY_SERVICE] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`);
+          logger.info(`[CTRL_PROXY] No push received after ${staleCheckDelay}ms, sending stale check request (sinceTimestamp: ${minTimestamp})`);
           this.sendHierarchyIfStaleRequest(minTimestamp);
         }
 
@@ -542,7 +542,7 @@ export class CtrlProxyHierarchy {
             screenCheckInProgress = false;
             if (!isOn) {
               this.context.timer.clearInterval(intervalId);
-              logger.warn("[ACCESSIBILITY_SERVICE] Screen is off - failing fast instead of waiting for timeout");
+              logger.warn("[CTRL_PROXY] Screen is off - failing fast instead of waiting for timeout");
               resolve(null);
             }
           }).catch(() => {
@@ -555,7 +555,7 @@ export class CtrlProxyHierarchy {
           this.context.timer.clearInterval(intervalId);
           const cached = this.context.getCachedHierarchy();
           if (cached) {
-            logger.debug(`[ACCESSIBILITY_SERVICE] Timeout: cached data receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}`);
+            logger.debug(`[CTRL_PROXY] Timeout: cached data receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}`);
           }
           resolve(null);
         }
@@ -569,7 +569,7 @@ export class CtrlProxyHierarchy {
   private sendHierarchyRequest(disableAllFiltering: boolean = false): boolean {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Cannot send request - WebSocket not connected");
+      logger.warn("[CTRL_PROXY] Cannot send request - WebSocket not connected");
       return false;
     }
 
@@ -581,10 +581,10 @@ export class CtrlProxyHierarchy {
         disableAllFiltering
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent hierarchy request via WebSocket (requestId: ${requestId}, disableAllFiltering: ${disableAllFiltering})`);
+      logger.debug(`[CTRL_PROXY] Sent hierarchy request via WebSocket (requestId: ${requestId}, disableAllFiltering: ${disableAllFiltering})`);
       return true;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to send WebSocket request: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to send WebSocket request: ${error}`);
       return false;
     }
   }
@@ -595,7 +595,7 @@ export class CtrlProxyHierarchy {
   private sendHierarchyIfStaleRequest(sinceTimestamp: number): boolean {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Cannot send stale check request - WebSocket not connected");
+      logger.warn("[CTRL_PROXY] Cannot send stale check request - WebSocket not connected");
       return false;
     }
 
@@ -607,10 +607,10 @@ export class CtrlProxyHierarchy {
         sinceTimestamp
       });
       ws.send(message);
-      logger.debug(`[ACCESSIBILITY_SERVICE] Sent hierarchy_if_stale request (requestId: ${requestId}, sinceTimestamp: ${sinceTimestamp})`);
+      logger.debug(`[CTRL_PROXY] Sent hierarchy_if_stale request (requestId: ${requestId}, sinceTimestamp: ${sinceTimestamp})`);
       return true;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to send stale check request: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to send stale check request: ${error}`);
       return false;
     }
   }
@@ -621,7 +621,7 @@ export class CtrlProxyHierarchy {
   private sendRecompositionTrackingRequest(enabled: boolean): boolean {
     const ws = this.context.getWebSocket();
     if (!ws || ws.readyState !== WebSocket.OPEN) {
-      logger.warn("[ACCESSIBILITY_SERVICE] Cannot send recomposition config - WebSocket not connected");
+      logger.warn("[CTRL_PROXY] Cannot send recomposition config - WebSocket not connected");
       return false;
     }
 
@@ -631,7 +631,7 @@ export class CtrlProxyHierarchy {
       ws.send(message);
       return true;
     } catch (error) {
-      logger.warn(`[ACCESSIBILITY_SERVICE] Failed to send recomposition config: ${error}`);
+      logger.warn(`[CTRL_PROXY] Failed to send recomposition config: ${error}`);
       return false;
     }
   }

@@ -61,7 +61,7 @@ export class CtrlProxyCertificates {
     try {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for CA cert install");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install");
         return {
           success: false,
           action: "install",
@@ -96,22 +96,22 @@ export class CtrlProxyCertificates {
           certificate: trimmed
         });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent CA cert install request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId})`);
       });
 
       const result = await perf.track("waitForCaCertInstall", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] CA cert install completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? "unknown"}`);
+        logger.info(`[CTRL_PROXY] CA cert install completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? "unknown"}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] CA cert install failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] CA cert install failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] CA cert install request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] CA cert install request failed after ${duration}ms: ${error}`);
       return {
         success: false,
         action: "install",
@@ -168,7 +168,7 @@ export class CtrlProxyCertificates {
 
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for CA cert install");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert install");
         return {
           success: false,
           action: "install",
@@ -203,16 +203,16 @@ export class CtrlProxyCertificates {
           devicePath
         });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent CA cert install request (requestId: ${requestId}, devicePath: ${devicePath})`);
+        logger.debug(`[CTRL_PROXY] Sent CA cert install request (requestId: ${requestId}, devicePath: ${devicePath})`);
       });
 
       const result = await perf.track("waitForCaCertInstall", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] CA cert install completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? "unknown"}`);
+        logger.info(`[CTRL_PROXY] CA cert install completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? "unknown"}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] CA cert install failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] CA cert install failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
@@ -250,7 +250,7 @@ export class CtrlProxyCertificates {
     try {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for CA cert removal");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for CA cert removal");
         return {
           success: false,
           action: "remove",
@@ -290,22 +290,22 @@ export class CtrlProxyCertificates {
           alias: trimmedAlias
         });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent CA cert removal request (requestId: ${requestId}, alias: ${trimmedAlias})`);
+        logger.debug(`[CTRL_PROXY] Sent CA cert removal request (requestId: ${requestId}, alias: ${trimmedAlias})`);
       });
 
       const result = await perf.track("waitForCaCertRemoval", () => caCertPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] CA cert removal completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? trimmedAlias}`);
+        logger.info(`[CTRL_PROXY] CA cert removal completed: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, alias=${result.alias ?? trimmedAlias}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] CA cert removal failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] CA cert removal failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] CA cert removal request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] CA cert removal request failed after ${duration}ms: ${error}`);
       return {
         success: false,
         action: "remove",
@@ -327,7 +327,7 @@ export class CtrlProxyCertificates {
     try {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for device owner status");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for device owner status");
         return {
           success: false,
           isDeviceOwner: false,
@@ -363,22 +363,22 @@ export class CtrlProxyCertificates {
           requestId
         });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent device owner status request (requestId: ${requestId})`);
+        logger.debug(`[CTRL_PROXY] Sent device owner status request (requestId: ${requestId})`);
       });
 
       const result = await perf.track("waitForDeviceOwnerStatus", () => statusPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Device owner status received: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, owner=${result.isDeviceOwner}, admin=${result.isAdminActive}`);
+        logger.info(`[CTRL_PROXY] Device owner status received: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, owner=${result.isDeviceOwner}, admin=${result.isAdminActive}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Device owner status failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Device owner status failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Device owner status request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Device owner status request failed after ${duration}ms: ${error}`);
       return {
         success: false,
         isDeviceOwner: false,
@@ -417,7 +417,7 @@ export class CtrlProxyCertificates {
     try {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
-        logger.warn("[ACCESSIBILITY_SERVICE] Failed to establish WebSocket connection for permission request");
+        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for permission request");
         return {
           success: false,
           permission: trimmedPermission,
@@ -461,22 +461,22 @@ export class CtrlProxyCertificates {
           requestPermission
         });
         ws.send(message);
-        logger.debug(`[ACCESSIBILITY_SERVICE] Sent permission request (requestId: ${requestId}, permission: ${trimmedPermission})`);
+        logger.debug(`[CTRL_PROXY] Sent permission request (requestId: ${requestId}, permission: ${trimmedPermission})`);
       });
 
       const result = await perf.track("waitForPermission", () => permissionPromise);
       const clientDuration = this.context.timer.now() - startTime;
 
       if (result.success) {
-        logger.info(`[ACCESSIBILITY_SERVICE] Permission status received: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, permission=${result.permission}, granted=${result.granted}`);
+        logger.info(`[CTRL_PROXY] Permission status received: clientTime=${clientDuration}ms, deviceTotalTime=${result.totalTimeMs}ms, permission=${result.permission}, granted=${result.granted}`);
       } else {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Permission request failed after ${clientDuration}ms: ${result.error}`);
+        logger.warn(`[CTRL_PROXY] Permission request failed after ${clientDuration}ms: ${result.error}`);
       }
 
       return result;
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
-      logger.warn(`[ACCESSIBILITY_SERVICE] Permission request failed after ${duration}ms: ${error}`);
+      logger.warn(`[CTRL_PROXY] Permission request failed after ${duration}ms: ${error}`);
       return {
         success: false,
         permission: trimmedPermission,
@@ -518,7 +518,7 @@ export class CtrlProxyCertificates {
       try {
         return fileURLToPath(trimmedPath);
       } catch (error) {
-        logger.warn(`[ACCESSIBILITY_SERVICE] Failed to parse certificate file URL: ${error}`);
+        logger.warn(`[CTRL_PROXY] Failed to parse certificate file URL: ${error}`);
         return null;
       }
     }

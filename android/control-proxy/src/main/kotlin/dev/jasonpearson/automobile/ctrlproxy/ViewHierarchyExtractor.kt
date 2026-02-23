@@ -384,7 +384,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       )
       return ViewHierarchy(
           error = "No visible windows available",
-          accessibilityServiceIncomplete = true,
+          ctrlProxyIncomplete = true,
       )
     }
 
@@ -401,8 +401,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // This happens when:
     // 1. An active window has a null root (app restricts accessibility access)
     // 2. Only system UI windows were successfully extracted (no app windows accessible)
-    val accessibilityServiceIncomplete = activeWindowHasNullRoot || !hasApplicationWindow
-    if (accessibilityServiceIncomplete) {
+    val ctrlProxyIncomplete = activeWindowHasNullRoot || !hasApplicationWindow
+    if (ctrlProxyIncomplete) {
       Log.w(
           TAG,
           "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
@@ -416,7 +416,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         intentChooserDetected = intentChooserDetected,
         notificationPermissionDetected = notificationPermissionDetected,
         accessibilityFocusedElement = accessibilityFocusedElement,
-        accessibilityServiceIncomplete = if (accessibilityServiceIncomplete) true else null,
+        ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
     )
   }
 

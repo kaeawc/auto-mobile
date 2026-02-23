@@ -4,12 +4,12 @@ import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-too
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { Window } from "../features/observe/Window";
 import { logger } from "./logger";
-import { AndroidAccessibilityServiceManager } from "./AccessibilityServiceManager";
+import { AndroidCtrlProxyManager } from "./CtrlProxyManager";
 import { IOSXCTestServiceManager } from "./XCTestServiceManager";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
-import { AccessibilityServiceClient } from "../features/observe/android";
+import { CtrlProxyClient } from "../features/observe/android";
 import { XCTestServiceClient } from "../features/observe/ios";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createPerformanceTracker } from "./PerformanceTracker";
@@ -417,7 +417,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         logger.warn("[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipAccessibilityDownload instead.");
       }
 
-      const accessibilityClient = AccessibilityServiceClient.getInstance(device);
+      const accessibilityClient = CtrlProxyClient.getInstance(device);
       if (accessibilityClient.isConnected()) {
         // WebSocket appears connected, but verify service is actually responsive
         // This catches cases where service crashed but socket wasn't properly closed
@@ -434,7 +434,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         logger.warn(`[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, checking status`);
       }
 
-      const manager = AndroidAccessibilityServiceManager.getInstance(device);
+      const manager = AndroidCtrlProxyManager.getInstance(device);
       const verifyCompatibilityWhenSkipping = async (): Promise<void> => {
         const isCompatible = await manager.isVersionCompatible();
         if (isCompatible) {

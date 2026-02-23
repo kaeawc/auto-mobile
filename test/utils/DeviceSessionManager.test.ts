@@ -3,9 +3,9 @@ import { DeviceSessionManager } from "../../src/utils/DeviceSessionManager";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
-import { FakeAccessibilityServiceManager } from "../fakes/FakeAccessibilityServiceManager";
-import { AndroidAccessibilityServiceManager } from "../../src/utils/AccessibilityServiceManager";
-import { AccessibilityServiceClient } from "../../src/features/observe/android";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
+import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
+import { CtrlProxyClient } from "../../src/features/observe/android";
 import { Window } from "../../src/features/observe/Window";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -20,8 +20,8 @@ describe("DeviceSessionManager", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
   let originalGetActive: typeof Window.prototype.getActive;
-  let originalGetInstance: typeof AndroidAccessibilityServiceManager.getInstance;
-  let originalAccessibilityClientGetInstance: typeof AccessibilityServiceClient.getInstance;
+  let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
+  let originalAccessibilityClientGetInstance: typeof CtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -46,23 +46,23 @@ describe("DeviceSessionManager", () => {
       };
     };
 
-    originalGetInstance = AndroidAccessibilityServiceManager.getInstance;
-    originalAccessibilityClientGetInstance = AccessibilityServiceClient.getInstance;
+    originalGetInstance = AndroidCtrlProxyManager.getInstance;
+    originalAccessibilityClientGetInstance = CtrlProxyClient.getInstance;
   });
 
   afterEach(() => {
     Window.prototype.getActive = originalGetActive;
-    AndroidAccessibilityServiceManager.getInstance = originalGetInstance;
-    AccessibilityServiceClient.getInstance = originalAccessibilityClientGetInstance;
+    AndroidCtrlProxyManager.getInstance = originalGetInstance;
+    CtrlProxyClient.getInstance = originalAccessibilityClientGetInstance;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
   test("should skip accessibility download when requested and not installed", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false
       } as any);
@@ -75,12 +75,12 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should enable accessibility when installed but disabled even when download is skipped", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(false);
     accessibilityManager.setVersionCompatible(true);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -95,12 +95,12 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should verify compatibility when download is skipped and service enabled", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(true);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -114,12 +114,12 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should error on incompatible accessibility version when download is skipped", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(false);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -132,11 +132,11 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should run accessibility setup by default", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true),
@@ -150,11 +150,11 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should skip setup when accessibility is already enabled and WebSocket connects", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -168,11 +168,11 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should run setup when accessibility cache is stale (WebSocket fails)", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(false)  // WebSocket fails - cache is stale
@@ -188,7 +188,7 @@ describe("DeviceSessionManager", () => {
 
   test("should skip accessibility checks when websocket is connected and service is responsive", async () => {
     let managerTouched = false;
-    AndroidAccessibilityServiceManager.getInstance = () => {
+    AndroidCtrlProxyManager.getInstance = () => {
       managerTouched = true;
       return {
         isInstalled: async () => false,
@@ -197,7 +197,7 @@ describe("DeviceSessionManager", () => {
         setup: async () => ({ success: true, message: "ok" })
       } as any;
     };
-    AccessibilityServiceClient.getInstance = () =>
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(true)
@@ -210,11 +210,11 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should fall through to normal flow when websocket connected but service not responsive", async () => {
-    const accessibilityManager = new FakeAccessibilityServiceManager();
+    const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidAccessibilityServiceManager.getInstance = () => accessibilityManager as any;
-    AccessibilityServiceClient.getInstance = () =>
+    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
+    CtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(false),  // Service not responsive

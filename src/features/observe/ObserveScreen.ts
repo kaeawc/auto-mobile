@@ -15,7 +15,7 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import fs from "fs-extra";
 import path from "path";
 import { readdirAsync, readFileAsync, statAsync, writeFileAsync } from "../../utils/io";
-import { AndroidAccessibilityServiceManager } from "../../utils/AccessibilityServiceManager";
+import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { PerformanceTracker, NoOpPerformanceTracker, processTimingData } from "../../utils/PerformanceTracker";
 import { PerformanceAudit } from "../performance/PerformanceAudit";
 import { ThresholdManager } from "../performance/ThresholdManager";
@@ -372,7 +372,7 @@ export class RealObserveScreen implements ObserveScreen {
       logger.warn("Failed to get view hierarchy:", error);
 
       // Clear cache on failure
-      AndroidAccessibilityServiceManager.getInstance(this.device, this.adb).clearAvailabilityCache();
+      AndroidCtrlProxyManager.getInstance(this.device, this.adb).clearAvailabilityCache();
 
       // Check if the error is due to screen being off
       const errorStr = String(error);

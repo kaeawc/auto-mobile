@@ -1,8 +1,8 @@
 /**
- * Shared types for AccessibilityServiceClient delegates.
+ * Shared types for CtrlProxyClient delegates.
  *
  * This module defines the context interfaces that delegates receive to access
- * shared state and functionality from the main AccessibilityServiceClient.
+ * shared state and functionality from the main CtrlProxyClient.
  */
 
 import type { BootedDevice, RecompositionNodeInfo, ViewHierarchyWindowInfo } from "../../../models";

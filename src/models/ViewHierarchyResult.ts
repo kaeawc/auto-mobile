@@ -4,7 +4,7 @@ import { RecompositionMetrics, RecompositionNodeInfo } from "./Recomposition";
 /**
  * Hierarchy data sources that contributed to the result
  */
-export type HierarchySource = "accessibility-service" | "uiautomator";
+export type HierarchySource = "control-proxy" | "uiautomator";
 
 /**
  * Represents the ViewHierarchy dump result from a device.

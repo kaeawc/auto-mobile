@@ -244,12 +244,12 @@ internal object DaemonSocketClientManager {
   private fun findLocalAccessibilityApkPath(): String? {
     val candidates =
         listOf(
-            File("accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk"),
+            File("control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"),
             File(
-                "../accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk"
+                "../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
             ),
             File(
-                "../../accessibility-service/build/outputs/apk/debug/accessibility-service-debug.apk"
+                "../../control-proxy/build/outputs/apk/debug/control-proxy-debug.apk"
             ),
         )
     return candidates.firstOrNull { it.exists() }?.absolutePath

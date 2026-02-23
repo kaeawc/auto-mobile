@@ -9,7 +9,7 @@ import { getDaemonHealthReport } from "../../daemon/debugTools";
 import { RELEASE_VERSION } from "../../constants/release";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
-import { AndroidAccessibilityServiceManager } from "../../utils/AccessibilityServiceManager";
+import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { logger } from "../../utils/logger";
 
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
@@ -119,8 +119,8 @@ export async function checkAccessibilityService(
     const device = devices[0];
     // Reset cached instances to ensure fresh ADB reads for doctor diagnostics
     // (getInstance memoizes isInstalled/isEnabled for 30 minutes which can report stale state)
-    AndroidAccessibilityServiceManager.resetInstances();
-    const serviceManager = AndroidAccessibilityServiceManager.getInstance(device);
+    AndroidCtrlProxyManager.resetInstances();
+    const serviceManager = AndroidCtrlProxyManager.getInstance(device);
 
     const versionResult = await serviceManager.ensureCompatibleVersion();
     const isInstalled = await serviceManager.isInstalled();
@@ -261,7 +261,7 @@ export async function checkWorkProfileAccessibility(
         undefined,
         true
       );
-      const isEnabled = result.stdout.includes(AndroidAccessibilityServiceManager.PACKAGE);
+      const isEnabled = result.stdout.includes(AndroidCtrlProxyManager.PACKAGE);
       if (!isEnabled) {
         profilesWithoutService.push({ userId: profile.userId, name: profile.name });
       }

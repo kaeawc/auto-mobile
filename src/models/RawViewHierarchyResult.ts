@@ -20,7 +20,7 @@ export interface RawViewHierarchyResult {
   /**
    * Source of the hierarchy data
    */
-  source: "uiautomator" | "accessibility-service" | "both" | "xcuitest";
+  source: "uiautomator" | "control-proxy" | "both" | "xcuitest";
 
   /**
    * Timestamp when the hierarchy was captured

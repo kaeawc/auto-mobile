@@ -78,6 +78,8 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   private adb: AdbExecutor;
   public static readonly PACKAGE = "dev.jasonpearson.automobile.ctrlproxy";
   public static readonly ACTIVITY = "dev.jasonpearson.automobile.ctrlproxy.MainActivity";
+  /** Package name used before the rename to CtrlProxy — uninstalled opportunistically on device setup */
+  private static readonly LEGACY_PACKAGE = "dev.jasonpearson.automobile.accessibilityservice";
   private static readonly APK_URL = APK_URL;
 
   // Static cache for service availability
@@ -522,6 +524,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    */
   async ensureCompatibleVersion(): Promise<AccessibilityVersionCheckResult> {
     this.clearAvailabilityCache();
+    await this.uninstallLegacyPackageIfPresent();
 
     const expectedSha = this.getExpectedChecksum();
     if (expectedSha.length === 0) {
@@ -720,6 +723,27 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       }
     } catch (error) {
       throw new Error(`APK integrity check failed: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  /**
+   * Uninstall the legacy accessibility service package if still present on the device.
+   * This cleans up the old package name left over from before the rename to CtrlProxy.
+   */
+  private async uninstallLegacyPackageIfPresent(): Promise<void> {
+    try {
+      const result = await this.adb.executeCommand(
+        `shell pm list packages | grep ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`,
+        undefined, undefined, true
+      );
+      if (!result.stdout.includes(AndroidCtrlProxyManager.LEGACY_PACKAGE)) {
+        return;
+      }
+      logger.info(`[CTRL_PROXY] Found legacy package ${AndroidCtrlProxyManager.LEGACY_PACKAGE}, uninstalling`);
+      await this.adb.executeCommand(`shell pm uninstall ${AndroidCtrlProxyManager.LEGACY_PACKAGE}`);
+      logger.info(`[CTRL_PROXY] Legacy package uninstalled`);
+    } catch (error) {
+      logger.warn(`[CTRL_PROXY] Failed to check/uninstall legacy package: ${error}`);
     }
   }
 

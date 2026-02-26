@@ -6,7 +6,6 @@
  * If no path is provided, validates all test plans in the repository
  */
 
-import { glob } from "glob";
 import path from "path";
 import { PlanSchemaValidator } from "../src/utils/plan/PlanSchemaValidator";
 
@@ -32,10 +31,15 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
 
   // Find all test plan YAML files
   const pattern = searchPath || "**/test-plans/**/*.yaml";
-  const files = await glob(pattern, {
-    ignore: ["**/node_modules/**", "**/dist/**", "**/build/**"],
-    absolute: true
-  });
+  const globber = new Bun.Glob(pattern);
+  const files: string[] = [];
+  for await (const file of globber.scan({
+    cwd: process.cwd(),
+    absolute: true,
+    exclude: ["**/node_modules/**", "**/dist/**", "**/build/**"],
+  })) {
+    files.push(file);
+  }
 
   if (files.length === 0) {
     console.error(`No YAML files found matching pattern: ${pattern}`);

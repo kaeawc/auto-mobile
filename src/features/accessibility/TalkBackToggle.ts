@@ -1,0 +1,151 @@
+import { logger } from "../../utils/logger";
+import type { BootedDevice } from "../../models";
+import type { TalkBackResult } from "../../models/AccessibilityResult";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
+import { accessibilityDetector } from "../../utils/AccessibilityDetector";
+import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+
+const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
+const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
+const DIALOG_DISMISS_RETRIES = 3;
+const DIALOG_DISMISS_DELAY_MS = 500;
+
+export class TalkBackToggle {
+  private readonly adb: AdbExecutor;
+
+  constructor(
+    private readonly device: BootedDevice,
+    adb: AdbExecutor | null = null,
+    private readonly detector: AccessibilityDetector = accessibilityDetector,
+    private readonly timer: Timer = defaultTimer
+  ) {
+    this.adb = adb ?? defaultAdbClientFactory.create(device);
+  }
+
+  async toggle(enabled: boolean): Promise<TalkBackResult> {
+    // Step 1: Verify TalkBack is installed on this device
+    const serviceComponent = await this.detectInstalledService();
+    if (!serviceComponent) {
+      return {
+        supported: false,
+        applied: false,
+        reason: "TalkBack service not installed on this device"
+      };
+    }
+
+    // Step 2: Idempotency — skip if already in requested state
+    const currentlyEnabled = await this.detector.isAccessibilityEnabled(
+      this.device.deviceId,
+      this.adb
+    );
+    if (currentlyEnabled === enabled) {
+      return {
+        supported: true,
+        applied: false,
+        currentState: enabled
+      };
+    }
+
+    // Step 3: Apply ADB commands
+    if (enabled) {
+      await this.adb.executeCommand(
+        `shell settings put secure enabled_accessibility_services ${serviceComponent}`
+      );
+      await this.adb.executeCommand(
+        "shell settings put secure accessibility_enabled 1"
+      );
+      // Step 4: Best-effort permission dialog dismissal
+      await this.dismissPermissionDialog();
+    } else {
+      await this.adb.executeCommand(
+        "shell settings delete secure enabled_accessibility_services"
+      );
+      await this.adb.executeCommand(
+        "shell settings put secure accessibility_enabled 0"
+      );
+    }
+
+    // Step 5: Invalidate detection cache so next check reflects the new state
+    this.detector.invalidateCache(this.device.deviceId);
+
+    return {
+      supported: true,
+      applied: true,
+      currentState: enabled
+    };
+  }
+
+  /**
+   * Run `dumpsys accessibility` to check whether TalkBack is installed on the
+   * device.  Returns the full service component name to use in settings commands,
+   * or null if TalkBack is not present.
+   */
+  private async detectInstalledService(): Promise<string | null> {
+    try {
+      const result = await this.adb.executeCommand("shell dumpsys accessibility");
+      const output = result.stdout;
+
+      if (!output.includes(TALKBACK_PACKAGE) && !output.includes("TalkBackService")) {
+        logger.debug("[TalkBackToggle] TalkBack not found in dumpsys output");
+        return null;
+      }
+
+      // Prefer extracting the exact component name from the dump
+      const match = /com\.google\.android\.marvin\.talkback\/[\w.]+TalkBackService/.exec(output);
+      if (match) {
+        logger.debug(`[TalkBackToggle] Detected service component: ${match[0]}`);
+        return match[0];
+      }
+
+      // Package found but component name could not be parsed — use known fallback
+      logger.debug("[TalkBackToggle] Using hardcoded TalkBack service component name");
+      return TALKBACK_SERVICE_FALLBACK;
+    } catch (error) {
+      logger.error("[TalkBackToggle] Failed to detect TalkBack service via dumpsys:", error);
+      return null;
+    }
+  }
+
+  /**
+   * After enabling TalkBack, Android shows a permission dialog that must be
+   * accepted before automation can continue.  Retry a few times to allow the
+   * dialog time to appear, then tap "Allow".
+   */
+  private async dismissPermissionDialog(): Promise<void> {
+    for (let attempt = 0; attempt < DIALOG_DISMISS_RETRIES; attempt++) {
+      await this.timer.sleep(DIALOG_DISMISS_DELAY_MS);
+      try {
+        const dumpResult = await this.adb.executeCommand(
+          "shell uiautomator dump /dev/tty"
+        );
+        const xml = dumpResult.stdout;
+
+        const nodeMatch = /<node[^>]*text="Allow"[^>]*\/>/.exec(xml);
+        if (nodeMatch) {
+          const boundsMatch = /bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/.exec(
+            nodeMatch[0]
+          );
+          if (boundsMatch) {
+            const x = Math.round(
+              (parseInt(boundsMatch[1], 10) + parseInt(boundsMatch[3], 10)) / 2
+            );
+            const y = Math.round(
+              (parseInt(boundsMatch[2], 10) + parseInt(boundsMatch[4], 10)) / 2
+            );
+            await this.adb.executeCommand(`shell input tap ${x} ${y}`);
+            logger.debug("[TalkBackToggle] Dismissed TalkBack permission dialog");
+            return;
+          }
+        }
+      } catch (error) {
+        logger.debug(
+          `[TalkBackToggle] Dialog dismissal attempt ${attempt + 1} failed:`,
+          error
+        );
+      }
+    }
+    logger.warn("[TalkBackToggle] TalkBack permission dialog not found — continuing");
+  }
+}

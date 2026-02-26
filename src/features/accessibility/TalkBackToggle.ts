@@ -54,21 +54,12 @@ export class TalkBackToggle {
     }
 
     // Step 3: Apply ADB commands
-    try {
-      if (enabled) {
-        await this.enableTalkBack(serviceComponent);
-        // Step 4: Best-effort permission dialog dismissal
-        await this.dismissPermissionDialog();
-      } else {
-        await this.disableTalkBack();
-      }
-    } catch (error) {
-      logger.error("[TalkBackToggle] Failed to apply accessibility change:", error);
-      return {
-        supported: true,
-        applied: false,
-        reason: `Failed to apply TalkBack change: ${error}`
-      };
+    if (enabled) {
+      await this.enableTalkBack(serviceComponent);
+      // Step 4: Best-effort permission dialog dismissal
+      await this.dismissPermissionDialog();
+    } else {
+      await this.disableTalkBack();
     }
 
     // Step 5: Invalidate detection cache so next check reflects the new state

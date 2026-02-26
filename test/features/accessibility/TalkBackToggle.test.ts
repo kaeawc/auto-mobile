@@ -369,6 +369,22 @@ describe("TalkBackToggle", () => {
     });
   });
 
+  describe("ADB error propagation during apply phase", () => {
+    test("propagates ADB error thrown during enable when TalkBack is installed", async () => {
+      // dumpsys succeeds so detectInstalledService() passes (TalkBack is found)
+      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
+      // The apply phase reads the current services list; make that command throw
+      fakeAdb.setCommandError(
+        "settings get secure enabled_accessibility_services",
+        new Error("ADB command failed during apply")
+      );
+      fakeDetector.setDefaultResult(false);
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      await expect(toggle.toggle(true)).rejects.toThrow();
+    });
+  });
+
   describe("service component name detection", () => {
     test("extracts service component from dumpsys output", async () => {
       fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));

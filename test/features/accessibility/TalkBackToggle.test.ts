@@ -155,6 +155,18 @@ describe("TalkBackToggle", () => {
       expect(result.currentState).toBe(true);
       expect(fakeAdb.wasCommandExecuted("accessibility_enabled 1")).toBe(false);
     });
+
+    test("enables TalkBack when another service is active but TalkBack is not", async () => {
+      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
+      // isAccessibilityEnabled would return true, but TalkBack specifically is not active
+      fakeDetector.setDefaultResult(true, "unknown");
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const result = await toggle.toggle(true);
+
+      expect(result.applied).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("accessibility_enabled 1")).toBe(true);
+    });
   });
 
   describe("disable TalkBack", () => {
@@ -203,6 +215,33 @@ describe("TalkBackToggle", () => {
       await toggle.toggle(false);
 
       expect(fakeDetector.getInvalidatedDevices()).toContain(ANDROID_DEVICE.deviceId);
+    });
+
+    test("preserves other accessibility services when disabling TalkBack", async () => {
+      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
+      fakeAdb.setCommandResponse(
+        "settings get secure enabled_accessibility_services",
+        makeExecResult(
+          "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService:com.example.other/OtherService"
+        )
+      );
+      fakeDetector.setDefaultResult(true, "talkback");
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      await toggle.toggle(false);
+
+      expect(
+        fakeAdb.wasCommandExecuted(
+          "shell settings put secure enabled_accessibility_services com.example.other/OtherService"
+        )
+      ).toBe(true);
+      // Should NOT delete all services or disable accessibility when others remain
+      expect(
+        fakeAdb.wasCommandExecuted("shell settings delete secure enabled_accessibility_services")
+      ).toBe(false);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 0")).toBe(
+        false
+      );
     });
 
     test("is idempotent when TalkBack is already disabled", async () => {

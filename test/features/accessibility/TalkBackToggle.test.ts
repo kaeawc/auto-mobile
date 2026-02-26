@@ -176,6 +176,27 @@ describe("TalkBackToggle", () => {
       expect(result.applied).toBe(true);
     });
 
+    test("does not tap button1 when it belongs to an unrelated dialog (no TalkBack context)", async () => {
+      // Simulate a system dialog that happens to use android:id/button1 but has no TalkBack text
+      const unrelatedDialogXml = `<?xml version="1.0" encoding="UTF-8"?>
+<hierarchy><node index="0" text="" resource-id="android:id/content">
+  <node index="0" text="Allow this app to access your location?" resource-id="" />
+  <node index="1" text="Allow" resource-id="android:id/button1" bounds="[180,684][540,740]" />
+</hierarchy>`;
+      fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
+      fakeAdb.setCommandResponse(
+        "shell uiautomator dump /dev/tty",
+        makeExecResult(unrelatedDialogXml)
+      );
+      fakeDetector.setDefaultResult(false);
+
+      const toggle = new TalkBackToggle(ANDROID_DEVICE, fakeAdb, fakeDetector, fakeTimer);
+      const result = await toggle.toggle(true);
+
+      expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(false);
+      expect(result.applied).toBe(true);
+    });
+
     test("is idempotent when TalkBack is already enabled", async () => {
       fakeAdb.setCommandResponse("dumpsys accessibility", makeExecResult(DUMPSYS_WITH_TALKBACK));
       fakeDetector.setDefaultResult(true, "talkback");

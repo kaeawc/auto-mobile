@@ -54,12 +54,21 @@ export class TalkBackToggle {
     }
 
     // Step 3: Apply ADB commands
-    if (enabled) {
-      await this.enableTalkBack(serviceComponent);
-      // Step 4: Best-effort permission dialog dismissal
-      await this.dismissPermissionDialog();
-    } else {
-      await this.disableTalkBack();
+    try {
+      if (enabled) {
+        await this.enableTalkBack(serviceComponent);
+        // Step 4: Best-effort permission dialog dismissal
+        await this.dismissPermissionDialog();
+      } else {
+        await this.disableTalkBack();
+      }
+    } catch (error) {
+      logger.error("[TalkBackToggle] Failed to apply accessibility change:", error);
+      return {
+        supported: true,
+        applied: false,
+        reason: `Failed to apply TalkBack change: ${error}`
+      };
     }
 
     // Step 5: Invalidate detection cache so next check reflects the new state
@@ -77,21 +86,7 @@ export class TalkBackToggle {
    * active accessibility services (e.g. CtrlProxy).
    */
   private async enableTalkBack(serviceComponent: string): Promise<void> {
-    const result = await this.adb.executeCommand(
-      "shell settings get secure enabled_accessibility_services"
-    );
-    const currentServices = result.stdout.trim();
-
-    const otherServices: string[] = [];
-    if (currentServices && currentServices !== "null") {
-      for (const s of currentServices.split(":")) {
-        const trimmed = s.trim();
-        if (trimmed && !trimmed.includes(TALKBACK_PACKAGE) && !trimmed.includes("TalkBackService")) {
-          otherServices.push(trimmed);
-        }
-      }
-    }
-
+    const otherServices = await this.getOtherServices();
     const updatedServices = [...otherServices, serviceComponent].join(":");
     await this.adb.executeCommand(
       `shell settings put secure enabled_accessibility_services ${updatedServices}`
@@ -107,20 +102,7 @@ export class TalkBackToggle {
    * accessibility_enabled flag when no other services remain.
    */
   private async disableTalkBack(): Promise<void> {
-    const result = await this.adb.executeCommand(
-      "shell settings get secure enabled_accessibility_services"
-    );
-    const currentServices = result.stdout.trim();
-
-    const otherServices: string[] = [];
-    if (currentServices && currentServices !== "null") {
-      for (const s of currentServices.split(":")) {
-        const trimmed = s.trim();
-        if (trimmed && !trimmed.includes(TALKBACK_PACKAGE) && !trimmed.includes("TalkBackService")) {
-          otherServices.push(trimmed);
-        }
-      }
-    }
+    const otherServices = await this.getOtherServices();
 
     if (otherServices.length === 0) {
       await this.adb.executeCommand(
@@ -136,6 +118,28 @@ export class TalkBackToggle {
         `shell settings put secure enabled_accessibility_services ${otherServices.join(":")}`
       );
     }
+  }
+
+  /**
+   * Read the current enabled_accessibility_services setting and return all
+   * entries that are NOT part of TalkBack, preserving other active services.
+   */
+  private async getOtherServices(): Promise<string[]> {
+    const result = await this.adb.executeCommand(
+      "shell settings get secure enabled_accessibility_services"
+    );
+    const currentServices = result.stdout.trim();
+
+    const otherServices: string[] = [];
+    if (currentServices && currentServices !== "null") {
+      for (const s of currentServices.split(":")) {
+        const trimmed = s.trim();
+        if (trimmed && !trimmed.includes(TALKBACK_PACKAGE) && !trimmed.includes("TalkBackService")) {
+          otherServices.push(trimmed);
+        }
+      }
+    }
+    return otherServices;
   }
 
   /**

@@ -118,7 +118,7 @@ describe("TalkBackToggle", () => {
       await toggle.toggle(true);
 
       // Cache must have been invalidated at least once before detectMethod was called
-      expect(fakeDetector.getInvalidationCountBefore("detectMethod")).toBeGreaterThanOrEqual(1);
+      expect(fakeDetector.getInvalidationCountBeforeFirstDetection()).toBeGreaterThanOrEqual(1);
     });
 
     test("attempts dialog dismissal after enabling", async () => {
@@ -217,6 +217,7 @@ describe("TalkBackToggle", () => {
           "shell settings put secure enabled_accessibility_services com.example.other/OtherService:com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService"
         )
       ).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put secure accessibility_enabled 1")).toBe(true);
     });
   });
 

@@ -3,11 +3,13 @@ import { ScreenshotUtils } from "../../src/utils/screenshot/ScreenshotUtils";
 import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../src/utils/constants";
 import { promises as fsPromises } from "node:fs";
 import path from "path";
+import os from "os";
+import crypto from "crypto";
 import sharp from "sharp";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("ScreenshotUtils", function() {
-  const testDir = "/tmp/test-screenshots";
+  const testDir = path.join(os.tmpdir(), `test-screenshots-${crypto.randomUUID()}`);
   let fakeTimer: FakeTimer;
 
   beforeEach(async function() {

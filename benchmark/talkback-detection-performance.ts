@@ -6,8 +6,6 @@
 import { DefaultAccessibilityDetector } from "../src/utils/AccessibilityDetector";
 import { FeatureFlagService } from "../src/features/featureFlags/FeatureFlagService";
 import { FakeTimer } from "../test/fakes/FakeTimer";
-import { SystemTimer } from "../src/utils/SystemTimer";
-import type { Timer } from "../src/utils/SystemTimer";
 import type { AdbExecutor } from "../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { ExecResult, BootedDevice, AndroidUser } from "../src/models";
 import type { FeatureFlagKey } from "../src/features/featureFlags/FeatureFlagDefinitions";
@@ -19,23 +17,17 @@ import type { FeatureFlagKey } from "../src/features/featureFlags/FeatureFlagDef
 class BenchmarkAdbExecutor implements AdbExecutor {
   private readonly delayMs: number;
   private readonly output: string;
-  private readonly timer: Timer;
   private callCount = 0;
 
-  constructor(
-    delayMs: number = 30,
-    output: string = "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService",
-    timer: Timer = new SystemTimer()
-  ) {
+  constructor(delayMs: number = 30, output: string = "com.google.android.marvin.talkback/com.google.android.marvin.talkback.TalkBackService") {
     this.delayMs = delayMs;
     this.output = output;
-    this.timer = timer;
   }
 
   async executeCommand(_command: string): Promise<ExecResult> {
     this.callCount++;
     if (this.delayMs > 0) {
-      await this.timer.sleep(this.delayMs);
+      await new Promise<void>(resolve => setTimeout(resolve, this.delayMs));
     }
     return {
       stdout: this.output,

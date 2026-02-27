@@ -4,17 +4,15 @@ import { DEFAULT_FUZZY_MATCH_TOLERANCE_PERCENT } from "../../src/utils/constants
 import { promises as fsPromises } from "node:fs";
 import path from "path";
 import os from "os";
-import crypto from "crypto";
 import sharp from "sharp";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 describe("ScreenshotUtils", function() {
-  const testDir = path.join(os.tmpdir(), `test-screenshots-${crypto.randomUUID()}`);
+  let testDir: string;
   let fakeTimer: FakeTimer;
 
   beforeEach(async function() {
-    // Create test directory
-    await fsPromises.mkdir(testDir, { recursive: true });
+    testDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "test-screenshots-"));
     fakeTimer = new FakeTimer();
   });
 

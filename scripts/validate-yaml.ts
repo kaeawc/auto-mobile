@@ -31,10 +31,11 @@ async function validateTestPlans(searchPath?: string): Promise<ValidationReport>
 
   // Find all test plan YAML files
   const pattern = searchPath || "**/test-plans/**/*.yaml";
-  const globber = new Bun.Glob(pattern);
+  const isAbsolute = path.isAbsolute(pattern);
+  const globber = new Bun.Glob(isAbsolute ? pattern.slice(1) : pattern);
   const files: string[] = [];
   for await (const file of globber.scan({
-    cwd: process.cwd(),
+    cwd: isAbsolute ? "/" : process.cwd(),
     absolute: true,
     exclude: ["**/node_modules/**", "**/dist/**", "**/build/**"],
   })) {

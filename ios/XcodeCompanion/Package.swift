@@ -16,24 +16,16 @@ let package = Package(
         // SwiftUI and Combine are built-in
     ],
     targets: [
-        .target(
-            name: "AutoMobileCompanionCore",
+        .executableTarget(
+            name: "AutoMobileCompanion",
             dependencies: [],
-            path: "Sources/AutoMobileCompanion",
-            exclude: ["AutoMobileCompanionApp.swift"],
             resources: [
                 .process("Resources"),
             ]
         ),
-        .executableTarget(
-            name: "AutoMobileCompanion",
-            dependencies: ["AutoMobileCompanionCore"],
-            path: "Sources/AutoMobileCompanion",
-            sources: ["AutoMobileCompanionApp.swift"]
-        ),
         .testTarget(
             name: "AutoMobileCompanionTests",
-            dependencies: ["AutoMobileCompanionCore"]
+            dependencies: ["AutoMobileCompanion"]
         ),
     ]
 )

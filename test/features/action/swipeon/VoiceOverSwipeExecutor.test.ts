@@ -418,8 +418,8 @@ describe("VoiceOverSwipeExecutor", () => {
       expect(swipeHistory[1].duration).toBe(150);
     });
 
-    test("boomerang: returns failure when forward 3-finger swipe fails", async () => {
-      const { executor } = makeFakeGestureExecutor();
+    test("boomerang: falls back to standard boomerang when forward 3-finger swipe returns failure", async () => {
+      const { executor, calls } = makeFakeGestureExecutor();
       fakeVoiceOverDetector.setVoiceOverEnabled(true);
       fakeIosClient.setMultiFingerSwipeResult({ success: false, error: "Gesture failed", totalTimeMs: 0 });
 
@@ -438,9 +438,72 @@ describe("VoiceOverSwipeExecutor", () => {
         { apexPauseMs: 0, returnSpeed: 1 }
       );
 
-      expect(result.success).toBe(false);
-      // Only one swipe attempt (forward), no return stroke
+      // Falls back to standard boomerang (2 standard swipe calls)
+      expect(result.success).toBe(true);
+      expect(calls).toHaveLength(2);
+      expect(calls[0]).toMatchObject({ x1: 100, y1: 500, x2: 100, y2: 200 });
+      expect(calls[1]).toMatchObject({ x1: 100, y1: 200, x2: 100, y2: 500 });
+      // Only one 3-finger attempt before fallback
       expect(fakeIosClient.getMultiFingerSwipeHistory()).toHaveLength(1);
+    });
+
+    test("boomerang: falls back to standard boomerang when forward 3-finger swipe throws", async () => {
+      const { executor, calls } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+      fakeIosClient.setFailureMode("multiFingerSwipe", new Error("Transport error"));
+
+      const voiceOverExecutor = new VoiceOverSwipeExecutor(
+        { platform: "ios", id: "00001234-ABCD" } as any,
+        executor,
+        fakeIosClient as any,
+        fakeVoiceOverDetector,
+        fakeTimer
+      );
+
+      const result = await voiceOverExecutor.executeSwipeGesture(
+        100, 500, 100, 200,
+        { duration: 300 },
+        perf,
+        { apexPauseMs: 0, returnSpeed: 1 }
+      );
+
+      // Falls back to standard boomerang
+      expect(result.success).toBe(true);
+      expect(calls).toHaveLength(2);
+    });
+
+    test("boomerang: returns failure when return 3-finger swipe throws (forward already completed)", async () => {
+      const { executor } = makeFakeGestureExecutor();
+      fakeVoiceOverDetector.setVoiceOverEnabled(true);
+
+      // Forward succeeds, then throw on the return stroke
+      let callCount = 0;
+      const originalMethod = fakeIosClient.requestMultiFingerSwipe.bind(fakeIosClient);
+      fakeIosClient.requestMultiFingerSwipe = async (...args: Parameters<typeof originalMethod>) => {
+        callCount++;
+        if (callCount === 2) {
+          throw new Error("Return stroke transport error");
+        }
+        return originalMethod(...args);
+      };
+
+      const voiceOverExecutor = new VoiceOverSwipeExecutor(
+        { platform: "ios", id: "00001234-ABCD" } as any,
+        executor,
+        fakeIosClient as any,
+        fakeVoiceOverDetector,
+        fakeTimer
+      );
+
+      const result = await voiceOverExecutor.executeSwipeGesture(
+        100, 500, 100, 200,
+        { duration: 300 },
+        perf,
+        { apexPauseMs: 0, returnSpeed: 1 }
+      );
+
+      expect(result.success).toBe(false);
+      expect(callCount).toBe(2);
     });
 
     test("boomerang: total duration includes forward + apex + return", async () => {

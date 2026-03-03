@@ -73,7 +73,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
 
     // VoiceOver is enabled
     if (boomerang) {
-      return this.executeVoiceOverBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang);
+      return this.executeVoiceOverBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang, perf);
     }
 
     // VoiceOver is enabled: use 3-finger swipe to scroll content
@@ -167,6 +167,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   /**
    * Execute a boomerang gesture using 3-finger swipes (VoiceOver enabled).
    * Performs a forward 3-finger swipe, optional apex pause, then a return 3-finger swipe.
+   * Falls back to executeBoomerangGesture (standard swipes) if the forward stroke fails or throws,
+   * mirroring the non-boomerang VoiceOver fallback behavior.
    */
   private async executeVoiceOverBoomerangGesture(
     x1: number,
@@ -174,7 +176,8 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     x2: number,
     y2: number,
     gestureOptions: GestureOptions | undefined,
-    boomerang: BoomerangConfig
+    boomerang: BoomerangConfig,
+    perf: PerformanceTracker
   ): Promise<SwipeResult> {
     const forwardDuration = gestureOptions?.duration ?? 300;
     const returnDuration = this.getReturnDuration(forwardDuration, boomerang.returnSpeed);
@@ -182,33 +185,52 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
 
     logger.info("[VoiceOverSwipeExecutor] VoiceOver enabled, using 3-finger boomerang swipe");
 
-    const forwardResult = await this.iosClient.requestMultiFingerSwipe(
-      x1, y1, x2, y2,
-      3,
-      forwardDuration
-    );
+    let forwardResult: Awaited<ReturnType<typeof this.iosClient.requestMultiFingerSwipe>>;
+    try {
+      forwardResult = await this.iosClient.requestMultiFingerSwipe(
+        x1, y1, x2, y2,
+        3,
+        forwardDuration
+      );
+    } catch (error) {
+      logger.warn(
+        `[VoiceOverSwipeExecutor] 3-finger boomerang forward swipe error: ${error}, ` +
+        `falling back to standard boomerang`
+      );
+      return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang, perf);
+    }
 
     if (!forwardResult.success) {
-      return {
-        success: false,
-        error: forwardResult.error,
-        x1,
-        y1,
-        x2,
-        y2,
-        duration: forwardDuration
-      };
+      logger.warn(
+        `[VoiceOverSwipeExecutor] 3-finger boomerang forward swipe failed: ${forwardResult.error ?? "unknown error"}, ` +
+        `falling back to standard boomerang`
+      );
+      return this.executeBoomerangGesture(x1, y1, x2, y2, gestureOptions, boomerang, perf);
     }
 
     if (boomerang.apexPauseMs > 0) {
       await this.timer.sleep(boomerang.apexPauseMs);
     }
 
-    const returnResult = await this.iosClient.requestMultiFingerSwipe(
-      x2, y2, x1, y1,
-      3,
-      returnDuration
-    );
+    let returnResult: Awaited<ReturnType<typeof this.iosClient.requestMultiFingerSwipe>>;
+    try {
+      returnResult = await this.iosClient.requestMultiFingerSwipe(
+        x2, y2, x1, y1,
+        3,
+        returnDuration
+      );
+    } catch (error) {
+      logger.warn(`[VoiceOverSwipeExecutor] 3-finger boomerang return swipe error: ${error}`);
+      return {
+        success: false,
+        error: String(error),
+        x1,
+        y1,
+        x2,
+        y2,
+        duration: totalDuration
+      };
+    }
 
     if (!returnResult.success) {
       return {

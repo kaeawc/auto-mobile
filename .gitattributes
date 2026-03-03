@@ -32,6 +32,4 @@ android/art/presentation-code-light.png -filter -diff -merge -text
 docs/img/auto-mobile.png -filter -diff -merge -text
 docs/img/auto_mobile_sticker_splash.png -filter -diff -merge -text
 docs/img/automobile_system_design.png -filter -diff -merge -text
-docs/img/auto-mobile-party.gif -filter -diff -merge -text
-docs/img/uninstall.gif -filter -diff -merge -text
 docs/img/favicon.ico -filter -diff -merge -text

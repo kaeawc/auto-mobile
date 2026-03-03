@@ -30,6 +30,21 @@ If you have a question file an issue or discussion, but small contributions like
 
 ## Local Development
 
+### Prerequisites
+
+This repo uses [Git LFS](https://git-lfs.com/) for binary assets (images, archives, etc.). Install it before cloning, otherwise most files will be missing from your working tree.
+
+```bash
+# macOS
+brew install git-lfs
+git lfs install
+
+# Then fork + clone
+gh repo fork kaeawc/auto-mobile --clone
+```
+
+If you already cloned without git-lfs, run `git restore .` after installing to recover the missing files.
+
 | Platform | Script |
 |----------|--------|
 | Android | `./scripts/local-dev/android-hot-reload.sh` |

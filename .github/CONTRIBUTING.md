@@ -32,12 +32,12 @@ If you have a question file an issue or discussion, but small contributions like
 
 ### Prerequisites
 
-This repo uses [Git LFS](https://git-lfs.com/) for binary assets (images, archives, etc.). Install it before cloning, otherwise most files will be missing from your working tree.
+This repo uses [Git LFS](https://git-lfs.com/) for binary assets (images, archives, etc.). Install and initialize it **before cloning** — the `git lfs install` step registers a global git hook that triggers LFS during checkout. If you clone first, the hook won't be present and most files will be silently missing from your working tree.
 
 ```bash
 # macOS
 brew install git-lfs
-git lfs install
+git lfs install   # registers LFS hooks globally in ~/.gitconfig
 
 # Then fork + clone
 gh repo fork kaeawc/auto-mobile --clone

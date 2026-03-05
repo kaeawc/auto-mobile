@@ -31,7 +31,7 @@ Run `./gradlew -p ide-plugin runIde` and verify the following in the sandbox IDE
 - [ ] AutoMobile tool window appears in the right panel (look for the AutoMobile icon in the stripe)
 - [ ] Tool window renders without blank content or exceptions in the IDE log
 - [ ] "Connect" / MCP attachment button is visible in the tool window header
-- [ ] With the MCP daemon running (`bun run start --daemon-mode`), clicking attach populates the resource list
+- [ ] With the MCP daemon running (`bun dist/src/index.js --daemon-mode`), clicking attach populates the resource list
 - [ ] Navigation graph tab renders nodes and edges after a graph resource is loaded
 - [ ] Settings page is accessible via File > Settings > AutoMobile
 

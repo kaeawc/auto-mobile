@@ -920,7 +920,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   ): Promise<{
     success: boolean; screenWidth?: number; screenHeight?: number; density?: number;
     rotation?: number; sdkInt?: number; deviceModel?: string; isEmulator?: boolean;
-    wakefulness?: string; foregroundActivity?: string; foregroundTaskId?: number;
+    wakefulness?: string; foregroundActivity?: string;
     totalTimeMs: number; error?: string;
   }> {
     const startTime = this.timer.now();
@@ -1398,7 +1398,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           sdkInt: infoMessage.sdkInt, deviceModel: infoMessage.deviceModel,
           isEmulator: infoMessage.isEmulator, wakefulness: infoMessage.wakefulness,
           foregroundActivity: infoMessage.foregroundActivity,
-          foregroundTaskId: infoMessage.foregroundTaskId,
           totalTimeMs: infoMessage.totalTimeMs ?? 0, error: infoMessage.error
         });
       }

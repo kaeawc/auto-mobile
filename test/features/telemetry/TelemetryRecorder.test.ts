@@ -18,19 +18,19 @@ class FakeRepository implements TelemetryRepository {
   shouldThrow = false;
 
   async recordNetworkEvent(input: RecordNetworkEventInput): Promise<void> {
-    if (this.shouldThrow) throw new Error("db error");
+    if (this.shouldThrow) {throw new Error("db error");}
     this.networkEvents.push(input);
   }
   async recordLogEvent(input: RecordLogEventInput): Promise<void> {
-    if (this.shouldThrow) throw new Error("db error");
+    if (this.shouldThrow) {throw new Error("db error");}
     this.logEvents.push(input);
   }
   async recordCustomEvent(input: RecordCustomEventInput): Promise<void> {
-    if (this.shouldThrow) throw new Error("db error");
+    if (this.shouldThrow) {throw new Error("db error");}
     this.customEvents.push(input);
   }
   async recordOsEvent(input: RecordOsEventInput): Promise<void> {
-    if (this.shouldThrow) throw new Error("db error");
+    if (this.shouldThrow) {throw new Error("db error");}
     this.osEvents.push(input);
   }
 }
@@ -97,6 +97,18 @@ describe("TelemetryRecorder", () => {
     expect(pushTarget.pushedEvents).toHaveLength(1);
     expect(pushTarget.pushedEvents[0].category).toBe("network");
     expect(pushTarget.pushedEvents[0].timestamp).toBe(1000);
+    expect(pushTarget.pushedEvents[0].deviceId).toBeNull();
+  });
+
+  it("includes deviceId in pushed events", async () => {
+    recorder.setContext("emulator-5554", "s1");
+
+    await recorder.recordLogEvent({
+      timestamp: 1000, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
+    });
+
+    expect(pushTarget.pushedEvents).toHaveLength(1);
+    expect(pushTarget.pushedEvents[0].deviceId).toBe("emulator-5554");
   });
 
   it("records log event to repository", async () => {

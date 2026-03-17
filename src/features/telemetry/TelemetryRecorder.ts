@@ -8,6 +8,7 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 export interface TelemetryEvent {
   category: "network" | "log" | "custom" | "os";
   timestamp: number;
+  deviceId: string | null;
   data: unknown;
 }
 
@@ -23,10 +24,10 @@ export interface TelemetryRepository {
 }
 
 const defaultRepository: TelemetryRepository = {
-  recordNetworkEvent: (input) => recordNetworkEvent(input),
-  recordLogEvent: (input) => recordLogEvent(input),
-  recordCustomEvent: (input) => recordCustomEvent(input),
-  recordOsEvent: (input) => recordOsEvent(input),
+  recordNetworkEvent: input => recordNetworkEvent(input),
+  recordLogEvent: input => recordLogEvent(input),
+  recordCustomEvent: input => recordCustomEvent(input),
+  recordOsEvent: input => recordOsEvent(input),
 };
 
 export class TelemetryRecorder {
@@ -91,7 +92,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record network event: ${e}`);
     }
 
-    this.pushToSocket({ category: "network", timestamp: event.timestamp, data: event });
+    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId: this.deviceId, data: event });
   }
 
   async recordLogEvent(event: {
@@ -114,7 +115,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record log event: ${e}`);
     }
 
-    this.pushToSocket({ category: "log", timestamp: event.timestamp, data: event });
+    this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId: this.deviceId, data: event });
   }
 
   async recordCustomEvent(event: {
@@ -135,7 +136,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record custom event: ${e}`);
     }
 
-    this.pushToSocket({ category: "custom", timestamp: event.timestamp, data: event });
+    this.pushToSocket({ category: "custom", timestamp: event.timestamp, deviceId: this.deviceId, data: event });
   }
 
   async recordOsEvent(event: {
@@ -157,7 +158,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record OS event: ${e}`);
     }
 
-    this.pushToSocket({ category: "os", timestamp: event.timestamp, data: event });
+    this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId: this.deviceId, data: event });
   }
 
   private pushToSocket(event: TelemetryEvent): void {

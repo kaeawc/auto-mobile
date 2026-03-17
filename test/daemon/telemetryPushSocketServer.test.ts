@@ -83,6 +83,7 @@ describe("TelemetryPushSocketServer", () => {
     const event: TelemetryEvent = {
       category: "network",
       timestamp: 1000,
+      deviceId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
@@ -107,6 +108,7 @@ describe("TelemetryPushSocketServer", () => {
     const networkEvent: TelemetryEvent = {
       category: "network",
       timestamp: 1000,
+      deviceId: null,
       data: { method: "GET", url: "/users", statusCode: 200, durationMs: 42 },
     };
 
@@ -123,12 +125,14 @@ describe("TelemetryPushSocketServer", () => {
     const logEvent: TelemetryEvent = {
       category: "log",
       timestamp: 2000,
+      deviceId: null,
       data: { level: 4, tag: "TestTag", message: "hello" },
     };
 
     const networkEvent: TelemetryEvent = {
       category: "network",
       timestamp: 3000,
+      deviceId: null,
       data: { method: "POST", url: "/submit", statusCode: 201, durationMs: 100 },
     };
 
@@ -146,6 +150,7 @@ describe("TelemetryPushSocketServer", () => {
     const event: TelemetryEvent = {
       category: "custom",
       timestamp: 4000,
+      deviceId: null,
       data: { name: "purchase", properties: { item: "premium" } },
     };
 
@@ -162,6 +167,7 @@ describe("TelemetryPushSocketServer", () => {
     const event: TelemetryEvent = {
       category: "os",
       timestamp: 5000,
+      deviceId: null,
       data: { category: "lifecycle", kind: "foreground", details: null },
     };
 
@@ -182,6 +188,7 @@ describe("TelemetryPushSocketServer", () => {
     const event: TelemetryEvent = {
       category: "log",
       timestamp: 6000,
+      deviceId: null,
       data: { level: 4, tag: "Test", message: "msg" },
     };
 
@@ -219,6 +226,7 @@ describe("TelemetryPushSocketServer", () => {
     const event: TelemetryEvent = {
       category: "network",
       timestamp: 50000,
+      deviceId: null,
       data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
     };
 
@@ -227,5 +235,53 @@ describe("TelemetryPushSocketServer", () => {
     const msgs = socket.getWrittenMessages<{ type: string; timestamp: number; data?: TelemetryEvent }>();
     expect(msgs[0].timestamp).toBe(99999);
     expect(msgs[0].data?.timestamp).toBe(50000);
+  });
+
+  it("filters pushes by deviceId", () => {
+    const { socket: d1Socket } = server.simulateSubscription({ deviceId: "device-1" });
+    const { socket: d2Socket } = server.simulateSubscription({ deviceId: "device-2" });
+    const { socket: allSocket } = server.simulateSubscription({});
+
+    const event: TelemetryEvent = {
+      category: "network",
+      timestamp: 1000,
+      deviceId: "device-1",
+      data: { method: "GET", url: "/test", statusCode: 200, durationMs: 10 },
+    };
+
+    server.pushTelemetryEvent(event);
+
+    expect(d1Socket.getWrittenMessages()).toHaveLength(1);
+    expect(d2Socket.getWrittenMessages()).toHaveLength(0);
+    expect(allSocket.getWrittenMessages()).toHaveLength(1);
+  });
+
+  it("filters by both category and deviceId", () => {
+    const { socket } = server.simulateSubscription({ category: "log", deviceId: "device-1" });
+
+    const matchEvent: TelemetryEvent = {
+      category: "log",
+      timestamp: 1000,
+      deviceId: "device-1",
+      data: { level: 4, tag: "t", message: "m" },
+    };
+    const wrongCategory: TelemetryEvent = {
+      category: "network",
+      timestamp: 2000,
+      deviceId: "device-1",
+      data: { method: "GET", url: "/x", statusCode: 200, durationMs: 0 },
+    };
+    const wrongDevice: TelemetryEvent = {
+      category: "log",
+      timestamp: 3000,
+      deviceId: "device-2",
+      data: { level: 4, tag: "t", message: "m" },
+    };
+
+    server.pushTelemetryEvent(matchEvent);
+    server.pushTelemetryEvent(wrongCategory);
+    server.pushTelemetryEvent(wrongDevice);
+
+    expect(socket.getWrittenMessages()).toHaveLength(1);
   });
 });

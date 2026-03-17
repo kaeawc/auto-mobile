@@ -47,6 +47,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     if (filter.category !== null && filter.category !== data.category) {
       return false;
     }
+    if (filter.deviceId !== null && filter.deviceId !== data.deviceId) {
+      return false;
+    }
     return true;
   }
 

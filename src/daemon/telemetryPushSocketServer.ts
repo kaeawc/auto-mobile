@@ -32,7 +32,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   pushTelemetryEvent(event: TelemetryEvent): void {
     const sentCount = this.pushToSubscribers(event);
     if (sentCount > 0) {
-      logger.debug(`[TelemetryPush] Pushed ${event.category} event to ${sentCount} subscribers`);
+      logger.info(`[TelemetryPush] Pushed ${event.category} event to ${sentCount} subscribers`);
+    } else if (event.category === "navigation") {
+      logger.warn(`[TelemetryPush] No subscribers matched navigation event (${this.getSubscriberCount()} total subs, event deviceId: ${event.deviceId})`);
     }
   }
 

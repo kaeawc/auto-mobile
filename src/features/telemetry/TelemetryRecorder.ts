@@ -6,7 +6,7 @@ import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventReposito
 import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 
 export interface TelemetryEvent {
-  category: "network" | "log" | "custom" | "os";
+  category: "network" | "log" | "custom" | "os" | "navigation";
   timestamp: number;
   deviceId: string | null;
   data: unknown;
@@ -148,6 +148,18 @@ export class TelemetryRecorder {
     }
 
     this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  async recordNavigationEvent(event: {
+    timestamp: number;
+    applicationId: string | null;
+    destination: string;
+    source: string | null;
+    arguments: Record<string, string> | null;
+    metadata: Record<string, string> | null;
+  }): Promise<void> {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "navigation", timestamp: event.timestamp, deviceId, data: event });
   }
 
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {

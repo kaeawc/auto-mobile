@@ -5,6 +5,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.longOrNull
 
@@ -78,6 +79,14 @@ sealed class TelemetryDisplayEvent {
         val kind: String,
         val details: Map<String, String>?,
     ) : TelemetryDisplayEvent()
+
+    data class Navigation(
+        override val timestamp: Long,
+        val destination: String,
+        val source: String?,
+        val arguments: Map<String, String>?,
+        val metadata: Map<String, String>?,
+    ) : TelemetryDisplayEvent()
 }
 
 private val json = Json { ignoreUnknownKeys = true }
@@ -145,6 +154,21 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 details = details.ifEmpty { null },
             )
         }
+        "navigation" -> {
+            val args = mutableMapOf<String, String>()
+            d["arguments"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.jsonObject?.forEach { (k, v) -> args[k] = v.jsonPrimitive.content }
+            val meta = mutableMapOf<String, String>()
+            d["metadata"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.jsonObject?.forEach { (k, v) -> meta[k] = v.jsonPrimitive.content }
+            TelemetryDisplayEvent.Navigation(
+                timestamp = envelope.timestamp,
+                destination = d.stringOrDefault("destination", "unknown"),
+                source = d.stringOrNull("source"),
+                arguments = args.ifEmpty { null },
+                metadata = meta.ifEmpty { null },
+            )
+        }
         else -> null
     }
 }
@@ -153,4 +177,4 @@ private fun JsonObject.stringOrDefault(key: String, default: String): String =
     this[key]?.jsonPrimitive?.content ?: default
 
 private fun JsonObject.stringOrNull(key: String): String? =
-    this[key]?.jsonPrimitive?.content
+    this[key]?.jsonPrimitive?.contentOrNull

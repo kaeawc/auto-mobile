@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.ide.telemetry
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -9,11 +10,13 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -29,6 +32,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.ide.daemon.TelemetryConnectionState
@@ -45,6 +49,7 @@ private const val MAX_EVENTS = 1000
 private enum class CategoryFilter(val label: String, val icon: String) {
     All("All", "\uD83D\uDCE1"),       // 📡
     Network("Network", "\uD83C\uDF10"), // 🌐
+    Navigation("Nav", "\uD83E\uDDED"),  // 🧭
     Logs("Logs", "\uD83D\uDCDD"),      // 📝
     Os("OS", "\u2699\uFE0F"),           // ⚙️
     Custom("Custom", "\uD83C\uDFF7\uFE0F"), // 🏷️
@@ -105,6 +110,7 @@ fun TelemetryDashboard(
                     when (selectedFilter) {
                         CategoryFilter.All -> true
                         CategoryFilter.Network -> event is TelemetryDisplayEvent.Network
+                        CategoryFilter.Navigation -> event is TelemetryDisplayEvent.Navigation
                         CategoryFilter.Logs -> event is TelemetryDisplayEvent.Log
                         CategoryFilter.Os -> event is TelemetryDisplayEvent.Os
                         CategoryFilter.Custom -> event is TelemetryDisplayEvent.Custom
@@ -120,6 +126,7 @@ fun TelemetryDashboard(
             mapOf(
                 CategoryFilter.All to events.size,
                 CategoryFilter.Network to events.count { it is TelemetryDisplayEvent.Network },
+                CategoryFilter.Navigation to events.count { it is TelemetryDisplayEvent.Navigation },
                 CategoryFilter.Logs to events.count { it is TelemetryDisplayEvent.Log },
                 CategoryFilter.Os to events.count { it is TelemetryDisplayEvent.Os },
                 CategoryFilter.Custom to events.count { it is TelemetryDisplayEvent.Custom },
@@ -206,6 +213,8 @@ fun TelemetryDashboard(
                     color = colors.text.normal.copy(alpha = 0.4f),
                 )
             }
+        } else if (selectedFilter == CategoryFilter.Network) {
+            NetworkTable(filteredEvents.filterIsInstance<TelemetryDisplayEvent.Network>(), listState, timeFormat, colors.text.normal)
         } else {
             LazyColumn(
                 state = listState,
@@ -256,6 +265,7 @@ private fun TelemetryEventRow(
         Text(
             when (event) {
                 is TelemetryDisplayEvent.Network -> "\uD83C\uDF10"  // 🌐
+                is TelemetryDisplayEvent.Navigation -> "\uD83E\uDDED" // 🧭
                 is TelemetryDisplayEvent.Log -> "\uD83D\uDCDD"      // 📝
                 is TelemetryDisplayEvent.Os -> "\u2699\uFE0F"       // ⚙️
                 is TelemetryDisplayEvent.Custom -> "\uD83C\uDFF7\uFE0F" // 🏷️
@@ -267,6 +277,7 @@ private fun TelemetryEventRow(
         // Summary text
         when (event) {
             is TelemetryDisplayEvent.Network -> NetworkSummary(event, textColor)
+            is TelemetryDisplayEvent.Navigation -> NavigationSummary(event, textColor)
             is TelemetryDisplayEvent.Log -> LogSummary(event, textColor)
             is TelemetryDisplayEvent.Custom -> CustomSummary(event, textColor)
             is TelemetryDisplayEvent.Os -> OsSummary(event, textColor)
@@ -274,10 +285,17 @@ private fun TelemetryEventRow(
     }
 }
 
+private fun networkStatusColor(statusCode: Int, error: String?, textColor: Color): Color = when {
+    error != null || statusCode == 0 -> Color(0xFFFF6B6B)      // Error / failed - bright red
+    statusCode in 200..299 -> Color(0xFF51CF66)                 // 2xx success - bright green
+    statusCode in 300..399 -> Color(0xFFFFD43B)                 // 3xx redirect - bright yellow
+    statusCode >= 400 -> Color(0xFFFF6B6B)                      // 4xx/5xx - bright red
+    else -> textColor.copy(alpha = 0.85f)
+}
+
 @Composable
 private fun NetworkSummary(event: TelemetryDisplayEvent.Network, textColor: Color) {
-    val isError = event.statusCode >= 400 || event.error != null
-    val color = if (isError) Color(0xFFE06060) else textColor.copy(alpha = 0.85f)
+    val color = networkStatusColor(event.statusCode, event.error, textColor)
     val displayPath = event.path ?: event.url
 
     Text(
@@ -287,6 +305,98 @@ private fun NetworkSummary(event: TelemetryDisplayEvent.Network, textColor: Colo
         color = color,
         maxLines = 1,
     )
+}
+
+private data class NetworkColumn(val label: String, val width: Int)
+
+private val networkColumns = listOf(
+    NetworkColumn("Time", 90),
+    NetworkColumn("Method", 55),
+    NetworkColumn("Status", 50),
+    NetworkColumn("Host", 140),
+    NetworkColumn("Path", 160),
+    NetworkColumn("Duration", 70),
+    NetworkColumn("Error", 180),
+)
+
+@Composable
+private fun NetworkTable(
+    events: List<TelemetryDisplayEvent.Network>,
+    listState: androidx.compose.foundation.lazy.LazyListState,
+    timeFormat: SimpleDateFormat,
+    textColor: Color,
+) {
+    val scrollState = rememberScrollState()
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header row
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(textColor.copy(alpha = 0.05f))
+                .horizontalScroll(scrollState)
+                .padding(vertical = 6.dp),
+        ) {
+            networkColumns.forEach { col ->
+                Box(modifier = Modifier.width(col.width.dp).padding(horizontal = 6.dp)) {
+                    Text(
+                        col.label,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        fontFamily = FontFamily.Monospace,
+                        color = textColor,
+                        maxLines = 1,
+                    )
+                }
+            }
+        }
+
+        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(textColor.copy(alpha = 0.1f)))
+
+        // Data rows
+        LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
+            items(events, key = { "${it.timestamp}_${it.hashCode()}" }) { event ->
+                val color = networkStatusColor(event.statusCode, event.error, textColor)
+                val formattedTime = remember(event.timestamp) { timeFormat.format(Date(event.timestamp)) }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(scrollState)
+                        .padding(vertical = 3.dp),
+                ) {
+                    // Time
+                    Box(modifier = Modifier.width(networkColumns[0].width.dp).padding(horizontal = 6.dp)) {
+                        Text(formattedTime, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = textColor.copy(alpha = 0.5f), maxLines = 1)
+                    }
+                    // Method
+                    Box(modifier = Modifier.width(networkColumns[1].width.dp).padding(horizontal = 6.dp)) {
+                        Text(event.method, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
+                    }
+                    // Status
+                    Box(modifier = Modifier.width(networkColumns[2].width.dp).padding(horizontal = 6.dp)) {
+                        Text("${event.statusCode}", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
+                    }
+                    // Host
+                    Box(modifier = Modifier.width(networkColumns[3].width.dp).padding(horizontal = 6.dp)) {
+                        Text(event.host ?: "", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = textColor.copy(alpha = 0.85f), maxLines = 1)
+                    }
+                    // Path
+                    Box(modifier = Modifier.width(networkColumns[4].width.dp).padding(horizontal = 6.dp)) {
+                        Text(event.path ?: event.url, fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = textColor.copy(alpha = 0.85f), maxLines = 1)
+                    }
+                    // Duration
+                    Box(modifier = Modifier.width(networkColumns[5].width.dp).padding(horizontal = 6.dp)) {
+                        Text("${event.durationMs}ms", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = textColor.copy(alpha = 0.7f), maxLines = 1)
+                    }
+                    // Error
+                    Box(modifier = Modifier.width(networkColumns[6].width.dp).padding(horizontal = 6.dp)) {
+                        Text(event.error ?: "", fontSize = 10.sp, fontFamily = FontFamily.Monospace, color = Color(0xFFE06060), maxLines = 1)
+                    }
+                }
+            }
+        }
+    }
 }
 
 @Composable
@@ -337,18 +447,42 @@ private fun CustomSummary(event: TelemetryDisplayEvent.Custom, textColor: Color)
 }
 
 @Composable
+private fun NavigationSummary(event: TelemetryDisplayEvent.Navigation, textColor: Color) {
+    val argsText = event.arguments?.entries?.joinToString(", ") { "${it.key}=${it.value}" }
+    val suffix = if (argsText != null) " ($argsText)" else ""
+
+    Text(
+        "${event.destination}$suffix",
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        color = Color(0xFF74C0FC),  // light blue
+        maxLines = 1,
+    )
+}
+
+@Composable
 private fun OsSummary(event: TelemetryDisplayEvent.Os, textColor: Color) {
     val detailsText = if (event.details != null && event.details.isNotEmpty()) {
         " ${event.details.entries.joinToString(", ") { "${it.key}:${it.value}" }}"
     } else {
         ""
     }
+    val color = when (event.kind) {
+        "foreground" -> Color(0xFF51CF66)                   // green
+        "background" -> Color(0xFFFFA94D)                   // orange
+        "connectivity_change" -> {
+            val connected = event.details?.get("connected")
+            if (connected == "true") Color(0xFF51CF66) else Color(0xFFFF6B6B)
+        }
+        "screen_off" -> textColor.copy(alpha = 0.4f)
+        else -> textColor.copy(alpha = 0.85f)
+    }
 
     Text(
         "[${event.category}] ${event.kind}$detailsText",
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
-        color = textColor.copy(alpha = 0.85f),
+        color = color,
         maxLines = 1,
     )
 }
@@ -408,6 +542,13 @@ private fun generateFakeEvents(): List<TelemetryDisplayEvent> {
             category = "broadcast",
             kind = "LOCALE_CHANGED",
             details = mapOf("locale" to "en_US"),
+        ),
+        TelemetryDisplayEvent.Navigation(
+            timestamp = now - 5800,
+            destination = "HomeScreen",
+            source = "sdk",
+            arguments = mapOf("tab" to "discover"),
+            metadata = null,
         ),
         TelemetryDisplayEvent.Custom(
             timestamp = now - 6000,

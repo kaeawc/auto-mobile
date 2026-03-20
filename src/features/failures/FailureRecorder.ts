@@ -10,6 +10,7 @@ import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import crypto from "node:crypto";
 import type { FailureRecorderService } from "./interfaces/FailureRecorderService";
 import { getFailuresPushServer, FailureNotificationPush } from "../../daemon/failuresPushSocketServer";
+import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 
 /**
  * Input for recording a tool failure
@@ -274,6 +275,19 @@ export class FailureRecorder implements FailureRecorderService {
         `${input.exceptionType}: ${input.exceptionMessage}`
       );
 
+      // Push to telemetry timeline
+      TelemetryRecorder.getInstance().recordFailureTelemetry({
+        type: "crash",
+        occurrenceId,
+        groupId: signature,
+        severity,
+        title,
+        exceptionType: input.exceptionType,
+        screen: input.currentScreen ?? null,
+        timestamp: this.timer.now(),
+        stackTrace: input.stackTrace,
+      });
+
       return occurrenceId;
     } catch (error) {
       logger.error(`[FailureRecorder] Failed to record crash: ${error}`);
@@ -323,6 +337,18 @@ export class FailureRecorder implements FailureRecorderService {
         title,
         input.reason
       );
+
+      // Push to telemetry timeline
+      TelemetryRecorder.getInstance().recordFailureTelemetry({
+        type: "anr",
+        occurrenceId,
+        groupId: signature,
+        severity: "high",
+        title,
+        screen: input.currentScreen ?? null,
+        timestamp: this.timer.now(),
+        stackTrace: input.stackTrace ?? null,
+      });
 
       return occurrenceId;
     } catch (error) {
@@ -375,6 +401,19 @@ export class FailureRecorder implements FailureRecorderService {
         title,
         failureInput.message
       );
+
+      // Push to telemetry timeline
+      TelemetryRecorder.getInstance().recordFailureTelemetry({
+        type: "nonfatal",
+        occurrenceId,
+        groupId: signature,
+        severity,
+        title,
+        exceptionType: input.exceptionType,
+        screen: input.currentScreen ?? null,
+        timestamp: this.timer.now(),
+        stackTrace: input.stackTrace,
+      });
 
       return occurrenceId;
     } catch (error) {

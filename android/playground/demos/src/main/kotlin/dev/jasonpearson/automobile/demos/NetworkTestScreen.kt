@@ -65,7 +65,7 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
 
         val client = remember {
             OkHttpClient.Builder().apply {
-                AutoMobileNetwork.interceptor()?.let { addInterceptor(it) }
+                AutoMobileNetwork.interceptor(captureHeaders = true, captureBodies = true)?.let { addInterceptor(it) }
             }.build()
         }
 

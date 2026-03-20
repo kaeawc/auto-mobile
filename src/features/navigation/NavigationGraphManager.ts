@@ -392,6 +392,8 @@ export class NavigationGraphManager implements NavigationGraphService {
       source: event.source ?? null,
       arguments: event.arguments ?? null,
       metadata: event.metadata ?? null,
+      triggeringInteraction: event.triggeringInteraction ?? null,
+      screenshotUri: `automobile:navigation/nodes/${node.id}/screenshot`,
     });
   }
 

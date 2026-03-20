@@ -3,7 +3,9 @@ package dev.jasonpearson.automobile.ide.telemetry
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.intOrNull
+import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.jsonPrimitive
@@ -44,6 +46,17 @@ data class TelemetryEventEnvelope(
 )
 
 /**
+ * A single frame in a failure stack trace.
+ */
+data class StackTraceFrame(
+    val className: String,
+    val methodName: String,
+    val fileName: String?,
+    val lineNumber: Int?,
+    val isAppCode: Boolean,
+)
+
+/**
  * Parsed telemetry events for UI rendering, with category-specific fields extracted.
  */
 sealed class TelemetryDisplayEvent {
@@ -58,6 +71,11 @@ sealed class TelemetryDisplayEvent {
         val host: String?,
         val path: String?,
         val error: String?,
+        val requestHeaders: Map<String, String>?,
+        val responseHeaders: Map<String, String>?,
+        val requestBody: String?,
+        val responseBody: String?,
+        val contentType: String?,
     ) : TelemetryDisplayEvent()
 
     data class Log(
@@ -86,6 +104,40 @@ sealed class TelemetryDisplayEvent {
         val source: String?,
         val arguments: Map<String, String>?,
         val metadata: Map<String, String>?,
+        val triggeringInteraction: String?,
+        val screenshotUri: String?,
+    ) : TelemetryDisplayEvent()
+
+    data class Failure(
+        override val timestamp: Long,
+        val type: String, // "crash", "anr", "nonfatal"
+        val occurrenceId: String,
+        val severity: String,
+        val title: String,
+        val exceptionType: String?,
+        val screen: String?,
+        val stackTrace: List<StackTraceFrame>?,
+    ) : TelemetryDisplayEvent()
+
+    data class Storage(
+        override val timestamp: Long,
+        val fileName: String,
+        val key: String?,
+        val value: String?,
+        val valueType: String?,
+        val changeType: String,
+        val previousValue: String?,
+    ) : TelemetryDisplayEvent()
+
+    data class Layout(
+        override val timestamp: Long,
+        val subType: String,
+        val composableName: String?,
+        val recompositionCount: Int?,
+        val durationMs: Long?,
+        val likelyCause: String?,
+        val screenName: String?,
+        val detailsJson: String?,
     ) : TelemetryDisplayEvent()
 }
 
@@ -98,18 +150,52 @@ private val json = Json { ignoreUnknownKeys = true }
 fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent? {
     val d = envelope.data
     return when (envelope.category) {
-        "network" -> TelemetryDisplayEvent.Network(
-            timestamp = envelope.timestamp,
-            method = d.stringOrDefault("method", "?"),
-            statusCode = d["statusCode"]?.jsonPrimitive?.intOrNull
-                ?: d["status_code"]?.jsonPrimitive?.intOrNull ?: 0,
-            url = d.stringOrDefault("url", ""),
-            durationMs = d["durationMs"]?.jsonPrimitive?.longOrNull
-                ?: d["duration_ms"]?.jsonPrimitive?.longOrNull ?: 0,
-            host = d.stringOrNull("host"),
-            path = d.stringOrNull("path"),
-            error = d.stringOrNull("error"),
-        )
+        "network" -> {
+            val reqHeaders = mutableMapOf<String, String>()
+            d["requestHeaders"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.jsonObject?.forEach { (k, v) -> reqHeaders[k] = v.jsonPrimitive.content }
+            val respHeaders = mutableMapOf<String, String>()
+            d["responseHeaders"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.jsonObject?.forEach { (k, v) -> respHeaders[k] = v.jsonPrimitive.content }
+            // Also check snake_case variants from backfill
+            if (reqHeaders.isEmpty()) {
+                val reqJson = d.stringOrNull("request_headers_json")
+                if (reqJson != null) {
+                    try {
+                        json.parseToJsonElement(reqJson).jsonObject.forEach { (k, v) ->
+                            reqHeaders[k] = v.jsonPrimitive.content
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            if (respHeaders.isEmpty()) {
+                val respJson = d.stringOrNull("response_headers_json")
+                if (respJson != null) {
+                    try {
+                        json.parseToJsonElement(respJson).jsonObject.forEach { (k, v) ->
+                            respHeaders[k] = v.jsonPrimitive.content
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+            TelemetryDisplayEvent.Network(
+                timestamp = envelope.timestamp,
+                method = d.stringOrDefault("method", "?"),
+                statusCode = d["statusCode"]?.jsonPrimitive?.intOrNull
+                    ?: d["status_code"]?.jsonPrimitive?.intOrNull ?: 0,
+                url = d.stringOrDefault("url", ""),
+                durationMs = d["durationMs"]?.jsonPrimitive?.longOrNull
+                    ?: d["duration_ms"]?.jsonPrimitive?.longOrNull ?: 0,
+                host = d.stringOrNull("host"),
+                path = d.stringOrNull("path"),
+                error = d.stringOrNull("error"),
+                requestHeaders = reqHeaders.ifEmpty { null },
+                responseHeaders = respHeaders.ifEmpty { null },
+                requestBody = d.stringOrNull("requestBody") ?: d.stringOrNull("request_body"),
+                responseBody = d.stringOrNull("responseBody") ?: d.stringOrNull("response_body"),
+                contentType = d.stringOrNull("contentType") ?: d.stringOrNull("content_type"),
+            )
+        }
         "log" -> TelemetryDisplayEvent.Log(
             timestamp = envelope.timestamp,
             level = d["level"]?.jsonPrimitive?.intOrNull ?: 4, // default INFO
@@ -161,14 +247,72 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             val meta = mutableMapOf<String, String>()
             d["metadata"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
                 ?.jsonObject?.forEach { (k, v) -> meta[k] = v.jsonPrimitive.content }
+            // Build human-readable triggering interaction summary
+            val trigInteraction = d["triggeringInteraction"]
+                ?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                ?.jsonObject?.let { ti ->
+                    val interType = ti.stringOrNull("type") ?: "interaction"
+                    val elText = ti.stringOrNull("elementText")
+                    val elResId = ti.stringOrNull("elementResourceId")
+                    val target = elText ?: elResId
+                    if (target != null) "$interType on '$target'" else interType
+                }
             TelemetryDisplayEvent.Navigation(
                 timestamp = envelope.timestamp,
                 destination = d.stringOrDefault("destination", "unknown"),
                 source = d.stringOrNull("source"),
                 arguments = args.ifEmpty { null },
                 metadata = meta.ifEmpty { null },
+                triggeringInteraction = trigInteraction,
+                screenshotUri = d.stringOrNull("screenshotUri"),
             )
         }
+        "crash", "anr", "nonfatal" -> {
+            val frames = try {
+                d["stackTrace"]?.takeIf { it !is kotlinx.serialization.json.JsonNull }
+                    ?.jsonArray?.map { frame ->
+                        val f = frame.jsonObject
+                        StackTraceFrame(
+                            className = f.stringOrDefault("className", ""),
+                            methodName = f.stringOrDefault("methodName", ""),
+                            fileName = f.stringOrNull("fileName"),
+                            lineNumber = f["lineNumber"]?.jsonPrimitive?.intOrNull,
+                            isAppCode = f["isAppCode"]?.jsonPrimitive?.booleanOrNull ?: false,
+                        )
+                    }
+            } catch (_: Exception) { null }
+            TelemetryDisplayEvent.Failure(
+                timestamp = envelope.timestamp,
+                type = envelope.category,
+                occurrenceId = d.stringOrDefault("occurrenceId", ""),
+                severity = d.stringOrDefault("severity", "medium"),
+                title = d.stringOrDefault("title", "Unknown failure"),
+                exceptionType = d.stringOrNull("exceptionType"),
+                screen = d.stringOrNull("screen"),
+                stackTrace = frames,
+            )
+        }
+        "storage" -> TelemetryDisplayEvent.Storage(
+            timestamp = envelope.timestamp,
+            fileName = d.stringOrDefault("fileName", d.stringOrDefault("file_name", "unknown")),
+            key = d.stringOrNull("key"),
+            value = d.stringOrNull("value"),
+            valueType = d.stringOrNull("valueType") ?: d.stringOrNull("value_type"),
+            changeType = d.stringOrDefault("changeType", d.stringOrDefault("change_type", "modify")),
+            previousValue = d.stringOrNull("previousValue") ?: d.stringOrNull("previous_value"),
+        )
+        "layout" -> TelemetryDisplayEvent.Layout(
+            timestamp = envelope.timestamp,
+            subType = d.stringOrDefault("subType", d.stringOrDefault("sub_type", "unknown")),
+            composableName = d.stringOrNull("composableName") ?: d.stringOrNull("composable_name"),
+            recompositionCount = d["recompositionCount"]?.jsonPrimitive?.intOrNull
+                ?: d["recomposition_count"]?.jsonPrimitive?.intOrNull,
+            screenName = d.stringOrNull("screenName") ?: d.stringOrNull("screen_name"),
+            detailsJson = d.stringOrNull("detailsJson") ?: d.stringOrNull("details_json"),
+            durationMs = d["durationMs"]?.jsonPrimitive?.longOrNull
+                ?: d["duration_ms"]?.jsonPrimitive?.longOrNull,
+            likelyCause = d.stringOrNull("likelyCause") ?: d.stringOrNull("likely_cause"),
+        )
         else -> null
     }
 }

@@ -348,6 +348,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
   // Interaction listeners
   private interactionListeners: Set<(event: InteractionEvent) => void> = new Set();
+  // Last interaction for correlating with navigation events
+  private lastInteraction: { type: string; elementText?: string; elementResourceId?: string; timestamp: number } | null = null;
   private installedAppsRepository: InstalledAppsStore | null = null;
 
   // Hierarchy navigation detector
@@ -369,6 +371,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
   // Track foreground package for crash monitoring
   private lastForegroundPackage: string | null = null;
+  private lastLayoutTelemetryTimestamp = 0;
 
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
@@ -1486,6 +1489,15 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           if (event.applicationId) {
             this.sdkNavigationAppIds.add(event.applicationId);
           }
+          // Attach last interaction for telemetry correlation
+          if (this.lastInteraction) {
+            event.triggeringInteraction = {
+              type: this.lastInteraction.type,
+              elementText: this.lastInteraction.elementText,
+              elementResourceId: this.lastInteraction.elementResourceId,
+            };
+          }
+
           logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
           await NavigationGraphManager.getInstance().recordNavigationEvent(event);
 
@@ -1516,6 +1528,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         const interactionMessage = message as any;
         const interaction = interactionMessage.event as InteractionEvent | undefined;
         if (interaction) {
+          this.lastInteraction = {
+            type: interaction.type,
+            elementText: interaction.element?.text ?? undefined,
+            elementResourceId: interaction.element?.["resource-id"] ?? undefined,
+            timestamp: interaction.timestamp,
+          };
           this.notifyInteractionListeners(interaction);
         }
       }
@@ -1564,6 +1582,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
             host: event.host ?? null,
             path: event.path ?? null,
             error: event.error ?? null,
+            requestHeaders: event.requestHeaders ?? null,
+            responseHeaders: event.responseHeaders ?? null,
+            requestBody: event.requestBody ?? null,
+            responseBody: event.responseBody ?? null,
+            contentType: event.contentType ?? null,
           });
         }
       }
@@ -1670,6 +1693,19 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         if (server) {
           server.pushStorageUpdate(this.device.deviceId, event);
         }
+
+        // Record to telemetry timeline
+        const recorder = TelemetryRecorder.getInstance();
+        recorder.setContext(this.device.deviceId, null);
+        recorder.recordStorageEvent({
+          timestamp: event.timestamp,
+          applicationId: storageMessage.packageName ?? null,
+          fileName: event.fileName,
+          key: event.key,
+          value: event.value,
+          valueType: event.valueType,
+          changeType: storageMessage.changeType ?? "modify",
+        });
       }
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Error handling WebSocket message: ${error}`);
@@ -1708,6 +1744,34 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       // Start performance monitoring for this device/package
       const monitor = getPerformanceMonitor();
       monitor.startMonitoring(this.device.deviceId, data.packageName);
+    }
+
+    // Record layout telemetry (throttled to max 1 per 500ms)
+    if (now - this.lastLayoutTelemetryTimestamp >= 500) {
+      this.lastLayoutTelemetryTimestamp = now;
+      const recorder = TelemetryRecorder.getInstance();
+      recorder.setContext(this.device.deviceId, null);
+      const screenName = data.foregroundActivity ?? data.packageName ?? null;
+      const windowCount = data.windows?.length ?? 0;
+      // Store the hierarchy JSON so the telemetry detail panel can render the tree.
+      // Wrap in the format parseHierarchyFromJson expects: { hierarchy: { node: ... } }
+      recorder.recordLayoutEvent({
+        timestamp: now,
+        applicationId: data.packageName ?? null,
+        subType: "hierarchy_change",
+        composableName: null,
+        composableId: null,
+        recompositionCount: null,
+        durationMs: null,
+        likelyCause: null,
+        detailsJson: JSON.stringify({
+          screenName,
+          windowCount,
+          foregroundActivity: data.foregroundActivity ?? null,
+          hierarchy: { node: data.hierarchy },
+        }),
+        screenName,
+      });
     }
 
     // Notify hierarchy navigation detector

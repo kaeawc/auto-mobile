@@ -176,55 +176,85 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
     DetailRow("Duration", "${event.durationMs}ms", textColor)
     event.error?.let { DetailRow("Error", it, textColor) }
 
-    // Always show request/response sections as collapsible items
+    // Request/Response sizes
+    val reqSize = (event.requestHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
+    val respSize = (event.responseHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
+    if (reqSize > 0) DetailRow("Request Size", formatByteSize(reqSize), textColor)
+    if (respSize > 0) DetailRow("Response Size", formatByteSize(respSize), textColor)
+
+    // Request Headers — data table with copy button
     Spacer(Modifier.height(8.dp))
-    CollapsibleSection("Request Headers", textColor, defaultExpanded = !event.requestHeaders.isNullOrEmpty()) {
+    val reqHeadersCopy = remember(event.requestHeaders) {
+        event.requestHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
+    CollapsibleSection(
+        "Request Headers",
+        textColor,
+        defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
+        copyText = reqHeadersCopy,
+    ) {
         if (!event.requestHeaders.isNullOrEmpty()) {
-            event.requestHeaders.forEach { (k, v) -> DetailRow(k, v, textColor) }
+            HeaderDataTable(event.requestHeaders, textColor)
         } else {
             Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
         }
     }
 
+    // Request Body — content-type-aware rendering with copy
     Spacer(Modifier.height(4.dp))
-    CollapsibleSection("Request Body", textColor, defaultExpanded = !event.requestBody.isNullOrBlank()) {
-        if (!event.requestBody.isNullOrBlank()) {
-            MonospaceBlock(formatBodyText(event.requestBody, event.requestHeaders?.get("Content-Type")), textColor)
-        } else {
-            Text("No body", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-        }
+    CollapsibleSection(
+        "Request Body",
+        textColor,
+        defaultExpanded = !event.requestBody.isNullOrBlank(),
+        copyText = event.requestBody,
+    ) {
+        NetworkBodyContent(
+            body = event.requestBody,
+            contentType = event.requestHeaders?.get("Content-Type"),
+            bodySize = reqSize,
+            textColor = textColor,
+        )
     }
 
+    // Response Headers — data table with copy
     Spacer(Modifier.height(4.dp))
-    CollapsibleSection("Response Headers", textColor, defaultExpanded = !event.responseHeaders.isNullOrEmpty()) {
+    val respHeadersCopy = remember(event.responseHeaders) {
+        event.responseHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
+    CollapsibleSection(
+        "Response Headers",
+        textColor,
+        defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
+        copyText = respHeadersCopy,
+    ) {
         if (!event.responseHeaders.isNullOrEmpty()) {
-            event.responseHeaders.forEach { (k, v) -> DetailRow(k, v, textColor) }
+            HeaderDataTable(event.responseHeaders, textColor)
         } else {
             Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
         }
     }
 
+    // Response Body — content-type-aware rendering with copy
     Spacer(Modifier.height(4.dp))
-    CollapsibleSection("Response Body", textColor, defaultExpanded = !event.responseBody.isNullOrBlank()) {
-        if (!event.responseBody.isNullOrBlank()) {
-            MonospaceBlock(formatBodyText(event.responseBody, event.contentType), textColor)
-        } else {
-            Text("No body captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-        }
+    CollapsibleSection(
+        "Response Body",
+        textColor,
+        defaultExpanded = !event.responseBody.isNullOrBlank(),
+        copyText = event.responseBody,
+    ) {
+        NetworkBodyContent(
+            body = event.responseBody,
+            contentType = event.contentType,
+            bodySize = respSize,
+            textColor = textColor,
+        )
     }
 
     // cURL command
     Spacer(Modifier.height(8.dp))
     val curlCommand = remember(event) { generateCurlCommand(event) }
-    CollapsibleSection("cURL", textColor) {
+    CollapsibleSection("cURL", textColor, copyText = curlCommand) {
         MonospaceBlock(curlCommand, textColor)
-        Spacer(Modifier.height(4.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            ActionButton("Copy", textColor) {
-                val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
-                clipboard.setContents(java.awt.datatransfer.StringSelection(curlCommand), null)
-            }
-        }
     }
 
     // Run button — key on event to reset state when switching events
@@ -263,19 +293,21 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
         DetailRow("Status", "${result.statusCode}", textColor)
         DetailRow("Duration", "${result.durationMs}ms", textColor)
         result.error?.let { DetailRow("Error", it, textColor) }
-        CollapsibleSection("Response Headers", textColor, defaultExpanded = false) {
+        val replayRespHeadersCopy = result.responseHeaders.entries.joinToString("\n") { "${it.key}: ${it.value}" }
+        CollapsibleSection("Response Headers", textColor, defaultExpanded = false, copyText = replayRespHeadersCopy) {
             if (result.responseHeaders.isNotEmpty()) {
-                result.responseHeaders.forEach { (k, v) -> DetailRow(k, v, textColor) }
+                HeaderDataTable(result.responseHeaders, textColor)
             } else {
                 Text("No headers", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
             }
         }
-        CollapsibleSection("Response Body", textColor) {
-            if (!result.responseBody.isNullOrBlank()) {
-                MonospaceBlock(formatBodyText(result.responseBody, result.responseHeaders["content-type"]), textColor)
-            } else {
-                Text("No body", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-            }
+        CollapsibleSection("Response Body", textColor, copyText = result.responseBody) {
+            NetworkBodyContent(
+                body = result.responseBody,
+                contentType = result.responseHeaders["content-type"],
+                bodySize = result.responseBody?.length?.toLong() ?: -1,
+                textColor = textColor,
+            )
         }
     }
 }
@@ -285,6 +317,7 @@ private fun CollapsibleSection(
     title: String,
     textColor: Color,
     defaultExpanded: Boolean = true,
+    copyText: String? = null,
     content: @Composable () -> Unit,
 ) {
     var expanded by remember { mutableStateOf(defaultExpanded) }
@@ -307,7 +340,21 @@ private fun CollapsibleSection(
             fontSize = 10.sp,
             fontWeight = FontWeight.SemiBold,
             color = textColor.copy(alpha = 0.7f),
+            modifier = Modifier.weight(1f),
         )
+        if (copyText != null && expanded) {
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        clipboard.setContents(java.awt.datatransfer.StringSelection(copyText), null)
+                    }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(4.dp),
+            ) {
+                Text("\uD83D\uDCCB", fontSize = 10.sp) // 📋
+            }
+        }
     }
     if (expanded) {
         content()

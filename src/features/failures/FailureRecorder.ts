@@ -134,11 +134,17 @@ export interface RecordNonFatalInput {
 export class FailureRecorder implements FailureRecorderService {
   private repository: FailureAnalyticsRepository;
   private timer: Timer;
+  private telemetryRecorder: { recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"] };
   private static instance: FailureRecorder | null = null;
 
-  constructor(repository?: FailureAnalyticsRepository, timer: Timer = defaultTimer) {
+  constructor(
+    repository?: FailureAnalyticsRepository,
+    timer: Timer = defaultTimer,
+    telemetryRecorder?: { recordFailureTelemetry: TelemetryRecorder["recordFailureTelemetry"] },
+  ) {
     this.repository = repository ?? new FailureAnalyticsRepository();
     this.timer = timer;
+    this.telemetryRecorder = telemetryRecorder ?? TelemetryRecorder.getInstance();
   }
 
   /**
@@ -276,7 +282,7 @@ export class FailureRecorder implements FailureRecorderService {
       );
 
       // Push to telemetry timeline
-      TelemetryRecorder.getInstance().recordFailureTelemetry({
+      this.telemetryRecorder.recordFailureTelemetry({
         type: "crash",
         occurrenceId,
         groupId: signature,
@@ -339,7 +345,7 @@ export class FailureRecorder implements FailureRecorderService {
       );
 
       // Push to telemetry timeline
-      TelemetryRecorder.getInstance().recordFailureTelemetry({
+      this.telemetryRecorder.recordFailureTelemetry({
         type: "anr",
         occurrenceId,
         groupId: signature,
@@ -403,7 +409,7 @@ export class FailureRecorder implements FailureRecorderService {
       );
 
       // Push to telemetry timeline
-      TelemetryRecorder.getInstance().recordFailureTelemetry({
+      this.telemetryRecorder.recordFailureTelemetry({
         type: "nonfatal",
         occurrenceId,
         groupId: signature,

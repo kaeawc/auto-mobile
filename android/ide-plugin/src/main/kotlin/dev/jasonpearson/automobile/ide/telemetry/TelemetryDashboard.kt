@@ -6,6 +6,7 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -40,6 +41,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.intellij.ide.util.PropertiesComponent
+import dev.jasonpearson.automobile.ide.components.SearchBar
+import kotlinx.coroutines.delay
 import dev.jasonpearson.automobile.ide.daemon.TelemetryConnectionState
 import dev.jasonpearson.automobile.ide.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.ide.datasource.DataSourceMode
@@ -90,6 +93,16 @@ fun TelemetryDashboard(
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
 
+    // Search and severity filter state
+    var searchQuery by remember { mutableStateOf("") }
+    var debouncedQuery by remember { mutableStateOf("") }
+    var enabledSeverities by remember { mutableStateOf(EventSeverity.entries.toSet()) }
+
+    LaunchedEffect(searchQuery) {
+        delay(150)
+        debouncedQuery = searchQuery
+    }
+
     // Collect telemetry events from the push client
     LaunchedEffect(telemetryPushClient) {
         val client = telemetryPushClient ?: return@LaunchedEffect
@@ -117,14 +130,15 @@ fun TelemetryDashboard(
         events.addAll(0, fakeEvents)
     }
 
-    // Filtered events — derivedStateOf tracks SnapshotStateList mutations correctly,
-    // unlike remember(events.size) which freezes once the list hits MAX_EVENTS cap.
-    val filteredEvents by remember(selectedFilter) {
+    // Filtered events — chains category, severity, and text search filters.
+    // derivedStateOf tracks SnapshotStateList mutations correctly.
+    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities) {
         derivedStateOf {
-            if (selectedFilter == CategoryFilter.All) {
-                events.toList()
-            } else {
-                events.filter { event ->
+            var result: List<TelemetryDisplayEvent> = events.toList()
+
+            // Category filter
+            if (selectedFilter != CategoryFilter.All) {
+                result = result.filter { event ->
                     when (selectedFilter) {
                         CategoryFilter.All -> true
                         CategoryFilter.Network -> event is TelemetryDisplayEvent.Network
@@ -140,6 +154,18 @@ fun TelemetryDashboard(
                     }
                 }
             }
+
+            // Severity filter
+            if (enabledSeverities.size < EventSeverity.entries.size) {
+                result = result.filter { it.eventSeverity in enabledSeverities }
+            }
+
+            // Text search filter
+            if (debouncedQuery.isNotEmpty()) {
+                result = result.filter { it.matchesSearch(debouncedQuery) }
+            }
+
+            result
         }
     }
 
@@ -163,44 +189,93 @@ fun TelemetryDashboard(
     }
 
     Column(modifier = modifier.fillMaxSize()) {
-        // Category filter row (horizontally scrollable for overflow)
+        // Search bar + severity toggle row
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
                 .padding(horizontal = 8.dp, vertical = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
             verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
         ) {
-            CategoryFilter.entries.forEach { filter ->
-                val isSelected = filter == selectedFilter
-                val count = counts[filter] ?: 0
+            SearchBar(
+                query = searchQuery,
+                onQueryChange = { searchQuery = it },
+                placeholder = "Filter events...",
+                modifier = Modifier.weight(1f),
+            )
+            // Severity toggle chips
+            EventSeverity.entries.forEach { sev ->
+                val isEnabled = sev in enabledSeverities
                 Box(
                     modifier = Modifier
                         .background(
-                            if (isSelected) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
-                            RoundedCornerShape(6.dp),
+                            if (isEnabled) Color(sev.color).copy(alpha = 0.15f) else Color.Transparent,
+                            RoundedCornerShape(4.dp),
                         )
-                        .clickable { selectedFilter = filter }
+                        .clickable {
+                            enabledSeverities = if (isEnabled) enabledSeverities - sev else enabledSeverities + sev
+                        }
                         .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 8.dp, vertical = 4.dp),
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
                 ) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Text(filter.icon, fontSize = 11.sp)
-                        Text(
-                            filter.label,
-                            fontSize = 11.sp,
-                            color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
-                        )
-                        if (count > 0) {
-                            Text(
-                                "$count",
-                                fontSize = 9.sp,
-                                color = colors.text.normal.copy(alpha = 0.4f),
+                    Text(sev.icon, fontSize = 11.sp)
+                }
+            }
+        }
+
+        // Responsive category filter tabs
+        BoxWithConstraints(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 2.dp),
+        ) {
+            val tabCount = CategoryFilter.entries.size
+            val tabsWithText = when {
+                maxWidth >= 750.dp -> tabCount
+                maxWidth >= 600.dp -> tabCount - 3
+                maxWidth >= 450.dp -> tabCount - 6
+                maxWidth >= 350.dp -> 3
+                else -> 0
+            }
+
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                CategoryFilter.entries.forEachIndexed { index, filter ->
+                    val isSelected = filter == selectedFilter
+                    val count = counts[filter] ?: 0
+                    val showText = index < tabsWithText
+                    Box(
+                        modifier = Modifier
+                            .background(
+                                if (isSelected) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
+                                RoundedCornerShape(6.dp),
                             )
+                            .clickable { selectedFilter = filter }
+                            .pointerHoverIcon(PointerIcon.Hand)
+                            .padding(horizontal = if (showText) 8.dp else 6.dp, vertical = 4.dp),
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            Text(filter.icon, fontSize = 11.sp)
+                            if (showText) {
+                                Text(
+                                    filter.label,
+                                    fontSize = 11.sp,
+                                    color = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                                )
+                                if (count > 0) {
+                                    Text(
+                                        "$count",
+                                        fontSize = 9.sp,
+                                        color = colors.text.normal.copy(alpha = 0.4f),
+                                    )
+                                }
+                            }
                         }
                     }
                 }

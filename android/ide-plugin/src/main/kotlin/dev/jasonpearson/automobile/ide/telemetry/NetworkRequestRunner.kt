@@ -7,6 +7,18 @@ import java.net.http.HttpResponse
 import java.time.Duration
 
 /**
+ * Interface for executing network requests. Enables testing with fakes.
+ */
+interface NetworkRequestExecutor {
+    fun run(
+        url: String,
+        method: String,
+        requestHeaders: Map<String, String>?,
+        requestBody: String?,
+    ): NetworkReplayResult
+}
+
+/**
  * Result of replaying a network request from the IDE.
  */
 data class NetworkReplayResult(
@@ -20,14 +32,14 @@ data class NetworkReplayResult(
 /**
  * Replays a network request using the JVM HttpClient.
  */
-object NetworkRequestRunner {
+object NetworkRequestRunner : NetworkRequestExecutor {
 
     private val client = HttpClient.newBuilder()
         .followRedirects(HttpClient.Redirect.NORMAL)
         .connectTimeout(Duration.ofSeconds(30))
         .build()
 
-    fun run(
+    override fun run(
         url: String,
         method: String,
         requestHeaders: Map<String, String>?,

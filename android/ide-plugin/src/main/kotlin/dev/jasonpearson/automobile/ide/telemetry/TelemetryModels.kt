@@ -322,3 +322,97 @@ private fun JsonObject.stringOrDefault(key: String, default: String): String =
 
 private fun JsonObject.stringOrNull(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull
+
+/**
+ * Severity classification for telemetry events, used for filter toggles.
+ */
+enum class EventSeverity(val label: String, val icon: String, val color: Long) {
+    Error("Errors", "\u274C", 0xFFFF6B6B),
+    Warning("Warnings", "\u26A0\uFE0F", 0xFFE0C040),
+    Info("Info", "\u2139\uFE0F", 0xFF74C0FC),
+}
+
+/**
+ * Classify a telemetry event into a severity level.
+ * Named `eventSeverity` to avoid collision with Failure.severity field.
+ */
+/**
+ * Classify a telemetry event into a severity level.
+ * @param slowNetworkThresholdMs Requests slower than this are classified as Warning (default 3000ms)
+ */
+fun TelemetryDisplayEvent.classifyEventSeverity(slowNetworkThresholdMs: Long = 3000): EventSeverity =
+    when (this) {
+        is TelemetryDisplayEvent.Failure -> when (type) {
+            "crash", "anr" -> EventSeverity.Error
+            "nonfatal" -> EventSeverity.Warning
+            else -> EventSeverity.Warning
+        }
+        is TelemetryDisplayEvent.Log -> when (level) {
+            6, 7 -> EventSeverity.Error
+            5 -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
+        is TelemetryDisplayEvent.Network -> when {
+            error != null -> EventSeverity.Error
+            statusCode == 0 -> EventSeverity.Error
+            statusCode >= 400 -> EventSeverity.Error
+            durationMs >= slowNetworkThresholdMs -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
+        is TelemetryDisplayEvent.Layout -> when (subType) {
+            "excessive_recomposition" -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
+        else -> EventSeverity.Info
+    }
+
+/** Convenience property using default threshold */
+val TelemetryDisplayEvent.eventSeverity: EventSeverity
+    get() = classifyEventSeverity()
+
+/**
+ * Full-text search across all relevant fields of a telemetry event.
+ */
+fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
+    if (query.isBlank()) return true
+    val q = query.lowercase()
+    return when (this) {
+        is TelemetryDisplayEvent.Network ->
+            method.lowercase().contains(q) ||
+            "$statusCode".contains(q) ||
+            url.lowercase().contains(q) ||
+            host?.lowercase()?.contains(q) == true ||
+            path?.lowercase()?.contains(q) == true ||
+            error?.lowercase()?.contains(q) == true
+        is TelemetryDisplayEvent.Log ->
+            tag.lowercase().contains(q) ||
+            message.lowercase().contains(q)
+        is TelemetryDisplayEvent.Navigation ->
+            destination.lowercase().contains(q) ||
+            source?.lowercase()?.contains(q) == true ||
+            triggeringInteraction?.lowercase()?.contains(q) == true ||
+            arguments?.values?.any { it.lowercase().contains(q) } == true
+        is TelemetryDisplayEvent.Os ->
+            category.lowercase().contains(q) ||
+            kind.lowercase().contains(q) ||
+            details?.values?.any { it.lowercase().contains(q) } == true
+        is TelemetryDisplayEvent.Custom ->
+            name.lowercase().contains(q) ||
+            properties.entries.any { it.key.lowercase().contains(q) || it.value.lowercase().contains(q) }
+        is TelemetryDisplayEvent.Failure ->
+            type.lowercase().contains(q) ||
+            title.lowercase().contains(q) ||
+            exceptionType?.lowercase()?.contains(q) == true ||
+            screen?.lowercase()?.contains(q) == true
+        is TelemetryDisplayEvent.Storage ->
+            fileName.lowercase().contains(q) ||
+            key?.lowercase()?.contains(q) == true ||
+            value?.lowercase()?.contains(q) == true ||
+            changeType.lowercase().contains(q)
+        is TelemetryDisplayEvent.Layout ->
+            subType.lowercase().contains(q) ||
+            composableName?.lowercase()?.contains(q) == true ||
+            screenName?.lowercase()?.contains(q) == true ||
+            likelyCause?.lowercase()?.contains(q) == true
+    }
+}

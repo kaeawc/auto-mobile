@@ -84,6 +84,12 @@ class AutoMobileNetworkInterceptor(
     val durationMs = System.currentTimeMillis() - startMs
     val responseContentType = response.header("Content-Type")
 
+    // Capture request headers from the response's request (includes OkHttp-added headers
+    // like Host, User-Agent, Accept-Encoding that aren't on the original request)
+    val finalReqHeaders = if (captureHeaders) {
+      response.request.headers.toMap()
+    } else reqHeaders
+
     // Capture response headers
     val respHeaders = if (captureHeaders) {
       response.headers.toMap()
@@ -109,7 +115,7 @@ class AutoMobileNetworkInterceptor(
         protocol = response.protocol.toString(),
         host = request.url.host,
         path = request.url.encodedPath,
-        requestHeaders = reqHeaders,
+        requestHeaders = finalReqHeaders,
         responseHeaders = respHeaders,
         requestBody = reqBody,
         responseBody = respBody,

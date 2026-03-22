@@ -3537,7 +3537,7 @@ main() {
 
     # Check runtime dependencies
     spin_check "Checking ffmpeg" "command -v ffmpeg >/dev/null 2>&1" || true
-    spin_check "Checking libvips" "_check_libvips" || true
+    spin_check "Checking libvips" "command -v pkg-config >/dev/null 2>&1 && pkg-config --exists vips 2>/dev/null" || true
 
     # Check Android SDK
     local adb_check="command -v adb >/dev/null 2>&1 || [[ -x \"${ANDROID_HOME:-}/platform-tools/adb\" ]] || [[ -x \"${ANDROID_SDK_ROOT:-}/platform-tools/adb\" ]] || [[ -x \"${HOME}/Library/Android/sdk/platform-tools/adb\" ]] || [[ -x \"${HOME}/Android/Sdk/platform-tools/adb\" ]]"
@@ -3825,6 +3825,9 @@ main() {
             # Only run setup if not already detected as ready
             if [[ "${IOS_SETUP_OK}" != "true" ]]; then
                 run_ios_setup
+            else
+                # Xcode already detected — still check physical device tools
+                ios_check_physical_device_tools
             fi
             ;;
         Both)
@@ -3837,6 +3840,9 @@ main() {
             fi
             if [[ "${IOS_SETUP_OK}" != "true" ]]; then
                 run_ios_setup
+            else
+                # Xcode already detected — still check physical device tools
+                ios_check_physical_device_tools
             fi
             ;;
     esac

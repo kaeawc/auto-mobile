@@ -4166,6 +4166,11 @@ class CtrlProxy : AccessibilityService() {
             path = event.path,
             error = event.error,
             applicationId = event.applicationId,
+            requestHeaders = event.requestHeaders,
+            responseHeaders = event.responseHeaders,
+            requestBody = event.requestBody,
+            responseBody = event.responseBody,
+            contentType = event.contentType,
           ),
         )
         is SdkWebSocketFrameEvent -> WebSocketFrameResponse(

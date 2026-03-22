@@ -306,6 +306,7 @@ remove_homebrew_packages() {
         hadolint
         vips
         libusbmuxd
+        libimobiledevice
         ideviceinstaller
     )
 

@@ -2599,33 +2599,16 @@ install_runtime_deps() {
         fi
     fi
 
-    # libvips — required by sharp for screenshot processing
-    # Check for the library via pkg-config, not the vips CLI tool
+    # libvips — optional system fallback for sharp image processing.
+    # Sharp's npm prebuilt binaries bundle their own libvips, so a system
+    # install is only needed when the prebuilts are unavailable (e.g.
+    # unsupported arch or failed download). Never auto-install; just inform.
     if ! _check_libvips; then
-        if [[ "${os}" == "macos" ]] && command_exists brew; then
-            if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-                log_info "Installing vips (required for image processing)..."
-                if run_spinner "Installing vips" brew install vips; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "vips install failed — image processing may fall back to slower paths"
-                fi
-            elif gum confirm "Install vips? (required for image processing)"; then
-                if run_spinner "Installing vips" brew install vips; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "vips install failed — image processing may fall back to slower paths"
-                fi
-            else
-                log_info "Skipped vips — install later with: brew install vips"
-            fi
+        log_info "System libvips not found (optional — sharp uses bundled prebuilts)"
+        if [[ "${os}" == "macos" ]]; then
+            log_info "If image processing fails, install with: brew install vips"
         else
-            log_warn "libvips not found — image processing may fall back to slower paths"
-            if [[ "${os}" == "macos" ]]; then
-                log_info "Install with: brew install vips"
-            else
-                _log_linux_install_hint "libvips" "libvips-dev" "vips-devel" "libvips"
-            fi
+            _log_linux_install_hint "libvips" "libvips-dev" "vips-devel" "libvips"
         fi
     fi
 }

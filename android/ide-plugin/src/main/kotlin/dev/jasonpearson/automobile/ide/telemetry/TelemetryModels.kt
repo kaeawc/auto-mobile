@@ -4,6 +4,7 @@ import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.booleanOrNull
+import kotlinx.serialization.json.doubleOrNull
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -127,6 +128,18 @@ sealed class TelemetryDisplayEvent {
         val valueType: String?,
         val changeType: String,
         val previousValue: String?,
+    ) : TelemetryDisplayEvent()
+
+    data class Performance(
+        override val timestamp: Long,
+        val fps: Double?,
+        val frameTimeMs: Double?,
+        val jankFrames: Int?,
+        val touchLatencyMs: Double?,
+        val memoryUsageMb: Double?,
+        val cpuUsagePercent: Double?,
+        val health: String,
+        val changedMetrics: List<String>,
     ) : TelemetryDisplayEvent()
 
     data class Layout(
@@ -313,6 +326,22 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 ?: d["duration_ms"]?.jsonPrimitive?.longOrNull,
             likelyCause = d.stringOrNull("likelyCause") ?: d.stringOrNull("likely_cause"),
         )
+        "performance" -> {
+            val changed = try {
+                d["changedMetrics"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
+            } catch (_: Exception) { emptyList() }
+            TelemetryDisplayEvent.Performance(
+                timestamp = envelope.timestamp,
+                fps = d["fps"]?.jsonPrimitive?.doubleOrNull,
+                frameTimeMs = d["frameTimeMs"]?.jsonPrimitive?.doubleOrNull,
+                jankFrames = d["jankFrames"]?.jsonPrimitive?.intOrNull,
+                touchLatencyMs = d["touchLatencyMs"]?.jsonPrimitive?.doubleOrNull,
+                memoryUsageMb = d["memoryUsageMb"]?.jsonPrimitive?.doubleOrNull,
+                cpuUsagePercent = d["cpuUsagePercent"]?.jsonPrimitive?.doubleOrNull,
+                health = d.stringOrDefault("health", "healthy"),
+                changedMetrics = changed,
+            )
+        }
         else -> null
     }
 }
@@ -361,6 +390,11 @@ fun TelemetryDisplayEvent.classifyEventSeverity(slowNetworkThresholdMs: Long = 3
         }
         is TelemetryDisplayEvent.Layout -> when (subType) {
             "excessive_recomposition" -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
+        is TelemetryDisplayEvent.Performance -> when (health) {
+            "critical" -> EventSeverity.Error
+            "warning" -> EventSeverity.Warning
             else -> EventSeverity.Info
         }
         else -> EventSeverity.Info
@@ -414,5 +448,9 @@ fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
             composableName?.lowercase()?.contains(q) == true ||
             screenName?.lowercase()?.contains(q) == true ||
             likelyCause?.lowercase()?.contains(q) == true
+        is TelemetryDisplayEvent.Performance ->
+            health.lowercase().contains(q) ||
+            changedMetrics.any { it.lowercase().contains(q) } ||
+            "performance".contains(q)
     }
 }

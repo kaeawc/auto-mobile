@@ -119,6 +119,7 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Failure -> FailureDetail(event, textColor, project)
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
+                is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
             }
         }
 
@@ -142,6 +143,7 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
     }
     is TelemetryDisplayEvent.Storage -> "Storage Change"
     is TelemetryDisplayEvent.Layout -> "Layout Event"
+    is TelemetryDisplayEvent.Performance -> "Performance"
 }
 
 @Composable
@@ -710,6 +712,46 @@ private fun LayoutDetailMetadata(event: TelemetryDisplayEvent.Layout, textColor:
             metadata.second?.let { DetailRow("Windows", "$it", textColor) }
         }
     }
+}
+
+@Composable
+private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColor: Color) {
+    val healthColor = when (event.health) {
+        "critical" -> Color(0xFFFF4040)
+        "warning" -> Color(0xFFFFA94D)
+        else -> Color(0xFF51CF66)
+    }
+
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(healthColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 6.dp, vertical = 1.dp),
+        ) {
+            Text(
+                event.health.uppercase(),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = healthColor,
+            )
+        }
+    }
+
+    if (event.changedMetrics.isNotEmpty()) {
+        DetailRow("Changed", event.changedMetrics.joinToString(", "), textColor)
+    }
+
+    Spacer(Modifier.height(4.dp))
+    event.fps?.let { DetailRow("Frame Rate", "${it.toInt()} fps", textColor) }
+    event.frameTimeMs?.let { DetailRow("Frame Time", "${it.toInt()} ms", textColor) }
+    event.jankFrames?.let { DetailRow("Jank Frames", "$it", textColor) }
+    event.touchLatencyMs?.let { DetailRow("Touch Latency", "${it.toInt()} ms", textColor) }
+    event.memoryUsageMb?.let { DetailRow("Memory", "${it.toInt()} MB", textColor) }
+    event.cpuUsagePercent?.let { DetailRow("CPU", "${"%.1f".format(it)}%", textColor) }
 }
 
 /**

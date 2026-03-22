@@ -71,6 +71,7 @@ private enum class CategoryFilter(val label: String, val icon: String) {
     NonFatals("Non-Fatal", "\u26A0\uFE0F"), // ⚠️
     Storage("Storage", "\uD83D\uDDC4\uFE0F"), // 🗄️
     Layout("Layout", "\uD83C\uDFD7\uFE0F"), // 🏗️
+    Performance("Perf", "\uD83D\uDCCA"),     // 📊
 }
 
 /**
@@ -151,6 +152,7 @@ fun TelemetryDashboard(
                         CategoryFilter.NonFatals -> event is TelemetryDisplayEvent.Failure && event.type == "nonfatal"
                         CategoryFilter.Storage -> event is TelemetryDisplayEvent.Storage
                         CategoryFilter.Layout -> event is TelemetryDisplayEvent.Layout
+                        CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
                     }
                 }
             }
@@ -184,6 +186,7 @@ fun TelemetryDashboard(
                 CategoryFilter.NonFatals to events.count { it is TelemetryDisplayEvent.Failure && it.type == "nonfatal" },
                 CategoryFilter.Storage to events.count { it is TelemetryDisplayEvent.Storage },
                 CategoryFilter.Layout to events.count { it is TelemetryDisplayEvent.Layout },
+                CategoryFilter.Performance to events.count { it is TelemetryDisplayEvent.Performance },
             )
         }
     }
@@ -460,6 +463,7 @@ private fun TelemetryEventRow(
                 }
                 is TelemetryDisplayEvent.Storage -> "\uD83D\uDDC4\uFE0F" // 🗄️
                 is TelemetryDisplayEvent.Layout -> "\uD83C\uDFD7\uFE0F"  // 🏗️
+                is TelemetryDisplayEvent.Performance -> "\uD83D\uDCCA" // 📊
             },
             fontSize = 10.sp,
         )
@@ -475,6 +479,7 @@ private fun TelemetryEventRow(
             is TelemetryDisplayEvent.Failure -> FailureSummary(event, textColor)
             is TelemetryDisplayEvent.Storage -> StorageSummary(event, textColor)
             is TelemetryDisplayEvent.Layout -> LayoutSummary(event, textColor)
+            is TelemetryDisplayEvent.Performance -> PerformanceSummary(event, textColor)
         }
     }
 }
@@ -752,6 +757,31 @@ private fun LayoutSummary(event: TelemetryDisplayEvent.Layout, textColor: Color)
         "excessive_recomposition" -> Color(0xFFFFA94D) // orange
         "recomposition" -> Color(0xFF74C0FC) // light blue
         else -> textColor.copy(alpha = 0.7f)
+    }
+
+    Text(
+        text,
+        fontSize = 11.sp,
+        fontFamily = FontFamily.Monospace,
+        color = color,
+        maxLines = 1,
+    )
+}
+
+@Composable
+private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textColor: Color) {
+    val changed = event.changedMetrics.joinToString(", ")
+    val metrics = buildString {
+        event.fps?.let { append("${it.toInt()}fps ") }
+        event.frameTimeMs?.let { append("${it.toInt()}ms ") }
+        event.jankFrames?.let { if (it > 0) append("${it}jank ") }
+        event.memoryUsageMb?.let { append("${it.toInt()}MB ") }
+    }.trim()
+    val text = "[${event.health.uppercase()}] $metrics ($changed)"
+    val color = when (event.health) {
+        "critical" -> Color(0xFFFF4040)
+        "warning" -> Color(0xFFFFA94D)
+        else -> Color(0xFF51CF66)
     }
 
     Text(

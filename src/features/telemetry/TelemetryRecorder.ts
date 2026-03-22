@@ -10,7 +10,8 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 
 export type TelemetryCategory =
   | "network" | "log" | "custom" | "os" | "navigation"
-  | "crash" | "anr" | "nonfatal" | "storage" | "layout";
+  | "crash" | "anr" | "nonfatal" | "storage" | "layout"
+  | "performance";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -257,6 +258,32 @@ export class TelemetryRecorder {
     }
 
     this.pushToSocket({ category: "layout", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /**
+   * Record a performance metric change as a telemetry event.
+   * Emitted when metrics cross health thresholds (healthy→warning→critical).
+   * Push-only — no separate DB write (performance data is already stored in performance_audit_results).
+   */
+  recordPerformanceEvent(event: {
+    timestamp: number;
+    packageName: string | null;
+    fps: number | null;
+    frameTimeMs: number | null;
+    jankFrames: number | null;
+    touchLatencyMs: number | null;
+    memoryUsageMb: number | null;
+    cpuUsagePercent: number | null;
+    health: string;
+    changedMetrics: string[];
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({
+      category: "performance",
+      timestamp: event.timestamp,
+      deviceId,
+      data: event,
+    });
   }
 
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {

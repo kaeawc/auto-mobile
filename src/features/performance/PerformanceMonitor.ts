@@ -8,6 +8,7 @@ import {
 } from "../../daemon/performancePushSocketServer";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
+import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFile } from "child_process";
@@ -82,6 +83,8 @@ interface MonitoredDevice {
   prevJankCounters: RawJankCounters | null;
   /** PID of the app process (cached for iOS since it requires a lookup) */
   cachedPid: number | null;
+  /** Previous per-metric health for detecting threshold crossings */
+  previousMetricHealth: Record<string, string>;
 }
 
 /**
@@ -204,6 +207,7 @@ export class PerformanceMonitor {
       cachedTouchLatency: null,
       prevJankCounters: null,
       cachedPid: null,
+      previousMetricHealth: {},
     });
     logger.info(`[PerformanceMonitor] Started monitoring ${packageName} on ${deviceId} (${platform})`);
   }
@@ -485,6 +489,9 @@ export class PerformanceMonitor {
 
     server.pushPerformanceData(data);
 
+    // Emit telemetry events when metric health status changes
+    this.emitPerformanceTelemetry(device, now, metrics, data.health);
+
     // Also push to the observation stream for IDE plugin
     // Skip for iOS - CtrlProxy iOSClient handles observation stream updates via CADisplayLink
     if (device.platform === "ios") {
@@ -509,6 +516,75 @@ export class PerformanceMonitor {
         recompositionRate: recompositionSummary?.averagePerSecond ?? null,
       };
       observationServer.pushPerformanceUpdate(device.deviceId, streamData);
+    }
+  }
+
+  /**
+   * Detect per-metric health changes and emit telemetry events.
+   * Only emits when a metric crosses a threshold boundary (healthy→warning→critical or back).
+   */
+  private emitPerformanceTelemetry(
+    device: MonitoredDevice,
+    now: number,
+    metrics: {
+      fps: number | null;
+      frameTimeMs: number | null;
+      jankFrames: number | null;
+      touchLatencyMs: number | null;
+      memoryUsageMb: number | null;
+      cpuUsagePercent: number | null;
+    },
+    overallHealth: string
+  ): void {
+    const th = DEFAULT_THRESHOLDS;
+    const currentHealth: Record<string, string> = {};
+    const changedMetrics: string[] = [];
+
+    // Classify each metric
+    if (metrics.fps !== null) {
+      currentHealth.fps = metrics.fps < th.fpsCritical ? "critical" : metrics.fps < th.fpsWarning ? "warning" : "healthy";
+    }
+    if (metrics.frameTimeMs !== null) {
+      currentHealth.frameTime = metrics.frameTimeMs > th.frameTimeCritical ? "critical" : metrics.frameTimeMs > th.frameTimeWarning ? "warning" : "healthy";
+    }
+    if (metrics.jankFrames !== null) {
+      currentHealth.jank = metrics.jankFrames > th.jankCritical ? "critical" : metrics.jankFrames > th.jankWarning ? "warning" : "healthy";
+    }
+    if (metrics.touchLatencyMs !== null) {
+      currentHealth.touchLatency = metrics.touchLatencyMs > th.touchLatencyCritical ? "critical" : metrics.touchLatencyMs > th.touchLatencyWarning ? "warning" : "healthy";
+    }
+    if (metrics.memoryUsageMb !== null) {
+      // Memory doesn't have thresholds in DEFAULT_THRESHOLDS, track absolute value changes
+      currentHealth.memory = "info";
+    }
+
+    // Compare against previous health — emit when any metric crosses a threshold
+    for (const [metric, health] of Object.entries(currentHealth)) {
+      const prev = device.previousMetricHealth[metric];
+      if (prev !== undefined && prev !== health) {
+        changedMetrics.push(metric);
+      }
+    }
+
+    // Update stored health
+    device.previousMetricHealth = currentHealth;
+
+    // Emit telemetry if any metric health changed
+    if (changedMetrics.length > 0) {
+      const recorder = TelemetryRecorder.getInstance();
+      recorder.setContext(device.deviceId, null);
+      recorder.recordPerformanceEvent({
+        timestamp: now,
+        packageName: device.packageName,
+        fps: metrics.fps,
+        frameTimeMs: metrics.frameTimeMs,
+        jankFrames: metrics.jankFrames,
+        touchLatencyMs: metrics.touchLatencyMs,
+        memoryUsageMb: metrics.memoryUsageMb,
+        cpuUsagePercent: metrics.cpuUsagePercent,
+        health: overallHealth,
+        changedMetrics,
+      });
     }
   }
 

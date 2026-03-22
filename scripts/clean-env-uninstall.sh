@@ -305,6 +305,8 @@ remove_homebrew_packages() {
         gum
         hadolint
         vips
+        libusbmuxd
+        ideviceinstaller
     )
 
     local installed=()

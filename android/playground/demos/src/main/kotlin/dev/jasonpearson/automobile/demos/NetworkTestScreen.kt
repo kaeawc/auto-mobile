@@ -45,8 +45,10 @@ import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
 
 private data class NetworkResult(
     val label: String,
@@ -65,16 +67,27 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
 
         val client = remember {
             OkHttpClient.Builder().apply {
+                connectTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
+                readTimeout(5, java.util.concurrent.TimeUnit.SECONDS)
                 AutoMobileNetwork.interceptor(captureHeaders = true, captureBodies = true)?.let { addInterceptor(it) }
             }.build()
         }
 
-        fun makeRequest(label: String, url: String) {
+        fun makeRequest(
+            label: String,
+            url: String,
+            method: String = "GET",
+            body: okhttp3.RequestBody? = null,
+        ) {
             scope.launch {
                 val start = System.currentTimeMillis()
                 try {
+                    val request = Request.Builder()
+                        .url(url)
+                        .method(method, body)
+                        .build()
                     val response = withContext(Dispatchers.IO) {
-                        client.newCall(Request.Builder().url(url).build()).execute()
+                        client.newCall(request).execute()
                     }
                     val duration = System.currentTimeMillis() - start
                     results.add(0, NetworkResult(label, response.code, duration, null))
@@ -162,7 +175,15 @@ fun NetworkTestScreen(onNavigateBack: () -> Unit) {
                                 ) { Text("GET 200") }
 
                                 Button(
-                                    onClick = { makeRequest("POST 200", "https://httpbin.org/post") },
+                                    onClick = {
+                                        makeRequest(
+                                            "POST 200",
+                                            "https://httpbin.org/post",
+                                            method = "POST",
+                                            body = """{"message":"hello","timestamp":${System.currentTimeMillis()}}"""
+                                                .toRequestBody("application/json".toMediaType()),
+                                        )
+                                    },
                                     modifier = Modifier.weight(1f).semantics { testTag = "http_post_200" },
                                     colors = ButtonDefaults.buttonColors(
                                         containerColor = MaterialTheme.colorScheme.primary,

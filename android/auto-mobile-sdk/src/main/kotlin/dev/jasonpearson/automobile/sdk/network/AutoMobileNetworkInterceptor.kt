@@ -46,9 +46,13 @@ class AutoMobileNetworkInterceptor(
     val request = chain.request()
     val startMs = System.currentTimeMillis()
 
-    // Capture request headers
+    // Capture request headers — include OkHttp defaults that will be added later
     val reqHeaders = if (captureHeaders) {
-      request.headers.toMap()
+      val headers = request.headers.toMap().toMutableMap()
+      // OkHttp adds these automatically in the network layer; include them for completeness
+      if ("Host" !in headers) headers["Host"] = request.url.host
+      if ("User-Agent" !in headers) headers["User-Agent"] = "okhttp/${okhttp3.OkHttp.VERSION}"
+      headers
     } else null
 
     // Capture request body

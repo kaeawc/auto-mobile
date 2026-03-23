@@ -2675,54 +2675,74 @@ start_mcp_daemon() {
 # These are not development/CI tools — they are required for end-user functionality:
 #   ffmpeg  - video recording and encoding (videoRecording tool)
 #   vips    - native image processing via sharp (observe screenshots, image comparison)
-install_runtime_deps() {
+# Install a system package using the host's native package manager.
+# Usage: _install_system_package <package_name> <description> [apt_name]
+# apt_name defaults to package_name if not provided.
+_install_system_package() {
+    local pkg="$1"
+    local description="$2"
+    local apt_pkg="${3:-$1}"
     local os
     os=$(detect_os)
 
+    local install_cmd=""
+    local skip_hint=""
+
+    case "${os}" in
+        macos)
+            if command_exists brew; then
+                install_cmd="brew install ${pkg}"
+                skip_hint="brew install ${pkg}"
+            fi
+            ;;
+        linux)
+            if command_exists apt-get; then
+                install_cmd="sudo apt-get install -y -qq ${apt_pkg}"
+                skip_hint="sudo apt-get install ${apt_pkg}"
+            elif command_exists dnf; then
+                install_cmd="sudo dnf install -y ${apt_pkg}"
+                skip_hint="sudo dnf install ${apt_pkg}"
+            elif command_exists pacman; then
+                install_cmd="sudo pacman -S --noconfirm ${apt_pkg}"
+                skip_hint="sudo pacman -S ${apt_pkg}"
+            fi
+            ;;
+    esac
+
+    if [[ -z "${install_cmd}" ]]; then
+        log_warn "${pkg} not found — ${description} will be unavailable"
+        return 1
+    fi
+
+    if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+        log_info "Installing ${pkg} (${description})..."
+        if run_spinner "Installing ${pkg}" bash -c "${install_cmd} >/dev/null 2>&1"; then
+            CHANGES_MADE=true
+            return 0
+        else
+            log_warn "${pkg} install failed — ${description} will be unavailable"
+            return 1
+        fi
+    fi
+
+    if gum confirm "Install ${pkg}? (${description})"; then
+        if run_spinner "Installing ${pkg}" bash -c "${install_cmd} >/dev/null 2>&1"; then
+            CHANGES_MADE=true
+            return 0
+        else
+            log_warn "${pkg} install failed — ${description} will be unavailable"
+            return 1
+        fi
+    fi
+
+    log_info "Skipped ${pkg} — install later with: ${skip_hint}"
+    return 1
+}
+
+install_runtime_deps() {
     # ffmpeg — required for video recording features
     if ! command_exists ffmpeg; then
-        if [[ "${os}" == "macos" ]] && command_exists brew; then
-            if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-                log_info "Installing ffmpeg (required for video recording)..."
-                if run_spinner "Installing ffmpeg" brew install ffmpeg; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "ffmpeg install failed — video recording will be unavailable"
-                fi
-            elif gum confirm "Install ffmpeg? (required for video recording)"; then
-                if run_spinner "Installing ffmpeg" brew install ffmpeg; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "ffmpeg install failed — video recording will be unavailable"
-                fi
-            else
-                log_info "Skipped ffmpeg — install later with: brew install ffmpeg"
-            fi
-        elif [[ "${os}" == "linux" ]] && command_exists apt-get; then
-            if [[ "${NON_INTERACTIVE}" == "true" ]]; then
-                log_info "Installing ffmpeg (required for video recording)..."
-                if sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "ffmpeg install failed — video recording will be unavailable"
-                fi
-            elif gum confirm "Install ffmpeg? (required for video recording)"; then
-                if sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1; then
-                    CHANGES_MADE=true
-                else
-                    log_warn "ffmpeg install failed — video recording will be unavailable"
-                fi
-            else
-                log_info "Skipped ffmpeg — install later with: sudo apt-get install ffmpeg"
-            fi
-        else
-            log_warn "ffmpeg not found — video recording will be unavailable"
-            if [[ "${os}" == "macos" ]]; then
-                log_info "Install with: brew install ffmpeg"
-            else
-                _log_linux_install_hint "ffmpeg" "ffmpeg" "ffmpeg" "ffmpeg"
-            fi
-        fi
+        _install_system_package "ffmpeg" "required for video recording" || true
     fi
 
     # libvips — sharp bundles its own libvips via @img/sharp-libvips-* optional

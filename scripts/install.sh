@@ -3465,8 +3465,8 @@ apply_preset() {
 
     case "${preset_name}" in
         minimal)
-            # MCP client config only - no CLI, no daemon, no IDE plugin
-            INSTALL_BUN=false
+            # MCP client config + ensure bun is installed (configs reference bunx)
+            INSTALL_BUN=true
             INSTALL_IDE_PLUGIN=false
             INSTALL_AUTOMOBILE_CLI=false
             START_DAEMON=false

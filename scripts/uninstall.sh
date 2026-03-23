@@ -456,6 +456,9 @@ remove_cli() {
         if command_exists bun; then
             log_info "[DRY-RUN]   - bun remove -g @kaeawc/auto-mobile"
         fi
+        if command_exists npm; then
+            log_info "[DRY-RUN]   - npm uninstall -g @kaeawc/auto-mobile (legacy cleanup)"
+        fi
         return 0
     fi
 
@@ -463,6 +466,11 @@ remove_cli() {
 
     if command_exists bun; then
         bun remove -g @kaeawc/auto-mobile 2>/dev/null || true
+    fi
+
+    # Also remove legacy npm global install (older versions used npm install -g)
+    if command_exists npm; then
+        npm uninstall -g @kaeawc/auto-mobile 2>/dev/null || true
     fi
 
     # Verify removal by checking if command still exists

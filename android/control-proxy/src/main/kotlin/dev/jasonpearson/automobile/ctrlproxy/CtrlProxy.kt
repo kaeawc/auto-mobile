@@ -1001,21 +1001,21 @@ class CtrlProxy : AccessibilityService() {
 
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
-        if (isRecording) recordInteractionEvent(event, "windowChange")
       }
 
       // Always broadcast interaction events for telemetry tracking.
-      // TYPE_VIEW_CLICKED doesn't fire for many Compose views — also track
-      // TYPE_VIEW_SELECTED and TYPE_VIEW_FOCUSED for broader coverage.
+      // Compose views don't fire TYPE_VIEW_CLICKED for most taps — also track
+      // TYPE_WINDOW_STATE_CHANGED (activity/dialog transitions) which reliably
+      // fires for both Compose and View-based UIs.
       when (event.eventType) {
         AccessibilityEvent.TYPE_VIEW_CLICKED ->
           recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
           recordInteractionEvent(event, "longPress")
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
+          recordInteractionEvent(event, "navigate")
         AccessibilityEvent.TYPE_VIEW_SELECTED ->
           recordInteractionEvent(event, "select")
-        AccessibilityEvent.TYPE_VIEW_FOCUSED ->
-          recordInteractionEvent(event, "focus")
         AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
           val now = System.currentTimeMillis()
           if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
@@ -1024,7 +1024,7 @@ class CtrlProxy : AccessibilityService() {
           }
         }
         AccessibilityEvent.TYPE_VIEW_SCROLLED ->
-          recordInteractionEvent(event, "swipe")
+          recordInteractionEvent(event, "scroll")
       }
 
       // Delegate to the smart debouncer for content/window changes

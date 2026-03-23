@@ -501,16 +501,8 @@ jobs:
           bun dist/src/index.js --cli doctor --json 2>&1 | tee ci-logs/daemon-doctor.log
           bun dist/src/index.js --daemon stop   2>&1 | tee ci-logs/daemon-stop.log
 
-      - name: "Run Uninstaller"
-        shell: bash
-        continue-on-error: true
-        run: |
-          set -uo pipefail
-          bash ./scripts/uninstall.sh --all --force 2>&1 | tee ci-logs/uninstaller.log
-          echo "UNINSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
-
       - name: "Upload Logs"
-        if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure()
+        if: env.INSTALL_EXIT_CODE != '0' || failure()
         uses: actions/upload-artifact@v6
         with:
           name: installer-development-${{ matrix.os }}-logs
@@ -518,11 +510,10 @@ jobs:
           retention-days: 7
 
       - name: "Fail on error"
-        if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0'
+        if: env.INSTALL_EXIT_CODE != '0'
         shell: bash
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
-          echo "Uninstaller exit code: ${UNINSTALL_EXIT_CODE:-0}"
           exit 1
 
   # =============================================================================

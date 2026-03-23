@@ -143,20 +143,21 @@ class CtrlProxy : AccessibilityService() {
   @Volatile
   private var isRecording: Boolean = false
 
-  // Debounce for inputText interaction events (TYPE_VIEW_TEXT_CHANGED fires per keystroke)
-  private var lastInputTextBroadcastMs: Long = 0
+  // Debounce timestamps — @Volatile since interaction events may trigger coroutines
+  @Volatile private var lastInputTextBroadcastMs: Long = 0
   private val inputTextDebounceMs: Long = 100
 
-  // Debounce for accessibility-focus-based tap detection (avoids duplicates with TYPE_VIEW_CLICKED)
-  private var lastA11yFocusTapMs: Long = 0
+  @Volatile private var lastA11yFocusTapMs: Long = 0
   private val a11yFocusTapDebounceMs: Long = 200
 
-  // Debounce for scroll events — accumulate delta and emit once per gesture
+  // Debounce for scroll events — accumulate delta and emit once per gesture.
+  // Store extracted fields instead of the raw AccessibilityEvent because
+  // Android recycles events after onAccessibilityEvent returns.
   private var lastScrollBroadcastMs: Long = 0
   private val scrollDebounceMs: Long = 300
-  private var pendingScrollDeltaX: Int = 0
-  private var pendingScrollDeltaY: Int = 0
-  private var pendingScrollEvent: AccessibilityEvent? = null
+  @Volatile private var pendingScrollDeltaX: Int = 0
+  @Volatile private var pendingScrollDeltaY: Int = 0
+  private var pendingScrollPackageName: String? = null
 
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
@@ -1171,15 +1172,15 @@ class CtrlProxy : AccessibilityService() {
       pendingScrollDeltaX += event.scrollDeltaX
       pendingScrollDeltaY += event.scrollDeltaY
     }
-    pendingScrollEvent = event
+    // Store package name — don't hold the event reference (Android recycles it)
+    pendingScrollPackageName = event.packageName?.toString()
 
     if (now - lastScrollBroadcastMs >= scrollDebounceMs) {
       lastScrollBroadcastMs = now
-      val scrollEvent = pendingScrollEvent ?: return
-      recordInteractionEvent(scrollEvent, "scroll")
+      recordInteractionEvent(event, "scroll")
       pendingScrollDeltaX = 0
       pendingScrollDeltaY = 0
-      pendingScrollEvent = null
+      pendingScrollPackageName = null
     }
   }
 

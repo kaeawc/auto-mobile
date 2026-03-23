@@ -9,18 +9,18 @@ import {
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
-
-/** Minimal interface for performance telemetry emission. */
-export interface PerformanceTelemetryEmitter {
-  setContext(deviceId: string | null, sessionId: string | null): void;
-  recordPerformanceEvent: TelemetryRecorder["recordPerformanceEvent"];
-}
 import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFile } from "child_process";
 import { promisify } from "util";
 
 const defaultExecFileAsync = promisify(execFile);
+
+/** Minimal interface for performance telemetry emission. */
+export interface PerformanceTelemetryEmitter {
+  setContext(deviceId: string | null, sessionId: string | null): void;
+  recordPerformanceEvent: TelemetryRecorder["recordPerformanceEvent"];
+}
 
 /**
  * Type for the exec function used to run host commands.

@@ -130,72 +130,65 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       }
     }
 
-    // Backfill failures (crash/anr/nonfatal) from failure_occurrences + failure_groups
+    // Backfill failures (crash/anr/nonfatal) in parallel
     const failureTypes = ["crash", "anr", "nonfatal"] as const;
-    for (const failureType of failureTypes) {
-      if (shouldInclude(failureType)) {
-        try {
-          const db = getDatabase() as unknown as Kysely<Database>;
-          let q = db
-            .selectFrom("failure_occurrences")
-            .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")
-            .select([
-              "failure_occurrences.id as occurrenceId",
-              "failure_occurrences.group_id as groupId",
-              "failure_occurrences.timestamp",
-              "failure_occurrences.device_id as deviceId",
-              "failure_occurrences.screen_at_failure as screen",
-              "failure_groups.type",
-              "failure_groups.severity",
-              "failure_groups.title",
-              "failure_groups.stack_trace_json",
-            ])
-            .where("failure_groups.type", "=", failureType);
+    const failureBackfillFn = async (failureType: typeof failureTypes[number]) => {
+      if (!shouldInclude(failureType)) {return;}
+      try {
+        const db = getDatabase() as unknown as Kysely<Database>;
+        let q = db
+          .selectFrom("failure_occurrences")
+          .innerJoin("failure_groups", "failure_groups.id", "failure_occurrences.group_id")
+          .select([
+            "failure_occurrences.id as occurrenceId",
+            "failure_occurrences.group_id as groupId",
+            "failure_occurrences.timestamp",
+            "failure_occurrences.device_id as deviceId",
+            "failure_occurrences.screen_at_failure as screen",
+            "failure_groups.type",
+            "failure_groups.severity",
+            "failure_groups.title",
+            "failure_groups.stack_trace_json",
+          ])
+          .where("failure_groups.type", "=", failureType);
 
-          if (deviceId) {
-            q = q.where("failure_occurrences.device_id", "=", deviceId);
-          }
-
-          const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
-
-          for (const r of rows) {
-            // Extract exceptionType and parsed stack trace from stored JSON
-            let exceptionType: string | undefined;
-            let stackTrace: unknown[] | null = null;
-            if (r.stack_trace_json) {
-              try {
-                const frames = JSON.parse(r.stack_trace_json);
-                if (Array.isArray(frames)) {
-                  stackTrace = frames;
-                  if (frames.length > 0) {
-                    exceptionType = frames[0].className ?? frames[0].declaringClass;
-                  }
-                }
-              } catch { /* ignore parse errors */ }
-            }
-
-            events.push({
-              category: failureType,
-              timestamp: r.timestamp,
-              deviceId: r.deviceId,
-              data: {
-                type: r.type,
-                occurrenceId: r.occurrenceId,
-                groupId: r.groupId,
-                severity: r.severity,
-                title: r.title,
-                exceptionType,
-                screen: r.screen,
-                timestamp: r.timestamp,
-                stackTrace,
-              },
-            });
-          }
-        } catch (e) {
-          logger.warn(`[TelemetryPush] Failed to backfill ${failureType} events: ${e}`);
+        if (deviceId) {
+          q = q.where("failure_occurrences.device_id", "=", deviceId);
         }
+
+        const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
+
+        for (const r of rows) {
+          let exceptionType: string | undefined;
+          let stackTrace: unknown[] | null = null;
+          if (r.stack_trace_json) {
+            try {
+              const frames = JSON.parse(r.stack_trace_json);
+              if (Array.isArray(frames)) {
+                stackTrace = frames;
+                if (frames.length > 0) {
+                  exceptionType = frames[0].className ?? frames[0].declaringClass;
+                }
+              }
+            } catch { /* ignore parse errors */ }
+          }
+
+          events.push({
+            category: failureType,
+            timestamp: r.timestamp,
+            deviceId: r.deviceId,
+            data: {
+              type: r.type, occurrenceId: r.occurrenceId, groupId: r.groupId,
+              severity: r.severity, title: r.title, exceptionType,
+              screen: r.screen, timestamp: r.timestamp, stackTrace,
+            },
+          });
+        }
+      } catch (e) {
+        logger.warn(`[TelemetryPush] Failed to backfill ${failureType} events: ${e}`);
       }
-    }
+    };
+    await Promise.all(failureTypes.map(failureBackfillFn));
 
     const [storageRows, layoutRows] = await Promise.all([
       shouldInclude("storage") ? getStorageEvents({ deviceId, limit }) : [],

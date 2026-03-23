@@ -2541,12 +2541,18 @@ migrate_stale_daemon() {
         local target_version
         target_version=$(get_package_version)
 
-        if [[ -z "${target_version}" ]] || [[ "${running_version}" == "${target_version}" ]]; then
+        if [[ -n "${target_version}" ]] && [[ "${running_version}" == "${target_version}" ]]; then
             log_info "Running daemon is up to date (v${running_version})."
             return 0
         fi
 
-        log_info "Running daemon is v${running_version}, latest is v${target_version}. Restarting..."
+        if [[ -n "${target_version}" ]]; then
+            log_info "Running daemon is v${running_version}, latest is v${target_version}. Restarting..."
+        else
+            # Outside a repo checkout (e.g. curl pipe install) — can't determine
+            # target version from package.json. Restart to ensure latest from registry.
+            log_info "Running daemon is v${running_version}. Restarting to ensure latest version..."
+        fi
     fi
 
     log_info "Restarting daemon to pick up the new version..."
@@ -3996,6 +4002,9 @@ main() {
         fi
     fi
 
+    # Bun setup — must happen before MCP config writing since configs reference bunx
+    handle_bun_setup
+
     # MCP Client Configuration (new feature!)
     if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]]; then
         echo ""
@@ -4040,9 +4049,6 @@ main() {
             fi
         fi
     fi
-
-    # Bun setup
-    handle_bun_setup
 
     # bun install (for local-dev preset)
     if [[ "${RUN_NPM_INSTALL}" == "true" ]] && [[ "${IS_REPO}" == "true" ]]; then

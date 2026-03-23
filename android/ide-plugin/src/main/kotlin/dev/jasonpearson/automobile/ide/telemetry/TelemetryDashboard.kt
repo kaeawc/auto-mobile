@@ -815,7 +815,11 @@ private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textCol
 
 @Composable
 private fun InteractionSummary(event: TelemetryDisplayEvent.Interaction, textColor: Color) {
-    val target = event.elementText ?: event.elementResourceId?.substringAfterLast('/') ?: event.elementContentDesc ?: ""
+    val target = event.elementText
+        ?: event.elementResourceId?.substringAfterLast('/')
+        ?: event.elementContentDesc
+        ?: event.screenClassName?.substringAfterLast('.')
+        ?: ""
     val text = "${event.interactionType}${if (target.isNotEmpty()) " '$target'" else ""}"
     Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF74C0FC), maxLines = 1)
 }

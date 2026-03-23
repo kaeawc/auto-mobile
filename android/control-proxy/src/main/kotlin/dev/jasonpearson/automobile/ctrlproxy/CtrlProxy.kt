@@ -147,6 +147,10 @@ class CtrlProxy : AccessibilityService() {
   private var lastInputTextBroadcastMs: Long = 0
   private val inputTextDebounceMs: Long = 100
 
+  // Debounce for accessibility-focus-based tap detection (avoids duplicates with TYPE_VIEW_CLICKED)
+  private var lastA11yFocusTapMs: Long = 0
+  private val a11yFocusTapDebounceMs: Long = 200
+
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
 
@@ -1003,15 +1007,17 @@ class CtrlProxy : AccessibilityService() {
         lastWindowClassName = event.className?.toString()
       }
 
-      // Always broadcast interaction events for telemetry tracking.
-      // Compose views don't fire TYPE_VIEW_CLICKED for most taps — also track
-      // TYPE_WINDOW_STATE_CHANGED (activity/dialog transitions) which reliably
-      // fires for both Compose and View-based UIs.
+      // Broadcast interaction events for telemetry tracking.
+      // Also track TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires when Compose
+      // moves accessibility focus after a tap (more reliable than TYPE_VIEW_CLICKED
+      // for Compose UIs). Debounce at 200ms to avoid duplicate events.
       when (event.eventType) {
         AccessibilityEvent.TYPE_VIEW_CLICKED ->
           recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
           recordInteractionEvent(event, "longPress")
+        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED ->
+          recordDebouncedInteraction(event, "tap")
         AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
           recordInteractionEvent(event, "navigate")
         AccessibilityEvent.TYPE_VIEW_SELECTED ->
@@ -1111,6 +1117,18 @@ class CtrlProxy : AccessibilityService() {
       } catch (e: Exception) {
         Log.e(TAG, "Error broadcasting interaction event", e)
       }
+    }
+  }
+
+  /**
+   * Record an interaction event with debouncing to avoid duplicates.
+   * Used for TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires alongside TYPE_VIEW_CLICKED.
+   */
+  private fun recordDebouncedInteraction(event: AccessibilityEvent, type: String) {
+    val now = System.currentTimeMillis()
+    if (now - lastA11yFocusTapMs >= a11yFocusTapDebounceMs) {
+      lastA11yFocusTapMs = now
+      recordInteractionEvent(event, type)
     }
   }
 

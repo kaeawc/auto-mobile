@@ -1,6 +1,7 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 import { BootedDevice } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { MemoryMetricsCollector, MemoryMetrics } from "./MemoryMetricsCollector";
@@ -375,6 +376,21 @@ export class MemoryAudit {
       logger.info(
         `[MemoryAudit] Stored audit result for ${packageName}/${toolName}: ${passed ? "PASSED" : "FAILED"}`
       );
+
+      // Emit memory telemetry event
+      const recorder = TelemetryRecorder.getInstance();
+      recorder.setContext(this.device.id, null);
+      recorder.recordMemoryEvent({
+        timestamp: Date.now(),
+        packageName,
+        passed,
+        javaHeapGrowthMb: metrics.javaHeapGrowthMb,
+        nativeHeapGrowthMb: metrics.nativeHeapGrowthMb,
+        gcCount: metrics.gcCount,
+        gcDurationMs: metrics.gcTotalDurationMs,
+        unreachableObjects: metrics.unreachableObjects?.count ?? null,
+        violations: violations.map(v => v.type),
+      });
     } catch (error) {
       logger.error(`[MemoryAudit] Failed to store audit result: ${error}`);
     }

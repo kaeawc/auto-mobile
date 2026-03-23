@@ -11,7 +11,7 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 export type TelemetryCategory =
   | "network" | "log" | "custom" | "os" | "navigation"
   | "crash" | "anr" | "nonfatal" | "storage" | "layout"
-  | "performance";
+  | "performance" | "interaction" | "gesture" | "input" | "memory";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -284,6 +284,62 @@ export class TelemetryRecorder {
       deviceId,
       data: event,
     });
+  }
+
+  /** Record a user interaction (tap, swipe, longPress, inputText) from the accessibility service. */
+  recordInteractionEvent(event: {
+    timestamp: number;
+    type: string;
+    packageName?: string;
+    screenClassName?: string;
+    elementText?: string;
+    elementResourceId?: string;
+    elementContentDesc?: string;
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "interaction", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /** Record a gesture result (tap, swipe, drag, pinch) with performance timing. */
+  recordGestureEvent(event: {
+    timestamp: number;
+    gestureType: string;
+    success: boolean;
+    totalTimeMs: number;
+    gestureTimeMs?: number;
+    error?: string | null;
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "gesture", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /** Record a text input result (setText, imeAction, selectAll, clipboard). */
+  recordInputEvent(event: {
+    timestamp: number;
+    inputType: string;
+    success: boolean;
+    totalTimeMs: number;
+    action?: string;
+    error?: string | null;
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "input", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /** Record a memory audit result (passed/failed with metrics). */
+  recordMemoryEvent(event: {
+    timestamp: number;
+    packageName: string;
+    passed: boolean;
+    javaHeapGrowthMb: number | null;
+    nativeHeapGrowthMb: number | null;
+    gcCount: number | null;
+    gcDurationMs: number | null;
+    unreachableObjects: number | null;
+    violations: string[];
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "memory", timestamp: event.timestamp, deviceId, data: event });
   }
 
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {

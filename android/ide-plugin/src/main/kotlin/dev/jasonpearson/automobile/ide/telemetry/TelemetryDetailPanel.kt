@@ -120,6 +120,10 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
                 is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
+                is TelemetryDisplayEvent.Interaction -> InteractionDetail(event, textColor)
+                is TelemetryDisplayEvent.Gesture -> GestureDetail(event, textColor)
+                is TelemetryDisplayEvent.Input -> InputDetail(event, textColor)
+                is TelemetryDisplayEvent.Memory -> MemoryDetail(event, textColor)
             }
         }
 
@@ -144,6 +148,10 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
     is TelemetryDisplayEvent.Storage -> "Storage Change"
     is TelemetryDisplayEvent.Layout -> "Layout Event"
     is TelemetryDisplayEvent.Performance -> "Performance"
+    is TelemetryDisplayEvent.Interaction -> "Interaction"
+    is TelemetryDisplayEvent.Gesture -> "Gesture"
+    is TelemetryDisplayEvent.Input -> "Text Input"
+    is TelemetryDisplayEvent.Memory -> "Memory Audit"
 }
 
 @Composable
@@ -752,6 +760,67 @@ private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColo
     event.touchLatencyMs?.let { DetailRow("Touch Latency", "${it.toInt()} ms", textColor) }
     event.memoryUsageMb?.let { DetailRow("Memory", "${it.toInt()} MB", textColor) }
     event.cpuUsagePercent?.let { DetailRow("CPU", "${"%.1f".format(it)}%", textColor) }
+}
+
+@Composable
+private fun InteractionDetail(event: TelemetryDisplayEvent.Interaction, textColor: Color) {
+    DetailRow("Type", event.interactionType, textColor)
+    event.packageName?.let { DetailRow("Package", it, textColor) }
+    event.screenClassName?.let { DetailRow("Screen", it, textColor) }
+    event.elementText?.let { DetailRow("Text", it, textColor) }
+    event.elementResourceId?.let { DetailRow("Resource ID", it, textColor) }
+    event.elementContentDesc?.let { DetailRow("Content Desc", it, textColor) }
+}
+
+@Composable
+private fun GestureDetail(event: TelemetryDisplayEvent.Gesture, textColor: Color) {
+    DetailRow("Gesture", event.gestureType, textColor)
+    DetailRow("Success", if (event.success) "Yes" else "No", textColor)
+    DetailRow("Total Time", "${event.totalTimeMs}ms", textColor)
+    event.gestureTimeMs?.let { DetailRow("Gesture Time", "${it}ms", textColor) }
+    event.error?.let { DetailRow("Error", it, textColor) }
+}
+
+@Composable
+private fun InputDetail(event: TelemetryDisplayEvent.Input, textColor: Color) {
+    DetailRow("Input Type", event.inputType, textColor)
+    DetailRow("Success", if (event.success) "Yes" else "No", textColor)
+    DetailRow("Duration", "${event.totalTimeMs}ms", textColor)
+    event.action?.let { DetailRow("Action", it, textColor) }
+    event.error?.let { DetailRow("Error", it, textColor) }
+}
+
+@Composable
+private fun MemoryDetail(event: TelemetryDisplayEvent.Memory, textColor: Color) {
+    val resultColor = if (event.passed) Color(0xFF51CF66) else Color(0xFFFF6B6B)
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(resultColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 6.dp, vertical = 1.dp),
+        ) {
+            Text(
+                if (event.passed) "PASSED" else "FAILED",
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = resultColor,
+            )
+        }
+    }
+    DetailRow("Package", event.packageName, textColor)
+    event.javaHeapGrowthMb?.let { DetailRow("Java Heap Growth", "${"%.2f".format(it)} MB", textColor) }
+    event.nativeHeapGrowthMb?.let { DetailRow("Native Heap Growth", "${"%.2f".format(it)} MB", textColor) }
+    event.gcCount?.let { DetailRow("GC Count", "$it", textColor) }
+    event.gcDurationMs?.let { DetailRow("GC Duration", "${it}ms", textColor) }
+    event.unreachableObjects?.let { DetailRow("Unreachable Objects", "$it", textColor) }
+    if (event.violations.isNotEmpty()) {
+        Spacer(Modifier.height(4.dp))
+        DetailRow("Violations", event.violations.joinToString(", "), textColor)
+    }
 }
 
 /**

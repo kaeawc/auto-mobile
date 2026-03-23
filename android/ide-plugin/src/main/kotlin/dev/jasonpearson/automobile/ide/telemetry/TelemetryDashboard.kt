@@ -72,6 +72,10 @@ private enum class CategoryFilter(val label: String, val icon: String) {
     Storage("Storage", "\uD83D\uDDC4\uFE0F"), // 🗄️
     Layout("Layout", "\uD83C\uDFD7\uFE0F"), // 🏗️
     Performance("Perf", "\uD83D\uDCCA"),     // 📊
+    Interactions("Touch", "\uD83D\uDC46"),  // 👆
+    Gestures("Gesture", "\u270B"),          // ✋
+    Inputs("Input", "\u2328\uFE0F"),        // ⌨️
+    MemoryAudit("Memory", "\uD83E\uDDE0"), // 🧠
 }
 
 /**
@@ -153,6 +157,10 @@ fun TelemetryDashboard(
                         CategoryFilter.Storage -> event is TelemetryDisplayEvent.Storage
                         CategoryFilter.Layout -> event is TelemetryDisplayEvent.Layout
                         CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
+                        CategoryFilter.Interactions -> event is TelemetryDisplayEvent.Interaction
+                        CategoryFilter.Gestures -> event is TelemetryDisplayEvent.Gesture
+                        CategoryFilter.Inputs -> event is TelemetryDisplayEvent.Input
+                        CategoryFilter.MemoryAudit -> event is TelemetryDisplayEvent.Memory
                     }
                 }
             }
@@ -187,6 +195,10 @@ fun TelemetryDashboard(
                 CategoryFilter.Storage to events.count { it is TelemetryDisplayEvent.Storage },
                 CategoryFilter.Layout to events.count { it is TelemetryDisplayEvent.Layout },
                 CategoryFilter.Performance to events.count { it is TelemetryDisplayEvent.Performance },
+                CategoryFilter.Interactions to events.count { it is TelemetryDisplayEvent.Interaction },
+                CategoryFilter.Gestures to events.count { it is TelemetryDisplayEvent.Gesture },
+                CategoryFilter.Inputs to events.count { it is TelemetryDisplayEvent.Input },
+                CategoryFilter.MemoryAudit to events.count { it is TelemetryDisplayEvent.Memory },
             )
         }
     }
@@ -464,6 +476,10 @@ private fun TelemetryEventRow(
                 is TelemetryDisplayEvent.Storage -> "\uD83D\uDDC4\uFE0F" // 🗄️
                 is TelemetryDisplayEvent.Layout -> "\uD83C\uDFD7\uFE0F"  // 🏗️
                 is TelemetryDisplayEvent.Performance -> "\uD83D\uDCCA" // 📊
+                is TelemetryDisplayEvent.Interaction -> "\uD83D\uDC46" // 👆
+                is TelemetryDisplayEvent.Gesture -> "\u270B" // ✋
+                is TelemetryDisplayEvent.Input -> "\u2328\uFE0F" // ⌨️
+                is TelemetryDisplayEvent.Memory -> "\uD83E\uDDE0" // 🧠
             },
             fontSize = 10.sp,
         )
@@ -480,6 +496,10 @@ private fun TelemetryEventRow(
             is TelemetryDisplayEvent.Storage -> StorageSummary(event, textColor)
             is TelemetryDisplayEvent.Layout -> LayoutSummary(event, textColor)
             is TelemetryDisplayEvent.Performance -> PerformanceSummary(event, textColor)
+            is TelemetryDisplayEvent.Interaction -> InteractionSummary(event, textColor)
+            is TelemetryDisplayEvent.Gesture -> GestureSummary(event, textColor)
+            is TelemetryDisplayEvent.Input -> InputSummary(event, textColor)
+            is TelemetryDisplayEvent.Memory -> MemorySummary(event, textColor)
         }
     }
 }
@@ -791,6 +811,43 @@ private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textCol
         color = color,
         maxLines = 1,
     )
+}
+
+@Composable
+private fun InteractionSummary(event: TelemetryDisplayEvent.Interaction, textColor: Color) {
+    val target = event.elementText ?: event.elementResourceId?.substringAfterLast('/') ?: event.elementContentDesc ?: ""
+    val text = "${event.interactionType}${if (target.isNotEmpty()) " '$target'" else ""}"
+    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF74C0FC), maxLines = 1)
+}
+
+@Composable
+private fun GestureSummary(event: TelemetryDisplayEvent.Gesture, textColor: Color) {
+    val status = if (event.success) "${event.totalTimeMs}ms" else "FAILED"
+    val text = "${event.gestureType} $status"
+    val color = when {
+        !event.success -> Color(0xFFFF6B6B)
+        event.totalTimeMs > 1000 -> Color(0xFFFFA94D)
+        else -> Color(0xFF51CF66)
+    }
+    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
+}
+
+@Composable
+private fun InputSummary(event: TelemetryDisplayEvent.Input, textColor: Color) {
+    val status = if (event.success) "${event.totalTimeMs}ms" else "FAILED"
+    val actionSuffix = event.action?.let { " ($it)" } ?: ""
+    val text = "${event.inputType}$actionSuffix $status"
+    val color = if (event.success) textColor.copy(alpha = 0.85f) else Color(0xFFFF6B6B)
+    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
+}
+
+@Composable
+private fun MemorySummary(event: TelemetryDisplayEvent.Memory, textColor: Color) {
+    val status = if (event.passed) "PASS" else "FAIL"
+    val growth = event.javaHeapGrowthMb?.let { "+${"%.1f".format(it)}MB" } ?: ""
+    val text = "[$status] ${event.packageName.substringAfterLast('.')} $growth"
+    val color = if (event.passed) Color(0xFF51CF66) else Color(0xFFFF6B6B)
+    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
 }
 
 /**

@@ -101,7 +101,7 @@ import type {
  * Interface for interaction event from accessibility service
  */
 export interface InteractionEvent {
-  type: "tap" | "longPress" | "swipe" | "inputText" | "select" | "navigate" | "scroll" | "touch";
+  type: "tap" | "longPress" | "swipe" | "inputText" | "select" | "navigate" | "scroll" | "touch" | "stateChange";
   timestamp: number;
   packageName?: string;
   screenClassName?: string;
@@ -1688,12 +1688,27 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
-          await recorder.recordCustomEvent({
-            timestamp: msg.timestamp,
-            applicationId: event.applicationId ?? null,
-            name: event.name ?? "",
-            properties: event.properties ?? {},
-          });
+
+          // Route SDK auto-tap events to interaction telemetry
+          if (event.name === "_auto_tap") {
+            const props = event.properties ?? {};
+            recorder.recordInteractionEvent({
+              timestamp: msg.timestamp,
+              type: "tap",
+              packageName: event.applicationId ?? undefined,
+              screenClassName: props.className ?? undefined,
+              elementText: props.text ?? undefined,
+              elementResourceId: props.resourceId ?? undefined,
+              elementContentDesc: props.contentDesc ?? undefined,
+            });
+          } else {
+            await recorder.recordCustomEvent({
+              timestamp: msg.timestamp,
+              applicationId: event.applicationId ?? null,
+              name: event.name ?? "",
+              properties: event.properties ?? {},
+            });
+          }
         }
       }
 

@@ -570,6 +570,11 @@ class CtrlProxy : AccessibilityService() {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
 
+    // Ensure we receive ALL accessibility event types (XML config may be cached)
+    serviceInfo = serviceInfo?.apply {
+      eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+    }
+
     try {
       overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
       overlayManager =
@@ -1007,8 +1012,10 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      // Log accessibility events for debugging (reduced verbosity)
-      Log.v(TAG, "Accessibility event: ${event.eventType}, package: ${event.packageName}")
+      // Log accessibility events for debugging
+      if (event.packageName?.toString()?.contains("playground") == true) {
+        Log.d(TAG, "A11Y event type=${event.eventType} class=${event.className} pkg=${event.packageName} text=${event.text} contentChange=${event.contentChangeTypes} action=${event.action}")
+      }
 
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
         lastWindowClassName = event.className?.toString()
@@ -1023,10 +1030,19 @@ class CtrlProxy : AccessibilityService() {
           recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
           recordInteractionEvent(event, "longPress")
-        // Compose doesn't fire TYPE_VIEW_CLICKED — use touch interaction start
-        // which fires when the user physically touches the screen
-        AccessibilityEvent.TYPE_TOUCH_INTERACTION_START ->
-          recordDebouncedInteraction(event, "touch")
+        // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
+        // on clickable elements. CONTENT_CHANGE_TYPE_STATE_DESCRIPTION (64) fires
+        // when Compose state changes (e.g., button click updates counter).
+        // CONTENT_CHANGE_TYPE_CONTENT_DESCRIPTION (4) fires on many Compose interactions.
+        AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED -> {
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            val ct = event.contentChangeTypes
+            // State description change = likely user interaction (Compose state update)
+            if (ct and AccessibilityEvent.CONTENT_CHANGE_TYPE_STATE_DESCRIPTION != 0) {
+              recordDebouncedInteraction(event, "stateChange")
+            }
+          }
+        }
         AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
           recordInteractionEvent(event, "navigate")
         AccessibilityEvent.TYPE_VIEW_SELECTED ->

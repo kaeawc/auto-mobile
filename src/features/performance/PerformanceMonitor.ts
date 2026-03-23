@@ -559,6 +559,7 @@ export class PerformanceMonitor {
     }
 
     // Compare against previous health — emit when any metric crosses a threshold
+    const isFirstSample = Object.keys(device.previousMetricHealth).length === 0;
     for (const [metric, health] of Object.entries(currentHealth)) {
       const prev = device.previousMetricHealth[metric];
       if (prev !== undefined && prev !== health) {
@@ -569,8 +570,12 @@ export class PerformanceMonitor {
     // Update stored health
     device.previousMetricHealth = currentHealth;
 
-    // Emit telemetry if any metric health changed
-    if (changedMetrics.length > 0) {
+    // Emit on first sample (baseline) or when any metric health changed
+    const effectiveChanged = isFirstSample
+      ? Object.keys(currentHealth) // all metrics for baseline
+      : changedMetrics;
+
+    if (effectiveChanged.length > 0) {
       const recorder = TelemetryRecorder.getInstance();
       recorder.setContext(device.deviceId, null);
       recorder.recordPerformanceEvent({
@@ -583,7 +588,7 @@ export class PerformanceMonitor {
         memoryUsageMb: metrics.memoryUsageMb,
         cpuUsagePercent: metrics.cpuUsagePercent,
         health: overallHealth,
-        changedMetrics,
+        changedMetrics: effectiveChanged,
       });
     }
   }

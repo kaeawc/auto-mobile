@@ -9,6 +9,12 @@ import {
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../daemon/deviceDataStreamSocketServer";
 import { RecompositionTracker } from "./RecompositionTracker";
 import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
+
+/** Minimal interface for performance telemetry emission. */
+export interface PerformanceTelemetryEmitter {
+  setContext(deviceId: string | null, sessionId: string | null): void;
+  recordPerformanceEvent: TelemetryRecorder["recordPerformanceEvent"];
+}
 import { defaultAdbClientFactory, AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient, SimCtl } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { execFile } from "child_process";
@@ -120,6 +126,7 @@ export class PerformanceMonitor {
   private readonly simCtlClientFactory: SimCtlClientFactory;
   private readonly getServer: ServerGetter;
   private readonly execFileAsync: ExecFileAsyncFn;
+  private readonly getTelemetryEmitter: () => PerformanceTelemetryEmitter;
   private monitoredDevices = new Map<string, MonitoredDevice>();
 
   constructor(
@@ -127,13 +134,15 @@ export class PerformanceMonitor {
     adbClientFactory: AdbClientFactory = defaultAdbClientFactory,
     serverGetter: ServerGetter = getPerformancePushServer,
     simCtlClientFactory: SimCtlClientFactory = defaultSimCtlClientFactory,
-    execFileAsync: ExecFileAsyncFn = defaultExecFileAsync
+    execFileAsync: ExecFileAsyncFn = defaultExecFileAsync,
+    getTelemetryEmitter: () => PerformanceTelemetryEmitter = () => TelemetryRecorder.getInstance(),
   ) {
     this.timer = timer;
     this.adbClientFactory = adbClientFactory;
     this.simCtlClientFactory = simCtlClientFactory;
     this.getServer = serverGetter;
     this.execFileAsync = execFileAsync;
+    this.getTelemetryEmitter = getTelemetryEmitter;
   }
 
   /**
@@ -576,9 +585,9 @@ export class PerformanceMonitor {
       : changedMetrics;
 
     if (effectiveChanged.length > 0) {
-      const recorder = TelemetryRecorder.getInstance();
-      recorder.setContext(device.deviceId, null);
-      recorder.recordPerformanceEvent({
+      const emitter = this.getTelemetryEmitter();
+      emitter.setContext(device.deviceId, null);
+      emitter.recordPerformanceEvent({
         timestamp: now,
         packageName: device.packageName,
         fps: metrics.fps,

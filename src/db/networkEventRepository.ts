@@ -94,11 +94,11 @@ export async function getNetworkEvents(
     host: r.host,
     path: r.path,
     error: r.error,
-    requestHeaders: (r as any).request_headers_json ? JSON.parse((r as any).request_headers_json) : null,
-    responseHeaders: (r as any).response_headers_json ? JSON.parse((r as any).response_headers_json) : null,
-    requestBody: (r as any).request_body ?? null,
-    responseBody: (r as any).response_body ?? null,
-    contentType: (r as any).content_type ?? null,
+    requestHeaders: r.request_headers_json ? JSON.parse(r.request_headers_json) : null,
+    responseHeaders: r.response_headers_json ? JSON.parse(r.response_headers_json) : null,
+    requestBody: r.request_body ?? null,
+    responseBody: r.response_body ?? null,
+    contentType: r.content_type ?? null,
   }));
 }
 

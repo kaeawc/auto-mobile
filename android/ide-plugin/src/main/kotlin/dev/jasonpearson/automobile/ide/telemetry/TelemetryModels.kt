@@ -444,10 +444,6 @@ enum class EventSeverity(val label: String, val icon: String, val color: Long) {
 
 /**
  * Classify a telemetry event into a severity level.
- * Named `eventSeverity` to avoid collision with Failure.severity field.
- */
-/**
- * Classify a telemetry event into a severity level.
  * @param slowNetworkThresholdMs Requests slower than this are classified as Warning (default 3000ms)
  */
 fun TelemetryDisplayEvent.classifyEventSeverity(slowNetworkThresholdMs: Long = 3000): EventSeverity =

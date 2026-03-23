@@ -1789,8 +1789,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       recorder.setContext(this.device.deviceId, null);
       const screenName = data.foregroundActivity ?? data.packageName ?? null;
       const windowCount = data.windows?.length ?? 0;
-      // Store the hierarchy JSON so the telemetry detail panel can render the tree.
-      // Wrap in the format parseHierarchyFromJson expects: { hierarchy: { node: ... } }
+      // Store metadata only — full hierarchy is available via the observation stream.
+      // Embedding the full tree (~10-50KB) in every telemetry event would cause
+      // excessive DB/socket traffic at the 500ms hierarchy update interval.
       recorder.recordLayoutEvent({
         timestamp: now,
         applicationId: data.packageName ?? null,
@@ -1804,7 +1805,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           screenName,
           windowCount,
           foregroundActivity: data.foregroundActivity ?? null,
-          hierarchy: { node: data.hierarchy },
         }),
         screenName,
       });

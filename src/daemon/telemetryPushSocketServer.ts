@@ -80,32 +80,24 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     const shouldInclude = (category: string) =>
       filter.category === null || filter.category === category;
 
-    if (shouldInclude("network")) {
-      const rows = await getNetworkEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "network", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    // Run independent backfill queries in parallel
+    const [networkRows, logRows, customRows, osRows] = await Promise.all([
+      shouldInclude("network") ? getNetworkEvents({ deviceId, limit }) : [],
+      shouldInclude("log") ? getLogEvents({ deviceId, limit }) : [],
+      shouldInclude("custom") ? getCustomEvents({ deviceId, limit }) : [],
+      shouldInclude("os") ? getOsEvents({ deviceId, limit }) : [],
+    ]);
+    for (const r of networkRows) {
+      events.push({ category: "network", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
-
-    if (shouldInclude("log")) {
-      const rows = await getLogEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    for (const r of logRows) {
+      events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
-
-    if (shouldInclude("custom")) {
-      const rows = await getCustomEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "custom", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    for (const r of customRows) {
+      events.push({ category: "custom", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
-
-    if (shouldInclude("os")) {
-      const rows = await getOsEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    for (const r of osRows) {
+      events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
 
     if (shouldInclude("navigation")) {
@@ -205,18 +197,15 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       }
     }
 
-    if (shouldInclude("storage")) {
-      const rows = await getStorageEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "storage", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    const [storageRows, layoutRows] = await Promise.all([
+      shouldInclude("storage") ? getStorageEvents({ deviceId, limit }) : [],
+      shouldInclude("layout") ? getLayoutEvents({ deviceId, limit }) : [],
+    ]);
+    for (const r of storageRows) {
+      events.push({ category: "storage", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
-
-    if (shouldInclude("layout")) {
-      const rows = await getLayoutEvents({ deviceId, limit });
-      for (const r of rows) {
-        events.push({ category: "layout", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
-      }
+    for (const r of layoutRows) {
+      events.push({ category: "layout", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
     }
 
     // Sort oldest-first so dashboard shows them in correct order

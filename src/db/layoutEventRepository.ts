@@ -77,7 +77,7 @@ export async function getLayoutEvents(
     durationMs: r.duration_ms,
     likelyCause: r.likely_cause,
     detailsJson: r.details_json,
-    screenName: (r as any).screen_name ?? null,
+    screenName: r.screen_name ?? null,
   }));
 }
 

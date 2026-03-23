@@ -32,7 +32,7 @@ export async function recordStorageEvent(
   let previousValue: string | null = input.previousValue ?? null;
   if (previousValue === null && input.key !== null && input.deviceId !== null) {
     try {
-      let q = d
+      const q = d
         .selectFrom("storage_events")
         .select("value")
         .where("device_id", "=", input.deviceId)
@@ -94,7 +94,7 @@ export async function getStorageEvents(
     value: r.value,
     valueType: r.value_type,
     changeType: r.change_type,
-    previousValue: (r as any).previous_value ?? null,
+    previousValue: r.previous_value ?? null,
   }));
 }
 

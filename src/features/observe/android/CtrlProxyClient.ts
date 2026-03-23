@@ -101,7 +101,7 @@ import type {
  * Interface for interaction event from accessibility service
  */
 export interface InteractionEvent {
-  type: "tap" | "longPress" | "swipe" | "inputText" | "select" | "navigate" | "scroll";
+  type: "tap" | "longPress" | "swipe" | "inputText" | "select" | "navigate" | "scroll" | "touch";
   timestamp: number;
   packageName?: string;
   screenClassName?: string;

@@ -1005,12 +1005,17 @@ class CtrlProxy : AccessibilityService() {
       }
 
       // Always broadcast interaction events for telemetry tracking.
-      // Previously gated behind isRecording (test recording only).
+      // TYPE_VIEW_CLICKED doesn't fire for many Compose views — also track
+      // TYPE_VIEW_SELECTED and TYPE_VIEW_FOCUSED for broader coverage.
       when (event.eventType) {
         AccessibilityEvent.TYPE_VIEW_CLICKED ->
           recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
           recordInteractionEvent(event, "longPress")
+        AccessibilityEvent.TYPE_VIEW_SELECTED ->
+          recordInteractionEvent(event, "select")
+        AccessibilityEvent.TYPE_VIEW_FOCUSED ->
+          recordInteractionEvent(event, "focus")
         AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
           val now = System.currentTimeMillis()
           if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {

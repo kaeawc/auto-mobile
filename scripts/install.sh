@@ -63,6 +63,7 @@ IDE_PLUGIN_ZIP_URL=""
 IDE_PLUGIN_DIR=""
 INSTALL_AUTOMOBILE_CLI=false
 INSTALL_CLAUDE_MARKETPLACE=false
+INSTALL_DEV_TOOLS=false
 START_DAEMON=false
 DAEMON_STARTED=false
 AUTO_MOBILE_CMD=()
@@ -156,6 +157,40 @@ is_daemon_running() {
     [[ -S "${socket_path}" ]]
 }
 
+# Read daemon version from PID file. Returns empty string if unreadable.
+get_running_daemon_version() {
+    local pid_file
+    pid_file="/tmp/auto-mobile-daemon-$(id -u).pid"
+    if [[ ! -f "${pid_file}" ]]; then
+        echo ""
+        return 0
+    fi
+
+    if command_exists jq; then
+        jq -r '.version // empty' "${pid_file}" 2>/dev/null || echo ""
+    elif command_exists python3; then
+        python3 -c "import json,sys; print(json.load(open('${pid_file}')).get('version',''))" 2>/dev/null || echo ""
+    else
+        # Fallback: grep for version field
+        grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "${pid_file}" 2>/dev/null | \
+            sed 's/.*"\([^"]*\)"$/\1/' || echo ""
+    fi
+}
+
+# Get the package version from package.json (the version we're installing)
+get_package_version() {
+    if [[ "${IS_REPO}" == "true" ]] && [[ -f "${PROJECT_ROOT}/package.json" ]]; then
+        if command_exists jq; then
+            jq -r '.version // empty' "${PROJECT_ROOT}/package.json" 2>/dev/null || echo ""
+        else
+            grep -o '"version"[[:space:]]*:[[:space:]]*"[^"]*"' "${PROJECT_ROOT}/package.json" 2>/dev/null | \
+                head -1 | sed 's/.*"\([^"]*\)"$/\1/' || echo ""
+        fi
+    else
+        echo ""
+    fi
+}
+
 # Check if Claude CLI is installed
 is_claude_cli_installed() {
     command_exists claude
@@ -206,7 +241,7 @@ Options:
 Presets:
   minimal      - CLI + MCP client configuration only
   development  - Full setup with debug flags and IDE plugin (if available)
-  local-dev    - Dependencies for hot-reload development (bun, npm install)
+  local-dev    - Dependencies for hot-reload development (bun install)
 
 Examples:
   ./scripts/install.sh --dry-run
@@ -1695,25 +1730,25 @@ generate_auto_mobile_config() {
     case "${preset}" in
         minimal)
             cat << 'EOF'
-{"command":"npx","args":["-y","@kaeawc/auto-mobile@latest"]}
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest"]}
 EOF
             ;;
         development)
             # Only add ANDROID_HOME to env if it wasn't already set in the environment
             if [[ -n "${android_home}" && "${ANDROID_HOME_FROM_ENV}" != "true" ]]; then
                 cat << EOF
-{"command":"npx","args":["-y","@kaeawc/auto-mobile@latest","--debug","--debug-perf"],"env":{"ANDROID_HOME":"${android_home}"}}
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"],"env":{"ANDROID_HOME":"${android_home}"}}
 EOF
             else
                 cat << 'EOF'
-{"command":"npx","args":["-y","@kaeawc/auto-mobile@latest","--debug","--debug-perf"]}
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"]}
 EOF
             fi
             ;;
         *)
             # Default to minimal
             cat << 'EOF'
-{"command":"npx","args":["-y","@kaeawc/auto-mobile@latest"]}
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest"]}
 EOF
             ;;
     esac
@@ -1728,8 +1763,8 @@ generate_auto_mobile_config_toml() {
         minimal)
             cat << 'EOF'
 [mcp_servers.auto-mobile]
-command = "npx"
-args = ["-y", "@kaeawc/auto-mobile@latest"]
+command = "bunx"
+args = ["@kaeawc/auto-mobile@latest"]
 EOF
             ;;
         development)
@@ -1737,8 +1772,8 @@ EOF
             if [[ -n "${android_home}" && "${ANDROID_HOME_FROM_ENV}" != "true" ]]; then
                 cat << EOF
 [mcp_servers.auto-mobile]
-command = "npx"
-args = ["-y", "@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
+command = "bunx"
+args = ["@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
 
 [mcp_servers.auto-mobile.env]
 ANDROID_HOME = "${android_home}"
@@ -1746,8 +1781,8 @@ EOF
             else
                 cat << 'EOF'
 [mcp_servers.auto-mobile]
-command = "npx"
-args = ["-y", "@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
+command = "bunx"
+args = ["@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
 EOF
             fi
             ;;
@@ -1755,8 +1790,8 @@ EOF
             # Default to minimal
             cat << 'EOF'
 [mcp_servers.auto-mobile]
-command = "npx"
-args = ["-y", "@kaeawc/auto-mobile@latest"]
+command = "bunx"
+args = ["@kaeawc/auto-mobile@latest"]
 EOF
             ;;
     esac
@@ -1848,9 +1883,8 @@ extensions:
     name: auto-mobile
     type: stdio
     enabled: true
-    cmd: npx
+    cmd: bunx
     args:
-      - "-y"
       - "@kaeawc/auto-mobile@latest"
 EOF
             ;;
@@ -1863,9 +1897,8 @@ extensions:
     name: auto-mobile
     type: stdio
     enabled: true
-    cmd: npx
+    cmd: bunx
     args:
-      - "-y"
       - "@kaeawc/auto-mobile@latest"
       - "--debug"
       - "--debug-perf"
@@ -1879,9 +1912,8 @@ extensions:
     name: auto-mobile
     type: stdio
     enabled: true
-    cmd: npx
+    cmd: bunx
     args:
-      - "-y"
       - "@kaeawc/auto-mobile@latest"
       - "--debug"
       - "--debug-perf"
@@ -1896,9 +1928,8 @@ extensions:
     name: auto-mobile
     type: stdio
     enabled: true
-    cmd: npx
+    cmd: bunx
     args:
-      - "-y"
       - "@kaeawc/auto-mobile@latest"
 EOF
             ;;
@@ -1985,6 +2016,15 @@ update_mcp_client_config() {
     if [[ "${existing_content}" == "${new_content}" ]]; then
         log_info "No changes needed for ${client_name}"
         return 0
+    fi
+
+    # Detect npx → bunx migration and show clear messaging
+    if echo "${existing_content}" | grep -qE '"npx"|command = "npx"|cmd: npx'; then
+        echo ""
+        printf '%b[MIGRATION]%b %s config uses npx — updating to bunx.\n' "${BOLD}" "${RESET}" "${client_name}"
+        printf '  AutoMobile now runs exclusively on Bun for a single, consistent runtime.\n'
+        printf '  This changes the MCP server command from npx to bunx.\n'
+        echo ""
     fi
 
     # Show diff
@@ -2167,14 +2207,8 @@ detect_ide_plugins_dir() {
 }
 
 resolve_auto_mobile_command() {
-    # Prefer npx/bunx over global install to avoid requiring npm install -g
-    if command_exists npx; then
-        AUTO_MOBILE_CMD=("npx" "-y" "@kaeawc/auto-mobile@latest")
-        return 0
-    fi
-
     if command_exists bunx; then
-        AUTO_MOBILE_CMD=("bunx" "-y" "@kaeawc/auto-mobile@latest")
+        AUTO_MOBILE_CMD=("bunx" "@kaeawc/auto-mobile@latest")
         return 0
     fi
 
@@ -2186,7 +2220,7 @@ ensure_auto_mobile_command() {
         return 0
     fi
 
-    log_error "AutoMobile CLI not available. Install it or ensure bunx/npx is on PATH."
+    log_error "AutoMobile CLI not available. Install bun (https://bun.sh) and ensure bunx is on PATH."
     return 1
 }
 
@@ -2292,7 +2326,40 @@ ensure_mcp_daemon() {
     DAEMON_STARTED=true
 }
 
+migrate_npm_global_auto_mobile() {
+    # Detect and remove stale npm global install of auto-mobile.
+    # Old versions were installed via "npm install -g @kaeawc/auto-mobile".
+    # This must be cleaned up so the npm binary doesn't shadow the bun one.
+    if ! command_exists npm; then
+        return 0
+    fi
+
+    local npm_list_output
+    npm_list_output=$(npm list -g @kaeawc/auto-mobile 2>/dev/null) || return 0
+
+    if ! echo "${npm_list_output}" | grep -q "@kaeawc/auto-mobile"; then
+        return 0
+    fi
+
+    log_warn "Found old npm global install of @kaeawc/auto-mobile"
+    log_info "AutoMobile now runs exclusively on Bun. Removing npm global package..."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Remove npm global: npm uninstall -g @kaeawc/auto-mobile")
+        log_info "[DRY-RUN] Would remove npm global install"
+        return 0
+    fi
+
+    npm uninstall -g @kaeawc/auto-mobile 2>/dev/null || true
+    hash -r 2>/dev/null || true
+    log_info "Removed npm global install of @kaeawc/auto-mobile"
+    CHANGES_MADE=true
+}
+
 install_auto_mobile_cli() {
+    # Clean up any stale npm global install before proceeding
+    migrate_npm_global_auto_mobile
+
     if command_exists auto-mobile; then
         log_info "AutoMobile CLI already installed."
         return 0
@@ -2302,11 +2369,8 @@ install_auto_mobile_cli() {
         if command_exists bun; then
             DRY_RUN_LOG+=("[DRY-RUN] Install AutoMobile CLI with Bun")
             log_info "[DRY-RUN] Would install AutoMobile CLI with: bun add -g @kaeawc/auto-mobile@latest"
-        elif command_exists npm; then
-            DRY_RUN_LOG+=("[DRY-RUN] Install AutoMobile CLI with npm")
-            log_info "[DRY-RUN] Would install AutoMobile CLI with: npm install -g @kaeawc/auto-mobile@latest"
         else
-            log_error "Bun or npm is required to install AutoMobile CLI."
+            log_error "Bun is required to install AutoMobile CLI. Install from https://bun.sh"
             return 1
         fi
         return 0
@@ -2337,22 +2401,7 @@ install_auto_mobile_cli() {
         return 1
     fi
 
-    if command_exists npm; then
-        local install_output
-        local install_status=0
-        install_output=$(npm install -g @kaeawc/auto-mobile@latest 2>&1) || install_status=$?
-
-        if [[ ${install_status} -ne 0 ]]; then
-            log_error "AutoMobile CLI installation failed with npm:"
-            echo "${install_output}"
-            return 1
-        fi
-        log_info "AutoMobile CLI installed with npm"
-        CHANGES_MADE=true
-        return 0
-    fi
-
-    log_error "Bun or npm is required to install AutoMobile CLI."
+    log_error "Bun is required to install AutoMobile CLI. Install from https://bun.sh"
     return 1
 }
 
@@ -2475,9 +2524,63 @@ install_ide_plugin() {
     log_info "Restart your IDE to load the AutoMobile plugin."
 }
 
+migrate_stale_daemon() {
+    # If a daemon is already running, check if it's from an older version.
+    # If so, restart it so the user gets the latest behavior automatically.
+    if ! is_daemon_running; then
+        return 0
+    fi
+
+    local running_version
+    running_version=$(get_running_daemon_version)
+
+    if [[ -z "${running_version}" ]]; then
+        # Can't determine version — offer restart to be safe
+        log_warn "Running daemon has no version info (likely pre-migration)."
+    else
+        local target_version
+        target_version=$(get_package_version)
+
+        if [[ -z "${target_version}" ]] || [[ "${running_version}" == "${target_version}" ]]; then
+            log_info "Running daemon is up to date (v${running_version})."
+            return 0
+        fi
+
+        log_info "Running daemon is v${running_version}, latest is v${target_version}. Restarting..."
+    fi
+
+    log_info "Restarting daemon to pick up the new version..."
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        DRY_RUN_LOG+=("[DRY-RUN] Restart daemon for version upgrade")
+        log_info "[DRY-RUN] Would restart daemon"
+        return 0
+    fi
+
+    if ! resolve_auto_mobile_command; then
+        log_warn "Cannot restart daemon: bunx not available. Restart manually after install."
+        return 0
+    fi
+
+    local restart_output
+    local restart_status=0
+    restart_output=$("${AUTO_MOBILE_CMD[@]}" --daemon restart 2>&1) || restart_status=$?
+
+    if [[ ${restart_status} -ne 0 ]]; then
+        log_warn "Daemon restart failed. You may need to restart manually:"
+        log_warn "  bunx @kaeawc/auto-mobile@latest --daemon restart"
+        echo "${restart_output}"
+        return 0
+    fi
+
+    log_info "Daemon restarted successfully."
+    DAEMON_ALREADY_RUNNING=true
+    CHANGES_MADE=true
+}
+
 start_mcp_daemon() {
     if ! resolve_auto_mobile_command; then
-        log_error "AutoMobile CLI not available. Install it or ensure bunx/npx is on PATH."
+        log_error "AutoMobile CLI not available. Install bun (https://bun.sh) and ensure bunx is on PATH."
         return 1
     fi
 
@@ -2599,16 +2702,24 @@ install_runtime_deps() {
         fi
     fi
 
-    # libvips — optional system fallback for sharp image processing.
-    # Sharp's npm prebuilt binaries bundle their own libvips, so a system
-    # install is only needed when the prebuilts are unavailable (e.g.
-    # unsupported arch or failed download). Never auto-install; just inform.
+    # libvips — sharp bundles its own libvips via @img/sharp-libvips-* optional
+    # dependencies, so a system install is not needed. Only log if the bundled
+    # prebuilts are missing (which would cause sharp to fail at runtime).
     if ! _check_libvips; then
-        log_info "System libvips not found (optional — sharp uses bundled prebuilts)"
-        if [[ "${os}" == "macos" ]]; then
-            log_info "If image processing fails, install with: brew install vips"
-        else
-            _log_linux_install_hint "libvips" "libvips-dev" "vips-devel" "libvips"
+        # Check if sharp's bundled libvips is available
+        local sharp_bundled=false
+        if [[ -d "${PROJECT_ROOT:-}/node_modules/@img" ]]; then
+            # Bundled prebuilts exist — no system libvips needed
+            sharp_bundled=true
+        fi
+        if [[ "${sharp_bundled}" != "true" ]]; then
+            log_warn "Neither system libvips nor sharp bundled prebuilts found"
+            log_info "Run 'bun install' to fetch sharp's bundled libvips, or install system libvips:"
+            if [[ "${os}" == "macos" ]]; then
+                log_info "  brew install vips"
+            else
+                _log_linux_install_hint "libvips" "libvips-dev" "vips-devel" "libvips"
+            fi
         fi
     fi
 }
@@ -2630,6 +2741,76 @@ _check_libvips() {
         ldconfig -p 2>/dev/null | grep -q libvips && return 0
     fi
     return 1
+}
+
+# Install development tools needed by scripts/ (shellcheck, jq, ripgrep, etc.)
+# These are Homebrew packages used by validation, linting, and CI scripts.
+install_dev_tools() {
+    if ! command_exists brew; then
+        log_warn "Homebrew not found — skipping dev tool installation"
+        return 0
+    fi
+
+    # All required packages (macOS-specific ones included on macOS)
+    local all_packages=(
+        "shellcheck"    # shell script linting (scripts/shellcheck/)
+        "jq"            # JSON processing (scripts/detect-dead-code-ts.sh, install.sh)
+        "ripgrep"       # fast code search (scripts/detect-dead-code-ts.sh, versioning)
+        "yq"            # YAML processing (install.sh MCP config merging)
+        "gum"           # interactive TUI prompts (install.sh)
+        "hadolint"      # Dockerfile linting (scripts/hadolint/)
+        "xmlstarlet"    # XML processing (Android manifest editing)
+    )
+    if [[ "$(detect_os)" == "macos" ]]; then
+        all_packages+=(
+            "swiftformat"       # Swift formatting (scripts/swiftformat/)
+            "swiftlint"         # Swift linting (scripts/swiftlint/)
+            "xcodegen"          # Xcode project generation
+            "libusbmuxd"        # iproxy for physical iOS device USB tunneling
+            "ideviceinstaller"  # physical iOS device app management
+        )
+    fi
+
+    # Single brew call to get all installed packages (~100ms vs ~300ms per package)
+    local installed_packages
+    installed_packages=$(brew list --formula -1 2>/dev/null || true)
+
+    local to_install=()
+    for pkg in "${all_packages[@]}"; do
+        if ! echo "${installed_packages}" | grep -qx "${pkg}"; then
+            to_install+=("${pkg}")
+        fi
+    done
+
+    if [[ ${#to_install[@]} -eq 0 ]]; then
+        log_info "Development tools ready."
+        return 0
+    fi
+
+    log_info "Installing ${#to_install[@]} missing dev tool(s): ${to_install[*]}"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        for pkg in "${to_install[@]}"; do
+            log_info "[DRY-RUN] Would install ${pkg}"
+        done
+        return 0
+    fi
+
+    local missing=0
+    for pkg in "${to_install[@]}"; do
+        if run_spinner "Installing ${pkg}" brew install "${pkg}"; then
+            CHANGES_MADE=true
+        else
+            log_warn "Failed to install ${pkg}"
+            ((missing++)) || true
+        fi
+    done
+
+    if [[ ${missing} -gt 0 ]]; then
+        log_warn "${missing} dev tool(s) could not be installed"
+    else
+        log_info "Development tools ready."
+    fi
 }
 
 # Print distro-aware install hints for Linux packages.
@@ -2999,8 +3180,8 @@ _install_libimobiledevice_tools() {
     fi
 }
 
-# Report-only variant: show status of physical device tools without offering to install.
-# Used when iOS is already detected as ready (rerun case) to avoid unexpected brew installs.
+# Report or install physical device tools depending on preset.
+# In development/local-dev presets, offers to install. Otherwise just reports.
 ios_report_physical_device_tools() {
     if [[ "$(detect_os)" != "macos" ]]; then
         return 0
@@ -3013,8 +3194,14 @@ ios_report_physical_device_tools() {
 
     if [[ ${#missing_tools[@]} -eq 0 ]]; then
         log_info "Physical iOS device tools: all present"
+        return 0
+    fi
+
+    # In development preset, offer to install
+    if [[ "${INSTALL_DEV_TOOLS}" == "true" ]] && command_exists brew; then
+        ios_check_physical_device_tools
     else
-        log_warn "Missing physical iOS device tools: ${missing_tools[*]}"
+        log_info "Physical iOS device tools not installed: ${missing_tools[*]} (needed for USB-connected iPhones only)"
         log_info "Install with: brew install libusbmuxd ideviceinstaller"
     fi
 }
@@ -3135,14 +3322,6 @@ install_bun_homebrew() {
     return 0
 }
 
-install_bun_npm() {
-    if ! run_spinner "Installing Bun via npm" npm install -g bun; then
-        log_error "Bun installation via npm failed."
-        return 1
-    fi
-
-    return 0
-}
 
 install_bun() {
     local skip_confirm="${1:-false}"  # If true, skip the Yes/No prompt (already confirmed)
@@ -3155,9 +3334,6 @@ install_bun() {
     options+=("Official installer (curl | bash)")
     if [[ "${os}" == "macos" ]] && command_exists brew; then
         options+=("Homebrew (brew install)")
-    fi
-    if command_exists npm; then
-        options+=("npm (npm install -g)")
     fi
 
     # Ask user which method to use
@@ -3176,9 +3352,6 @@ install_bun() {
             case "${choice}" in
                 "Homebrew"*)
                     install_method="homebrew"
-                    ;;
-                "npm"*)
-                    install_method="npm"
                     ;;
                 *)
                     install_method="curl"
@@ -3199,9 +3372,6 @@ install_bun() {
     case "${install_method}" in
         homebrew)
             install_bun_homebrew || install_status=$?
-            ;;
-        npm)
-            install_bun_npm || install_status=$?
             ;;
         *)
             install_bun_curl || install_status=$?
@@ -3249,6 +3419,7 @@ apply_preset() {
             ;;
         development)
             INSTALL_BUN=true
+            INSTALL_DEV_TOOLS=true
             # IDE plugin only installed if available in release
             local ide_url
             ide_url=$(resolve_ide_plugin_url || true)
@@ -3639,10 +3810,16 @@ main() {
             fi
         fi
 
-        # Check libimobiledevice tools (physical iOS device support)
-        spin_check "Checking iproxy" "command -v iproxy >/dev/null 2>&1" || true
-        spin_check "Checking idevice_id" "command -v idevice_id >/dev/null 2>&1" || true
-        spin_check "Checking ideviceinstaller" "command -v ideviceinstaller >/dev/null 2>&1" || true
+        # Check libimobiledevice tools (only needed for physical iOS devices over USB)
+        local ios_usb_missing=()
+        command_exists iproxy          || ios_usb_missing+=("iproxy")
+        command_exists idevice_id      || ios_usb_missing+=("idevice_id")
+        command_exists ideviceinstaller || ios_usb_missing+=("ideviceinstaller")
+        if [[ ${#ios_usb_missing[@]} -eq 0 ]]; then
+            log_info "Checking physical iOS device tools: ok"
+        else
+            log_info "Checking physical iOS device tools: not installed (needed for USB-connected iPhones only)"
+        fi
     fi
 
     # Check AutoMobile CLI
@@ -3803,15 +3980,20 @@ main() {
     # Bun setup
     handle_bun_setup
 
-    # npm install (for local-dev preset)
+    # bun install (for local-dev preset)
     if [[ "${RUN_NPM_INSTALL}" == "true" ]] && [[ "${IS_REPO}" == "true" ]]; then
-        if ! execute_spinner "Running npm install" bash -c "cd '${PROJECT_ROOT}' && npm install"; then
-            log_warn "npm install failed"
+        if ! execute_spinner "Running bun install" bash -c "cd '${PROJECT_ROOT}' && bun install"; then
+            log_warn "bun install failed"
         fi
     fi
 
     # Runtime dependencies (needed for AutoMobile features)
     install_runtime_deps
+
+    # Development tools (shellcheck, jq, ripgrep, etc.)
+    if [[ "${INSTALL_DEV_TOOLS}" == "true" ]]; then
+        install_dev_tools
+    fi
 
     # Platform-specific setup
     case "${platform_choice}" in
@@ -3859,6 +4041,9 @@ main() {
     if [[ "${INSTALL_CLAUDE_MARKETPLACE}" == "true" ]]; then
         install_claude_marketplace
     fi
+
+    # Migrate stale daemon (restart if running an older version)
+    migrate_stale_daemon
 
     # Daemon startup
     if [[ "${START_DAEMON}" == "true" ]]; then

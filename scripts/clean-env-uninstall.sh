@@ -71,7 +71,7 @@ Options:
 
 Categories:
   1. AutoMobile components   (delegates to scripts/uninstall.sh --all)
-  2. Bun                     (~/.bun/, Homebrew tap, npm global)
+  2. Bun                     (~/.bun/, Homebrew tap)
   3. Node.js / nvm           (~/.nvm/, Homebrew node)
   4. Homebrew packages        (ripgrep, shellcheck, jq, ffmpeg, xmlstarlet,
                                swiftformat, swiftlint, xcodegen, yq, gum,
@@ -203,9 +203,6 @@ remove_bun() {
     if command_exists brew && brew list oven-sh/bun/bun >/dev/null 2>&1; then
         found+=("Homebrew: oven-sh/bun/bun")
     fi
-    if command_exists npm && npm list -g bun >/dev/null 2>&1; then
-        found+=("npm global bun package")
-    fi
 
     if [[ ${#found[@]} -eq 0 ]]; then
         log_info "Bun: not found"
@@ -228,11 +225,6 @@ remove_bun() {
         if brew tap 2>/dev/null | grep -q "oven-sh/bun"; then
             run_cmd brew untap oven-sh/bun || true
         fi
-    fi
-
-    # Remove npm global bun if present
-    if command_exists npm && npm list -g bun >/dev/null 2>&1; then
-        run_cmd npm uninstall -g bun || true
     fi
 
     # Remove ~/.bun directory

@@ -456,21 +456,13 @@ remove_cli() {
         if command_exists bun; then
             log_info "[DRY-RUN]   - bun remove -g @kaeawc/auto-mobile"
         fi
-        if command_exists npm; then
-            log_info "[DRY-RUN]   - npm uninstall -g @kaeawc/auto-mobile"
-        fi
         return 0
     fi
 
     log_info "Removing AutoMobile CLI..."
 
-    # Try both bun and npm - the CLI might be installed via either or both
     if command_exists bun; then
         bun remove -g @kaeawc/auto-mobile 2>/dev/null || true
-    fi
-
-    if command_exists npm; then
-        npm uninstall -g @kaeawc/auto-mobile 2>/dev/null || true
     fi
 
     # Verify removal by checking if command still exists

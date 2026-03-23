@@ -249,25 +249,35 @@ jobs:
         if: env.INSTALL_EXIT_CODE == '0'
         shell: bash
         run: |
-          set -euo pipefail
+          set -uo pipefail
+
+          # Refresh PATH — installer may have added ~/.bun/bin or Homebrew paths
+          export PATH="${HOME}/.bun/bin:${PATH}"
+          if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc" 2>/dev/null || true; fi
+          hash -r 2>/dev/null || true
+
           missing=()
 
           # Core runtime
-          command -v bun     || missing+=("bun")
-          command -v bunx    || missing+=("bunx")
-          command -v ffmpeg  || missing+=("ffmpeg")
+          command -v bun     >/dev/null 2>&1 || missing+=("bun")
+          command -v bunx    >/dev/null 2>&1 || missing+=("bunx")
 
-          # Dev tools (installed by development preset)
-          command -v shellcheck  || missing+=("shellcheck")
-          command -v jq          || missing+=("jq")
-          command -v rg          || missing+=("ripgrep")
-          command -v yq          || missing+=("yq")
+          # Runtime deps (ffmpeg installed by installer on macOS via brew,
+          # pre-installed on ubuntu-latest)
+          command -v ffmpeg  >/dev/null 2>&1 || missing+=("ffmpeg")
+
+          # Dev tools (installed by development preset via brew on macOS,
+          # some pre-installed on ubuntu-latest)
+          command -v shellcheck  >/dev/null 2>&1 || missing+=("shellcheck")
+          command -v jq          >/dev/null 2>&1 || missing+=("jq")
+          command -v rg          >/dev/null 2>&1 || missing+=("ripgrep")
 
           # macOS-specific
           if [[ "$(uname -s)" == "Darwin" ]]; then
-            command -v swiftformat || missing+=("swiftformat")
-            command -v swiftlint   || missing+=("swiftlint")
-            command -v iproxy      || missing+=("iproxy")
+            command -v yq          >/dev/null 2>&1 || missing+=("yq")
+            command -v swiftformat >/dev/null 2>&1 || missing+=("swiftformat")
+            command -v swiftlint   >/dev/null 2>&1 || missing+=("swiftlint")
+            command -v iproxy      >/dev/null 2>&1 || missing+=("iproxy")
           fi
 
           if [[ ${#missing[@]} -gt 0 ]]; then
@@ -280,6 +290,7 @@ jobs:
         if: env.INSTALL_EXIT_CODE == '0'
         shell: bash
         run: |
+          export PATH="${HOME}/.bun/bin:${PATH}"
           bun install --frozen-lockfile
           bunx turbo run build --output-logs=errors-only
 
@@ -288,6 +299,7 @@ jobs:
         shell: bash
         run: |
           set -uo pipefail
+          export PATH="${HOME}/.bun/bin:${PATH}"
           mkdir -p ci-logs
 
           bun dist/src/index.js --daemon start  2>&1 | tee ci-logs/daemon-start.log

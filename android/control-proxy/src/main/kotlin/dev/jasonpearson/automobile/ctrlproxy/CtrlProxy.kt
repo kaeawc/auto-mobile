@@ -1000,15 +1000,17 @@ class CtrlProxy : AccessibilityService() {
         if (isRecording) recordInteractionEvent(event, "windowChange")
       }
 
+      // Always broadcast interaction events for telemetry tracking.
+      // Previously gated behind isRecording (test recording only).
       when (event.eventType) {
         AccessibilityEvent.TYPE_VIEW_CLICKED ->
-          if (isRecording) recordInteractionEvent(event, "tap")
+          recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
-          if (isRecording) recordInteractionEvent(event, "longPress")
+          recordInteractionEvent(event, "longPress")
         AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ->
           if (isRecording) recordInteractionEvent(event, "inputText")
         AccessibilityEvent.TYPE_VIEW_SCROLLED ->
-          if (isRecording) recordInteractionEvent(event, "swipe")
+          recordInteractionEvent(event, "swipe")
       }
 
       // Delegate to the smart debouncer for content/window changes

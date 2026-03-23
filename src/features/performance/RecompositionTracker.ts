@@ -255,7 +255,7 @@ export class RecompositionTracker {
     }
 
     const db = getDatabase();
-    const sessionId = new Date().toISOString().split("T")[0];
+    const sessionId = new Date(this.timer.now()).toISOString().split("T")[0];
     const timestamp = new Date(observationTimestamp).toISOString();
 
     try {

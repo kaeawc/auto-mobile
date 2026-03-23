@@ -2698,6 +2698,23 @@ install_runtime_deps() {
             else
                 log_info "Skipped ffmpeg — install later with: brew install ffmpeg"
             fi
+        elif [[ "${os}" == "linux" ]] && command_exists apt-get; then
+            if [[ "${NON_INTERACTIVE}" == "true" ]]; then
+                log_info "Installing ffmpeg (required for video recording)..."
+                if sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1; then
+                    CHANGES_MADE=true
+                else
+                    log_warn "ffmpeg install failed — video recording will be unavailable"
+                fi
+            elif gum confirm "Install ffmpeg? (required for video recording)"; then
+                if sudo apt-get install -y -qq ffmpeg >/dev/null 2>&1; then
+                    CHANGES_MADE=true
+                else
+                    log_warn "ffmpeg install failed — video recording will be unavailable"
+                fi
+            else
+                log_info "Skipped ffmpeg — install later with: sudo apt-get install ffmpeg"
+            fi
         else
             log_warn "ffmpeg not found — video recording will be unavailable"
             if [[ "${os}" == "macos" ]]; then

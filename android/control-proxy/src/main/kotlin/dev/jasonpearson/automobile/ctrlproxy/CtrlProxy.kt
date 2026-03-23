@@ -143,6 +143,10 @@ class CtrlProxy : AccessibilityService() {
   @Volatile
   private var isRecording: Boolean = false
 
+  // Debounce for inputText interaction events (TYPE_VIEW_TEXT_CHANGED fires per keystroke)
+  private var lastInputTextBroadcastMs: Long = 0
+  private val inputTextDebounceMs: Long = 100
+
   // Job for collecting hierarchy flow results
   private var hierarchyFlowJob: Job? = null
 
@@ -1007,8 +1011,13 @@ class CtrlProxy : AccessibilityService() {
           recordInteractionEvent(event, "tap")
         AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
           recordInteractionEvent(event, "longPress")
-        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED ->
-          if (isRecording) recordInteractionEvent(event, "inputText")
+        AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
+          val now = System.currentTimeMillis()
+          if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
+            lastInputTextBroadcastMs = now
+            recordInteractionEvent(event, "inputText")
+          }
+        }
         AccessibilityEvent.TYPE_VIEW_SCROLLED ->
           recordInteractionEvent(event, "swipe")
       }

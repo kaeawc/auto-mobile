@@ -40,4 +40,4 @@ runs:
     - name: "Globally Install AutoMobile"
       shell: ${{ inputs.shell }}
       run: |
-        bun link
+        bun add -g .

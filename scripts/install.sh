@@ -1722,33 +1722,51 @@ show_config_diff() {
     show_colored_diff "${old_content}" "${new_content}" "${config_path}"
 }
 
+# Build the PATH env value that ensures bunx is available for GUI clients.
+# Desktop apps (Claude Desktop, Cursor, etc.) don't inherit shell PATH,
+# so we must inject ~/.bun/bin explicitly.
+_bun_path_env() {
+    local bun_bin="${HOME}/.bun/bin"
+    local brew_bin=""
+    if command_exists brew; then
+        brew_bin="$(brew --prefix 2>/dev/null)/bin"
+    fi
+    # Assemble a PATH that covers bun + brew + standard system paths
+    local parts="${bun_bin}"
+    if [[ -n "${brew_bin}" ]]; then
+        parts="${parts}:${brew_bin}"
+    fi
+    parts="${parts}:/usr/local/bin:/usr/bin:/bin"
+    echo "${parts}"
+}
+
 # Generate auto-mobile MCP server config based on preset
 generate_auto_mobile_config() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+    local bun_path
+    bun_path=$(_bun_path_env)
 
     case "${preset}" in
         minimal)
-            cat << 'EOF'
-{"command":"bunx","args":["@kaeawc/auto-mobile@latest"]}
+            cat << EOF
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest"],"env":{"PATH":"${bun_path}"}}
 EOF
             ;;
         development)
-            # Only add ANDROID_HOME to env if it wasn't already set in the environment
             if [[ -n "${android_home}" && "${ANDROID_HOME_FROM_ENV}" != "true" ]]; then
                 cat << EOF
-{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"],"env":{"ANDROID_HOME":"${android_home}"}}
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"],"env":{"PATH":"${bun_path}","ANDROID_HOME":"${android_home}"}}
 EOF
             else
-                cat << 'EOF'
-{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"]}
+                cat << EOF
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest","--debug","--debug-perf"],"env":{"PATH":"${bun_path}"}}
 EOF
             fi
             ;;
         *)
-            # Default to minimal
-            cat << 'EOF'
-{"command":"bunx","args":["@kaeawc/auto-mobile@latest"]}
+            cat << EOF
+{"command":"bunx","args":["@kaeawc/auto-mobile@latest"],"env":{"PATH":"${bun_path}"}}
 EOF
             ;;
     esac
@@ -1758,17 +1776,21 @@ EOF
 generate_auto_mobile_config_toml() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+    local bun_path
+    bun_path=$(_bun_path_env)
 
     case "${preset}" in
         minimal)
-            cat << 'EOF'
+            cat << EOF
 [mcp_servers.auto-mobile]
 command = "bunx"
 args = ["@kaeawc/auto-mobile@latest"]
+
+[mcp_servers.auto-mobile.env]
+PATH = "${bun_path}"
 EOF
             ;;
         development)
-            # Only add ANDROID_HOME to env if it wasn't already set in the environment
             if [[ -n "${android_home}" && "${ANDROID_HOME_FROM_ENV}" != "true" ]]; then
                 cat << EOF
 [mcp_servers.auto-mobile]
@@ -1776,22 +1798,28 @@ command = "bunx"
 args = ["@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
 
 [mcp_servers.auto-mobile.env]
+PATH = "${bun_path}"
 ANDROID_HOME = "${android_home}"
 EOF
             else
-                cat << 'EOF'
+                cat << EOF
 [mcp_servers.auto-mobile]
 command = "bunx"
 args = ["@kaeawc/auto-mobile@latest", "--debug", "--debug-perf"]
+
+[mcp_servers.auto-mobile.env]
+PATH = "${bun_path}"
 EOF
             fi
             ;;
         *)
-            # Default to minimal
-            cat << 'EOF'
+            cat << EOF
 [mcp_servers.auto-mobile]
 command = "bunx"
 args = ["@kaeawc/auto-mobile@latest"]
+
+[mcp_servers.auto-mobile.env]
+PATH = "${bun_path}"
 EOF
             ;;
     esac
@@ -1874,10 +1902,12 @@ ensure_yq() {
 generate_auto_mobile_config_yaml() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+    local bun_path
+    bun_path=$(_bun_path_env)
 
     case "${preset}" in
         minimal)
-            cat << 'EOF'
+            cat << EOF
 extensions:
   auto-mobile:
     name: auto-mobile
@@ -1886,10 +1916,11 @@ extensions:
     cmd: bunx
     args:
       - "@kaeawc/auto-mobile@latest"
+    env:
+      PATH: "${bun_path}"
 EOF
             ;;
         development)
-            # Only add ANDROID_HOME to env if it wasn't already set in the environment
             if [[ -n "${android_home}" && "${ANDROID_HOME_FROM_ENV}" != "true" ]]; then
                 cat << EOF
 extensions:
@@ -1903,10 +1934,11 @@ extensions:
       - "--debug"
       - "--debug-perf"
     env:
+      PATH: "${bun_path}"
       ANDROID_HOME: "${android_home}"
 EOF
             else
-                cat << 'EOF'
+                cat << EOF
 extensions:
   auto-mobile:
     name: auto-mobile
@@ -1917,12 +1949,13 @@ extensions:
       - "@kaeawc/auto-mobile@latest"
       - "--debug"
       - "--debug-perf"
+    env:
+      PATH: "${bun_path}"
 EOF
             fi
             ;;
         *)
-            # Default to minimal
-            cat << 'EOF'
+            cat << EOF
 extensions:
   auto-mobile:
     name: auto-mobile
@@ -1931,6 +1964,8 @@ extensions:
     cmd: bunx
     args:
       - "@kaeawc/auto-mobile@latest"
+    env:
+      PATH: "${bun_path}"
 EOF
             ;;
     esac

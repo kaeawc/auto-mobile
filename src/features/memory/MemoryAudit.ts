@@ -342,7 +342,8 @@ export class MemoryAudit {
     passed: boolean
   ): Promise<void> {
     try {
-      const sessionId = new Date().toISOString().split("T")[0]; // YYYY-MM-DD
+      const now = new Date();
+      const sessionId = now.toISOString().split("T")[0]; // YYYY-MM-DD
 
       const auditResult: NewMemoryAuditResult = {
         device_id: this.device.id,
@@ -381,7 +382,7 @@ export class MemoryAudit {
       const recorder = TelemetryRecorder.getInstance();
       recorder.setContext(this.device.id, null);
       recorder.recordMemoryEvent({
-        timestamp: Date.now(),
+        timestamp: now.getTime(),
         packageName,
         passed,
         javaHeapGrowthMb: metrics.javaHeapGrowthMb,
@@ -389,7 +390,7 @@ export class MemoryAudit {
         gcCount: metrics.gcCount,
         gcDurationMs: metrics.gcTotalDurationMs,
         unreachableObjects: metrics.unreachableObjects?.count ?? null,
-        violations: violations.map(v => v.type),
+        violations: violations.map(v => v.metric),
       });
     } catch (error) {
       logger.error(`[MemoryAudit] Failed to store audit result: ${error}`);

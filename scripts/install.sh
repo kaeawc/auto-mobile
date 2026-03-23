@@ -2746,30 +2746,39 @@ _check_libvips() {
 # Install development tools needed by scripts/ (shellcheck, jq, ripgrep, etc.)
 # These are Homebrew packages used by validation, linting, and CI scripts.
 install_dev_tools() {
+    local os
+    os=$(detect_os)
+
+    if [[ "${os}" == "macos" ]]; then
+        _install_dev_tools_brew
+    elif [[ "${os}" == "linux" ]]; then
+        _install_dev_tools_apt
+    else
+        log_warn "Unsupported OS for dev tool installation"
+    fi
+}
+
+_install_dev_tools_brew() {
     if ! command_exists brew; then
         log_warn "Homebrew not found — skipping dev tool installation"
         return 0
     fi
 
-    # All required packages (macOS-specific ones included on macOS)
+    # All required packages (macOS-specific ones included)
     local all_packages=(
-        "shellcheck"    # shell script linting (scripts/shellcheck/)
-        "jq"            # JSON processing (scripts/detect-dead-code-ts.sh, install.sh)
-        "ripgrep"       # fast code search (scripts/detect-dead-code-ts.sh, versioning)
-        "yq"            # YAML processing (install.sh MCP config merging)
-        "gum"           # interactive TUI prompts (install.sh)
-        "hadolint"      # Dockerfile linting (scripts/hadolint/)
-        "xmlstarlet"    # XML processing (Android manifest editing)
+        "shellcheck"        # shell script linting
+        "jq"                # JSON processing
+        "ripgrep"           # fast code search
+        "yq"                # YAML processing
+        "gum"               # interactive TUI prompts
+        "hadolint"          # Dockerfile linting
+        "xmlstarlet"        # XML processing
+        "swiftformat"       # Swift formatting
+        "swiftlint"         # Swift linting
+        "xcodegen"          # Xcode project generation
+        "libusbmuxd"        # iproxy for physical iOS device USB tunneling
+        "ideviceinstaller"  # physical iOS device app management
     )
-    if [[ "$(detect_os)" == "macos" ]]; then
-        all_packages+=(
-            "swiftformat"       # Swift formatting (scripts/swiftformat/)
-            "swiftlint"         # Swift linting (scripts/swiftlint/)
-            "xcodegen"          # Xcode project generation
-            "libusbmuxd"        # iproxy for physical iOS device USB tunneling
-            "ideviceinstaller"  # physical iOS device app management
-        )
-    fi
 
     # Single brew call to get all installed packages (~100ms vs ~300ms per package)
     local installed_packages
@@ -2799,6 +2808,61 @@ install_dev_tools() {
     local missing=0
     for pkg in "${to_install[@]}"; do
         if run_spinner "Installing ${pkg}" brew install "${pkg}"; then
+            CHANGES_MADE=true
+        else
+            log_warn "Failed to install ${pkg}"
+            ((missing++)) || true
+        fi
+    done
+
+    if [[ ${missing} -gt 0 ]]; then
+        log_warn "${missing} dev tool(s) could not be installed"
+    else
+        log_info "Development tools ready."
+    fi
+}
+
+_install_dev_tools_apt() {
+    if ! command_exists apt-get; then
+        log_warn "apt-get not found — skipping dev tool installation"
+        return 0
+    fi
+
+    # Packages available in standard Ubuntu/Debian repos
+    local apt_packages=(
+        "shellcheck"    # shell script linting
+        "jq"            # JSON processing
+        "ripgrep"       # fast code search
+        "xmlstarlet"    # XML processing
+    )
+
+    local to_install=()
+    for pkg in "${apt_packages[@]}"; do
+        if ! dpkg -s "${pkg}" >/dev/null 2>&1; then
+            to_install+=("${pkg}")
+        fi
+    done
+
+    if [[ ${#to_install[@]} -eq 0 ]]; then
+        log_info "Development tools ready."
+        return 0
+    fi
+
+    log_info "Installing ${#to_install[@]} missing dev tool(s): ${to_install[*]}"
+
+    if [[ "${DRY_RUN}" == "true" ]]; then
+        for pkg in "${to_install[@]}"; do
+            log_info "[DRY-RUN] Would install ${pkg}"
+        done
+        return 0
+    fi
+
+    # Update package index once
+    sudo apt-get update -qq 2>/dev/null || true
+
+    local missing=0
+    for pkg in "${to_install[@]}"; do
+        if sudo apt-get install -y -qq "${pkg}" >/dev/null 2>&1; then
             CHANGES_MADE=true
         else
             log_warn "Failed to install ${pkg}"

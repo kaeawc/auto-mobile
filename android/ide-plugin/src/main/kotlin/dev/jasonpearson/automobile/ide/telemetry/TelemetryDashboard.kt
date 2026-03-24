@@ -66,16 +66,10 @@ private enum class CategoryFilter(val label: String, val icon: String) {
     Logs("Logs", "\uD83D\uDCDD"),      // 📝
     Os("OS", "\u2699\uFE0F"),           // ⚙️
     Custom("Custom", "\uD83C\uDFF7\uFE0F"), // 🏷️
-    Crashes("Crashes", "\uD83D\uDCA5"),  // 💥
-    Anrs("ANRs", "\u231B"),             // ⌛
-    NonFatals("Non-Fatal", "\u26A0\uFE0F"), // ⚠️
+    Failures("Failures", "\uD83D\uDCA5"), // 💥 (crashes + ANRs + non-fatals)
     Storage("Storage", "\uD83D\uDDC4\uFE0F"), // 🗄️
     Layout("Layout", "\uD83C\uDFD7\uFE0F"), // 🏗️
     Performance("Perf", "\uD83D\uDCCA"),     // 📊
-    Interactions("Touch", "\uD83D\uDC46"),  // 👆
-    Gestures("Gesture", "\u270B"),          // ✋
-    Inputs("Input", "\u2328\uFE0F"),        // ⌨️
-    MemoryAudit("Memory", "\uD83E\uDDE0"), // 🧠
     ToolCalls("Tools", "\uD83D\uDD27"),   // 🔧
     A11y("A11y", "\u267F"),               // ♿
 }
@@ -153,16 +147,11 @@ fun TelemetryDashboard(
                         CategoryFilter.Logs -> event is TelemetryDisplayEvent.Log
                         CategoryFilter.Os -> event is TelemetryDisplayEvent.Os
                         CategoryFilter.Custom -> event is TelemetryDisplayEvent.Custom
-                        CategoryFilter.Crashes -> event is TelemetryDisplayEvent.Failure && event.type == "crash"
-                        CategoryFilter.Anrs -> event is TelemetryDisplayEvent.Failure && event.type == "anr"
-                        CategoryFilter.NonFatals -> event is TelemetryDisplayEvent.Failure && event.type == "nonfatal"
+                        CategoryFilter.Failures -> event is TelemetryDisplayEvent.Failure
                         CategoryFilter.Storage -> event is TelemetryDisplayEvent.Storage
                         CategoryFilter.Layout -> event is TelemetryDisplayEvent.Layout
                         CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
-                        CategoryFilter.Interactions -> event is TelemetryDisplayEvent.Interaction
-                        CategoryFilter.Gestures -> event is TelemetryDisplayEvent.Gesture
-                        CategoryFilter.Inputs -> event is TelemetryDisplayEvent.Input
-                        CategoryFilter.MemoryAudit -> event is TelemetryDisplayEvent.Memory
+                        // Touch, Gesture, Input, Memory events appear in All but have no dedicated tab
                         CategoryFilter.ToolCalls -> event is TelemetryDisplayEvent.ToolCall
                         CategoryFilter.A11y -> event is TelemetryDisplayEvent.Accessibility
                     }
@@ -193,16 +182,10 @@ fun TelemetryDashboard(
                 CategoryFilter.Logs to events.count { it is TelemetryDisplayEvent.Log },
                 CategoryFilter.Os to events.count { it is TelemetryDisplayEvent.Os },
                 CategoryFilter.Custom to events.count { it is TelemetryDisplayEvent.Custom },
-                CategoryFilter.Crashes to events.count { it is TelemetryDisplayEvent.Failure && it.type == "crash" },
-                CategoryFilter.Anrs to events.count { it is TelemetryDisplayEvent.Failure && it.type == "anr" },
-                CategoryFilter.NonFatals to events.count { it is TelemetryDisplayEvent.Failure && it.type == "nonfatal" },
+                CategoryFilter.Failures to events.count { it is TelemetryDisplayEvent.Failure },
                 CategoryFilter.Storage to events.count { it is TelemetryDisplayEvent.Storage },
                 CategoryFilter.Layout to events.count { it is TelemetryDisplayEvent.Layout },
                 CategoryFilter.Performance to events.count { it is TelemetryDisplayEvent.Performance },
-                CategoryFilter.Interactions to events.count { it is TelemetryDisplayEvent.Interaction },
-                CategoryFilter.Gestures to events.count { it is TelemetryDisplayEvent.Gesture },
-                CategoryFilter.Inputs to events.count { it is TelemetryDisplayEvent.Input },
-                CategoryFilter.MemoryAudit to events.count { it is TelemetryDisplayEvent.Memory },
                 CategoryFilter.ToolCalls to events.count { it is TelemetryDisplayEvent.ToolCall },
                 CategoryFilter.A11y to events.count { it is TelemetryDisplayEvent.Accessibility },
             )

@@ -1215,7 +1215,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
             gestureTimeMs: swipeMessage.gestureTimeMs, error: swipeMessage.error, perfTiming
           });
         }
-        this.emitGestureTelemetry("swipe", swipeMessage);
+
       }
 
       // Handle tap coordinates result
@@ -1229,7 +1229,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
             success: tapMessage.success, totalTimeMs: tapMessage.totalTimeMs, error: tapMessage.error, perfTiming
           });
         }
-        this.emitGestureTelemetry("tap", tapMessage);
+
       }
 
       // Handle drag result
@@ -1240,7 +1240,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           success: dragMessage.success, totalTimeMs: dragMessage.totalTimeMs,
           gestureTimeMs: dragMessage.gestureTimeMs, error: dragMessage.error, perfTiming
         });
-        this.emitGestureTelemetry("drag", dragMessage);
+
       }
 
       // Handle pinch result
@@ -1251,7 +1251,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           success: pinchMessage.success, totalTimeMs: pinchMessage.totalTimeMs,
           gestureTimeMs: pinchMessage.gestureTimeMs, error: pinchMessage.error, perfTiming
         });
-        this.emitGestureTelemetry("pinch", pinchMessage);
+
       }
 
       // Handle set text result
@@ -1261,7 +1261,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         this.requestManager.resolve<A11ySetTextResult>(setTextMessage.requestId, {
           success: setTextMessage.success, totalTimeMs: setTextMessage.totalTimeMs, error: setTextMessage.error, perfTiming
         });
-        this.emitInputTelemetry("setText", setTextMessage);
+
       }
 
       // Handle IME action result
@@ -1272,7 +1272,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           success: imeActionMessage.success, action: imeActionMessage.action,
           totalTimeMs: imeActionMessage.totalTimeMs, error: imeActionMessage.error, perfTiming
         });
-        this.emitInputTelemetry("imeAction", imeActionMessage);
+
       }
 
       // Handle select all result
@@ -1282,7 +1282,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         this.requestManager.resolve<A11ySelectAllResult>(selectAllMessage.requestId, {
           success: selectAllMessage.success, totalTimeMs: selectAllMessage.totalTimeMs, error: selectAllMessage.error, perfTiming
         });
-        this.emitInputTelemetry("selectAll", selectAllMessage);
+
       }
 
       // Handle action result
@@ -1303,7 +1303,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           success: clipboardMessage.success, action: clipboardMessage.action, text: clipboardMessage.text,
           totalTimeMs: clipboardMessage.totalTimeMs, error: clipboardMessage.error, perfTiming
         });
-        this.emitInputTelemetry("clipboard", clipboardMessage);
+
       }
 
       // Handle CA certificate result
@@ -1543,19 +1543,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
             timestamp: interaction.timestamp,
           };
           this.notifyInteractionListeners(interaction);
-
-          // Emit interaction telemetry
-          const recorder = TelemetryRecorder.getInstance();
-          recorder.setContext(this.device.deviceId, null);
-          recorder.recordInteractionEvent({
-            timestamp: interaction.timestamp,
-            type: interaction.type,
-            packageName: interaction.packageName,
-            screenClassName: interaction.screenClassName,
-            elementText: interaction.element?.text ?? undefined,
-            elementResourceId: interaction.element?.["resource-id"] ?? undefined,
-            elementContentDesc: interaction.element?.["content-desc"] ?? undefined,
-          });
         }
       }
 
@@ -1689,26 +1676,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
 
-          // Route SDK auto-tap events to interaction telemetry
-          if (event.name === "_auto_tap") {
-            const props = event.properties ?? {};
-            recorder.recordInteractionEvent({
-              timestamp: msg.timestamp,
-              type: "tap",
-              packageName: event.applicationId ?? undefined,
-              screenClassName: props.className ?? undefined,
-              elementText: props.text ?? undefined,
-              elementResourceId: props.resourceId ?? undefined,
-              elementContentDesc: props.contentDesc ?? undefined,
-            });
-          } else {
-            await recorder.recordCustomEvent({
-              timestamp: msg.timestamp,
-              applicationId: event.applicationId ?? null,
-              name: event.name ?? "",
-              properties: event.properties ?? {},
-            });
-          }
+          await recorder.recordCustomEvent({
+            timestamp: msg.timestamp,
+            applicationId: event.applicationId ?? null,
+            name: event.name ?? "",
+            properties: event.properties ?? {},
+          });
         }
       }
 
@@ -2070,32 +2043,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     } catch (error) {
       logger.warn(`[CTRL_PROXY] Failed to apply package event: ${error}`);
     }
-  }
-
-  private emitGestureTelemetry(gestureType: string, msg: any): void {
-    const recorder = TelemetryRecorder.getInstance();
-    recorder.setContext(this.device.deviceId, null);
-    recorder.recordGestureEvent({
-      timestamp: this.timer.now(),
-      gestureType,
-      success: msg.success ?? false,
-      totalTimeMs: msg.totalTimeMs ?? 0,
-      gestureTimeMs: msg.gestureTimeMs,
-      error: msg.error ?? null,
-    });
-  }
-
-  private emitInputTelemetry(inputType: string, msg: any): void {
-    const recorder = TelemetryRecorder.getInstance();
-    recorder.setContext(this.device.deviceId, null);
-    recorder.recordInputEvent({
-      timestamp: this.timer.now(),
-      inputType,
-      success: msg.success ?? false,
-      totalTimeMs: msg.totalTimeMs ?? 0,
-      action: msg.action,
-      error: msg.error ?? null,
-    });
   }
 
   private async handleHandledExceptionEvent(event: HandledExceptionEvent): Promise<void> {

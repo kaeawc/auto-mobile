@@ -16,7 +16,6 @@ import {
 import { ContrastChecker } from "./ContrastChecker";
 import { BaselineManager } from "./BaselineManager";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { TelemetryRecorder } from "../telemetry/TelemetryRecorder";
 
 export class WcagAudit {
   private contrastChecker: ContrastChecker;
@@ -87,24 +86,6 @@ export class WcagAudit {
       baselinedCount,
       config
     );
-
-    // Emit telemetry when violations are found
-    if (filteredViolations.length > 0) {
-      TelemetryRecorder.getInstance().recordAccessibilityEvent({
-        timestamp: this.timer.now(),
-        packageName,
-        screenId,
-        totalViolations: violations.length,
-        newViolations: filteredViolations.length,
-        baselinedCount,
-        violations: filteredViolations.map(v => ({
-          type: v.type,
-          severity: v.severity,
-          criterion: v.criterion,
-          message: v.message,
-        })),
-      });
-    }
 
     return {
       config,

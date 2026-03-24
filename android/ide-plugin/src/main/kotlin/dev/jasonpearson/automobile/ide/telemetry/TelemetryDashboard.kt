@@ -71,7 +71,6 @@ private enum class CategoryFilter(val label: String, val icon: String) {
     Layout("Layout", "\uD83C\uDFD7\uFE0F"), // 🏗️
     Performance("Perf", "\uD83D\uDCCA"),     // 📊
     ToolCalls("Tools", "\uD83D\uDD27"),   // 🔧
-    A11y("A11y", "\u267F"),               // ♿
 }
 
 /**
@@ -153,7 +152,6 @@ fun TelemetryDashboard(
                         CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
                         // Touch, Gesture, Input, Memory events appear in All but have no dedicated tab
                         CategoryFilter.ToolCalls -> event is TelemetryDisplayEvent.ToolCall
-                        CategoryFilter.A11y -> event is TelemetryDisplayEvent.Accessibility
                     }
                 }
             }
@@ -187,7 +185,6 @@ fun TelemetryDashboard(
                 CategoryFilter.Layout to events.count { it is TelemetryDisplayEvent.Layout },
                 CategoryFilter.Performance to events.count { it is TelemetryDisplayEvent.Performance },
                 CategoryFilter.ToolCalls to events.count { it is TelemetryDisplayEvent.ToolCall },
-                CategoryFilter.A11y to events.count { it is TelemetryDisplayEvent.Accessibility },
             )
         }
     }

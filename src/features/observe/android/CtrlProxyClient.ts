@@ -1789,9 +1789,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       recorder.setContext(this.device.deviceId, null);
       const screenName = data.foregroundActivity ?? data.packageName ?? null;
       const windowCount = data.windows?.length ?? 0;
-      // Store metadata only — full hierarchy is available via the observation stream.
-      // Embedding the full tree (~10-50KB) in every telemetry event would cause
-      // excessive DB/socket traffic at the 500ms hierarchy update interval.
+      // Include a compact hierarchy tree (~2-5KB) with just the display properties.
+      // The full hierarchy (~10-50KB with bounds/states/extras) is available via
+      // the observation stream and would cause excessive traffic at 500ms intervals.
+      const compactHierarchy = data.hierarchy
+        ? { node: compactifyNode(data.hierarchy) }
+        : null;
       recorder.recordLayoutEvent({
         timestamp: now,
         applicationId: data.packageName ?? null,
@@ -1805,6 +1808,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           screenName,
           windowCount,
           foregroundActivity: data.foregroundActivity ?? null,
+          hierarchy: compactHierarchy,
         }),
         screenName,
       });
@@ -2245,4 +2249,24 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       logger.warn(`[CTRL_PROXY] Failed to mark installed apps stale: ${error}`);
     }
   }
+}
+
+/**
+ * Create a compact representation of an AccessibilityNode tree for telemetry.
+ * Strips bounds, states, extras — keeps only className, resource-id, text,
+ * content-desc, scrollable, and children. Typically ~2-5KB vs 10-50KB full.
+ */
+function compactifyNode(node: AccessibilityNode): Record<string, unknown> {
+  const compact: Record<string, unknown> = {};
+  if (node.className) {compact.className = node.className;}
+  if (node["resource-id"]) {compact["resource-id"] = node["resource-id"];}
+  if (node.text) {compact.text = node.text;}
+  if (node["content-desc"]) {compact["content-desc"] = node["content-desc"];}
+  if (node.scrollable === "true") {compact.scrollable = "true";}
+
+  if (node.node) {
+    const children = Array.isArray(node.node) ? node.node : [node.node];
+    compact.node = children.map(compactifyNode);
+  }
+  return compact;
 }

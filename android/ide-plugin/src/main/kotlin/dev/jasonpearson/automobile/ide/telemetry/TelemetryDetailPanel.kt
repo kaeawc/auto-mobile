@@ -36,6 +36,7 @@ import com.intellij.openapi.project.Project
 import dev.jasonpearson.automobile.ide.navigation.ScreenshotLoader
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
@@ -60,13 +61,22 @@ fun TelemetryDetailPanel(
     screenshotLoader: ScreenshotLoader? = null,
     modifier: Modifier = Modifier,
 ) {
+    // Layout events with hierarchy need a split layout — scrollable metadata on top,
+    // HierarchyTreeView (LazyColumn) filling remaining space below.
+    val isLayoutWithHierarchy = event is TelemetryDisplayEvent.Layout &&
+        event.subType == "hierarchy_change" && event.detailsJson != null
+
     Column(
         modifier = modifier
             .fillMaxHeight()
-            .background(textColor.copy(alpha = 0.03f))
-            .verticalScroll(rememberScrollState())
-            .padding(12.dp),
+            .background(textColor.copy(alpha = 0.03f)),
     ) {
+        Column(
+            modifier = Modifier
+                .then(if (isLayoutWithHierarchy) Modifier else Modifier.weight(1f))
+                .verticalScroll(rememberScrollState())
+                .padding(12.dp),
+        ) {
             // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
@@ -116,6 +126,12 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.ToolCall -> ToolCallDetail(event, textColor)
                 is TelemetryDisplayEvent.Accessibility -> AccessibilityDetail(event, textColor)
             }
+        }
+
+        // Hierarchy tree fills remaining space (only for layout events with hierarchy data)
+        if (event is TelemetryDisplayEvent.Layout && isLayoutWithHierarchy) {
+            LayoutDetailHierarchy(event, modifier = Modifier.weight(1f))
+        }
     }
 }
 
@@ -696,6 +712,39 @@ private fun LayoutDetailMetadata(event: TelemetryDisplayEvent.Layout, textColor:
             metadata.second?.let { DetailRow("Windows", "$it", textColor) }
         }
     }
+}
+
+/**
+ * Hierarchy tree portion of layout detail. Rendered outside the verticalScroll
+ * container so HierarchyTreeView's internal LazyColumn works correctly.
+ */
+@Composable
+private fun LayoutDetailHierarchy(event: TelemetryDisplayEvent.Layout, modifier: Modifier = Modifier) {
+    val details = event.detailsJson ?: return
+    val parsed = remember(details) {
+        try {
+            val json = Json { ignoreUnknownKeys = true }
+            val obj = json.parseToJsonElement(details).jsonObject
+            obj["hierarchy"]?.let { hierarchyElement ->
+                dev.jasonpearson.automobile.ide.layout.parseHierarchyFromJson(
+                    buildJsonObject { put("hierarchy", hierarchyElement) }
+                )
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+    val hierarchy = parsed ?: return
+
+    dev.jasonpearson.automobile.ide.layout.HierarchyTreeView(
+        hierarchy = hierarchy.root,
+        selectedElementId = null,
+        hoveredElementId = null,
+        onElementSelected = {},
+        onElementHovered = {},
+        parentMap = hierarchy.parentMap,
+        modifier = modifier,
+    )
 }
 
 @Composable

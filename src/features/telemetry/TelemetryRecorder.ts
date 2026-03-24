@@ -11,7 +11,8 @@ import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 export type TelemetryCategory =
   | "network" | "log" | "custom" | "os" | "navigation"
   | "crash" | "anr" | "nonfatal" | "storage" | "layout"
-  | "performance" | "interaction" | "gesture" | "input" | "memory";
+  | "performance" | "interaction" | "gesture" | "input" | "memory"
+  | "toolcall" | "accessibility";
 
 export interface TelemetryEvent {
   category: TelemetryCategory;
@@ -340,6 +341,33 @@ export class TelemetryRecorder {
   }): void {
     const { deviceId } = this.snapshotContext();
     this.pushToSocket({ category: "memory", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /** Record a tool call execution with timing and status. */
+  recordToolCallEvent(event: {
+    timestamp: number;
+    toolName: string;
+    durationMs: number;
+    success: boolean;
+    error?: string | null;
+    args?: Record<string, unknown> | null;
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "toolcall", timestamp: event.timestamp, deviceId, data: event });
+  }
+
+  /** Record accessibility violations found during audit. */
+  recordAccessibilityEvent(event: {
+    timestamp: number;
+    packageName: string;
+    screenId: string;
+    totalViolations: number;
+    newViolations: number;
+    baselinedCount: number;
+    violations: Array<{ type: string; severity: string; criterion: string; message: string }>;
+  }): void {
+    const { deviceId } = this.snapshotContext();
+    this.pushToSocket({ category: "accessibility", timestamp: event.timestamp, deviceId, data: event });
   }
 
   private snapshotContext(): { deviceId: string | null; sessionId: string | null } {

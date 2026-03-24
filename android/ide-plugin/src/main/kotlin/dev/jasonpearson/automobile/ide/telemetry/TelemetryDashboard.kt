@@ -76,6 +76,8 @@ private enum class CategoryFilter(val label: String, val icon: String) {
     Gestures("Gesture", "\u270B"),          // ✋
     Inputs("Input", "\u2328\uFE0F"),        // ⌨️
     MemoryAudit("Memory", "\uD83E\uDDE0"), // 🧠
+    ToolCalls("Tools", "\uD83D\uDD27"),   // 🔧
+    A11y("A11y", "\u267F"),               // ♿
 }
 
 /**
@@ -161,6 +163,8 @@ fun TelemetryDashboard(
                         CategoryFilter.Gestures -> event is TelemetryDisplayEvent.Gesture
                         CategoryFilter.Inputs -> event is TelemetryDisplayEvent.Input
                         CategoryFilter.MemoryAudit -> event is TelemetryDisplayEvent.Memory
+                        CategoryFilter.ToolCalls -> event is TelemetryDisplayEvent.ToolCall
+                        CategoryFilter.A11y -> event is TelemetryDisplayEvent.Accessibility
                     }
                 }
             }
@@ -199,6 +203,8 @@ fun TelemetryDashboard(
                 CategoryFilter.Gestures to events.count { it is TelemetryDisplayEvent.Gesture },
                 CategoryFilter.Inputs to events.count { it is TelemetryDisplayEvent.Input },
                 CategoryFilter.MemoryAudit to events.count { it is TelemetryDisplayEvent.Memory },
+                CategoryFilter.ToolCalls to events.count { it is TelemetryDisplayEvent.ToolCall },
+                CategoryFilter.A11y to events.count { it is TelemetryDisplayEvent.Accessibility },
             )
         }
     }
@@ -480,6 +486,8 @@ private fun TelemetryEventRow(
                 is TelemetryDisplayEvent.Gesture -> "\u270B" // ✋
                 is TelemetryDisplayEvent.Input -> "\u2328\uFE0F" // ⌨️
                 is TelemetryDisplayEvent.Memory -> "\uD83E\uDDE0" // 🧠
+                is TelemetryDisplayEvent.ToolCall -> "\uD83D\uDD27" // 🔧
+                is TelemetryDisplayEvent.Accessibility -> "\u267F" // ♿
             },
             fontSize = 10.sp,
         )
@@ -500,6 +508,8 @@ private fun TelemetryEventRow(
             is TelemetryDisplayEvent.Gesture -> GestureSummary(event, textColor)
             is TelemetryDisplayEvent.Input -> InputSummary(event, textColor)
             is TelemetryDisplayEvent.Memory -> MemorySummary(event, textColor)
+            is TelemetryDisplayEvent.ToolCall -> ToolCallSummary(event, textColor)
+            is TelemetryDisplayEvent.Accessibility -> A11ySummary(event, textColor)
         }
     }
 }
@@ -851,6 +861,28 @@ private fun MemorySummary(event: TelemetryDisplayEvent.Memory, textColor: Color)
     val growth = event.javaHeapGrowthMb?.let { "+${"%.1f".format(it)}MB" } ?: ""
     val text = "[$status] ${event.packageName.substringAfterLast('.')} $growth"
     val color = if (event.passed) Color(0xFF51CF66) else Color(0xFFFF6B6B)
+    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
+}
+
+@Composable
+private fun ToolCallSummary(event: TelemetryDisplayEvent.ToolCall, textColor: Color) {
+    val status = if (event.success) "${event.durationMs}ms" else "FAILED"
+    val errorSuffix = if (!event.success && event.error != null) " (${event.error.take(30)})" else ""
+    val color = when {
+        !event.success -> Color(0xFFFF6B6B)
+        event.durationMs > 5000 -> Color(0xFFFFA94D)
+        else -> Color(0xFF51CF66)
+    }
+    Text(
+        "${event.toolName} $status$errorSuffix",
+        fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1,
+    )
+}
+
+@Composable
+private fun A11ySummary(event: TelemetryDisplayEvent.Accessibility, textColor: Color) {
+    val color = if (event.newViolations > 0) Color(0xFFFFA94D) else Color(0xFF51CF66)
+    val text = "${event.newViolations} violations (${event.packageName.substringAfterLast('.')})"
     Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
 }
 

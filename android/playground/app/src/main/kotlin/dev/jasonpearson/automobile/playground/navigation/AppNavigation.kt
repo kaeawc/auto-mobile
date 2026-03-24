@@ -241,6 +241,20 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
     }
   }
 
+  // Re-fire current navigation destination on resume (after returning from background)
+  val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+  androidx.compose.runtime.DisposableEffect(lifecycleOwner) {
+    val observer = androidx.lifecycle.LifecycleEventObserver { _, event ->
+      if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+        val current = backStack.lastOrNull() ?: return@LifecycleEventObserver
+        val name = current::class.simpleName ?: return@LifecycleEventObserver
+        Navigation3Adapter.trackManually(name)
+      }
+    }
+    lifecycleOwner.lifecycle.addObserver(observer)
+    onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+  }
+
   // Set up the deep link callback for runtime navigation
   LaunchedEffect(Unit) {
     Log.d(TAG, "Setting up deep link callback")
@@ -376,10 +390,11 @@ fun AppNavigation(deepLinkUri: Uri? = null, onDeepLinkCallbackSet: ((Uri) -> Uni
             }
 
             entry<HomeDestination> { homeDestination ->
+              val tabNames = listOf("Discover", "Demos", "Slides", "Settings")
               Navigation3Adapter.TrackNavigation(
                   destination = homeDestination,
                   extractArguments = {
-                    mapOf("selectedTab" to it.selectedTab, "selectedSubTab" to it.selectedSubTab)
+                    mapOf("tab" to (tabNames.getOrNull(it.selectedTab) ?: it.selectedTab))
                   },
               )
               LaunchedEffect(Unit) {

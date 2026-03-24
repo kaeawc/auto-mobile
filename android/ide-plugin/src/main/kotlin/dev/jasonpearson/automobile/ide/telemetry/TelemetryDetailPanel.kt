@@ -113,6 +113,8 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Gesture -> GestureDetail(event, textColor)
                 is TelemetryDisplayEvent.Input -> InputDetail(event, textColor)
                 is TelemetryDisplayEvent.Memory -> MemoryDetail(event, textColor)
+                is TelemetryDisplayEvent.ToolCall -> ToolCallDetail(event, textColor)
+                is TelemetryDisplayEvent.Accessibility -> AccessibilityDetail(event, textColor)
             }
     }
 }
@@ -135,6 +137,8 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
     is TelemetryDisplayEvent.Gesture -> "Gesture"
     is TelemetryDisplayEvent.Input -> "Text Input"
     is TelemetryDisplayEvent.Memory -> "Memory Audit"
+    is TelemetryDisplayEvent.ToolCall -> "Tool Call"
+    is TelemetryDisplayEvent.Accessibility -> "Accessibility"
 }
 
 @Composable
@@ -792,6 +796,51 @@ private fun MemoryDetail(event: TelemetryDisplayEvent.Memory, textColor: Color) 
     if (event.violations.isNotEmpty()) {
         Spacer(Modifier.height(4.dp))
         DetailRow("Violations", event.violations.joinToString(", "), textColor)
+    }
+}
+
+@Composable
+private fun ToolCallDetail(event: TelemetryDisplayEvent.ToolCall, textColor: Color) {
+    DetailRow("Tool", event.toolName, textColor)
+    DetailRow("Duration", "${event.durationMs}ms", textColor)
+    DetailRow("Success", if (event.success) "Yes" else "No", textColor)
+    event.error?.let { DetailRow("Error", it, textColor) }
+}
+
+@Composable
+private fun AccessibilityDetail(event: TelemetryDisplayEvent.Accessibility, textColor: Color) {
+    DetailRow("Package", event.packageName, textColor)
+    DetailRow("Screen", event.screenId, textColor)
+    DetailRow("New Violations", "${event.newViolations}", textColor)
+    DetailRow("Total Violations", "${event.totalViolations}", textColor)
+    if (event.baselinedCount > 0) {
+        DetailRow("Baselined", "${event.baselinedCount}", textColor)
+    }
+
+    if (event.violations.isNotEmpty()) {
+        Spacer(Modifier.height(8.dp))
+        for (v in event.violations) {
+            val sevColor = when (v.severity) {
+                "error" -> Color(0xFFFF6B6B)
+                "warning" -> Color(0xFFFFA94D)
+                else -> textColor.copy(alpha = 0.6f)
+            }
+            Row(modifier = Modifier.padding(vertical = 2.dp)) {
+                Text(
+                    "[${v.criterion}] ",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    fontWeight = FontWeight.SemiBold,
+                    color = sevColor,
+                )
+                Text(
+                    "${v.type}: ${v.message}",
+                    fontSize = 9.sp,
+                    fontFamily = FontFamily.Monospace,
+                    color = textColor.copy(alpha = 0.75f),
+                )
+            }
+        }
     }
 }
 

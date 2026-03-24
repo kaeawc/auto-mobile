@@ -57,6 +57,13 @@ data class StackTraceFrame(
     val isAppCode: Boolean,
 )
 
+data class AccessibilityViolationInfo(
+    val type: String,
+    val severity: String,
+    val criterion: String,
+    val message: String,
+)
+
 /**
  * Parsed telemetry events for UI rendering, with category-specific fields extracted.
  */
@@ -156,6 +163,24 @@ sealed class TelemetryDisplayEvent {
         val totalTimeMs: Long,
         val action: String?,
         val error: String?,
+    ) : TelemetryDisplayEvent()
+
+    data class ToolCall(
+        override val timestamp: Long,
+        val toolName: String,
+        val durationMs: Long,
+        val success: Boolean,
+        val error: String?,
+    ) : TelemetryDisplayEvent()
+
+    data class Accessibility(
+        override val timestamp: Long,
+        val packageName: String,
+        val screenId: String,
+        val totalViolations: Int,
+        val newViolations: Int,
+        val baselinedCount: Int,
+        val violations: List<AccessibilityViolationInfo>,
     ) : TelemetryDisplayEvent()
 
     data class Memory(
@@ -366,6 +391,35 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 ?: d["duration_ms"]?.jsonPrimitive?.longOrNull,
             likelyCause = d.stringOrNull("likelyCause") ?: d.stringOrNull("likely_cause"),
         )
+        "toolcall" -> TelemetryDisplayEvent.ToolCall(
+            timestamp = envelope.timestamp,
+            toolName = d.stringOrDefault("toolName", "unknown"),
+            durationMs = d["durationMs"]?.jsonPrimitive?.longOrNull ?: 0,
+            success = d["success"]?.jsonPrimitive?.booleanOrNull ?: true,
+            error = d.stringOrNull("error"),
+        )
+        "accessibility" -> {
+            val violationsList = try {
+                d["violations"]?.jsonArray?.map { v ->
+                    val vObj = v.jsonObject
+                    AccessibilityViolationInfo(
+                        type = vObj.stringOrDefault("type", "unknown"),
+                        severity = vObj.stringOrDefault("severity", "warning"),
+                        criterion = vObj.stringOrDefault("criterion", ""),
+                        message = vObj.stringOrDefault("message", ""),
+                    )
+                } ?: emptyList()
+            } catch (_: Exception) { emptyList() }
+            TelemetryDisplayEvent.Accessibility(
+                timestamp = envelope.timestamp,
+                packageName = d.stringOrDefault("packageName", "unknown"),
+                screenId = d.stringOrDefault("screenId", ""),
+                totalViolations = d["totalViolations"]?.jsonPrimitive?.intOrNull ?: 0,
+                newViolations = d["newViolations"]?.jsonPrimitive?.intOrNull ?: 0,
+                baselinedCount = d["baselinedCount"]?.jsonPrimitive?.intOrNull ?: 0,
+                violations = violationsList,
+            )
+        }
         "interaction" -> TelemetryDisplayEvent.Interaction(
             timestamp = envelope.timestamp,
             interactionType = d.stringOrDefault("type", "tap"),
@@ -474,6 +528,15 @@ fun TelemetryDisplayEvent.classifyEventSeverity(slowNetworkThresholdMs: Long = 3
             "warning" -> EventSeverity.Warning
             else -> EventSeverity.Info
         }
+        is TelemetryDisplayEvent.ToolCall -> when {
+            !success -> EventSeverity.Error
+            durationMs > 5000 -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
+        is TelemetryDisplayEvent.Accessibility -> when {
+            newViolations > 0 -> EventSeverity.Warning
+            else -> EventSeverity.Info
+        }
         is TelemetryDisplayEvent.Interaction -> EventSeverity.Info
         is TelemetryDisplayEvent.Gesture -> when {
             !success -> EventSeverity.Error
@@ -543,6 +606,13 @@ fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
             health.lowercase().contains(q) ||
             changedMetrics.any { it.lowercase().contains(q) } ||
             "performance".contains(q)
+        is TelemetryDisplayEvent.ToolCall ->
+            toolName.lowercase().contains(q) ||
+            error?.lowercase()?.contains(q) == true
+        is TelemetryDisplayEvent.Accessibility ->
+            packageName.lowercase().contains(q) ||
+            screenId.lowercase().contains(q) ||
+            violations.any { it.type.lowercase().contains(q) || it.message.lowercase().contains(q) }
         is TelemetryDisplayEvent.Interaction ->
             interactionType.lowercase().contains(q) ||
             elementText?.lowercase()?.contains(q) == true ||

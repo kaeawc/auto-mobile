@@ -3557,8 +3557,8 @@ apply_preset() {
             CONFIGURE_MCP_CLIENTS=true
             ;;
         marketplace)
-            # Claude Marketplace plugin
-            INSTALL_BUN=false
+            # Claude Marketplace plugin (requires bun since plugin uses bunx)
+            INSTALL_BUN=true
             INSTALL_IDE_PLUGIN=false
             INSTALL_AUTOMOBILE_CLI=false
             START_DAEMON=false

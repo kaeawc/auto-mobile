@@ -2732,7 +2732,7 @@ _install_system_package() {
             ;;
         linux)
             if command_exists apt-get; then
-                install_cmd="sudo apt-get install -y -qq ${apt_pkg}"
+                install_cmd="sudo apt-get update -qq && sudo apt-get install -y -qq ${apt_pkg}"
                 skip_hint="sudo apt-get install ${apt_pkg}"
             elif command_exists dnf; then
                 install_cmd="sudo dnf install -y ${apt_pkg}"

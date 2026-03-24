@@ -1731,12 +1731,15 @@ _bun_path_env() {
     if command_exists brew; then
         brew_bin="$(brew --prefix 2>/dev/null)/bin"
     fi
-    # Assemble a PATH that covers bun + brew + standard system paths
+    # Prepend bun + brew to the user's current PATH so we don't lose
+    # user-specific entries (e.g. Android SDK, custom tool paths).
+    # We bake in the current PATH at install time since GUI clients
+    # don't inherit shell profile PATH.
     local parts="${bun_bin}"
     if [[ -n "${brew_bin}" ]]; then
         parts="${parts}:${brew_bin}"
     fi
-    parts="${parts}:/usr/local/bin:/usr/bin:/bin"
+    parts="${parts}:${PATH}"
     echo "${parts}"
 }
 
@@ -2562,6 +2565,9 @@ install_ide_plugin() {
 migrate_stale_daemon() {
     # If a daemon is already running, check if it's from an older version.
     # If so, restart it so the user gets the latest behavior automatically.
+    # Note: this only checks the default socket path. Daemons started with
+    # AUTOMOBILE_DAEMON_SOCKET_PATH overrides (benchmarks, XCTest) manage
+    # their own lifecycle and are not affected by the installer.
     if ! is_daemon_running; then
         return 0
     fi
@@ -4076,6 +4082,14 @@ main() {
 
     # Bun setup — must happen before MCP config writing since configs reference bunx
     handle_bun_setup
+
+    # Verify bunx is available before writing configs that depend on it.
+    # If bun installation failed, don't rewrite working npx configs to bunx.
+    if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]] && ! command_exists bunx; then
+        log_error "Bun is not available. Skipping MCP config updates to avoid breaking existing setup."
+        log_error "Install bun (https://bun.sh) and re-run the installer."
+        CONFIGURE_MCP_CLIENTS=false
+    fi
 
     # MCP Client Configuration (new feature!)
     if [[ "${CONFIGURE_MCP_CLIENTS}" == "true" ]]; then

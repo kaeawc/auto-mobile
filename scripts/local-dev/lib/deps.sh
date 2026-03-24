@@ -130,18 +130,21 @@ ensure_auto_mobile() {
     return 1
   fi
 
-  # Always reinstall globally to pick up changes
-  log_info "Installing auto-mobile globally via bun add -g..."
-  if (cd "${PROJECT_ROOT}" && bun add -g . 2>/dev/null); then
-    hash -r 2>/dev/null || true
-    if command -v auto-mobile >/dev/null 2>&1; then
-      log_info "auto-mobile CLI installed globally."
-      return 0
-    fi
+  # Register the package locally via bun link
+  log_info "Linking auto-mobile via bun link..."
+  if ! (cd "${PROJECT_ROOT}" && bun link 2>/dev/null); then
+    log_warn "bun link failed — CLI may not reflect latest changes"
   fi
 
-  log_error "Failed to install auto-mobile globally."
-  log_error "Try running manually: cd ${PROJECT_ROOT} && bun add -g ."
+  # Verify CLI is available
+  hash -r 2>/dev/null || true
+  if command -v auto-mobile >/dev/null 2>&1; then
+    log_info "auto-mobile CLI available."
+    return 0
+  fi
+
+  log_error "auto-mobile CLI not found after build."
+  log_error "Try running manually: cd ${PROJECT_ROOT} && bun link"
   return 1
 }
 

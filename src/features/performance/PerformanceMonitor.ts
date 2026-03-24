@@ -563,8 +563,10 @@ export class PerformanceMonitor {
       currentHealth.touchLatency = metrics.touchLatencyMs > th.touchLatencyCritical ? "critical" : metrics.touchLatencyMs > th.touchLatencyWarning ? "warning" : "healthy";
     }
     if (metrics.memoryUsageMb !== null) {
-      // Memory doesn't have thresholds in DEFAULT_THRESHOLDS, track absolute value changes
-      currentHealth.memory = "info";
+      // Classify memory into bands — emit telemetry when band changes.
+      // Thresholds based on typical Android app memory budgets.
+      const mb = metrics.memoryUsageMb;
+      currentHealth.memory = mb > 300 ? "critical" : mb > 200 ? "warning" : "healthy";
     }
 
     // Compare against previous health — emit when any metric crosses a threshold

@@ -11,10 +11,16 @@ public final class UserDefaultsInspector: @unchecked Sendable {
 
     private init() {}
 
-    func initialize() {
+    private var changeListeners: [UserDefaultsChangeListener] = []
+    private weak var buffer: SdkEventBuffer?
+    private var sequenceCounter: Int64 = 0
+    private var kvoObserver: NSObjectProtocol?
+
+    func initialize(buffer: SdkEventBuffer? = nil) {
         lock.lock()
         defer { lock.unlock() }
         _driver = DefaultUserDefaultsDriver()
+        self.buffer = buffer
     }
 
     /// Whether inspection is enabled.
@@ -39,6 +45,72 @@ public final class UserDefaultsInspector: @unchecked Sendable {
         return _driver
     }
 
+    // MARK: - Change Listeners
+
+    /// Register a listener for UserDefaults changes.
+    public func addChangeListener(_ listener: UserDefaultsChangeListener) {
+        lock.lock()
+        changeListeners.append(listener)
+        lock.unlock()
+    }
+
+    /// Remove a change listener.
+    public func removeChangeListener(_ listener: UserDefaultsChangeListener) {
+        lock.lock()
+        changeListeners.removeAll { $0 === listener }
+        lock.unlock()
+    }
+
+    /// Start listening for changes on a specific UserDefaults suite.
+    public func startListening(suiteName: String? = nil) {
+        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
+        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+
+        let observer = NotificationCenter.default.addObserver(
+            forName: UserDefaults.didChangeNotification,
+            object: defaults,
+            queue: nil
+        ) { [weak self] _ in
+            self?.notifyChangeListeners(suiteName: suiteName, key: nil)
+        }
+
+        lock.lock()
+        kvoObserver = observer
+        lock.unlock()
+    }
+
+    /// Stop listening for changes.
+    public func stopListening() {
+        lock.lock()
+        if let observer = kvoObserver {
+            NotificationCenter.default.removeObserver(observer)
+            kvoObserver = nil
+        }
+        lock.unlock()
+    }
+
+    private func notifyChangeListeners(suiteName: String?, key: String?) {
+        lock.lock()
+        sequenceCounter += 1
+        let seq = sequenceCounter
+        let currentListeners = changeListeners
+        let currentBuffer = buffer
+        lock.unlock()
+
+        for listener in currentListeners {
+            listener.onPreferenceChanged(suiteName: suiteName, key: key)
+        }
+
+        let event = SdkStorageChangedEvent(
+            suiteName: suiteName,
+            key: key,
+            newValue: nil,
+            valueType: "unknown",
+            sequenceNumber: seq
+        )
+        currentBuffer?.add(event)
+    }
+
     // MARK: - Testing Support
 
     internal func setDriver(_ driver: UserDefaultsDriver) {
@@ -48,11 +120,22 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     }
 
     internal func reset() {
+        stopListening()
         lock.lock()
         _isEnabled = false
         _driver = nil
+        buffer = nil
+        changeListeners.removeAll()
+        sequenceCounter = 0
         lock.unlock()
     }
+}
+
+// MARK: - Change Listener Protocol
+
+/// Listener for UserDefaults changes.
+public protocol UserDefaultsChangeListener: AnyObject {
+    func onPreferenceChanged(suiteName: String?, key: String?)
 }
 
 // MARK: - UserDefaultsDriver Protocol

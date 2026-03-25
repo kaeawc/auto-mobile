@@ -19,6 +19,9 @@ public enum SdkEventType: String, Codable, Sendable {
     case custom
     case notificationAction = "notification_action"
     case viewBodySnapshot = "view_body_snapshot"
+    case broadcast
+    case interaction
+    case storageChanged = "storage_changed"
 }
 
 // MARK: - Event Types
@@ -145,6 +148,11 @@ public struct SdkNetworkRequestEvent: SdkEvent {
     public let responseBodySize: Int?
     public let durationMs: Double?
     public let error: String?
+    public let host: String?
+    public let path: String?
+    public let requestBody: String?
+    public let responseBody: String?
+    public let contentType: String?
 
     public init(
         timestamp: TimeInterval = Date().timeIntervalSince1970,
@@ -156,7 +164,12 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         responseHeaders: [String: String]? = nil,
         responseBodySize: Int? = nil,
         durationMs: Double? = nil,
-        error: String? = nil
+        error: String? = nil,
+        host: String? = nil,
+        path: String? = nil,
+        requestBody: String? = nil,
+        responseBody: String? = nil,
+        contentType: String? = nil
     ) {
         self.timestamp = timestamp
         self.url = url
@@ -168,6 +181,11 @@ public struct SdkNetworkRequestEvent: SdkEvent {
         self.responseBodySize = responseBodySize
         self.durationMs = durationMs
         self.error = error
+        self.host = host
+        self.path = path
+        self.requestBody = requestBody
+        self.responseBody = responseBody
+        self.contentType = contentType
     }
 }
 
@@ -248,15 +266,18 @@ public struct SdkLifecycleEvent: SdkEvent {
     public let timestamp: TimeInterval
     public let state: String
     public let bundleId: String?
+    public let details: [String: String]
 
     public init(
         timestamp: TimeInterval = Date().timeIntervalSince1970,
         state: String,
-        bundleId: String? = nil
+        bundleId: String? = nil,
+        details: [String: String] = [:]
     ) {
         self.timestamp = timestamp
         self.state = state
         self.bundleId = bundleId
+        self.details = details
     }
 }
 
@@ -364,6 +385,69 @@ public struct SdkEventEnvelope: Codable, Sendable {
     public init<E: SdkEvent>(_ event: E) throws {
         self.eventType = event.eventType
         self.payload = try JSONEncoder().encode(event)
+    }
+}
+
+public struct SdkBroadcastEvent: SdkEvent {
+    public let eventType: SdkEventType = .broadcast
+    public let timestamp: TimeInterval
+    public let action: String
+    public let categories: [String]?
+    public let infoKeyTypes: [String: String]?
+
+    public init(
+        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        action: String,
+        categories: [String]? = nil,
+        infoKeyTypes: [String: String]? = nil
+    ) {
+        self.timestamp = timestamp
+        self.action = action
+        self.categories = categories
+        self.infoKeyTypes = infoKeyTypes
+    }
+}
+
+public struct SdkInteractionEvent: SdkEvent {
+    public let eventType: SdkEventType = .interaction
+    public let timestamp: TimeInterval
+    public let interactionType: String
+    public let properties: [String: String]
+
+    public init(
+        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        interactionType: String,
+        properties: [String: String] = [:]
+    ) {
+        self.timestamp = timestamp
+        self.interactionType = interactionType
+        self.properties = properties
+    }
+}
+
+public struct SdkStorageChangedEvent: SdkEvent {
+    public let eventType: SdkEventType = .storageChanged
+    public let timestamp: TimeInterval
+    public let suiteName: String?
+    public let key: String?
+    public let newValue: String?
+    public let valueType: String
+    public let sequenceNumber: Int64
+
+    public init(
+        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        suiteName: String?,
+        key: String?,
+        newValue: String?,
+        valueType: String,
+        sequenceNumber: Int64
+    ) {
+        self.timestamp = timestamp
+        self.suiteName = suiteName
+        self.key = key
+        self.newValue = newValue
+        self.valueType = valueType
+        self.sequenceNumber = sequenceNumber
     }
 }
 

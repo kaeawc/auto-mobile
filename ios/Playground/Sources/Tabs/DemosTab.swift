@@ -638,7 +638,7 @@ struct SDKStatusDemo: View {
                 }
 
                 Toggle("Enabled", isOn: $sdkEnabled)
-                    .onChange(of: sdkEnabled) { _, newValue in
+                    .onChange(of: sdkEnabled) { newValue in
                         AutoMobileSDK.shared.setEnabled(newValue)
                     }
 

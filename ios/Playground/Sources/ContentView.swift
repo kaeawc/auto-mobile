@@ -32,7 +32,7 @@ struct ContentView: View {
                 .tag(Tab.settings)
         }
         .tint(.autoMobileRed)
-        .onChange(of: selectedTab) { _, newTab in
+        .onChange(of: selectedTab) { newTab in
             SwiftUINavigationAdapter.shared.trackNavigation(
                 destination: "\(newTab)",
                 metadata: ["type": "tab_switch"]

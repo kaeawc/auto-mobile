@@ -1,7 +1,4 @@
 import Foundation
-#if canImport(UIKit)
-import UIKit
-#endif
 
 /// Main entry point for the AutoMobile iOS SDK.
 /// Provides navigation event tracking, log filtering, network monitoring,
@@ -34,7 +31,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _bundleId = resolvedBundleId
 
         let buffer = SdkEventBuffer { [weak self] events in
-            guard let bundleId = self?.bundleId else { return }
+            let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)
         }
         self.eventBuffer = buffer
@@ -48,15 +45,16 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileFailures.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileCrashes.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileHangs.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
-        UserDefaultsInspector.shared.initialize()
+        AutoMobileHangs.shared.startMonitoring()
+        AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        AutoMobileNotificationObserver.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        ViewBodyTracker.shared.initialize(buffer: buffer)
+        UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
 
         // Start navigation adapter
         SwiftUINavigationAdapter.shared.start()
-
-        #if canImport(UIKit) && !os(watchOS)
-        setupLifecycleTracking()
-        #endif
     }
 
     // MARK: - Navigation Listeners
@@ -166,34 +164,15 @@ public final class AutoMobileSDK: @unchecked Sendable {
         return eventBuffer
     }
 
-    // MARK: - Lifecycle
-
-    #if canImport(UIKit) && !os(watchOS)
-    private func setupLifecycleTracking() {
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didBecomeActiveNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            let event = SdkLifecycleEvent(state: "foreground", bundleId: self?.bundleId)
-            self?.eventBuffer?.add(event)
-        }
-
-        NotificationCenter.default.addObserver(
-            forName: UIApplication.didEnterBackgroundNotification,
-            object: nil,
-            queue: .main
-        ) { [weak self] _ in
-            let event = SdkLifecycleEvent(state: "background", bundleId: self?.bundleId)
-            self?.eventBuffer?.add(event)
-        }
-    }
-    #endif
-
     // MARK: - Testing Support
 
     /// Reset the SDK for testing. Not for production use.
     internal func reset() {
+        AutoMobileHangs.shared.reset()
+        AutoMobileOsEvents.shared.reset()
+        AutoMobileNotificationObserver.shared.reset()
+        AutoMobileInteractionTracker.shared.reset()
+        ViewBodyTracker.shared.reset()
         lock.lock()
         eventBuffer?.shutdown()
         eventBuffer = nil

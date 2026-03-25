@@ -43,6 +43,9 @@ fun main() {
     }
   }
 
+  // Force dark window decorations on macOS
+  System.setProperty("apple.awt.application.appearance", "NSAppearanceNameDarkAqua")
+
   application {
     val windowState = rememberWindowState(
       size = DpSize(1280.dp, 800.dp),

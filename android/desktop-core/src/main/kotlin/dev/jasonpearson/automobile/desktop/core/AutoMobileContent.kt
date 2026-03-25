@@ -730,23 +730,15 @@ fun AutoMobileContent(
     // Main content area - only show when a device is selected
     // Wrapped in a scrollable column so expanding horizontal tabs doesn't compress the layout
     if (!isDevicePanelExpanded && activeDeviceId != null) {
-      BoxWithConstraints(
+      Column(
           modifier = Modifier.weight(1f)
       ) {
-        val containerHeight = maxHeight
-        Column(
+        // Main content: Layout Inspector (central) + Failures/Performance (right vertical panels)
+        Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
+                .weight(if (selectedHorizontalTabId != null) 0.5f else 1f)
         ) {
-          // Main content: Layout Inspector (central) + Failures/Performance (right vertical panels)
-          Row(
-              modifier = if (selectedHorizontalTabId != null) {
-                  Modifier.fillMaxWidth().height(250.dp)
-              } else {
-                  Modifier.fillMaxWidth().height(containerHeight)
-              }
-          ) {
             // Central content area: Layout Inspector or Navigation (toggled)
             // Screenshot loader hoisted here so its cache persists across toggles
             val navScreenshotLoader = remember(clientProvider, dataSourceMode) {
@@ -908,7 +900,7 @@ fun AutoMobileContent(
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(containerHeight)
+                    .weight(0.5f)
             ) {
               when (selectedHorizontalTabId) {
                 "test_runs" -> TestDashboard(
@@ -955,8 +947,7 @@ fun AutoMobileContent(
               }
             }
           }
-        } // end scrollable Column
-      } // end BoxWithConstraints
+      } // end Column
     }
   }
 }

@@ -169,6 +169,9 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
                 -destination "${DESTINATION}" \
                 -configuration Debug \
                 -quiet \
+                CODE_SIGN_IDENTITY="-" \
+                CODE_SIGNING_REQUIRED=NO \
+                CODE_SIGNING_ALLOWED=NO \
                 build 2>&1; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else

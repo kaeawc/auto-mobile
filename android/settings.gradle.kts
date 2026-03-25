@@ -44,6 +44,8 @@ include(":video-server")
 
 include(":ide-plugin")
 
+include(":desktop-app")
+
 include(":playground:analytics")
 
 include(":playground:app")

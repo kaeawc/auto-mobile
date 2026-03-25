@@ -163,27 +163,16 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            set +e
-            BUILD_LOG=$(run_cmd xcodebuild \
+            if run_cmd xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
                 -configuration Debug \
+                -quiet \
                 CODE_SIGN_IDENTITY="-" \
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_ALLOWED=NO \
-                build 2>&1)
-            XCODE_EXIT=$?
-            set -e
-            if [ $XCODE_EXIT -ne 0 ]; then
-                # Output errors as GitHub Actions annotations so they're visible via API
-                echo "$BUILD_LOG" | grep -E "error:" | tail -20 | while IFS= read -r line; do
-                    echo "::error::${scheme}: ${line}"
-                done
-                # Also show last 30 lines for context
-                echo "$BUILD_LOG" | tail -30
-            fi
-            if [ $XCODE_EXIT -eq 0 ]; then
+                build 2>&1; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

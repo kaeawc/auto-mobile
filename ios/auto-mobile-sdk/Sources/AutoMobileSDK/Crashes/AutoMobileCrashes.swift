@@ -66,9 +66,18 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         for sig in Self.monitoredSignals {
             let prev = signal(sig, signalHandler)
             let idx = Int(sig)
-            if idx >= 0, idx < previousSignalHandlers.count,
-               prev != SIG_DFL, prev != SIG_ERR, prev != SIG_IGN {
-                previousSignalHandlers[idx] = prev
+            // Store previous handler for chaining (skip SIG_DFL/SIG_ERR/SIG_IGN
+            // which are sentinel values, not real function pointers).
+            // Use unsafeBitCast since @convention(c) function pointers
+            // don't conform to Equatable.
+            if idx >= 0, idx < previousSignalHandlers.count {
+                let prevRaw = unsafeBitCast(prev, to: Int.self)
+                let dflRaw = unsafeBitCast(SIG_DFL, to: Int.self)
+                let errRaw = unsafeBitCast(SIG_ERR, to: Int.self)
+                let ignRaw = unsafeBitCast(SIG_IGN, to: Int.self)
+                if prevRaw != dflRaw, prevRaw != errRaw, prevRaw != ignRaw {
+                    previousSignalHandlers[idx] = prev
+                }
             }
         }
     }

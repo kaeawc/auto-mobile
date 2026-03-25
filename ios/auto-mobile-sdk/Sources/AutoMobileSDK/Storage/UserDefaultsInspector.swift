@@ -206,6 +206,16 @@ public enum KeyValueType: String, Sendable {
 // MARK: - Default Implementation
 
 final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
+    /// Resolve the UserDefaults instance for a suite name.
+    /// Returns nil for non-nil suite names that can't be created (e.g., unconfigured app groups).
+    /// Returns .standard when suiteName is nil.
+    private func resolveDefaults(suiteName: String?) -> UserDefaults? {
+        if let name = suiteName {
+            return UserDefaults(suiteName: name)
+        }
+        return .standard
+    }
+
     func getSuites() -> [UserDefaultsSuiteDescriptor] {
         let standard = UserDefaults.standard.dictionaryRepresentation()
         return [
@@ -218,35 +228,30 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
     }
 
     func getValues(suiteName: String?) -> [KeyValuePair] {
-        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
-        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return [] }
+        guard let defaults = resolveDefaults(suiteName: suiteName) else { return [] }
         return defaults.dictionaryRepresentation().map { key, value in
             KeyValuePair(key: key, value: "\(value)", type: typeOf(value))
         }.sorted { $0.key < $1.key }
     }
 
     func getValue(suiteName: String?, key: String) -> KeyValuePair? {
-        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
-        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return nil }
+        guard let defaults = resolveDefaults(suiteName: suiteName) else { return nil }
         guard let value = defaults.object(forKey: key) else { return nil }
         return KeyValuePair(key: key, value: "\(value)", type: typeOf(value))
     }
 
     func setValue(suiteName: String?, key: String, value: Any?, type: KeyValueType) {
-        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
-        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         defaults.set(value, forKey: key)
     }
 
     func removeValue(suiteName: String?, key: String) {
-        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
-        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         defaults.removeObject(forKey: key)
     }
 
     func clear(suiteName: String?) {
-        let defaults = suiteName.map { UserDefaults(suiteName: $0) } ?? UserDefaults.standard
-        guard let defaults = suiteName != nil ? defaults : UserDefaults.standard else { return }
+        guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         for key in defaults.dictionaryRepresentation().keys {
             defaults.removeObject(forKey: key)
         }

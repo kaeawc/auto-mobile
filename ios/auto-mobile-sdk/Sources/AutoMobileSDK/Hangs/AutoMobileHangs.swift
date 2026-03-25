@@ -95,16 +95,15 @@ public final class AutoMobileHangs: @unchecked Sendable {
         }
     }
 
-    /// Capture the main thread's stack trace.
-    /// Uses pthread_from_mach_thread_np and backtrace to get the main thread's stack.
+    /// Capture stack trace context during a hang.
+    /// Note: iOS does not provide a public API to capture another thread's stack.
+    /// This captures the watchdog thread's stack as a diagnostic marker that a hang
+    /// was detected, not the actual blocking call stack on the main thread.
+    /// For production hang diagnostics, use MetricKit's MXHangDiagnostic (iOS 16+).
     private func captureMainThreadStack() -> String? {
-        // On iOS, we can identify the main thread and capture its backtrace
-        // Since we can't call Thread.callStackSymbols on another thread,
-        // we use backtrace_symbols for the current thread as a fallback,
-        // but prefix it to indicate this is the watchdog's view during a hang
         let symbols = Thread.callStackSymbols
         if symbols.isEmpty { return nil }
-        return "Main thread blocked (captured from hang detector):\n" + symbols.joined(separator: "\n")
+        return "Hang detected (watchdog thread stack — use MetricKit for main thread stack):\n" + symbols.joined(separator: "\n")
     }
 
     private func reportHang(durationMs: Double, stackTrace: String?) {

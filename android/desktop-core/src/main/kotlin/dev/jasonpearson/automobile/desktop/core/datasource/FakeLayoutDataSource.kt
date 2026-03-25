@@ -7,7 +7,7 @@ import kotlinx.coroutines.delay
  * Fake layout data source returning mock data for UI development.
  */
 class FakeLayoutDataSource : LayoutDataSource {
-    override suspend fun getViewHierarchy(): Result<dev.jasonpearson.automobile.ide.layout.UIElementInfo> {
+    override suspend fun getViewHierarchy(): Result<dev.jasonpearson.automobile.desktop.core.layout.UIElementInfo> {
         // Simulate network delay
         delay(100)
 

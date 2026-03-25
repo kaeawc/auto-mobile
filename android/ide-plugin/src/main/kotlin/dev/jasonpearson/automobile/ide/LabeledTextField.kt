@@ -1,21 +1,22 @@
-package dev.jasonpearson.automobile.desktop.core
+package dev.jasonpearson.automobile.ide
 
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextField
+import org.jetbrains.jewel.foundation.theme.JewelTheme
+import org.jetbrains.jewel.ui.component.Text
+import org.jetbrains.jewel.ui.component.TextField
 
+/** IDE-specific LabeledTextField using Jewel's TextFieldState API. */
 @Composable
 fun LabeledTextField(
     label: String,
-    value: String,
-    onValueChange: (String) -> Unit,
+    state: TextFieldState,
     modifier: Modifier = Modifier,
 ) {
   Column(
@@ -24,9 +25,9 @@ fun LabeledTextField(
   ) {
     Text(
         label,
-        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.65f),
+        color = JewelTheme.globalColors.text.normal.copy(alpha = 0.65f),
         fontSize = 11.sp,
     )
-    TextField(value = value, onValueChange = onValueChange, modifier = Modifier.fillMaxWidth())
+    TextField(state = state, modifier = Modifier.fillMaxWidth())
   }
 }

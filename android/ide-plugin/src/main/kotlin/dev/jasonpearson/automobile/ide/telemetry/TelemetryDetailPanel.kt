@@ -726,7 +726,7 @@ private fun LayoutDetailHierarchy(event: TelemetryDisplayEvent.Layout, modifier:
             val json = Json { ignoreUnknownKeys = true }
             val obj = json.parseToJsonElement(details).jsonObject
             obj["hierarchy"]?.let { hierarchyElement ->
-                dev.jasonpearson.automobile.ide.layout.parseHierarchyFromJson(
+                dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson(
                     buildJsonObject { put("hierarchy", hierarchyElement) }
                 )
             }
@@ -736,7 +736,7 @@ private fun LayoutDetailHierarchy(event: TelemetryDisplayEvent.Layout, modifier:
     }
     val hierarchy = parsed ?: return
 
-    dev.jasonpearson.automobile.ide.layout.HierarchyTreeView(
+    dev.jasonpearson.automobile.desktop.core.layout.HierarchyTreeView(
         hierarchy = hierarchy.root,
         selectedElementId = null,
         hoveredElementId = null,

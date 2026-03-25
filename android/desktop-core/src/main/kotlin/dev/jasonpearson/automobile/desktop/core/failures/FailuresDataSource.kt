@@ -66,7 +66,7 @@ enum class TimeAggregation(val label: String, val durationMs: Long) {
     fun toQueryParam(): String = name.lowercase()
 }
 
-// DataSourceMode has been moved to dev.jasonpearson.automobile.ide.datasource package
+// DataSourceMode has been moved to dev.jasonpearson.automobile.desktop.core.datasource package
 
 /**
  * Result of a data source operation

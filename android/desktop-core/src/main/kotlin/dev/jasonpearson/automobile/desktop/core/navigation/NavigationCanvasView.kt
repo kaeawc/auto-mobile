@@ -63,7 +63,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-// Tooltip removed - use Material3 equivalent
+import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import androidx.compose.ui.zIndex
 import kotlin.math.roundToInt
 import androidx.compose.ui.input.pointer.PointerEvent

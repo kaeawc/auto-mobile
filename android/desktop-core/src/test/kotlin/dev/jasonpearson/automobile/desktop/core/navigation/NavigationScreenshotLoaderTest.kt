@@ -258,7 +258,7 @@ class FakeAutoMobileClient : AutoMobileClient {
       limit: Int?,
       offset: Int?
   ) = notImplemented()
-  override fun getTestTimings(query: dev.jasonpearson.automobile.ide.daemon.TestTimingQuery) =
+  override fun getTestTimings(query: dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery) =
       notImplemented()
   override fun startTestRecording(platform: String) = notImplemented()
   override fun stopTestRecording(recordingId: String?, planName: String?) = notImplemented()
@@ -270,7 +270,7 @@ class FakeAutoMobileClient : AutoMobileClient {
   ) = notImplemented()
   override fun startDevice(name: String, platform: String, deviceId: String?) = notImplemented()
   override fun setActiveDevice(deviceId: String, platform: String) = notImplemented()
-  override fun getTestRuns(query: dev.jasonpearson.automobile.ide.daemon.TestRunQuery) =
+  override fun getTestRuns(query: dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery) =
       notImplemented()
   override fun observe(platform: String) = notImplemented()
   override fun killDevice(name: String, deviceId: String, platform: String) = notImplemented()

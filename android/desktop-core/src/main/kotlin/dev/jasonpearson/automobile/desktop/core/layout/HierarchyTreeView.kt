@@ -152,7 +152,7 @@ fun HierarchyTreeView(
 
     Column(modifier = modifier.fillMaxSize()) {
         // Search bar
-        dev.jasonpearson.automobile.ide.components.SearchBar(
+        dev.jasonpearson.automobile.desktop.core.components.SearchBar(
             query = searchQuery,
             onQueryChange = { searchQuery = it },
             placeholder = "Search views...",

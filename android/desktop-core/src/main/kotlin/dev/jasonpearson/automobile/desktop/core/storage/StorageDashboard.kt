@@ -71,7 +71,7 @@ fun StorageDashboard(
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val newDataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createStorageDataSource(
+                val newDataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createStorageDataSource(
                     dataSourceMode,
                     clientProvider,
                     deviceId,

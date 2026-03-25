@@ -67,7 +67,7 @@ interface AutoMobileClient {
 
   fun killDevice(name: String, deviceId: String, platform: String): KillDeviceResult
 
-  fun getDaemonStatus(): dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse
+  fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 
   fun updateService(deviceId: String, platform: String): UpdateServiceResult
 

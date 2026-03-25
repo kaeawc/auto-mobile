@@ -137,9 +137,9 @@ fun LayoutInspectorDashboard(
     LaunchedEffect(dataSourceMode, clientProvider) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider, platform)
+                val dataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider, platform)
                 when (val result = dataSource.getObservation()) {
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
                         val observation = result.data
                         state.updateHierarchy(observation.hierarchy, observation.rotation)
                         observation.screenshotData?.let { screenshot ->
@@ -151,10 +151,10 @@ fun LayoutInspectorDashboard(
                             )
                         }
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Error -> {
                         // Keep current state or show error
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Loading -> {
                         // Keep loading state
                     }
                 }

@@ -82,7 +82,7 @@ fun TelemetryDashboard(
     telemetryPushClient: TelemetryPushClient?,
     dataSourceMode: DataSourceMode,
     project: com.intellij.openapi.project.Project? = null,
-    screenshotLoader: dev.jasonpearson.automobile.ide.navigation.ScreenshotLoader? = null,
+    screenshotLoader: dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = JewelTheme.globalColors

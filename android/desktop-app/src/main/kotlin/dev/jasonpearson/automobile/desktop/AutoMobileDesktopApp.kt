@@ -51,6 +51,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 
 /** Dashboard tabs mirroring the IDE plugin's Dashboard enum. */
@@ -62,17 +64,6 @@ enum class Dashboard(val title: String, val icon: ImageVector) {
   Storage("Storage", Icons.Default.Storage),
   Failures("Failures", Icons.Default.BugReport),
 }
-
-/** Device types matching the IDE plugin model. */
-enum class DeviceType { AndroidEmulator, AndroidPhysical, iOSSimulator, iOSPhysical }
-
-data class BootedDevice(
-  val id: String,
-  val name: String,
-  val type: DeviceType,
-  val status: String = "Running",
-  val foregroundApp: String? = null,
-)
 
 @Composable
 fun AutoMobileDesktopApp() {

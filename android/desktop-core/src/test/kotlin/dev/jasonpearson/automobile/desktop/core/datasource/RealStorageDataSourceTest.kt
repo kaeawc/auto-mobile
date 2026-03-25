@@ -606,7 +606,7 @@ class FakeStorageAutoMobileClient : AutoMobileClient {
     override fun executePlan(planContent: String, platform: String, startStep: Int?, sessionUuid: String?) = notImplemented()
     override fun startDevice(name: String, platform: String, deviceId: String?) = notImplemented()
     override fun setActiveDevice(deviceId: String, platform: String) = notImplemented()
-    override fun getTestRuns(query: dev.jasonpearson.automobile.ide.daemon.TestRunQuery) = notImplemented()
+    override fun getTestRuns(query: dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery) = notImplemented()
     override fun observe(platform: String) = notImplemented()
     override fun killDevice(name: String, deviceId: String, platform: String) = notImplemented()
     override fun getDaemonStatus() = notImplemented()

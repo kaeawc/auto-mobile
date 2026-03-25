@@ -20,7 +20,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.input.TextFieldState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -40,8 +39,8 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
-import dev.jasonpearson.automobile.desktop.core.BootedDevice
-import dev.jasonpearson.automobile.desktop.core.DeviceType
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.HierarchyStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
@@ -167,15 +166,15 @@ fun TestDashboard(
       try {
         val dataSource = DataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
         when (val result = dataSource.getTestRuns()) {
-          is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
             testRuns = result.data
             isLoading = false
           }
-          is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Error -> {
             error = result.message
             isLoading = false
           }
-          is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+          is dev.jasonpearson.automobile.desktop.core.datasource.Result.Loading -> {
             // Keep loading state
           }
         }
@@ -548,7 +547,7 @@ private fun RecordingTestScreen(
 
   // Three-phase state: setup vs recording vs reviewing
   var recordingPhase by remember { mutableStateOf(RecordingPhase.Setup) }
-  val promptState = remember { TextFieldState("") }
+  var promptText by remember { mutableStateOf("") }
   var isLoadingAnalysis by remember { mutableStateOf(true) }
   var promptExpanded by remember { mutableStateOf(false) }
 
@@ -607,7 +606,7 @@ private fun RecordingTestScreen(
         Spacer(Modifier.height(8.dp))
 
         val placeholderText = "Describe what you want to test..."
-        val isEmpty = promptState.text.isEmpty()
+        val isEmpty = promptText.isEmpty()
 
         // Prompt input row with multiline text area, Clear, and Start buttons
         Row(
@@ -631,7 +630,7 @@ private fun RecordingTestScreen(
               )
             }
             androidx.compose.foundation.text.BasicTextField(
-                state = promptState,
+                value = promptText, onValueChange = { promptText = it },
                 modifier = Modifier.fillMaxSize(),
                 textStyle =
                     androidx.compose.ui.text.TextStyle(
@@ -649,7 +648,7 @@ private fun RecordingTestScreen(
           // Clear button - only enabled when there's text
           if (!isEmpty) {
             OutlinedButton(
-                onClick = { promptState.edit { replace(0, length, "") } },
+                onClick = { promptText = "" },
             ) {
               Text("Clear")
             }
@@ -681,7 +680,7 @@ private fun RecordingTestScreen(
             suggestedPrompts.forEach { suggestion ->
               SuggestedPromptChip(
                   text = suggestion,
-                  onClick = { promptState.edit { replace(0, length, suggestion) } },
+                  onClick = { promptText = suggestion },
               )
             }
           }
@@ -772,12 +771,12 @@ private fun RecordingTestScreen(
                 color = colors.text.normal.copy(alpha = 0.5f),
             )
             val promptPreview =
-                if (promptState.text.isEmpty()) {
+                if (promptText.isEmpty()) {
                   "No prompt"
-                } else if (promptState.text.length > 20) {
-                  promptState.text.take(20).toString() + "..."
+                } else if (promptText.length > 20) {
+                  promptText.take(20) + "..."
                 } else {
-                  promptState.text.toString()
+                  promptText
                 }
             Text(
                 promptPreview,
@@ -838,7 +837,7 @@ private fun RecordingTestScreen(
         }
 
         // Expanded prompt section (read-only)
-        if (promptExpanded && promptState.text.isNotEmpty()) {
+        if (promptExpanded && promptText.isNotEmpty()) {
           Box(
               modifier =
                   Modifier.fillMaxWidth()
@@ -847,7 +846,7 @@ private fun RecordingTestScreen(
                       .padding(12.dp),
           ) {
             Text(
-                promptState.text.toString(),
+                promptText,
                 fontSize = 12.sp,
                 color = colors.text.normal.copy(alpha = 0.7f),
             )
@@ -1375,11 +1374,11 @@ private fun ModuleSelectionScreen(
     onBack: () -> Unit,
 ) {
   val colors = SharedTheme.globalColors
-  val searchState = remember { TextFieldState("") }
+  var searchText by remember { mutableStateOf("") }
 
   val filteredModules =
-      remember(searchState.text.toString()) {
-        val query = searchState.text.toString()
+      remember(searchText) {
+        val query = searchText
         if (query.isBlank()) {
           TestMockData.modules
         } else {
@@ -1415,7 +1414,7 @@ private fun ModuleSelectionScreen(
 
     // Search field
     TextField(
-        state = searchState,
+        value = searchText, onValueChange = { searchText = it },
         modifier = Modifier.fillMaxWidth(),
     )
 

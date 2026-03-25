@@ -435,20 +435,20 @@ fun PerformanceDashboard(
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = dev.jasonpearson.automobile.ide.datasource.DataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
+                val dataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
                 when (val result = dataSource.getPerformanceRun()) {
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Success -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
                         // Only update if we still don't have data (stream might have pushed by now)
                         if (currentRun == null) {
                             currentRun = result.data
                         }
                         isLoading = false
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Error -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Error -> {
                         error = result.message
                         isLoading = false
                     }
-                    is dev.jasonpearson.automobile.ide.datasource.Result.Loading -> {
+                    is dev.jasonpearson.automobile.desktop.core.datasource.Result.Loading -> {
                         // Keep loading state
                     }
                 }

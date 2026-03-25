@@ -243,11 +243,11 @@ class McpDaemonClient(
     }
   }
 
-  override fun getDaemonStatus(): dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse {
+  override fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
     val response = sendRequest("ide/status")
     ensureSuccess(response)
     return json.decodeFromJsonElement(
-        dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse.serializer(),
+        dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
         response.result!!,
     )
   }

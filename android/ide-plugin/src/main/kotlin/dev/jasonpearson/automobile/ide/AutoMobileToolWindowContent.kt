@@ -1891,7 +1891,7 @@ private fun McpProcessesPanel(
     var bootErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     // State for device selection
-    var selectingDevice by remember { mutableStateOf<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo?>(null) }
+    var selectingDevice by remember { mutableStateOf<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo?>(null) }
     var selectError by remember { mutableStateOf<String?>(null) }
 
     // State for killing devices
@@ -1899,7 +1899,7 @@ private fun McpProcessesPanel(
     var killErrors by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
 
     // State for daemon status
-    var daemonStatus by remember { mutableStateOf<dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse?>(null) }
+    var daemonStatus by remember { mutableStateOf<dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse?>(null) }
 
     // State for service updates
     var updatingServiceDeviceIds by remember { mutableStateOf<Set<String>>(emptySet()) }
@@ -1907,8 +1907,8 @@ private fun McpProcessesPanel(
     val scope = androidx.compose.runtime.rememberCoroutineScope()
 
     // State for devices (fetched from connected MCP server)
-    var bootedDevices by remember { mutableStateOf<List<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo>>(emptyList()) }
-    var deviceImages by remember { mutableStateOf<List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>>(emptyList()) }
+    var bootedDevices by remember { mutableStateOf<List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>>(emptyList()) }
+    var deviceImages by remember { mutableStateOf<List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>>(emptyList()) }
     var devicesLoading by remember { mutableStateOf(false) }
     var devicesError by remember { mutableStateOf<String?>(null) }
 
@@ -1922,21 +1922,21 @@ private fun McpProcessesPanel(
                 LOG.debug("[AutoMobile IDE] Creating MCP client for process: ${process.name}, type: ${process.connectionType}, socket: ${process.socketPath}, port: ${process.port}")
 
                 val client = if (useRealData) {
-                    dev.jasonpearson.automobile.ide.mcp.McpResourceClientFactory.create(process)
+                    dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.create(process)
                 } else {
-                    dev.jasonpearson.automobile.ide.mcp.McpResourceClientFactory.createFake()
+                    dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.createFake()
                 }
 
                 LOG.debug("[AutoMobile IDE] Fetching booted devices from automobile:devices/booted")
                 // Fetch booted devices
                 when (val result = client.readResource("automobile:devices/booted")) {
-                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Success -> {
+                    is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
                         LOG.debug("[AutoMobile IDE] Successfully fetched booted devices: ${result.content.take(200)}...")
-                        val parsed = dev.jasonpearson.automobile.ide.mcp.DeviceResourceParser.parseBootedDevices(result.content)
+                        val parsed = dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseBootedDevices(result.content)
                         bootedDevices = parsed?.devices ?: emptyList()
                         LOG.debug("[AutoMobile IDE] Parsed ${bootedDevices.size} booted devices")
                     }
-                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Error -> {
+                    is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Error -> {
                         LOG.debug("[AutoMobile IDE] Error fetching booted devices: ${result.message}")
                         devicesError = result.message
                     }
@@ -1945,13 +1945,13 @@ private fun McpProcessesPanel(
                 LOG.debug("[AutoMobile IDE] Fetching device images from automobile:devices/images")
                 // Fetch device images
                 when (val result = client.readResource("automobile:devices/images")) {
-                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Success -> {
+                    is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Success -> {
                         LOG.debug("[AutoMobile IDE] Successfully fetched device images: ${result.content.take(200)}...")
-                        val parsed = dev.jasonpearson.automobile.ide.mcp.DeviceResourceParser.parseDeviceImages(result.content)
+                        val parsed = dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser.parseDeviceImages(result.content)
                         deviceImages = parsed?.images ?: emptyList()
                         LOG.debug("[AutoMobile IDE] Parsed ${deviceImages.size} device images")
                     }
-                    is dev.jasonpearson.automobile.ide.mcp.ResourceReadResult.Error -> {
+                    is dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult.Error -> {
                         LOG.debug("[AutoMobile IDE] Error fetching device images: ${result.message}")
                         // Don't overwrite error from booted devices
                         if (devicesError == null) devicesError = result.message
@@ -1961,9 +1961,9 @@ private fun McpProcessesPanel(
                 client.close()
 
                 // Fetch daemon status in background (best-effort)
-                var statusClient: dev.jasonpearson.automobile.ide.daemon.AutoMobileClient? = null
+                var statusClient: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
                 try {
-                    statusClient = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                    statusClient = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
                     daemonStatus = statusClient.getDaemonStatus()
                     LOG.debug("[AutoMobile IDE] Fetched daemon status: version=${daemonStatus?.version}")
                 } catch (e: Exception) {
@@ -2052,14 +2052,14 @@ private fun McpProcessesPanel(
     }
 
     // Boot device action (non-blocking coroutine)
-    val onBootDeviceAction: (dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo) -> Unit = { image ->
+    val onBootDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit = { image ->
         val deviceKey = image.deviceId ?: image.name
         bootingDeviceIds = bootingDeviceIds + deviceKey
         bootErrors = bootErrors - deviceKey
         scope.launch(Dispatchers.IO) {
             try {
                 LOG.debug("[AutoMobile IDE] Booting device: ${image.name}")
-                val client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
                 val result = client.startDevice(
                     name = image.name,
                     platform = image.platform,
@@ -2082,14 +2082,14 @@ private fun McpProcessesPanel(
     }
 
     // Select device action (non-blocking coroutine)
-    val onSelectDeviceAction: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit = { device ->
+    val onSelectDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit = { device ->
         LOG.debug("[AutoMobile IDE] Select clicked for device: ${device.name}, deviceId: ${device.deviceId}, platform: ${device.platform}")
         selectingDevice = device
         selectError = null
         onDeviceSelected(device.deviceId, device.name)
         scope.launch(Dispatchers.IO) {
             try {
-                val client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
                 val result = client.setActiveDevice(device.deviceId, device.platform)
                 if (result.success) {
                     LOG.debug("[AutoMobile IDE] Device selected successfully: ${device.name}")
@@ -2107,14 +2107,14 @@ private fun McpProcessesPanel(
     }
 
     // Kill device action (non-blocking coroutine)
-    val onKillDeviceAction: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit = { device ->
+    val onKillDeviceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit = { device ->
         killingDeviceIds = killingDeviceIds + device.deviceId
         killErrors = killErrors - device.deviceId
         scope.launch(Dispatchers.IO) {
-            var client: dev.jasonpearson.automobile.ide.daemon.AutoMobileClient? = null
+            var client: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
             try {
                 LOG.warn("[AutoMobile IDE] Killing device: ${device.name} (${device.deviceId}, ${device.platform})")
-                client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
                 val result = client.killDevice(
                     name = device.name,
                     deviceId = device.deviceId,
@@ -2139,13 +2139,13 @@ private fun McpProcessesPanel(
     }
 
     // Update service action (non-blocking coroutine)
-    val onUpdateServiceAction: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit = { device ->
+    val onUpdateServiceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit = { device ->
         updatingServiceDeviceIds = updatingServiceDeviceIds + device.deviceId
         scope.launch(Dispatchers.IO) {
-            var client: dev.jasonpearson.automobile.ide.daemon.AutoMobileClient? = null
+            var client: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
             try {
                 LOG.warn("[AutoMobile IDE] Updating service for device: ${device.name} (${device.deviceId}, ${device.platform})")
-                client = dev.jasonpearson.automobile.ide.daemon.McpClientFactory.createPreferred(null)
+                client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
                 val result = client.updateService(device.deviceId, device.platform)
                 if (result.success) {
                     LOG.warn("[AutoMobile IDE] Service updated successfully for: ${device.name}")
@@ -2967,20 +2967,20 @@ private fun formatUptime(ms: Long): String {
 
 @Composable
 private fun DevicesSection(
-    bootedDevices: List<dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo>,
-    deviceImages: List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>,
+    bootedDevices: List<dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo>,
+    deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
     isLoading: Boolean,
     error: String?,
     bootingDeviceIds: Set<String>,
     killingDeviceIds: Set<String>,
     bootErrors: Map<String, String>,
     killErrors: Map<String, String>,
-    daemonStatus: dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse?,
+    daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse?,
     updatingServiceDeviceIds: Set<String>,
-    onSelectDevice: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit,
-    onBootDevice: (dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo) -> Unit,
-    onKillDevice: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit,
-    onUpdateService: (dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo) -> Unit,
+    onSelectDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
+    onKillDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
+    onUpdateService: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
 
@@ -3077,7 +3077,7 @@ private fun DevicesSection(
 
 @Composable
 private fun DaemonStatusInfo(
-    daemonStatus: dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse,
+    daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse,
 ) {
     val colors = JewelTheme.globalColors
     Column(
@@ -3143,15 +3143,15 @@ private fun extractIosVersion(iosVersion: String?): String? {
 private data class DeviceGroup(
     val label: String,
     val sortKey: Int,
-    val images: List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>,
+    val images: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
 )
 
 @Composable
 private fun DeviceImagesGrouped(
-    deviceImages: List<dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo>,
+    deviceImages: List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>,
     bootingDeviceIds: Set<String>,
     bootErrors: Map<String, String>,
-    onBootDevice: (dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo) -> Unit,
+    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
 
@@ -3196,7 +3196,7 @@ private fun CollapsibleDeviceGroup(
     group: DeviceGroup,
     bootingDeviceIds: Set<String>,
     bootErrors: Map<String, String>,
-    onBootDevice: (dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo) -> Unit,
+    onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
     val colors = JewelTheme.globalColors
     var expanded by remember { mutableStateOf(false) }
@@ -3250,7 +3250,7 @@ private fun CollapsibleDeviceGroup(
 
 @Composable
 private fun BootedDeviceRow(
-    device: dev.jasonpearson.automobile.ide.mcp.BootedDeviceInfo,
+    device: dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo,
     isKilling: Boolean = false,
     killError: String? = null,
     isUpdatingService: Boolean = false,
@@ -3428,7 +3428,7 @@ private fun BootedDeviceRow(
 
 @Composable
 private fun DeviceImageRow(
-    image: dev.jasonpearson.automobile.ide.mcp.DeviceImageInfo,
+    image: dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo,
     isBooting: Boolean = false,
     error: String? = null,
     onBoot: () -> Unit,

@@ -43,6 +43,8 @@ class StderrLogger(private val tag: String) : Logger {
 object LoggerFactory {
   @Volatile var factory: (String) -> Logger = { tag -> StderrLogger(tag) }
 
+  fun getLogger(tag: String): Logger = factory(tag)
+
   fun getLogger(clazz: Class<*>): Logger = factory(clazz.simpleName ?: "Unknown")
 
   inline fun <reified T> getLogger(): Logger = getLogger(T::class.java)

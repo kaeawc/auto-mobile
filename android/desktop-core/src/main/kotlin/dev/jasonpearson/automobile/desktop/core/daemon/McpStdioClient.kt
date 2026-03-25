@@ -233,7 +233,7 @@ class McpStdioClient(
     }
   }
 
-  override fun getDaemonStatus(): dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse {
+  override fun getDaemonStatus(): dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse {
     val response =
         callTool(
             "getDaemonStatus",
@@ -243,10 +243,10 @@ class McpStdioClient(
       decodeToolResponse(
           json,
           response,
-          dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse.serializer(),
+          dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
       )
     } catch (e: Exception) {
-      dev.jasonpearson.automobile.ide.mcp.DaemonStatusResponse()
+      dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse()
     }
   }
 

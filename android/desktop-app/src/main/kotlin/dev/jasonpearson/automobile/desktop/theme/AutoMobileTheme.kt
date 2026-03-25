@@ -34,6 +34,8 @@ private val DarkColors = darkColorScheme(
   onSecondary = Color(0xFF303134),
   secondaryContainer = Color(0xFF3C4043),
   onSecondaryContainer = Color(0xFFE8EAED),
+  tertiary = Color(0xFFFFA94D), // Warning/amber
+  onTertiary = Color(0xFF3B2400),
   surface = Color(0xFF1E1E1E),
   onSurface = Color(0xFFE8EAED),
   surfaceVariant = Color(0xFF2D2D2D),
@@ -41,11 +43,13 @@ private val DarkColors = darkColorScheme(
   outline = Color(0xFF5F6368),
   error = Color(0xFFF28B82),
   onError = Color(0xFF601410),
+  background = Color(0xFF1E1E1E),
+  onBackground = Color(0xFFE8EAED),
 )
 
 @Composable
 fun AutoMobileTheme(
-  darkTheme: Boolean = isSystemInDarkTheme(),
+  darkTheme: Boolean = true, // Default to dark to match IDE plugin's Jewel dark theme
   content: @Composable () -> Unit,
 ) {
   MaterialTheme(

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -27,6 +28,7 @@ import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -92,6 +94,7 @@ fun TelemetryDashboard(
     var selectedEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
+    var isPaused by remember { mutableStateOf(false) }
 
     // Search and severity filter state
     var searchQuery by remember { mutableStateOf("") }
@@ -103,14 +106,28 @@ fun TelemetryDashboard(
         debouncedQuery = searchQuery
     }
 
-    // Collect telemetry events from the push client
-    LaunchedEffect(telemetryPushClient) {
+    // Collect telemetry events from the push client (newest at bottom)
+    LaunchedEffect(telemetryPushClient, isPaused) {
         val client = telemetryPushClient ?: return@LaunchedEffect
         client.telemetryEvents.collect { event ->
-            events.add(0, event)
-            // Cap at MAX_EVENTS
-            while (events.size > MAX_EVENTS) {
-                events.removeAt(events.size - 1)
+            if (!isPaused) {
+                events.add(event)
+                // Cap at MAX_EVENTS (remove oldest from front)
+                while (events.size > MAX_EVENTS) {
+                    events.removeAt(0)
+                }
+            }
+        }
+    }
+
+    // Auto-scroll to bottom when new events arrive and user is near the bottom
+    LaunchedEffect(events.size) {
+        if (!isPaused && events.isNotEmpty()) {
+            val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
+            val totalItems = listState.layoutInfo.totalItemsCount
+            // Auto-scroll if within 3 items of the bottom
+            if (totalItems - lastVisible <= 3) {
+                listState.animateScrollToItem(events.size - 1)
             }
         }
     }
@@ -127,7 +144,7 @@ fun TelemetryDashboard(
     LaunchedEffect(dataSourceMode) {
         if (dataSourceMode != DataSourceMode.Fake) return@LaunchedEffect
         val fakeEvents = generateFakeEvents()
-        events.addAll(0, fakeEvents)
+        events.addAll(fakeEvents)
     }
 
     // Filtered events — chains category, severity, and text search filters.
@@ -221,6 +238,59 @@ fun TelemetryDashboard(
                 ) {
                     Text(sev.icon, fontSize = 11.sp)
                 }
+            }
+
+            // Spacer between severity chips and action buttons
+            Spacer(Modifier.width(8.dp))
+
+            // Action buttons (like Logcat toolbar)
+            val coroutineScope = rememberCoroutineScope()
+            val buttonModifier = Modifier
+                .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 6.dp, vertical = 4.dp)
+
+            // Clear all events
+            Box(
+                modifier = Modifier
+                    .clickable { events.clear(); selectedEvent = null }
+                    .then(buttonModifier),
+            ) {
+                Text("\uD83D\uDDD1", fontSize = 13.sp) // 🗑
+            }
+
+            // Pause / Resume
+            Box(
+                modifier = Modifier
+                    .clickable { isPaused = !isPaused }
+                    .then(buttonModifier)
+                    .then(if (isPaused) Modifier.background(Color(0xFFFFA94D).copy(alpha = 0.15f), RoundedCornerShape(4.dp)) else Modifier),
+            ) {
+                Text(if (isPaused) "▶" else "⏸", fontSize = 13.sp)
+            }
+
+            // Restart (clear + unpause)
+            Box(
+                modifier = Modifier
+                    .clickable { events.clear(); selectedEvent = null; isPaused = false }
+                    .then(buttonModifier),
+            ) {
+                Text("↻", fontSize = 13.sp)
+            }
+
+            // Scroll to latest (bottom)
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        if (filteredEvents.isNotEmpty()) {
+                            coroutineScope.launch {
+                                listState.animateScrollToItem(filteredEvents.size - 1)
+                            }
+                        }
+                    }
+                    .then(buttonModifier),
+            ) {
+                Text("↓", fontSize = 13.sp)
             }
         }
 

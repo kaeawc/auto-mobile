@@ -163,7 +163,8 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            if run_cmd xcodebuild \
+            set +e
+            BUILD_LOG=$(run_cmd xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
@@ -172,7 +173,15 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
                 CODE_SIGN_IDENTITY="-" \
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_ALLOWED=NO \
-                build 2>&1; then
+                build 2>&1)
+            XCODE_EXIT=$?
+            set -e
+            if [ $XCODE_EXIT -ne 0 ]; then
+                echo "$BUILD_LOG" | grep -iE "error:" | head -20 | while IFS= read -r line; do
+                    echo "::error::${scheme}: ${line}"
+                done
+            fi
+            if [ $XCODE_EXIT -eq 0 ]; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

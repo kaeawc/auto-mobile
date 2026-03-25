@@ -182,13 +182,18 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileFailures.shared.reset()
         AutoMobileBiometrics.shared.reset()
         AutoMobileLog.shared.reset()
+
+        // Extract buffer under lock, then shut it down OUTSIDE the lock
+        // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock
         lock.lock()
-        eventBuffer?.shutdown()
+        let bufferToShutdown = eventBuffer
         eventBuffer = nil
         listeners.removeAll()
         _isEnabled = true
         _isInitialized = false
         _bundleId = nil
         lock.unlock()
+
+        bufferToShutdown?.shutdown()
     }
 }

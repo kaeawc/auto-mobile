@@ -137,34 +137,6 @@ sealed class TelemetryDisplayEvent {
         val previousValue: String?,
     ) : TelemetryDisplayEvent()
 
-    data class Interaction(
-        override val timestamp: Long,
-        val interactionType: String,
-        val packageName: String?,
-        val screenClassName: String?,
-        val elementText: String?,
-        val elementResourceId: String?,
-        val elementContentDesc: String?,
-    ) : TelemetryDisplayEvent()
-
-    data class Gesture(
-        override val timestamp: Long,
-        val gestureType: String,
-        val success: Boolean,
-        val totalTimeMs: Long,
-        val gestureTimeMs: Long?,
-        val error: String?,
-    ) : TelemetryDisplayEvent()
-
-    data class Input(
-        override val timestamp: Long,
-        val inputType: String,
-        val success: Boolean,
-        val totalTimeMs: Long,
-        val action: String?,
-        val error: String?,
-    ) : TelemetryDisplayEvent()
-
     data class ToolCall(
         override val timestamp: Long,
         val toolName: String,
@@ -420,31 +392,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 violations = violationsList,
             )
         }
-        "interaction" -> TelemetryDisplayEvent.Interaction(
-            timestamp = envelope.timestamp,
-            interactionType = d.stringOrDefault("type", "tap"),
-            packageName = d.stringOrNull("packageName"),
-            screenClassName = d.stringOrNull("screenClassName"),
-            elementText = d.stringOrNull("elementText"),
-            elementResourceId = d.stringOrNull("elementResourceId"),
-            elementContentDesc = d.stringOrNull("elementContentDesc"),
-        )
-        "gesture" -> TelemetryDisplayEvent.Gesture(
-            timestamp = envelope.timestamp,
-            gestureType = d.stringOrDefault("gestureType", "tap"),
-            success = d["success"]?.jsonPrimitive?.booleanOrNull ?: false,
-            totalTimeMs = d["totalTimeMs"]?.jsonPrimitive?.longOrNull ?: 0,
-            gestureTimeMs = d["gestureTimeMs"]?.jsonPrimitive?.longOrNull,
-            error = d.stringOrNull("error"),
-        )
-        "input" -> TelemetryDisplayEvent.Input(
-            timestamp = envelope.timestamp,
-            inputType = d.stringOrDefault("inputType", "setText"),
-            success = d["success"]?.jsonPrimitive?.booleanOrNull ?: false,
-            totalTimeMs = d["totalTimeMs"]?.jsonPrimitive?.longOrNull ?: 0,
-            action = d.stringOrNull("action"),
-            error = d.stringOrNull("error"),
-        )
+        "interaction", "gesture", "input" -> null // Filtered out — too noisy
         "memory" -> {
             val violations = try {
                 d["violations"]?.jsonArray?.map { it.jsonPrimitive.content } ?: emptyList()
@@ -537,16 +485,6 @@ fun TelemetryDisplayEvent.classifyEventSeverity(slowNetworkThresholdMs: Long = 3
             newViolations > 0 -> EventSeverity.Warning
             else -> EventSeverity.Info
         }
-        is TelemetryDisplayEvent.Interaction -> EventSeverity.Info
-        is TelemetryDisplayEvent.Gesture -> when {
-            !success -> EventSeverity.Error
-            totalTimeMs > 1000 -> EventSeverity.Warning
-            else -> EventSeverity.Info
-        }
-        is TelemetryDisplayEvent.Input -> when {
-            !success -> EventSeverity.Error
-            else -> EventSeverity.Info
-        }
         is TelemetryDisplayEvent.Memory -> when {
             !passed -> EventSeverity.Error
             else -> EventSeverity.Info
@@ -613,21 +551,6 @@ fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
             packageName.lowercase().contains(q) ||
             screenId.lowercase().contains(q) ||
             violations.any { it.type.lowercase().contains(q) || it.message.lowercase().contains(q) }
-        is TelemetryDisplayEvent.Interaction ->
-            interactionType.lowercase().contains(q) ||
-            elementText?.lowercase()?.contains(q) == true ||
-            elementResourceId?.lowercase()?.contains(q) == true ||
-            elementContentDesc?.lowercase()?.contains(q) == true ||
-            screenClassName?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Gesture ->
-            gestureType.lowercase().contains(q) ||
-            error?.lowercase()?.contains(q) == true ||
-            "gesture".contains(q)
-        is TelemetryDisplayEvent.Input ->
-            inputType.lowercase().contains(q) ||
-            action?.lowercase()?.contains(q) == true ||
-            error?.lowercase()?.contains(q) == true ||
-            "input".contains(q)
         is TelemetryDisplayEvent.Memory ->
             packageName.lowercase().contains(q) ||
             violations.any { it.lowercase().contains(q) } ||

@@ -119,9 +119,6 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
                 is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
-                is TelemetryDisplayEvent.Interaction -> InteractionDetail(event, textColor)
-                is TelemetryDisplayEvent.Gesture -> GestureDetail(event, textColor)
-                is TelemetryDisplayEvent.Input -> InputDetail(event, textColor)
                 is TelemetryDisplayEvent.Memory -> MemoryDetail(event, textColor)
                 is TelemetryDisplayEvent.ToolCall -> ToolCallDetail(event, textColor)
                 is TelemetryDisplayEvent.Accessibility -> AccessibilityDetail(event, textColor)
@@ -149,9 +146,6 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
     is TelemetryDisplayEvent.Storage -> "Storage Change"
     is TelemetryDisplayEvent.Layout -> "Layout Event"
     is TelemetryDisplayEvent.Performance -> "Performance"
-    is TelemetryDisplayEvent.Interaction -> "Interaction"
-    is TelemetryDisplayEvent.Gesture -> "Gesture"
-    is TelemetryDisplayEvent.Input -> "Text Input"
     is TelemetryDisplayEvent.Memory -> "Memory Audit"
     is TelemetryDisplayEvent.ToolCall -> "Tool Call"
     is TelemetryDisplayEvent.Accessibility -> "Accessibility"
@@ -787,34 +781,6 @@ private fun PerformanceDetail(event: TelemetryDisplayEvent.Performance, textColo
     event.touchLatencyMs?.let { DetailRow("Touch Latency", "${it.toInt()} ms", textColor) }
     event.memoryUsageMb?.let { DetailRow("Memory", "${it.toInt()} MB", textColor) }
     event.cpuUsagePercent?.let { DetailRow("CPU", "${"%.1f".format(it)}%", textColor) }
-}
-
-@Composable
-private fun InteractionDetail(event: TelemetryDisplayEvent.Interaction, textColor: Color) {
-    DetailRow("Type", event.interactionType, textColor)
-    event.packageName?.let { DetailRow("Package", it, textColor) }
-    event.screenClassName?.let { DetailRow("Screen", it, textColor) }
-    event.elementText?.let { DetailRow("Text", it, textColor) }
-    event.elementResourceId?.let { DetailRow("Resource ID", it, textColor) }
-    event.elementContentDesc?.let { DetailRow("Content Desc", it, textColor) }
-}
-
-@Composable
-private fun GestureDetail(event: TelemetryDisplayEvent.Gesture, textColor: Color) {
-    DetailRow("Gesture", event.gestureType, textColor)
-    DetailRow("Success", if (event.success) "Yes" else "No", textColor)
-    DetailRow("Total Time", "${event.totalTimeMs}ms", textColor)
-    event.gestureTimeMs?.let { DetailRow("Gesture Time", "${it}ms", textColor) }
-    event.error?.let { DetailRow("Error", it, textColor) }
-}
-
-@Composable
-private fun InputDetail(event: TelemetryDisplayEvent.Input, textColor: Color) {
-    DetailRow("Input Type", event.inputType, textColor)
-    DetailRow("Success", if (event.success) "Yes" else "No", textColor)
-    DetailRow("Duration", "${event.totalTimeMs}ms", textColor)
-    event.action?.let { DetailRow("Action", it, textColor) }
-    event.error?.let { DetailRow("Error", it, textColor) }
 }
 
 @Composable

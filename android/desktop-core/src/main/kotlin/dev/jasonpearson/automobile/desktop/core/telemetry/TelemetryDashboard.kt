@@ -95,6 +95,7 @@ fun TelemetryDashboard(
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
     var isPaused by remember { mutableStateOf(false) }
+    var autoScrollEnabled by remember { mutableStateOf(true) }
 
     // Search and severity filter state
     var searchQuery by remember { mutableStateOf("") }
@@ -120,15 +121,19 @@ fun TelemetryDashboard(
         }
     }
 
-    // Auto-scroll to bottom when new events arrive and user is near the bottom
-    LaunchedEffect(events.size) {
-        if (!isPaused && events.isNotEmpty()) {
+    // Track whether user has scrolled away from the bottom (disables auto-scroll)
+    LaunchedEffect(listState.isScrollInProgress) {
+        if (listState.isScrollInProgress) {
             val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
             val totalItems = listState.layoutInfo.totalItemsCount
-            // Auto-scroll if within 3 items of the bottom
-            if (totalItems - lastVisible <= 3) {
-                listState.animateScrollToItem(events.size - 1)
-            }
+            autoScrollEnabled = totalItems - lastVisible <= 3
+        }
+    }
+
+    // Auto-scroll to bottom when new events arrive
+    LaunchedEffect(events.size) {
+        if (autoScrollEnabled && !isPaused && events.isNotEmpty()) {
+            listState.animateScrollToItem(events.size - 1)
         }
     }
 
@@ -262,26 +267,39 @@ fun TelemetryDashboard(
             // Pause / Resume
             Box(
                 modifier = Modifier
-                    .clickable { isPaused = !isPaused }
+                    .clickable {
+                        isPaused = !isPaused
+                        if (!isPaused) {
+                            autoScrollEnabled = true
+                            coroutineScope.launch {
+                                if (filteredEvents.isNotEmpty()) {
+                                    listState.animateScrollToItem(filteredEvents.size - 1)
+                                }
+                            }
+                        }
+                    }
                     .then(buttonModifier)
                     .then(if (isPaused) Modifier.background(Color(0xFFFFA94D).copy(alpha = 0.15f), RoundedCornerShape(4.dp)) else Modifier),
             ) {
                 Text(if (isPaused) "▶" else "⏸", fontSize = 13.sp)
             }
 
-            // Restart (clear + unpause)
+            // Restart (clear + unpause + scroll to bottom)
             Box(
                 modifier = Modifier
-                    .clickable { events.clear(); selectedEvent = null; isPaused = false }
+                    .clickable {
+                        events.clear(); selectedEvent = null; isPaused = false; autoScrollEnabled = true
+                    }
                     .then(buttonModifier),
             ) {
                 Text("↻", fontSize = 13.sp)
             }
 
-            // Scroll to latest (bottom)
+            // Scroll to latest (bottom) + re-enable auto-scroll
             Box(
                 modifier = Modifier
                     .clickable {
+                        autoScrollEnabled = true
                         if (filteredEvents.isNotEmpty()) {
                             coroutineScope.launch {
                                 listState.animateScrollToItem(filteredEvents.size - 1)
@@ -524,9 +542,6 @@ private fun TelemetryEventRow(
                 is TelemetryDisplayEvent.Storage -> "\uD83D\uDDC4\uFE0F" // 🗄️
                 is TelemetryDisplayEvent.Layout -> "\uD83C\uDFD7\uFE0F"  // 🏗️
                 is TelemetryDisplayEvent.Performance -> "\uD83D\uDCCA" // 📊
-                is TelemetryDisplayEvent.Interaction -> "\uD83D\uDC46" // 👆
-                is TelemetryDisplayEvent.Gesture -> "\u270B" // ✋
-                is TelemetryDisplayEvent.Input -> "\u2328\uFE0F" // ⌨️
                 is TelemetryDisplayEvent.Memory -> "\uD83E\uDDE0" // 🧠
                 is TelemetryDisplayEvent.ToolCall -> "\uD83D\uDD27" // 🔧
                 is TelemetryDisplayEvent.Accessibility -> "\u267F" // ♿
@@ -546,9 +561,6 @@ private fun TelemetryEventRow(
             is TelemetryDisplayEvent.Storage -> StorageSummary(event, textColor)
             is TelemetryDisplayEvent.Layout -> LayoutSummary(event, textColor)
             is TelemetryDisplayEvent.Performance -> PerformanceSummary(event, textColor)
-            is TelemetryDisplayEvent.Interaction -> InteractionSummary(event, textColor)
-            is TelemetryDisplayEvent.Gesture -> GestureSummary(event, textColor)
-            is TelemetryDisplayEvent.Input -> InputSummary(event, textColor)
             is TelemetryDisplayEvent.Memory -> MemorySummary(event, textColor)
             is TelemetryDisplayEvent.ToolCall -> ToolCallSummary(event, textColor)
             is TelemetryDisplayEvent.Accessibility -> A11ySummary(event, textColor)
@@ -864,38 +876,6 @@ private fun PerformanceSummary(event: TelemetryDisplayEvent.Performance, textCol
         color = color,
         maxLines = 1,
     )
-}
-
-@Composable
-private fun InteractionSummary(event: TelemetryDisplayEvent.Interaction, textColor: Color) {
-    val target = event.elementText
-        ?: event.elementResourceId?.substringAfterLast('/')
-        ?: event.elementContentDesc
-        ?: event.screenClassName?.substringAfterLast('.')
-        ?: ""
-    val text = "${event.interactionType}${if (target.isNotEmpty()) " '$target'" else ""}"
-    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = Color(0xFF74C0FC), maxLines = 1)
-}
-
-@Composable
-private fun GestureSummary(event: TelemetryDisplayEvent.Gesture, textColor: Color) {
-    val status = if (event.success) "${event.totalTimeMs}ms" else "FAILED"
-    val text = "${event.gestureType} $status"
-    val color = when {
-        !event.success -> Color(0xFFFF6B6B)
-        event.totalTimeMs > 1000 -> Color(0xFFFFA94D)
-        else -> Color(0xFF51CF66)
-    }
-    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
-}
-
-@Composable
-private fun InputSummary(event: TelemetryDisplayEvent.Input, textColor: Color) {
-    val status = if (event.success) "${event.totalTimeMs}ms" else "FAILED"
-    val actionSuffix = event.action?.let { " ($it)" } ?: ""
-    val text = "${event.inputType}$actionSuffix $status"
-    val color = if (event.success) textColor.copy(alpha = 0.85f) else Color(0xFFFF6B6B)
-    Text(text, fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = color, maxLines = 1)
 }
 
 @Composable

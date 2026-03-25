@@ -632,6 +632,7 @@ fun AutoMobileContent(
     SettingsPanel(
         settings = settingsProvider,
         onClose = { showSettings = false },
+        clientProvider = clientProvider,
         modifier = Modifier.fillMaxSize(),
     )
     return

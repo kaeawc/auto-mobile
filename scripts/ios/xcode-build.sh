@@ -106,6 +106,25 @@ if ! has_simulator_sdk; then
     fi
 fi
 
+# Regenerate Xcode projects from project.yml if xcodegen is available
+if command -v xcodegen &> /dev/null; then
+    echo -e "${BLUE}Regenerating Xcode projects from project.yml...${NC}"
+    shopt -s nullglob
+    PROJECT_YMLS=("${IOS_DIR}"/*/project.yml)
+    shopt -u nullglob
+    for yml in "${PROJECT_YMLS[@]}"; do
+        yml_dir=$(dirname "$yml")
+        yml_name=$(basename "$yml_dir")
+        echo -e "  Generating ${yml_name}..."
+        if (cd "$yml_dir" && xcodegen generate 2>&1); then
+            echo -e "  ${GREEN}✓${NC} ${yml_name} regenerated"
+        else
+            echo -e "  ${YELLOW}⚠${NC} ${yml_name} generation failed, using committed project"
+        fi
+    done
+    echo ""
+fi
+
 # Find all xcodeproj directories using glob (faster than find)
 echo -e "${BLUE}Searching for Xcode projects...${NC}"
 shopt -s nullglob
@@ -136,17 +155,13 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            set +e
-            BUILD_OUTPUT=$(run_cmd xcodebuild \
+            if run_cmd xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
                 -configuration Debug \
-                build 2>&1)
-            BUILD_EXIT=$?
-            set -e
-            echo "$BUILD_OUTPUT" | tail -100
-            if [ $BUILD_EXIT -eq 0 ]; then
+                -quiet \
+                build 2>&1; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

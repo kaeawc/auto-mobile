@@ -25,7 +25,15 @@ sourceSets {
 
 dependencies {
   // Shared module (UX, unix socket architecture, settings, data sources)
-  implementation(project(":desktop-core"))
+  // Exclude coroutines and Compose runtime since IntelliJ provides them
+  implementation(project(":desktop-core")) {
+    exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core")
+    exclude(group = "org.jetbrains.kotlinx", module = "kotlinx-coroutines-core-jvm")
+    exclude(group = "org.jetbrains.compose.runtime")
+    exclude(group = "org.jetbrains.compose.ui")
+    exclude(group = "org.jetbrains.compose.foundation")
+    exclude(group = "org.jetbrains.compose.material3")
+  }
 
   // Shared validation module
   implementation(project(":test-plan-validation"))

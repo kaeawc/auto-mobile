@@ -145,7 +145,11 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     }
 
     private func reportBatteryChange() {
-        let level = Int(UIDevice.current.batteryLevel * 100)
+        let rawLevel = UIDevice.current.batteryLevel
+        // iOS returns -1.0 when battery level is unavailable (simulator, unsupported)
+        guard rawLevel >= 0 else { return }
+
+        let level = Int(rawLevel * 100)
         let state = UIDevice.current.batteryState
         let charging = state == .charging || state == .full
 

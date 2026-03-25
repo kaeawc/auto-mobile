@@ -107,5 +107,51 @@ public final class AutoMobileNotifications: @unchecked Sendable {
         let url = URL(fileURLWithPath: path)
         return FileManager.default.fileExists(atPath: path) ? url : nil
     }
+
+    /// Install a delegate handler that posts `actionNotification` when a notification
+    /// action button is tapped. Call this once during app setup.
+    /// Returns the delegate object (retain it to keep it active).
+    public func installActionHandler(on center: UNUserNotificationCenter = .current()) -> UNUserNotificationCenterDelegate {
+        let handler = NotificationActionHandler()
+        center.delegate = handler
+        return handler
+    }
     #endif
 }
+
+#if canImport(UserNotifications)
+/// Delegate that forwards notification action taps to NotificationCenter.
+final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let actionId = response.actionIdentifier
+        guard actionId != UNNotificationDefaultActionIdentifier,
+              actionId != UNNotificationDismissActionIdentifier else {
+            completionHandler()
+            return
+        }
+
+        // Post to NotificationCenter so SDK consumers can observe
+        NotificationCenter.default.post(
+            name: AutoMobileNotifications.actionNotification,
+            object: nil,
+            userInfo: [
+                "actionId": actionId,
+                "notificationTitle": response.notification.request.content.title,
+            ]
+        )
+
+        // Also emit as SDK event
+        let event = SdkNotificationActionEvent(
+            actionId: actionId,
+            notificationTitle: response.notification.request.content.title
+        )
+        AutoMobileSDK.shared.getEventBuffer()?.add(event)
+
+        completionHandler()
+    }
+}
+#endif

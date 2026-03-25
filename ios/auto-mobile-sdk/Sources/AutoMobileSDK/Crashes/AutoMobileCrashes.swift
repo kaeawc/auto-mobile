@@ -16,7 +16,9 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     private var installedSignalHandlers = false
 
     /// Signals to intercept for crash reporting.
-    private static let monitoredSignals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL, SIGTRAP]
+    /// SIGTRAP is excluded — it's used by the debugger and Swift runtime for
+    /// breakpoints and assertions; intercepting it breaks debugging and tests.
+    private static let monitoredSignals: [Int32] = [SIGABRT, SIGSEGV, SIGBUS, SIGFPE, SIGILL]
 
     /// Provide a closure that returns the current screen name for crash context.
     public var currentScreenProvider: (@Sendable () -> String?)?
@@ -41,9 +43,9 @@ public final class AutoMobileCrashes: @unchecked Sendable {
             AutoMobileCrashes.shared.handleException(exception)
         }
 
-        setupSignalCrashFile()
-        installSignalHandlers()
-        checkPreviousSignalCrash()
+        // Signal handlers are opt-in via enableSignalHandlers() because they
+        // interfere with debuggers and test frameworks. NSSetUncaughtExceptionHandler
+        // covers ObjC/Swift exceptions; signal handlers add SIGABRT/SIGSEGV coverage.
     }
 
     public var isInitialized: Bool {
@@ -53,6 +55,15 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     }
 
     // MARK: - Signal Handlers
+
+    /// Enable signal-based crash detection for SIGABRT, SIGSEGV, SIGBUS, etc.
+    /// Call after `initialize()` in production apps. Not recommended during testing
+    /// or debugging as signal handlers interfere with debuggers and XCTest.
+    public func enableSignalHandlers() {
+        setupSignalCrashFile()
+        installSignalHandlers()
+        checkPreviousSignalCrash()
+    }
 
     private func installSignalHandlers() {
         lock.lock()

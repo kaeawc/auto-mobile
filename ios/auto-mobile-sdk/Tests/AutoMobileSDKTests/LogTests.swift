@@ -16,19 +16,15 @@ final class AutoMobileLogTests: XCTestCase {
     }
 
     func testClearFilters() {
-        AutoMobileLog.shared.addFilter(name: "a")
-        AutoMobileLog.shared.addFilter(name: "b")
+        AutoMobileLog.shared.addFilter(name: "a", tagPattern: nil as NSRegularExpression?)
+        AutoMobileLog.shared.addFilter(name: "b", tagPattern: nil as NSRegularExpression?)
         XCTAssertEqual(AutoMobileLog.shared.filterCount, 2)
         AutoMobileLog.shared.clearFilters()
         XCTAssertEqual(AutoMobileLog.shared.filterCount, 0)
     }
 
     func testLogMatchesTagFilter() {
-        let buffer = FakeEventBuffer()
-        AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer as! SdkEventBuffer)
-
-        // Since FakeEventBuffer doesn't match SdkEventBuffer type,
-        // test the filter matching logic directly instead
+        // Test the filter matching logic directly
         let filter = LogFilter(
             name: "network",
             tagPattern: try? NSRegularExpression(pattern: "Network"),

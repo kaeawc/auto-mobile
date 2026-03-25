@@ -106,6 +106,14 @@ if ! has_simulator_sdk; then
     fi
 fi
 
+# Install xcodegen if not available (needed to regenerate projects for Xcode version compatibility)
+if ! command -v xcodegen &> /dev/null; then
+    if command -v brew &> /dev/null; then
+        print_info "Installing xcodegen..."
+        brew install --quiet xcodegen 2>/dev/null || true
+    fi
+fi
+
 # Regenerate Xcode projects from project.yml if xcodegen is available
 if command -v xcodegen &> /dev/null; then
     echo -e "${BLUE}Regenerating Xcode projects from project.yml...${NC}"

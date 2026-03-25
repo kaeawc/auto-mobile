@@ -73,12 +73,10 @@ public final class AutoMobileHangs: @unchecked Sendable {
             guard monitoring else { break }
 
             var responded = false
-            var mainThreadStack: String?
             let semaphore = DispatchSemaphore(value: 0)
+            let checkStart = CFAbsoluteTimeGetCurrent()
 
             DispatchQueue.main.async {
-                // Capture the main thread's stack when it responds
-                // If the main thread was blocked, this runs after the hang ends
                 responded = true
                 semaphore.signal()
             }
@@ -87,11 +85,10 @@ public final class AutoMobileHangs: @unchecked Sendable {
             let result = semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs)))
 
             if result == .timedOut && !responded {
-                // Main thread is still blocked — capture its stack from this thread
-                // Using Thread.callStackSymbols from the main thread via sync would deadlock,
-                // so we capture the current thread's view of all stacks
-                mainThreadStack = captureMainThreadStack()
-                reportHang(durationMs: timeoutMs, stackTrace: mainThreadStack)
+                // Main thread is still blocked — measure actual duration
+                let actualDurationMs = (CFAbsoluteTimeGetCurrent() - checkStart) * 1000
+                let mainThreadStack = captureMainThreadStack()
+                reportHang(durationMs: actualDurationMs, stackTrace: mainThreadStack)
             }
 
             Thread.sleep(forTimeInterval: pollIntervalMs / 1000.0)

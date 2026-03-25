@@ -168,6 +168,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Reset the SDK for testing. Not for production use.
     internal func reset() {
+        AutoMobileCrashes.shared.reset()
         AutoMobileHangs.shared.reset()
         AutoMobileOsEvents.shared.reset()
         AutoMobileNotificationObserver.shared.reset()

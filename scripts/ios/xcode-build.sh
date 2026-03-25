@@ -141,8 +141,7 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
                 -configuration Debug \
-                -quiet \
-                build 2>&1; then
+                build 2>&1 | tail -100; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

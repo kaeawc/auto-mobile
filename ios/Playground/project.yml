@@ -13,6 +13,10 @@ settings:
   base:
     SWIFT_VERSION: "5.0"
 
+packages:
+  AutoMobileSDK:
+    path: ../auto-mobile-sdk
+
 targets:
   Playground:
     type: application
@@ -24,6 +28,8 @@ targets:
       - path: Sources/Theme
       - path: Sources/Assets.xcassets
         type: folder
+    dependencies:
+      - package: AutoMobileSDK
     settings:
       base:
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

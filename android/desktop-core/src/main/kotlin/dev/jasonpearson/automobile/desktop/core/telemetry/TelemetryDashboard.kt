@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ide.telemetry
+package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -40,15 +40,14 @@ import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import com.intellij.ide.util.PropertiesComponent
+
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import kotlinx.coroutines.delay
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
-import dev.jasonpearson.automobile.desktop.core.telemetry.*
-import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.component.Text
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import androidx.compose.material3.Text
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -82,11 +81,11 @@ private enum class CategoryFilter(val label: String, val icon: String) {
 fun TelemetryDashboard(
     telemetryPushClient: TelemetryPushClient?,
     dataSourceMode: DataSourceMode,
-    project: com.intellij.openapi.project.Project? = null,
+    onOpenSource: ((String, Int, String) -> Unit)? = null,
     screenshotLoader: dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader? = null,
     modifier: Modifier = Modifier,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val events = remember { mutableStateListOf<TelemetryDisplayEvent>() }
     var selectedFilter by remember { mutableStateOf(CategoryFilter.All) }
     var connectionState by remember { mutableStateOf<TelemetryConnectionState?>(null) }
@@ -362,12 +361,7 @@ fun TelemetryDashboard(
             if (selected != null) {
                 val density = LocalDensity.current
                 var detailWidthDp by remember {
-                    mutableStateOf(
-                        PropertiesComponent.getInstance()
-                            .getInt(DETAIL_PANEL_WIDTH_KEY, DETAIL_PANEL_WIDTH_DEFAULT)
-                            .coerceIn(DETAIL_PANEL_WIDTH_MIN, DETAIL_PANEL_WIDTH_MAX)
-                            .dp
-                    )
+                    mutableStateOf(DETAIL_PANEL_WIDTH_DEFAULT.dp)
                 }
 
                 // Draggable divider — 6dp hit target, 1px visual line
@@ -384,10 +378,7 @@ fun TelemetryDashboard(
                                     detailWidthDp = (detailWidthDp + deltaDp)
                                         .coerceIn(DETAIL_PANEL_WIDTH_MIN.dp, DETAIL_PANEL_WIDTH_MAX.dp)
                                 },
-                                onDragEnd = {
-                                    PropertiesComponent.getInstance()
-                                        .setValue(DETAIL_PANEL_WIDTH_KEY, detailWidthDp.value.toInt(), DETAIL_PANEL_WIDTH_DEFAULT)
-                                },
+                                onDragEnd = { /* width persisted in memory only */ },
                             )
                         },
                     contentAlignment = Alignment.Center,
@@ -405,7 +396,7 @@ fun TelemetryDashboard(
                     timeFormat = timeFormat,
                     textColor = colors.text.normal,
                     onClose = { selectedEvent = null },
-                    project = project,
+                    onOpenSource = onOpenSource,
                     screenshotLoader = screenshotLoader,
                     modifier = Modifier.width(detailWidthDp),
                 )

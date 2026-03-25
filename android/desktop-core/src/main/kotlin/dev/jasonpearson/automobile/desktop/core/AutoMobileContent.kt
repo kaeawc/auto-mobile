@@ -1,6 +1,6 @@
 @file:OptIn(ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
 
-package dev.jasonpearson.automobile.ide
+package dev.jasonpearson.automobile.desktop.core
 
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -55,14 +55,21 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import dev.jasonpearson.automobile.desktop.core.components.Tooltip
+import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
+import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceType
+import dev.jasonpearson.automobile.desktop.core.mcp.AvailableEmulator
+import dev.jasonpearson.automobile.desktop.core.mcp.SystemImage
+import dev.jasonpearson.automobile.desktop.core.platform.NotificationHandler
+import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import org.jetbrains.jewel.foundation.theme.JewelTheme
-import org.jetbrains.jewel.ui.component.Text
-import org.jetbrains.jewel.ui.component.Tooltip
-import com.intellij.notification.NotificationGroupManager
-import com.intellij.notification.NotificationType
-import com.intellij.openapi.diagnostic.Logger
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
@@ -96,10 +103,10 @@ import dev.jasonpearson.automobile.desktop.core.failures.FailuresVerticalPanel
 import dev.jasonpearson.automobile.desktop.core.failures.DateRange
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceVerticalPanel
-import dev.jasonpearson.automobile.ide.settings.AutoMobileSettings
+
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
-import dev.jasonpearson.automobile.ide.telemetry.TelemetryDashboard
+import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
@@ -107,34 +114,9 @@ import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
 import dev.jasonpearson.automobile.desktop.core.test.TestDashboard
 
-private val LOG = Logger.getInstance("AutoMobileToolWindow")
+private val LOG = LoggerFactory.getLogger("AutoMobileContent")
 
-private fun showNotification(
-    title: String,
-    content: String,
-    type: NotificationType = NotificationType.INFORMATION,
-    actionText: String? = null,
-    onAction: (() -> Unit)? = null,
-) {
-    try {
-        val notification = NotificationGroupManager.getInstance()
-            .getNotificationGroup("AutoMobile")
-            .createNotification(title, content, type)
-
-        if (actionText != null && onAction != null) {
-            notification.addAction(object : com.intellij.notification.NotificationAction(actionText) {
-                override fun actionPerformed(e: com.intellij.openapi.actionSystem.AnActionEvent, notification: com.intellij.notification.Notification) {
-                    onAction()
-                    notification.expire()
-                }
-            })
-        }
-
-        notification.notify(null)
-    } catch (e: Exception) {
-        LOG.error("Failed to show notification: $title - $content", e)
-    }
-}
+// Notification handler is injected via parameter
 
 enum class Dashboard(val title: String, val icon: String) {
   Navigation("Navigation", "🧭"),
@@ -145,31 +127,7 @@ enum class Dashboard(val title: String, val icon: String) {
   Failures("Failures", "💥"),
 }
 
-// Device types for icons
-enum class DeviceType { AndroidEmulator, AndroidPhysical, iOSSimulator, iOSPhysical }
-
-data class BootedDevice(
-    val id: String,
-    val name: String,
-    val type: DeviceType,
-    val status: String = "Running",
-    val foregroundApp: String? = null,
-    val connectedAt: Long = System.currentTimeMillis(),
-)
-
-data class AvailableEmulator(
-    val id: String,
-    val name: String,
-    val type: DeviceType,
-    val apiLevel: String? = null,
-)
-
-data class SystemImage(
-    val id: String,
-    val name: String,
-    val platform: String, // "Android" or "iOS"
-    val apiLevel: String,
-)
+// DeviceType, BootedDevice, AvailableEmulator, SystemImage — defined in desktop.core.mcp
 
 // Common launcher package names
 private val ANDROID_LAUNCHERS = listOf(
@@ -205,7 +163,11 @@ private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?):
 }
 
 @Composable
-fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? = null) {
+fun AutoMobileContent(
+    settingsProvider: SettingsProvider = FakeSettingsProvider(),
+    notificationHandler: NotificationHandler = NoOpNotificationHandler,
+    onOpenSource: ((String, Int, String) -> Unit)? = null,
+) {
   var selectedIndex by remember { mutableIntStateOf(0) }
   val dashboardOrder = remember { mutableStateListOf(*Dashboard.entries.toTypedArray()) }
   var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -245,9 +207,9 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
   var hasNewCriticalFailure by remember { mutableStateOf(false) }
 
   // Load persisted date range setting
-  val settings = remember { AutoMobileSettings.getInstance() }
+  val settings = remember { settingsProvider }
   var failuresDateRange by remember {
-    val saved = settings.failuresDateRange
+    val saved = settingsProvider.failuresDateRange
     val initial = DateRange.entries.find { it.label == saved } ?: DateRange.TwentyFourHours
     mutableStateOf(initial)
   }
@@ -652,7 +614,7 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
     }
   }
 
-  val colors = JewelTheme.globalColors
+  val colors = SharedTheme.globalColors
 
   // Track header height for padding non-navigation content
   var headerHeight by remember { mutableStateOf(0) }
@@ -744,7 +706,7 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
               activeDeviceIdState.value = deviceId
               isDevicePanelExpandedState.value = false
               userNavigatedToDevices = false  // Reset when device selected
-              showNotification("Device Connected", "Connected to device: $deviceName", NotificationType.INFORMATION)
+              notificationHandler.show("Device Connected", "Connected to device: $deviceName")
           },
           onProcessConnected = { process ->
               LOG.info("onProcessConnected called with: ${process?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}")
@@ -875,17 +837,14 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
                         else -> null
                     }
                     if (typeLabel != null) {
-                        showNotification(
-                            title = "New $typeLabel Detected",
-                            content = notification.title,
-                            type = NotificationType.WARNING,
-                            actionText = "View",
-                            onAction = {
-                                // Expand failures panel and deep link
-                                isFailuresPanelCollapsed = false
-                                pendingFailureId = notification.groupId
-                            },
+                        notificationHandler.show(
+                            "New $typeLabel Detected",
+                            notification.title,
+                            isWarning = true,
                         )
+                        // Expand failures panel and deep link
+                        isFailuresPanelCollapsed = false
+                        pendingFailureId = notification.groupId
                     }
                 },
                 initialSelectedFailureId = pendingFailureId,
@@ -893,7 +852,7 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
                 onDateRangeChanged = { newRange ->
                     failuresDateRange = newRange
                     // Persist to settings
-                    settings.failuresDateRange = newRange.label
+                    settingsProvider.failuresDateRange = newRange.label
                 },
                 onFailureCountsChanged = { newCrashCount, newAnrCount, newToolFailureCount, newNonFatalCount ->
                     crashCount = newCrashCount
@@ -989,7 +948,7 @@ fun AutoMobileToolWindowContent(project: com.intellij.openapi.project.Project? =
                     TelemetryDashboard(
                         telemetryPushClient = telemetryPushClient,
                         dataSourceMode = dataSourceMode,
-                        project = project,
+                        onOpenSource = onOpenSource,
                         screenshotLoader = telemetryScreenshotLoader,
                     )
                 }
@@ -1008,7 +967,7 @@ private fun MainContentViewToggle(
     onToggle: (Boolean) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val bgColor = colors.panelBackground.copy(alpha = 0.85f)
     val selectedBg = colors.text.normal.copy(alpha = 0.1f)
     val borderColor = colors.text.normal.copy(alpha = 0.15f)
@@ -1068,12 +1027,12 @@ private fun GlobalShellHeader(
     onAppDropdownExpandedChange: (Boolean) -> Unit = {},
     onAppSelected: (String?) -> Unit = {},
 ) {
-  val colors = JewelTheme.globalColors
+  val colors = SharedTheme.globalColors
 
   Column(
       modifier = Modifier
           .fillMaxWidth()
-          .background(JewelTheme.globalColors.panelBackground),
+          .background(SharedTheme.globalColors.panelBackground),
   ) {
     FlowRow(
         modifier = Modifier
@@ -1261,7 +1220,7 @@ private fun DeviceIcon(
     isActive: Boolean,
     onClick: () -> Unit,
 ) {
-  val colors = JewelTheme.globalColors
+  val colors = SharedTheme.globalColors
   val bgColor =
       if (isActive) colors.text.normal.copy(alpha = 0.15f)
       else colors.text.normal.copy(alpha = 0.05f)
@@ -1350,7 +1309,7 @@ private fun RealDataSwitch(
     isRealData: Boolean,
     onToggle: (Boolean) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val trackColor = if (isRealData) Color(0xFF4CAF50) else colors.text.normal.copy(alpha = 0.3f)
     val thumbColor = Color.White
 
@@ -1400,14 +1359,14 @@ private fun DraggableTabs(
     onDropTargetChanged: (Int?) -> Unit,
 ) {
     LOG.debug("DraggableTabs rendered with ${tabs.size} tabs, selectedIndex=$selectedIndex")
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     var tabPositions by remember { mutableStateOf<Map<Int, Float>>(emptyMap()) }
     var dragOffset by remember { mutableStateOf(0f) }
 
     BoxWithConstraints(
         modifier = Modifier
             .fillMaxWidth()
-            .background(JewelTheme.globalColors.panelBackground)
+            .background(SharedTheme.globalColors.panelBackground)
     ) {
         // Three modes: icons only (< 300dp), icon + text (300-600dp), text only (> 600dp)
         val useIconsOnly = maxWidth < 300.dp
@@ -1543,7 +1502,7 @@ private fun DeviceManagementPanel(
     onBootEmulator: (String) -> Unit,
     onCreateEmulator: (String) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     // Split devices by platform
     val androidDevices = bootedDevices.filter {
@@ -1710,7 +1669,7 @@ private fun DeviceManagementPanel(
 
 @Composable
 private fun DeviceSectionHeader(title: String) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     Text(
         title,
         fontSize = 11.sp,
@@ -1725,7 +1684,7 @@ private fun DeviceListItem(
     icon: String,
     onClick: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     Row(
         modifier = Modifier
@@ -1756,7 +1715,7 @@ private fun EmulatorListItem(
     icon: String,
     onClick: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     Row(
         modifier = Modifier
@@ -1790,7 +1749,7 @@ private fun SystemImageListItem(
     icon: String,
     onClick: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     Row(
         modifier = Modifier
@@ -1831,7 +1790,7 @@ private fun McpProcessesPanel(
     onProcessConnected: (McpProcess?) -> Unit = {},  // Called when MCP process connection changes
     suppressAutoSelect: Boolean = false,  // When true, don't auto-select device (user wants to browse)
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     // Use appropriate detector based on mode
     val detector = remember(useRealData) {
@@ -2447,7 +2406,7 @@ private fun ProcessSection(
     onDetails: (McpProcess) -> Unit,
     onTest: (McpProcess) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Row(
@@ -2502,7 +2461,7 @@ private fun McpProcessItem(
     onDetails: (McpProcess) -> Unit = {},
     onTest: (McpProcess) -> Unit = {},
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val uptimeText = formatUptime(process.uptimeMs)
 
     BoxWithConstraints {
@@ -2736,7 +2695,7 @@ private fun McpProcessItem(
 
 @Composable
 private fun McpProcessDetails(process: McpProcess) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     var resources by remember { mutableStateOf<List<McpResource>?>(null) }
     var tools by remember { mutableStateOf<List<McpTool>?>(null) }
     var resourcesExpanded by remember { mutableStateOf(false) }
@@ -2982,7 +2941,7 @@ private fun DevicesSection(
     onKillDevice: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
     onUpdateService: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     Column(
         modifier = Modifier
@@ -3079,7 +3038,7 @@ private fun DevicesSection(
 private fun DaemonStatusInfo(
     daemonStatus: dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     Column(
         modifier = Modifier
             .fillMaxWidth()
@@ -3153,7 +3112,7 @@ private fun DeviceImagesGrouped(
     bootErrors: Map<String, String>,
     onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
 
     // Group images by API level / iOS version
     val groups = deviceImages.groupBy { image ->
@@ -3198,7 +3157,7 @@ private fun CollapsibleDeviceGroup(
     bootErrors: Map<String, String>,
     onBootDevice: (dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     var expanded by remember { mutableStateOf(false) }
     val deviceCount = group.images.size
     val deviceLabel = if (group.label.startsWith("iOS")) "simulator" else "device"
@@ -3258,7 +3217,7 @@ private fun BootedDeviceRow(
     onKill: () -> Unit,
     onUpdateService: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val platformIcon = if (device.platform == "android") "🤖" else "🍎"
     val isPhysical = !device.isVirtual
 
@@ -3433,7 +3392,7 @@ private fun DeviceImageRow(
     error: String? = null,
     onBoot: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val platformIcon = if (image.platform == "android") "🤖" else "🍎"
 
     Row(
@@ -3513,7 +3472,7 @@ private fun AppSelectorDropdown(
     onExpandedChange: (Boolean) -> Unit,
     onAppSelected: (String?) -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val selectedApp = installedApps.find { it.packageName == selectedAppId }
     val displayText = when {
         isLoading -> "Loading..."
@@ -3619,7 +3578,7 @@ private fun AppDropdownItem(
     isSelected: Boolean,
     onClick: () -> Unit,
 ) {
-    val colors = JewelTheme.globalColors
+    val colors = SharedTheme.globalColors
     val bgColor = if (isSelected) Color(0xFF2166B3) else Color.Transparent
 
     Row(

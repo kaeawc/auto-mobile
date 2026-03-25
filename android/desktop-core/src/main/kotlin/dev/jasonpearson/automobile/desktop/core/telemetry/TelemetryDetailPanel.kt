@@ -1,4 +1,4 @@
-package dev.jasonpearson.automobile.ide.telemetry
+package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -32,16 +32,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
-import com.intellij.openapi.project.Project
+
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
-import dev.jasonpearson.automobile.desktop.core.telemetry.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import org.jetbrains.jewel.ui.component.Text
+import androidx.compose.material3.Text
 import java.text.SimpleDateFormat
 import java.util.Date
 
@@ -58,7 +57,7 @@ fun TelemetryDetailPanel(
     timeFormat: SimpleDateFormat,
     textColor: Color,
     onClose: () -> Unit,
-    project: Project? = null,
+    onOpenSource: ((String, Int, String) -> Unit)? = null,
     screenshotLoader: ScreenshotLoader? = null,
     modifier: Modifier = Modifier,
 ) {
@@ -116,7 +115,7 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Log -> LogDetail(event, textColor)
                 is TelemetryDisplayEvent.Os -> OsDetail(event, textColor)
                 is TelemetryDisplayEvent.Custom -> CustomDetail(event, textColor)
-                is TelemetryDisplayEvent.Failure -> FailureDetail(event, textColor, project)
+                is TelemetryDisplayEvent.Failure -> FailureDetail(event, textColor, onOpenSource)
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
                 is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
@@ -515,7 +514,7 @@ private fun CustomDetail(event: TelemetryDisplayEvent.Custom, textColor: Color) 
 }
 
 @Composable
-private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color, project: Project?) {
+private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color, onOpenSource: ((String, Int, String) -> Unit)?) {
     val severityColor = when (event.severity) {
         "critical" -> Color(0xFFFF4040)
         "high" -> Color(0xFFFF6B6B)
@@ -568,7 +567,7 @@ private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color
 
             val fName = frame.fileName
             val fLine = frame.lineNumber
-            if (frame.isAppCode && project != null && fName != null && fLine != null) {
+            if (frame.isAppCode && onOpenSource != null && fName != null && fLine != null) {
                 // Clickable app code frame
                 Text(
                     frameText,
@@ -578,12 +577,7 @@ private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color
                     color = textColor.copy(alpha = 0.9f),
                     modifier = Modifier
                         .clickable {
-                            SourceFileFinder.findAndOpen(
-                                project,
-                                fName,
-                                fLine,
-                                frame.className,
-                            )
+                            onOpenSource(fName, fLine, frame.className)
                         }
                         .pointerHoverIcon(PointerIcon.Hand)
                         .padding(vertical = 1.dp),

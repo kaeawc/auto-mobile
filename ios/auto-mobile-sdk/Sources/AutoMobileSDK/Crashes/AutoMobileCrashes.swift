@@ -118,10 +118,20 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         _isInitialized = false
         bundleId = nil
         buffer = nil
+        // Restore previous exception handler to prevent recursive re-entry
+        // if initialize() is called again (e.g. between tests)
+        let prevHandler = previousExceptionHandler
         previousExceptionHandler = nil
         currentScreenProvider = nil
         // Note: signal handlers cannot be safely uninstalled, leave installedSignalHandlers as-is
         lock.unlock()
+
+        // Restore process-level handler outside the lock
+        if let prevHandler = prevHandler {
+            NSSetUncaughtExceptionHandler(prevHandler)
+        } else {
+            NSSetUncaughtExceptionHandler(nil)
+        }
     }
 }
 

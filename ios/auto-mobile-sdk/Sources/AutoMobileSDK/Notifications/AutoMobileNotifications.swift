@@ -162,7 +162,8 @@ final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegat
         }
 
         // Chain to previous delegate
-        if let prev = previousDelegate {
+        if let prev = previousDelegate,
+           prev.responds(to: #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:didReceive:withCompletionHandler:))) {
             prev.userNotificationCenter?(center, didReceive: response, withCompletionHandler: completionHandler)
         } else {
             completionHandler()
@@ -175,7 +176,8 @@ final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegat
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
         // Chain to previous delegate for foreground presentation
-        if let prev = previousDelegate {
+        if let prev = previousDelegate,
+           prev.responds(to: #selector(UNUserNotificationCenterDelegate.userNotificationCenter(_:willPresent:withCompletionHandler:))) {
             prev.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: completionHandler)
         } else {
             completionHandler([.banner, .sound])

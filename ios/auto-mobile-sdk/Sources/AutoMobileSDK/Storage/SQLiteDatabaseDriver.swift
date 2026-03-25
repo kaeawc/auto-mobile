@@ -285,6 +285,26 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         if result == SQLITE_DONE {
             let changes = Int(sqlite3_changes(db))
             return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: changes)
+        } else if result == SQLITE_ROW {
+            // RETURNING clause produces rows — collect them like a query
+            let columnCount = Int(sqlite3_column_count(stmt))
+            var columns: [String] = []
+            for i in 0..<columnCount {
+                if let name = sqlite3_column_name(stmt, Int32(i)) {
+                    columns.append(String(cString: name))
+                }
+            }
+            var rows: [[String?]] = []
+            // First row is already stepped
+            repeat {
+                var row: [String?] = []
+                for i in 0..<columnCount {
+                    row.append(getColumnValue(stmt: stmt, index: Int32(i)))
+                }
+                rows.append(row)
+            } while sqlite3_step(stmt) == SQLITE_ROW
+            let changes = Int(sqlite3_changes(db))
+            return SQLExecutionResult(columns: columns, rows: rows, rowsAffected: changes)
         } else {
             let error = sqlite3_errmsg(db).map { String(cString: $0) } ?? "Unknown error"
             return SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0, error: error)

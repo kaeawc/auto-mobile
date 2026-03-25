@@ -29,6 +29,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         message: String? = nil,
         currentScreen: String? = nil
     ) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
         let nsError = error as NSError
         let event = HandledExceptionEvent(
             timestamp: Date().timeIntervalSince1970,

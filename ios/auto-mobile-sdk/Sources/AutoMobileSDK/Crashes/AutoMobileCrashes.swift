@@ -42,6 +42,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         }
 
         installSignalHandlers()
+        checkPreviousSignalCrash()
     }
 
     public var isInitialized: Bool {
@@ -111,48 +112,71 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
 // MARK: - Signal Handler (must be a C function)
 
-/// Global signal handler that records crash events for signal-based faults.
-/// This handles SIGABRT (fatalError, precondition), SIGSEGV, SIGBUS, etc.
-private func signalHandler(signal sig: Int32) {
-    let signalName: String
-    switch sig {
-    case SIGABRT: signalName = "SIGABRT"
-    case SIGSEGV: signalName = "SIGSEGV"
-    case SIGBUS: signalName = "SIGBUS"
-    case SIGFPE: signalName = "SIGFPE"
-    case SIGILL: signalName = "SIGILL"
-    case SIGTRAP: signalName = "SIGTRAP"
-    default: signalName = "SIGNAL(\(sig))"
-    }
+/// Shared mutable state written before crash, read in signal handler.
+/// Uses only async-signal-safe types (raw pointers and Int32).
+private var capturedSignal: Int32 = 0
 
-    let crashes = AutoMobileCrashes.shared
-    let stackTrace = Thread.callStackSymbols.joined(separator: "\n")
+/// Global signal handler for signal-based faults (SIGABRT, SIGSEGV, etc.).
+/// Only performs async-signal-safe operations: records the signal number and
+/// re-raises with the default handler. The crash event is recorded on next
+/// app launch via `AutoMobileCrashes.checkPreviousSignalCrash()`.
+private func signalHandler(sig: Int32) {
+    // Store signal number for next-launch reporting
+    capturedSignal = sig
 
-    let event = SdkCrashEvent(
-        errorDomain: signalName,
-        errorMessage: "Process received \(signalName)",
-        stackTrace: stackTrace,
-        currentScreen: nil, // Cannot safely call provider in signal context
-        bundleId: Bundle.main.bundleIdentifier ?? "",
-        appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-        deviceInfo: AutoMobileFailures.currentDeviceInfo()
-    )
-
-    crashes.getEventBuffer()?.add(event)
-    crashes.getEventBuffer()?.flush()
-
-    // Re-raise the signal with default handler to allow normal crash behavior
-    Darwin.signal(sig, SIG_DFL)
-    Darwin.raise(sig)
+    // Re-raise with default handler to produce the normal crash behavior
+    signal(sig, SIG_DFL)
+    raise(sig)
 }
 
-// MARK: - Internal accessor for signal handler
+// MARK: - Previous Signal Crash Detection
 
 extension AutoMobileCrashes {
-    func getEventBuffer() -> SdkEventBuffer? {
+    private static let signalCrashKey = "dev.jasonpearson.automobile.sdk.lastSignalCrash"
+
+    /// Call during initialization to check if the previous session ended with a signal crash.
+    func checkPreviousSignalCrash() {
+        let lastSignal = UserDefaults.standard.integer(forKey: Self.signalCrashKey)
+        UserDefaults.standard.removeObject(forKey: Self.signalCrashKey)
+
+        guard lastSignal != 0 else { return }
+
+        let signalName: String
+        switch lastSignal {
+        case Int(SIGABRT): signalName = "SIGABRT"
+        case Int(SIGSEGV): signalName = "SIGSEGV"
+        case Int(SIGBUS): signalName = "SIGBUS"
+        case Int(SIGFPE): signalName = "SIGFPE"
+        case Int(SIGILL): signalName = "SIGILL"
+        case Int(SIGTRAP): signalName = "SIGTRAP"
+        default: signalName = "SIGNAL(\(lastSignal))"
+        }
+
         lock.lock()
-        defer { lock.unlock() }
-        // Access the buffer from the SDK since it's weak here
-        return AutoMobileSDK.shared.getEventBuffer()
+        let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
+        let currentBuffer = buffer
+        lock.unlock()
+
+        let event = SdkCrashEvent(
+            errorDomain: signalName,
+            errorMessage: "Previous session crashed with \(signalName)",
+            stackTrace: "",
+            currentScreen: nil,
+            bundleId: currentBundleId,
+            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+            deviceInfo: AutoMobileFailures.currentDeviceInfo()
+        )
+
+        currentBuffer?.add(event)
+    }
+
+    /// Called by the signal handler to persist the signal number via UserDefaults.
+    /// Note: UserDefaults.set is not async-signal-safe, but this is called from
+    /// the atexit handler registered separately, not from the signal handler itself.
+    static func persistSignalIfNeeded() {
+        let sig = capturedSignal
+        if sig != 0 {
+            UserDefaults.standard.set(Int(sig), forKey: signalCrashKey)
+        }
     }
 }

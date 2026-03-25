@@ -1,7 +1,5 @@
 import Foundation
-#if canImport(SQLite3)
 import SQLite3
-#endif
 
 /// Full SQLite database driver implementation.
 /// iOS equivalent of Android's SQLiteDatabaseDriver.

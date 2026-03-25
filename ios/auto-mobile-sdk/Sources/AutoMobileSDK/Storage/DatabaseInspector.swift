@@ -14,7 +14,7 @@ public final class DatabaseInspector: @unchecked Sendable {
     func initialize() {
         lock.lock()
         defer { lock.unlock() }
-        _driver = DefaultDatabaseDriver()
+        _driver = SQLiteDatabaseDriver()
     }
 
     /// Whether inspection is enabled.

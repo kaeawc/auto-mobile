@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Tracks system notification broadcasts (locale, timezone, memory warnings).
 /// iOS equivalent of Android's AutoMobileBroadcastInterceptor.
@@ -80,6 +83,8 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     }
 
     private func handleNotification(action: String, notification: Notification) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         let currentBuffer = buffer
         lock.unlock()

@@ -223,6 +223,8 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     // MARK: - Event Posting
 
     private func postEvent(state: String, details: [String: String] = [:]) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         let currentBuffer = buffer
         let currentBundleId = bundleId

@@ -130,7 +130,7 @@
 			isa = PBXProject;
 			attributes = {
 				BuildIndependentTargetsInParallel = YES;
-				LastUpgradeCheck = 1500;
+				LastUpgradeCheck = 2600;
 				TargetAttributes = {
 					739B1FD817D42F0264714A50 = {
 						ProvisioningStyle = Automatic;
@@ -240,7 +240,7 @@
 				ONLY_ACTIVE_ARCH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
 		};
@@ -330,7 +330,7 @@
 				MTL_FAST_MATH = YES;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SDKROOT = iphoneos;
-				SWIFT_VERSION = 5;
+				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
 		};

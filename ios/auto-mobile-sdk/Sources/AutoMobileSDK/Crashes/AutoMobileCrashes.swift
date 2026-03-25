@@ -124,7 +124,6 @@ private var signalCrashFilePath: UnsafeMutablePointer<CChar>?
 
 /// Previous signal handlers saved before installing ours, for chaining.
 /// Array indexed by signal number for O(1) lookup in the signal handler.
-/// Max signal number on Darwin is ~31, so 64 slots is plenty.
 private var previousSignalHandlers: [(@convention(c) (Int32) -> Void)?] = Array(repeating: nil, count: 64)
 
 /// Global signal handler for signal-based faults (SIGABRT, SIGSEGV, etc.).

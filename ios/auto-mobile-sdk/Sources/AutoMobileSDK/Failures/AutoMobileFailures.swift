@@ -32,7 +32,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
         let nsError = error as NSError
         let event = HandledExceptionEvent(
-            timestamp: Date().timeIntervalSince1970,
+            timestamp: Int64(Date().timeIntervalSince1970 * 1000),
             errorDomain: nsError.domain,
             errorMessage: nsError.localizedDescription,
             stackTrace: Thread.callStackSymbols.joined(separator: "\n"),
@@ -126,7 +126,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
 // MARK: - HandledExceptionEvent
 
 public struct HandledExceptionEvent: Sendable {
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let errorDomain: String
     public let errorMessage: String?
     public let stackTrace: String
@@ -137,7 +137,7 @@ public struct HandledExceptionEvent: Sendable {
     public let deviceInfo: SdkDeviceInfo
 
     public init(
-        timestamp: TimeInterval,
+        timestamp: Int64,
         errorDomain: String,
         errorMessage: String?,
         stackTrace: String,

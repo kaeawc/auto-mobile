@@ -8,10 +8,11 @@ public struct NavigationEvent: Sendable {
     /// Navigation framework source.
     public let source: NavigationSource
 
-    /// Event timestamp (seconds since epoch).
-    public let timestamp: TimeInterval
+    /// Event timestamp (milliseconds since epoch, matches Android SDK).
+    public let timestamp: Int64
 
-    /// Navigation arguments.
+    /// Navigation arguments (stringified for wire compatibility).
+    /// Use the convenience init with `[String: Any]` to pass mixed types.
     public let arguments: [String: String]
 
     /// Additional metadata.
@@ -20,7 +21,7 @@ public struct NavigationEvent: Sendable {
     public init(
         destination: String,
         source: NavigationSource,
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         arguments: [String: String] = [:],
         metadata: [String: String] = [:]
     ) {
@@ -28,6 +29,25 @@ public struct NavigationEvent: Sendable {
         self.source = source
         self.timestamp = timestamp
         self.arguments = arguments
+        self.metadata = metadata
+    }
+
+    /// Convenience init that accepts mixed-type arguments (matching Android's Map<String, Any?>).
+    /// Values are converted to strings for wire compatibility.
+    public init(
+        destination: String,
+        source: NavigationSource,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        mixedArguments: [String: Any],
+        metadata: [String: String] = [:]
+    ) {
+        self.destination = destination
+        self.source = source
+        self.timestamp = timestamp
+        self.arguments = mixedArguments.compactMapValues { value in
+            if let stringValue = value as? String { return stringValue }
+            return String(describing: value)
+        }
         self.metadata = metadata
     }
 }

@@ -3,7 +3,8 @@ import Foundation
 /// Base protocol for all SDK events sent from the AutoMobile SDK.
 public protocol SdkEvent: Codable, Sendable {
     var eventType: SdkEventType { get }
-    var timestamp: TimeInterval { get }
+    /// Milliseconds since epoch (matches Android SDK wire format).
+    var timestamp: Int64 { get }
 }
 
 /// Discriminator for SDK event types.
@@ -28,14 +29,14 @@ public enum SdkEventType: String, Codable, Sendable {
 
 public struct SdkNavigationEvent: SdkEvent {
     public let eventType: SdkEventType = .navigation
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let destination: String
     public let source: NavigationSourceType
     public let arguments: [String: String]
     public let metadata: [String: String]
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         destination: String,
         source: NavigationSourceType,
         arguments: [String: String] = [:],
@@ -51,7 +52,7 @@ public struct SdkNavigationEvent: SdkEvent {
 
 public struct SdkHandledExceptionEvent: SdkEvent {
     public let eventType: SdkEventType = .handledException
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let errorDomain: String
     public let errorMessage: String?
     public let stackTrace: String
@@ -62,7 +63,7 @@ public struct SdkHandledExceptionEvent: SdkEvent {
     public let deviceInfo: SdkDeviceInfo
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         errorDomain: String,
         errorMessage: String?,
         stackTrace: String,
@@ -86,7 +87,7 @@ public struct SdkHandledExceptionEvent: SdkEvent {
 
 public struct SdkCrashEvent: SdkEvent {
     public let eventType: SdkEventType = .crash
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let errorDomain: String
     public let errorMessage: String?
     public let stackTrace: String
@@ -96,7 +97,7 @@ public struct SdkCrashEvent: SdkEvent {
     public let deviceInfo: SdkDeviceInfo
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         errorDomain: String,
         errorMessage: String?,
         stackTrace: String,
@@ -118,13 +119,13 @@ public struct SdkCrashEvent: SdkEvent {
 
 public struct SdkHangEvent: SdkEvent {
     public let eventType: SdkEventType = .hang
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let durationMs: Double
     public let stackTrace: String?
     public let bundleId: String
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         durationMs: Double,
         stackTrace: String?,
         bundleId: String
@@ -138,7 +139,7 @@ public struct SdkHangEvent: SdkEvent {
 
 public struct SdkNetworkRequestEvent: SdkEvent {
     public let eventType: SdkEventType = .networkRequest
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let url: String
     public let method: String
     public let requestHeaders: [String: String]?
@@ -155,7 +156,7 @@ public struct SdkNetworkRequestEvent: SdkEvent {
     public let contentType: String?
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         url: String,
         method: String,
         requestHeaders: [String: String]? = nil,
@@ -191,14 +192,14 @@ public struct SdkNetworkRequestEvent: SdkEvent {
 
 public struct SdkWebSocketFrameEvent: SdkEvent {
     public let eventType: SdkEventType = .webSocketFrame
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let url: String
     public let direction: WebSocketFrameDirection
     public let frameType: WebSocketFrameType
     public let payloadSize: Int?
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         url: String,
         direction: WebSocketFrameDirection,
         frameType: WebSocketFrameType,
@@ -227,14 +228,14 @@ public enum WebSocketFrameType: String, Codable, Sendable {
 
 public struct SdkLogEvent: SdkEvent {
     public let eventType: SdkEventType = .log
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let level: LogLevel
     public let tag: String?
     public let message: String
     public let filterName: String
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         level: LogLevel,
         tag: String?,
         message: String,
@@ -263,13 +264,13 @@ public enum LogLevel: Int, Codable, Sendable, Comparable {
 
 public struct SdkLifecycleEvent: SdkEvent {
     public let eventType: SdkEventType = .lifecycle
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let state: String
     public let bundleId: String?
     public let details: [String: String]
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         state: String,
         bundleId: String? = nil,
         details: [String: String] = [:]
@@ -283,12 +284,12 @@ public struct SdkLifecycleEvent: SdkEvent {
 
 public struct SdkCustomEvent: SdkEvent {
     public let eventType: SdkEventType = .custom
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let name: String
     public let properties: [String: String]
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         name: String,
         properties: [String: String] = [:]
     ) {
@@ -300,12 +301,12 @@ public struct SdkCustomEvent: SdkEvent {
 
 public struct SdkNotificationActionEvent: SdkEvent {
     public let eventType: SdkEventType = .notificationAction
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let actionId: String
     public let notificationTitle: String?
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         actionId: String,
         notificationTitle: String? = nil
     ) {
@@ -317,11 +318,11 @@ public struct SdkNotificationActionEvent: SdkEvent {
 
 public struct SdkViewBodySnapshotEvent: SdkEvent {
     public let eventType: SdkEventType = .viewBodySnapshot
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let snapshots: [ViewBodySnapshot]
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         snapshots: [ViewBodySnapshot]
     ) {
         self.timestamp = timestamp
@@ -390,13 +391,13 @@ public struct SdkEventEnvelope: Codable, Sendable {
 
 public struct SdkBroadcastEvent: SdkEvent {
     public let eventType: SdkEventType = .broadcast
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let action: String
     public let categories: [String]?
     public let infoKeyTypes: [String: String]?
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         action: String,
         categories: [String]? = nil,
         infoKeyTypes: [String: String]? = nil
@@ -410,12 +411,12 @@ public struct SdkBroadcastEvent: SdkEvent {
 
 public struct SdkInteractionEvent: SdkEvent {
     public let eventType: SdkEventType = .interaction
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let interactionType: String
     public let properties: [String: String]
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         interactionType: String,
         properties: [String: String] = [:]
     ) {
@@ -427,7 +428,7 @@ public struct SdkInteractionEvent: SdkEvent {
 
 public struct SdkStorageChangedEvent: SdkEvent {
     public let eventType: SdkEventType = .storageChanged
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
     public let suiteName: String?
     public let key: String?
     public let newValue: String?
@@ -435,7 +436,7 @@ public struct SdkStorageChangedEvent: SdkEvent {
     public let sequenceNumber: Int64
 
     public init(
-        timestamp: TimeInterval = Date().timeIntervalSince1970,
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         suiteName: String?,
         key: String?,
         newValue: String?,
@@ -455,12 +456,12 @@ public struct SdkStorageChangedEvent: SdkEvent {
 public struct SdkEventBatch: Codable, Sendable {
     public let bundleId: String?
     public let events: [SdkEventEnvelope]
-    public let timestamp: TimeInterval
+    public let timestamp: Int64
 
     public init(
         bundleId: String?,
         events: [SdkEventEnvelope],
-        timestamp: TimeInterval = Date().timeIntervalSince1970
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000)
     ) {
         self.bundleId = bundleId
         self.events = events

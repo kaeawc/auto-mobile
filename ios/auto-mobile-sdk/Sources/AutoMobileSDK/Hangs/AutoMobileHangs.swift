@@ -72,19 +72,17 @@ public final class AutoMobileHangs: @unchecked Sendable {
             lock.unlock()
             guard monitoring else { break }
 
-            var responded = false
             let semaphore = DispatchSemaphore(value: 0)
             let checkStart = CFAbsoluteTimeGetCurrent()
 
             DispatchQueue.main.async {
-                responded = true
                 semaphore.signal()
             }
 
             let timeoutMs = hangThresholdMs
             let result = semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs)))
 
-            if result == .timedOut && !responded {
+            if result == .timedOut {
                 // Main thread is still blocked — measure actual duration
                 let actualDurationMs = (CFAbsoluteTimeGetCurrent() - checkStart) * 1000
                 let mainThreadStack = captureMainThreadStack()

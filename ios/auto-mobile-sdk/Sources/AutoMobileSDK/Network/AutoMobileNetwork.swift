@@ -172,8 +172,12 @@ public class AutoMobileURLProtocol: URLProtocol {
     private var receivedData = Data()
     private var totalBytesReceived = 0
 
+    private static let supportedSchemes: Set<String> = ["http", "https"]
+
     public override class func canInit(with request: URLRequest) -> Bool {
-        guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
+        guard let scheme = request.url?.scheme?.lowercased(),
+              supportedSchemes.contains(scheme),
+              URLProtocol.property(forKey: handledKey, in: request) == nil else {
             return false
         }
         return true

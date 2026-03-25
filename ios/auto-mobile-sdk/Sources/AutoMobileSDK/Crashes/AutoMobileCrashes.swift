@@ -41,6 +41,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
             AutoMobileCrashes.shared.handleException(exception)
         }
 
+        setupSignalCrashFile()
         installSignalHandlers()
         checkPreviousSignalCrash()
     }
@@ -112,17 +113,23 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
 // MARK: - Signal Handler (must be a C function)
 
-/// Shared mutable state written before crash, read in signal handler.
-/// Uses only async-signal-safe types (raw pointers and Int32).
-private var capturedSignal: Int32 = 0
+/// File path for persisting signal number across crashes.
+/// Computed once during initialization and stored as a C string for signal safety.
+private var signalCrashFilePath: UnsafeMutablePointer<CChar>?
 
 /// Global signal handler for signal-based faults (SIGABRT, SIGSEGV, etc.).
-/// Only performs async-signal-safe operations: records the signal number and
-/// re-raises with the default handler. The crash event is recorded on next
-/// app launch via `AutoMobileCrashes.checkPreviousSignalCrash()`.
+/// Only performs async-signal-safe operations: writes signal number to a file
+/// using POSIX write(), then re-raises with the default handler.
 private func signalHandler(sig: Int32) {
-    // Store signal number for next-launch reporting
-    capturedSignal = sig
+    // Write signal number to file using only async-signal-safe functions
+    if let path = signalCrashFilePath {
+        let fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0o644)
+        if fd >= 0 {
+            var sigValue = sig
+            _ = Darwin.write(fd, &sigValue, MemoryLayout<Int32>.size)
+            close(fd)
+        }
+    }
 
     // Re-raise with default handler to produce the normal crash behavior
     signal(sig, SIG_DFL)
@@ -132,24 +139,37 @@ private func signalHandler(sig: Int32) {
 // MARK: - Previous Signal Crash Detection
 
 extension AutoMobileCrashes {
-    private static let signalCrashKey = "dev.jasonpearson.automobile.sdk.lastSignalCrash"
+    /// Set up the file path for signal crash persistence.
+    func setupSignalCrashFile() {
+        let cacheDir = NSSearchPathForDirectoriesInDomains(.cachesDirectory, .userDomainMask, true).first ?? NSTemporaryDirectory()
+        let filePath = (cacheDir as NSString).appendingPathComponent("automobile_last_signal_crash")
+        signalCrashFilePath = strdup(filePath)
+    }
 
-    /// Call during initialization to check if the previous session ended with a signal crash.
+    /// Check if the previous session ended with a signal crash.
     func checkPreviousSignalCrash() {
-        let lastSignal = UserDefaults.standard.integer(forKey: Self.signalCrashKey)
-        UserDefaults.standard.removeObject(forKey: Self.signalCrashKey)
+        guard let path = signalCrashFilePath else { return }
+        let filePath = String(cString: path)
 
-        guard lastSignal != 0 else { return }
+        let fd = open(path, O_RDONLY)
+        guard fd >= 0 else { return }
+
+        var sigValue: Int32 = 0
+        let bytesRead = Darwin.read(fd, &sigValue, MemoryLayout<Int32>.size)
+        close(fd)
+        unlink(path) // Remove the file after reading
+
+        guard bytesRead == MemoryLayout<Int32>.size, sigValue != 0 else { return }
 
         let signalName: String
-        switch lastSignal {
-        case Int(SIGABRT): signalName = "SIGABRT"
-        case Int(SIGSEGV): signalName = "SIGSEGV"
-        case Int(SIGBUS): signalName = "SIGBUS"
-        case Int(SIGFPE): signalName = "SIGFPE"
-        case Int(SIGILL): signalName = "SIGILL"
-        case Int(SIGTRAP): signalName = "SIGTRAP"
-        default: signalName = "SIGNAL(\(lastSignal))"
+        switch sigValue {
+        case SIGABRT: signalName = "SIGABRT"
+        case SIGSEGV: signalName = "SIGSEGV"
+        case SIGBUS: signalName = "SIGBUS"
+        case SIGFPE: signalName = "SIGFPE"
+        case SIGILL: signalName = "SIGILL"
+        case SIGTRAP: signalName = "SIGTRAP"
+        default: signalName = "SIGNAL(\(sigValue))"
         }
 
         lock.lock()
@@ -168,15 +188,8 @@ extension AutoMobileCrashes {
         )
 
         currentBuffer?.add(event)
-    }
 
-    /// Called by the signal handler to persist the signal number via UserDefaults.
-    /// Note: UserDefaults.set is not async-signal-safe, but this is called from
-    /// the atexit handler registered separately, not from the signal handler itself.
-    static func persistSignalIfNeeded() {
-        let sig = capturedSignal
-        if sig != 0 {
-            UserDefaults.standard.set(Int(sig), forKey: signalCrashKey)
-        }
+        // Log for debugging
+        NSLog("[AutoMobile] Previous session crashed with %@", filePath)
     }
 }

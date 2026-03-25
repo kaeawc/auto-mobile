@@ -205,7 +205,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             requestBodySize: request.httpBody?.count,
             statusCode: httpResponse?.statusCode,
             responseHeaders: httpResponse?.allHeaderFields as? [String: String],
-            responseBodySize: Int(response.expectedContentLength),
+            responseBodySize: response.expectedContentLength >= 0 ? Int(response.expectedContentLength) : nil,
             durationMs: durationMs
         )
 

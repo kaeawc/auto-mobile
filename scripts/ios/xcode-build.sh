@@ -110,7 +110,7 @@ fi
 if ! command -v xcodegen &> /dev/null; then
     if command -v brew &> /dev/null; then
         print_info "Installing xcodegen..."
-        brew install --quiet xcodegen 2>/dev/null || true
+        brew install xcodegen || echo "xcodegen install failed, continuing with committed projects"
     fi
 fi
 
@@ -163,16 +163,19 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            if run_cmd xcodebuild \
+            set +e
+            run_cmd xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
                 -configuration Debug \
-                -quiet \
                 CODE_SIGN_IDENTITY="-" \
                 CODE_SIGNING_REQUIRED=NO \
                 CODE_SIGNING_ALLOWED=NO \
-                build 2>&1; then
+                build 2>&1
+            XCODE_EXIT=$?
+            set -e
+            if [ $XCODE_EXIT -eq 0 ]; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

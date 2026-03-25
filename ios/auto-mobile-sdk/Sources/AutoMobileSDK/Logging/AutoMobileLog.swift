@@ -40,15 +40,28 @@ public final class AutoMobileLog: @unchecked Sendable {
     }
 
     /// Convenience: add a filter with string regex patterns.
+    /// Returns false and does not register the filter if a pattern is invalid.
+    @discardableResult
     public func addFilter(
         name: String,
         tagPattern: String? = nil,
         messagePattern: String? = nil,
         minLevel: LogLevel = .verbose
-    ) {
-        let tagRegex = tagPattern.flatMap { try? NSRegularExpression(pattern: $0) }
-        let messageRegex = messagePattern.flatMap { try? NSRegularExpression(pattern: $0) }
+    ) -> Bool {
+        var tagRegex: NSRegularExpression?
+        var messageRegex: NSRegularExpression?
+
+        if let pattern = tagPattern {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            tagRegex = regex
+        }
+        if let pattern = messagePattern {
+            guard let regex = try? NSRegularExpression(pattern: pattern) else { return false }
+            messageRegex = regex
+        }
+
         addFilter(name: name, tagPattern: tagRegex, messagePattern: messageRegex, minLevel: minLevel)
+        return true
     }
 
     /// Remove a filter by name.

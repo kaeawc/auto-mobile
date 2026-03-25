@@ -49,9 +49,10 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     }
 
     /// Configure maximum body bytes to capture (default: 32KB).
+    /// Values <= 0 disable body capture truncation (uses 0, meaning no capture).
     public func setMaxBodyBytes(_ bytes: Int) {
         lock.lock()
-        _maxBodyBytes = bytes
+        _maxBodyBytes = max(0, bytes)
         lock.unlock()
     }
 

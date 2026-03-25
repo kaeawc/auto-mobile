@@ -42,6 +42,8 @@ include(":test-plan-validation")
 
 include(":video-server")
 
+include(":shared")
+
 include(":ide-plugin")
 
 include(":desktop-app")

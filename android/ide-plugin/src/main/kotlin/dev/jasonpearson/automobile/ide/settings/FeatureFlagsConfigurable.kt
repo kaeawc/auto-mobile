@@ -22,9 +22,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
-import dev.jasonpearson.automobile.ide.daemon.AutoMobileClient
-import dev.jasonpearson.automobile.ide.daemon.FeatureFlagState
-import dev.jasonpearson.automobile.ide.daemon.McpClientFactory
+import dev.jasonpearson.automobile.shared.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.shared.daemon.FeatureFlagState
+import dev.jasonpearson.automobile.shared.daemon.McpClientFactory
 import javax.swing.JComponent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers

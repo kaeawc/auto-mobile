@@ -33,7 +33,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import com.intellij.openapi.project.Project
-import dev.jasonpearson.automobile.ide.navigation.ScreenshotLoader
+import dev.jasonpearson.automobile.shared.navigation.ScreenshotLoader
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject

@@ -10,7 +10,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     private weak var buffer: SdkEventBuffer?
     private var _captureHeaders = false
     private var _captureBodies = false
-    private var _maxBodyBytes: Int = 32 * 1024 // 32KB default
+    var _maxBodyBytes: Int = 32 * 1024 // 32KB default (internal for URLProtocol access)
 
     /// Text content types eligible for body capture.
     static let textContentTypes: Set<String> = [
@@ -156,6 +156,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 public class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     private var startTime: Date?
+    private var urlSession: URLSession?
     private var dataTask: URLSessionDataTask?
     private var receivedResponse: URLResponse?
     private var receivedData = Data()
@@ -184,12 +185,17 @@ public class AutoMobileURLProtocol: URLProtocol {
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
         let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        urlSession = session
         dataTask = session.dataTask(with: mutableRequest as URLRequest)
         dataTask?.resume()
     }
 
     public override func stopLoading() {
         dataTask?.cancel()
+        // Invalidate session to break the retain cycle (session -> delegate -> self)
+        urlSession?.invalidateAndCancel()
+        urlSession = nil
+        dataTask = nil
     }
 }
 
@@ -233,7 +239,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             // Capture request body from original request
             let requestBody: String? = request.httpBody.flatMap { data in
                 AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
-                    ? String(data: data.prefix(Self.maxBodyCapture), encoding: .utf8)
+                    ? String(data: data.prefix(AutoMobileNetwork.shared._maxBodyBytes), encoding: .utf8)
                     : nil
             }
 
@@ -258,5 +264,9 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
 
             client?.urlProtocolDidFinishLoading(self)
         }
+        // Break retain cycle after completion
+        urlSession?.finishTasksAndInvalidate()
+        urlSession = nil
+        dataTask = nil
     }
 }

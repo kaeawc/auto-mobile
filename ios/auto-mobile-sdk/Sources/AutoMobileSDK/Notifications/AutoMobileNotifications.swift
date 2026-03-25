@@ -82,7 +82,11 @@ public final class AutoMobileNotifications: @unchecked Sendable {
                 actions: unActions,
                 intentIdentifiers: []
             )
-            center.setNotificationCategories([notificationCategory])
+            // Merge with existing categories to avoid clobbering app-registered ones
+            let existing = await center.notificationCategories()
+            var merged = existing.filter { $0.identifier != category }
+            merged.insert(notificationCategory)
+            center.setNotificationCategories(merged)
             content.categoryIdentifier = category
         }
 
@@ -109,10 +113,11 @@ public final class AutoMobileNotifications: @unchecked Sendable {
     }
 
     /// Install a delegate handler that posts `actionNotification` when a notification
-    /// action button is tapped. Call this once during app setup.
+    /// action button is tapped. Chains to any existing delegate to avoid clobbering
+    /// app-installed handlers. Call this once during app setup.
     /// Returns the delegate object (retain it to keep it active).
     public func installActionHandler(on center: UNUserNotificationCenter = .current()) -> UNUserNotificationCenterDelegate {
-        let handler = NotificationActionHandler()
+        let handler = NotificationActionHandler(previousDelegate: center.delegate)
         center.delegate = handler
         return handler
     }
@@ -121,37 +126,60 @@ public final class AutoMobileNotifications: @unchecked Sendable {
 
 #if canImport(UserNotifications)
 /// Delegate that forwards notification action taps to NotificationCenter.
+/// Chains to any previously installed delegate to avoid clobbering app behavior.
 final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
+    private weak var previousDelegate: UNUserNotificationCenterDelegate?
+
+    init(previousDelegate: UNUserNotificationCenterDelegate? = nil) {
+        self.previousDelegate = previousDelegate
+        super.init()
+    }
+
     func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
         let actionId = response.actionIdentifier
-        guard actionId != UNNotificationDefaultActionIdentifier,
-              actionId != UNNotificationDismissActionIdentifier else {
-            completionHandler()
-            return
+        if actionId != UNNotificationDefaultActionIdentifier,
+           actionId != UNNotificationDismissActionIdentifier {
+            // Post to NotificationCenter so SDK consumers can observe
+            NotificationCenter.default.post(
+                name: AutoMobileNotifications.actionNotification,
+                object: nil,
+                userInfo: [
+                    "actionId": actionId,
+                    "notificationTitle": response.notification.request.content.title,
+                ]
+            )
+
+            // Also emit as SDK event
+            let event = SdkNotificationActionEvent(
+                actionId: actionId,
+                notificationTitle: response.notification.request.content.title
+            )
+            AutoMobileSDK.shared.getEventBuffer()?.add(event)
         }
 
-        // Post to NotificationCenter so SDK consumers can observe
-        NotificationCenter.default.post(
-            name: AutoMobileNotifications.actionNotification,
-            object: nil,
-            userInfo: [
-                "actionId": actionId,
-                "notificationTitle": response.notification.request.content.title,
-            ]
-        )
+        // Chain to previous delegate
+        if let prev = previousDelegate {
+            prev.userNotificationCenter?(center, didReceive: response, withCompletionHandler: completionHandler)
+        } else {
+            completionHandler()
+        }
+    }
 
-        // Also emit as SDK event
-        let event = SdkNotificationActionEvent(
-            actionId: actionId,
-            notificationTitle: response.notification.request.content.title
-        )
-        AutoMobileSDK.shared.getEventBuffer()?.add(event)
-
-        completionHandler()
+    func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        // Chain to previous delegate for foreground presentation
+        if let prev = previousDelegate {
+            prev.userNotificationCenter?(center, willPresent: notification, withCompletionHandler: completionHandler)
+        } else {
+            completionHandler([.banner, .sound])
+        }
     }
 }
 #endif

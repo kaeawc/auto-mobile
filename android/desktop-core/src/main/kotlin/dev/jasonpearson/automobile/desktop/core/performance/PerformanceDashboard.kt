@@ -917,3 +917,5 @@ private fun calculateOverallHealth(metrics: List<PerformanceMetric>): HealthStat
         hasWarning -> HealthStatus.Warning
         else -> HealthStatus.Healthy
     }
+
+}

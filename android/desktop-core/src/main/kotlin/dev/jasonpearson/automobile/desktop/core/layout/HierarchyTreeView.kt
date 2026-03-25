@@ -469,3 +469,5 @@ private fun collectIdsUpToDepth(root: UIElementInfo, maxDepth: Int): Set<String>
 
     traverse(root, 0)
     return result
+
+}

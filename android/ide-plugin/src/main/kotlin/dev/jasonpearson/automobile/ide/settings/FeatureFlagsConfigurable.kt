@@ -277,9 +277,10 @@ private fun FeatureFlagRow(
         enabled = !isUpdating,
     )
 
-    if (!flag.description.isNullOrBlank()) {
+    val desc = flag.description
+    if (!desc.isNullOrBlank()) {
       Text(
-          flag.description,
+          desc,
           color = colors.text.normal.copy(alpha = 0.7f),
           fontSize = 12.sp,
       )

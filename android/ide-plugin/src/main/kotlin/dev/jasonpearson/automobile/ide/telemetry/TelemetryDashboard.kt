@@ -46,6 +46,7 @@ import kotlinx.coroutines.delay
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.telemetry.*
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import java.text.SimpleDateFormat
@@ -680,8 +681,9 @@ private fun NavigationSummary(event: TelemetryDisplayEvent.Navigation, textColor
 
 @Composable
 private fun OsSummary(event: TelemetryDisplayEvent.Os, textColor: Color) {
-    val detailsText = if (event.details != null && event.details.isNotEmpty()) {
-        " ${event.details.entries.joinToString(", ") { "${it.key}:${it.value}" }}"
+    val d = event.details
+    val detailsText = if (d != null && d.isNotEmpty()) {
+        " ${d.entries.joinToString(", ") { "${it.key}:${it.value}" }}"
     } else {
         ""
     }
@@ -847,7 +849,8 @@ private fun MemorySummary(event: TelemetryDisplayEvent.Memory, textColor: Color)
 @Composable
 private fun ToolCallSummary(event: TelemetryDisplayEvent.ToolCall, textColor: Color) {
     val status = if (event.success) "${event.durationMs}ms" else "FAILED"
-    val errorSuffix = if (!event.success && event.error != null) " (${event.error.take(30)})" else ""
+    val err = event.error
+    val errorSuffix = if (!event.success && err != null) " (${err.take(30)})" else ""
     val color = when {
         !event.success -> Color(0xFFFF6B6B)
         event.durationMs > 5000 -> Color(0xFFFFA94D)

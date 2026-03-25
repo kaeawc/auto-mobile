@@ -364,3 +364,5 @@ private fun rememberGraphPalette(): GraphPalette {
       labelMuted = baseText.copy(alpha = 0.65f),
       error = error,
   )
+
+}

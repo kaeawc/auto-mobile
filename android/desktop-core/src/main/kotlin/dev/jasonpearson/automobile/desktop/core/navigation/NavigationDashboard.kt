@@ -16,7 +16,8 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
-import dev.jasonpearson.automobile.desktop.core.settings.AutoMobileSettings
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 
 private val LOG = LoggerFactory.getLogger("NavigationDashboard")
@@ -34,6 +35,7 @@ fun NavigationDashboard(
     selectedAppId: String? = null,  // App ID to filter navigation graph by (managed by parent)
     observationStreamClient: ObservationStreamClient? = null,  // Real-time stream client for navigation updates
     screenshotLoader: ScreenshotLoader? = null,  // Screenshot loader (hoisted to parent so cache persists across toggles)
+    settingsProvider: SettingsProvider = FakeSettingsProvider(),  // Settings provider (caller injects real impl)
 ) {
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
@@ -45,8 +47,7 @@ fun NavigationDashboard(
     }
 
     // Fog mode settings - read from persisted settings (fog+auto are one combined toggle)
-    val settings = remember { AutoMobileSettings.getInstance() }
-    var fogModeEnabled by remember { mutableStateOf(settings.fogModeEnabled) }
+    var fogModeEnabled by remember { mutableStateOf(settingsProvider.fogModeEnabled) }
 
     // Track current screen and app from navigation stream
     var currentObservedScreen by remember { mutableStateOf<String?>(null) }
@@ -123,7 +124,7 @@ fun NavigationDashboard(
                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                     if (appChanged) {
                         fogModeEnabled = false
-                        settings.fogModeEnabled = false
+                        settingsProvider.fogModeEnabled = false
                         fitToViewTrigger++
                     }
                     lastObservedAppId = newAppId
@@ -169,7 +170,7 @@ fun NavigationDashboard(
                     currentObservedScreen = currentObservedScreen,
                     onFogModeToggled = { enabled ->
                         fogModeEnabled = enabled
-                        settings.fogModeEnabled = enabled
+                        settingsProvider.fogModeEnabled = enabled
                     },
                     fitToViewTrigger = fitToViewTrigger,
                 )

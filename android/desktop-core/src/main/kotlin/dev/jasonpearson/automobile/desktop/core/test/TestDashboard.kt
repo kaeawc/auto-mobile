@@ -630,18 +630,16 @@ private fun RecordingTestScreen(
               )
             }
             androidx.compose.foundation.text.BasicTextField(
-                value = promptText, onValueChange = { promptText = it },
+                value = promptText,
+                onValueChange = { promptText = it },
                 modifier = Modifier.fillMaxSize(),
                 textStyle =
                     androidx.compose.ui.text.TextStyle(
                         fontSize = 12.sp,
                         color = colors.text.normal,
                     ),
-                lineLimits =
-                    androidx.compose.foundation.text.input.TextFieldLineLimits.MultiLine(
-                        minHeightInLines = 2,
-                        maxHeightInLines = 4,
-                    ),
+                minLines = 2,
+                maxLines = 4,
             )
           }
 
@@ -1186,7 +1184,10 @@ private fun PlanReviewPanel(
     ) {
       OutlinedButton(
           onClick = {
-            savePlanToFile(plan) { path -> saveSuccess = path }
+            savePlanToFile(
+                plan,
+                dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
+            ) { path -> saveSuccess = path }
             onSave()
           },
           modifier = Modifier.weight(1f),
@@ -2500,3 +2501,5 @@ private fun extractVideoFrame(videoPath: String, timeMs: Long): org.jetbrains.sk
     frameCache[cacheKey] = null
     null
   }
+
+}

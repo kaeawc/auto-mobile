@@ -255,3 +255,5 @@ private fun StateCheckbox(
 
 private fun getSimpleClassName(fullName: String): String {
     return fullName.substringAfterLast(".")
+
+}

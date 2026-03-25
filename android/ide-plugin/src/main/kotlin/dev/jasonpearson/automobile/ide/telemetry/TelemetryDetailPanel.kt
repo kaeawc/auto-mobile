@@ -34,6 +34,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 import com.intellij.openapi.project.Project
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.telemetry.*
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.buildJsonObject
@@ -206,8 +207,9 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
         defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
         copyText = reqHeadersCopy,
     ) {
-        if (!event.requestHeaders.isNullOrEmpty()) {
-            HeaderDataTable(event.requestHeaders, textColor)
+        val reqHeaders = event.requestHeaders
+        if (!reqHeaders.isNullOrEmpty()) {
+            HeaderDataTable(reqHeaders, textColor)
         } else {
             Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
         }
@@ -240,8 +242,9 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
         defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
         copyText = respHeadersCopy,
     ) {
-        if (!event.responseHeaders.isNullOrEmpty()) {
-            HeaderDataTable(event.responseHeaders, textColor)
+        val respHeaders = event.responseHeaders
+        if (!respHeaders.isNullOrEmpty()) {
+            HeaderDataTable(respHeaders, textColor)
         } else {
             Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
         }
@@ -423,8 +426,9 @@ private fun generateCurlCommand(event: TelemetryDisplayEvent.Network): String {
         val displayValue = if (key.equals("Authorization", ignoreCase = true)) "[REDACTED]" else value
         sb.append(" \\\n  -H '${key}: ${displayValue.replace("'", "'\\''")}'")
     }
-    if (!event.requestBody.isNullOrBlank()) {
-        sb.append(" \\\n  -d '${event.requestBody.replace("'", "'\\''")}'")
+    val reqBody = event.requestBody
+    if (!reqBody.isNullOrBlank()) {
+        sb.append(" \\\n  -d '${reqBody.replace("'", "'\\''")}'")
     }
     sb.append(" \\\n  '${event.url}'")
     return sb.toString()
@@ -562,7 +566,9 @@ private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color
             }
             val frameText = "at ${frame.className}.${frame.methodName}($location)"
 
-            if (frame.isAppCode && project != null && frame.fileName != null && frame.lineNumber != null) {
+            val fName = frame.fileName
+            val fLine = frame.lineNumber
+            if (frame.isAppCode && project != null && fName != null && fLine != null) {
                 // Clickable app code frame
                 Text(
                     frameText,
@@ -574,8 +580,8 @@ private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color
                         .clickable {
                             SourceFileFinder.findAndOpen(
                                 project,
-                                frame.fileName,
-                                frame.lineNumber,
+                                fName,
+                                fLine,
                                 frame.className,
                             )
                         }
@@ -604,9 +610,11 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
 
     Spacer(Modifier.height(4.dp))
 
+    val prevValue = event.previousValue
+    val curValue = event.value
     when {
         // Value removed — show only the previous value
-        event.value == null && event.changeType == "remove" && event.previousValue != null -> {
+        curValue == null && event.changeType == "remove" && prevValue != null -> {
             Text(
                 "Removed value:",
                 fontSize = 9.sp,
@@ -614,7 +622,7 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
                 color = textColor.copy(alpha = 0.5f),
             )
             Text(
-                event.previousValue,
+                prevValue,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFFFF6B6B).copy(alpha = 0.8f),
@@ -622,8 +630,8 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
             )
         }
         // New key added — show only the new value
-        event.previousValue == null && event.changeType == "add" -> {
-            event.value?.let { v ->
+        prevValue == null && event.changeType == "add" -> {
+            curValue?.let { v ->
                 Text(
                     "New value:",
                     fontSize = 9.sp,
@@ -640,7 +648,7 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
             }
         }
         // Modified — show before/after
-        event.previousValue != null && event.value != null -> {
+        prevValue != null && curValue != null -> {
             Text(
                 "Previous:",
                 fontSize = 9.sp,
@@ -648,7 +656,7 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
                 color = textColor.copy(alpha = 0.5f),
             )
             Text(
-                event.previousValue,
+                prevValue,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFFFF6B6B).copy(alpha = 0.7f),
@@ -662,7 +670,7 @@ private fun StorageDetail(event: TelemetryDisplayEvent.Storage, textColor: Color
                 color = textColor.copy(alpha = 0.5f),
             )
             Text(
-                event.value,
+                curValue,
                 fontSize = 10.sp,
                 fontFamily = FontFamily.Monospace,
                 color = Color(0xFF51CF66).copy(alpha = 0.8f),

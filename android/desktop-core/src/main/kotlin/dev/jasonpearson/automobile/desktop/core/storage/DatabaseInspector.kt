@@ -1153,3 +1153,5 @@ private fun highlightSQL(sql: String): AnnotatedString {
             append(sql.substring(index))
         }
     }
+
+}

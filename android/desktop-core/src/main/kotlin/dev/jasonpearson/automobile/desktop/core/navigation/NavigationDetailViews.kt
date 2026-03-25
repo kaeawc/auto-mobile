@@ -418,3 +418,5 @@ fun DetailRow(label: String, value: String) {
         Text(label, fontSize = 12.sp, color = colors.text.normal.copy(alpha = 0.5f))
         Text(value, fontSize = 12.sp)
     }
+
+}

@@ -364,3 +364,5 @@ private fun runSystemChecks(): List<DiagnosticCheck> {
     checks.add(javaCheck)
 
     return checks
+
+}

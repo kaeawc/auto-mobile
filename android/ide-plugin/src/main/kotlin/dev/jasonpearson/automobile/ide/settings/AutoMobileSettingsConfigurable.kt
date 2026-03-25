@@ -16,7 +16,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.options.SearchableConfigurable
-import dev.jasonpearson.automobile.shared.LabeledTextField
+import dev.jasonpearson.automobile.desktop.core.LabeledTextField
 import javax.swing.JComponent
 import org.jetbrains.jewel.bridge.JewelComposePanel
 import org.jetbrains.jewel.foundation.theme.JewelTheme

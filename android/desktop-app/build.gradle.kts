@@ -22,7 +22,7 @@ sourceSets {
 
 dependencies {
   // Shared module (UX, unix socket architecture, settings, data sources)
-  implementation(project(":shared"))
+  implementation(project(":desktop-core"))
 
   // Compose Desktop
   implementation(compose.desktop.currentOs)

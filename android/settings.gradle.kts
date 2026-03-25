@@ -42,7 +42,7 @@ include(":test-plan-validation")
 
 include(":video-server")
 
-include(":shared")
+include(":desktop-core")
 
 include(":ide-plugin")
 

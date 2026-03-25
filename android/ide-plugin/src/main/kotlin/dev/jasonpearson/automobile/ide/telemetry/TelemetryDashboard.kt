@@ -41,11 +41,11 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.intellij.ide.util.PropertiesComponent
-import dev.jasonpearson.automobile.shared.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import kotlinx.coroutines.delay
-import dev.jasonpearson.automobile.shared.daemon.TelemetryConnectionState
-import dev.jasonpearson.automobile.shared.daemon.TelemetryPushClient
-import dev.jasonpearson.automobile.shared.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryConnectionState
+import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import org.jetbrains.jewel.foundation.theme.JewelTheme
 import org.jetbrains.jewel.ui.component.Text
 import java.text.SimpleDateFormat

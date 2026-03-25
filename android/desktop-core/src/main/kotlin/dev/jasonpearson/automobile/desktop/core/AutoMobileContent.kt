@@ -68,6 +68,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.NotificationHandler
 import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
+import dev.jasonpearson.automobile.desktop.core.settings.SettingsPanel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -168,6 +169,7 @@ fun AutoMobileContent(
     notificationHandler: NotificationHandler = NoOpNotificationHandler,
     onOpenSource: ((String, Int, String) -> Unit)? = null,
 ) {
+  var showSettings by remember { mutableStateOf(false) }
   var selectedIndex by remember { mutableIntStateOf(0) }
   val dashboardOrder = remember { mutableStateListOf(*Dashboard.entries.toTypedArray()) }
   var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -625,6 +627,16 @@ fun AutoMobileContent(
   val minPanelWidthPx = with(density) { 225.dp.toPx() }  // 150dp * 1.5
   val maxPanelWidthPx = with(density) { 500.dp.toPx() }
 
+  // Settings panel (full-screen overlay)
+  if (showSettings) {
+    SettingsPanel(
+        settings = settingsProvider,
+        onClose = { showSettings = false },
+        modifier = Modifier.fillMaxSize(),
+    )
+    return
+  }
+
   Column(modifier = Modifier.fillMaxSize()) {
     // Header (rendered on top with solid background)
     Column(
@@ -724,6 +736,7 @@ fun AutoMobileContent(
               appDropdownExpanded = false
               LOG.info("App selected: $appId")
           },
+          onSettingsClicked = { showSettings = true },
       )
     }
 
@@ -1017,6 +1030,7 @@ private fun GlobalShellHeader(
     appDropdownExpanded: Boolean = false,
     onAppDropdownExpandedChange: (Boolean) -> Unit = {},
     onAppSelected: (String?) -> Unit = {},
+    onSettingsClicked: () -> Unit = {},
 ) {
   val colors = SharedTheme.globalColors
 
@@ -1180,6 +1194,16 @@ private fun GlobalShellHeader(
             onToggle = { isReal ->
                 onDataSourceModeChanged(if (isReal) DataSourceMode.Real else DataSourceMode.Fake)
             },
+        )
+
+        // Settings gear
+        Text(
+            "⚙",
+            fontSize = 16.sp,
+            modifier = Modifier
+                .clickable { onSettingsClicked() }
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(horizontal = 8.dp, vertical = 4.dp),
         )
       }
     }

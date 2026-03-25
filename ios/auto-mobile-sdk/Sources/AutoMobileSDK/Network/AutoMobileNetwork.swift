@@ -157,6 +157,9 @@ public class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     private var startTime: Date?
     private var dataTask: URLSessionDataTask?
+    private var receivedResponse: URLResponse?
+    private var receivedData = Data()
+    private static let maxBodyCapture = 32 * 1024 // 32KB
 
     public override class func canInit(with request: URLRequest) -> Bool {
         guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
@@ -171,6 +174,7 @@ public class AutoMobileURLProtocol: URLProtocol {
 
     public override func startLoading() {
         startTime = Date()
+        receivedData = Data()
 
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
@@ -195,31 +199,23 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         didReceive response: URLResponse,
         completionHandler: @escaping (URLSession.ResponseDisposition) -> Void
     ) {
-        let httpResponse = response as? HTTPURLResponse
-        let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
-
-        AutoMobileNetwork.shared.recordRequest(
-            url: request.url?.absoluteString ?? "",
-            method: request.httpMethod ?? "GET",
-            requestHeaders: request.allHTTPHeaderFields,
-            requestBodySize: request.httpBody?.count,
-            statusCode: httpResponse?.statusCode,
-            responseHeaders: httpResponse?.allHeaderFields as? [String: String],
-            responseBodySize: response.expectedContentLength >= 0 ? Int(response.expectedContentLength) : nil,
-            durationMs: durationMs
-        )
-
+        receivedResponse = response
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         completionHandler(.allow)
     }
 
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+        // Accumulate response data for body capture (up to limit)
+        if receivedData.count < Self.maxBodyCapture {
+            receivedData.append(data.prefix(Self.maxBodyCapture - receivedData.count))
+        }
         client?.urlProtocol(self, didLoad: data)
     }
 
     public func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+        let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
+
         if let error = error {
-            let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
             AutoMobileNetwork.shared.recordRequest(
                 url: request.url?.absoluteString ?? "",
                 method: request.httpMethod ?? "GET",
@@ -228,6 +224,35 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             )
             client?.urlProtocol(self, didFailWithError: error)
         } else {
+            let httpResponse = receivedResponse as? HTTPURLResponse
+            let contentType = httpResponse?.value(forHTTPHeaderField: "Content-Type")
+
+            // Capture request body from original request
+            let requestBody: String? = request.httpBody.flatMap { data in
+                AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
+                    ? String(data: data.prefix(Self.maxBodyCapture), encoding: .utf8)
+                    : nil
+            }
+
+            // Capture response body if text content type
+            let responseBody: String? = AutoMobileNetwork.isTextContentType(contentType) && !receivedData.isEmpty
+                ? String(data: receivedData, encoding: .utf8)
+                : nil
+
+            AutoMobileNetwork.shared.recordRequest(
+                url: request.url?.absoluteString ?? "",
+                method: request.httpMethod ?? "GET",
+                requestHeaders: request.allHTTPHeaderFields,
+                requestBodySize: request.httpBody?.count,
+                statusCode: httpResponse?.statusCode,
+                responseHeaders: httpResponse?.allHeaderFields as? [String: String],
+                responseBodySize: receivedData.count,
+                durationMs: durationMs,
+                requestBody: requestBody,
+                responseBody: responseBody,
+                contentType: contentType
+            )
+
             client?.urlProtocolDidFinishLoading(self)
         }
     }

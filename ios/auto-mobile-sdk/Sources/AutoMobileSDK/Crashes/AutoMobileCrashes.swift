@@ -64,7 +64,12 @@ public final class AutoMobileCrashes: @unchecked Sendable {
         lock.unlock()
 
         for sig in Self.monitoredSignals {
-            signal(sig, signalHandler)
+            let prev = signal(sig, signalHandler)
+            let idx = Int(sig)
+            if idx >= 0, idx < previousSignalHandlers.count,
+               prev != SIG_DFL, prev != SIG_ERR, prev != SIG_IGN {
+                previousSignalHandlers[idx] = prev
+            }
         }
     }
 
@@ -117,9 +122,14 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 /// Computed once during initialization and stored as a C string for signal safety.
 private var signalCrashFilePath: UnsafeMutablePointer<CChar>?
 
+/// Previous signal handlers saved before installing ours, for chaining.
+/// Array indexed by signal number for O(1) lookup in the signal handler.
+/// Max signal number on Darwin is ~31, so 64 slots is plenty.
+private var previousSignalHandlers: [(@convention(c) (Int32) -> Void)?] = Array(repeating: nil, count: 64)
+
 /// Global signal handler for signal-based faults (SIGABRT, SIGSEGV, etc.).
 /// Only performs async-signal-safe operations: writes signal number to a file
-/// using POSIX write(), then re-raises with the default handler.
+/// using POSIX write(), then chains to the previous handler or re-raises.
 private func signalHandler(sig: Int32) {
     // Write signal number to file using only async-signal-safe functions
     if let path = signalCrashFilePath {
@@ -131,9 +141,15 @@ private func signalHandler(sig: Int32) {
         }
     }
 
-    // Re-raise with default handler to produce the normal crash behavior
-    signal(sig, SIG_DFL)
-    raise(sig)
+    // Chain to previous handler if one was installed
+    let idx = Int(sig)
+    if idx >= 0, idx < previousSignalHandlers.count, let prev = previousSignalHandlers[idx] {
+        prev(sig)
+    } else {
+        // No previous handler — re-raise with default
+        signal(sig, SIG_DFL)
+        raise(sig)
+    }
 }
 
 // MARK: - Previous Signal Crash Detection

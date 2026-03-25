@@ -201,8 +201,12 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
     private func isReadQuery(_ query: String) -> Bool {
         let upper = query.uppercased()
-        if startsWithKeyword(upper, "SELECT") || startsWithKeyword(upper, "PRAGMA") || startsWithKeyword(upper, "EXPLAIN") {
+        if startsWithKeyword(upper, "SELECT") || startsWithKeyword(upper, "EXPLAIN") {
             return true
+        }
+        // PRAGMA is read-only unless it contains '=' (e.g. PRAGMA user_version = 1)
+        if startsWithKeyword(upper, "PRAGMA") {
+            return !upper.contains("=")
         }
         if startsWithKeyword(upper, "WITH") {
             // CTE: find the actual statement after the CTE definitions

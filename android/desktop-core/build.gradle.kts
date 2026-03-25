@@ -30,6 +30,7 @@ dependencies {
 
   // Kotlin ecosystem
   implementation(libs.kotlinx.coroutines)
+  implementation("org.jetbrains.kotlinx:kotlinx-coroutines-swing:1.10.2")
   implementation(libs.kotlinx.serialization)
 
   // MCP Kotlin SDK for client communication

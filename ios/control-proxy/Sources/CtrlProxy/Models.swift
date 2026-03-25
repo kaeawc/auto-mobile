@@ -132,6 +132,7 @@ public struct WebSocketResponse: Codable {
     public let success: Bool?
     public let totalTimeMs: Int64?
     public let error: String?
+    public let action: String?
     public let text: String?
     public let perfTiming: PerfTiming?
 
@@ -142,6 +143,7 @@ public struct WebSocketResponse: Codable {
         success: Bool? = nil,
         totalTimeMs: Int64? = nil,
         error: String? = nil,
+        action: String? = nil,
         text: String? = nil,
         perfTiming: PerfTiming? = nil
     ) {
@@ -151,6 +153,7 @@ public struct WebSocketResponse: Codable {
         self.success = success
         self.totalTimeMs = totalTimeMs
         self.error = error
+        self.action = action
         self.text = text
         self.perfTiming = perfTiming
     }
@@ -159,6 +162,7 @@ public struct WebSocketResponse: Codable {
         type: String,
         requestId: String?,
         totalTimeMs: Int64,
+        action: String? = nil,
         text: String? = nil
     )
         -> WebSocketResponse
@@ -168,6 +172,7 @@ public struct WebSocketResponse: Codable {
             requestId: requestId,
             success: true,
             totalTimeMs: totalTimeMs,
+            action: action,
             text: text
         )
     }

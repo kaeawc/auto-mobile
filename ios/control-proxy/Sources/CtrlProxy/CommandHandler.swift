@@ -361,6 +361,7 @@ public class CommandHandler: CommandHandling {
             type: ResponseType.clipboardResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime),
+            action: action,
             text: resultText
         )
     }

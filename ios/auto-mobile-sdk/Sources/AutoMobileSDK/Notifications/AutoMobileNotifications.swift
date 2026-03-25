@@ -60,8 +60,8 @@ public final class AutoMobileNotifications: @unchecked Sendable {
         content.body = body
         content.sound = .default
 
-        // Handle image attachment
-        if let imagePath = imagePath, let url = imageURL(from: imagePath) {
+        // Handle image attachment (download remote images to temp file first)
+        if let imagePath = imagePath, let url = await resolveImageURL(from: imagePath) {
             if let attachment = try? UNNotificationAttachment(identifier: "image", url: url) {
                 content.attachments = [attachment]
             }
@@ -104,9 +104,22 @@ public final class AutoMobileNotifications: @unchecked Sendable {
         }
     }
 
-    private func imageURL(from path: String) -> URL? {
+    /// Resolve an image path to a local file URL suitable for UNNotificationAttachment.
+    /// Downloads remote images to a temp file since attachments require local URLs.
+    private func resolveImageURL(from path: String) async -> URL? {
         if path.hasPrefix("http://") || path.hasPrefix("https://") {
-            return URL(string: path)
+            guard let remoteURL = URL(string: path) else { return nil }
+            do {
+                let (data, _) = try await URLSession.shared.data(from: remoteURL)
+                let ext = remoteURL.pathExtension.isEmpty ? "jpg" : remoteURL.pathExtension
+                let tempURL = FileManager.default.temporaryDirectory
+                    .appendingPathComponent(UUID().uuidString)
+                    .appendingPathExtension(ext)
+                try data.write(to: tempURL)
+                return tempURL
+            } catch {
+                return nil
+            }
         }
         let url = URL(fileURLWithPath: path)
         return FileManager.default.fileExists(atPath: path) ? url : nil

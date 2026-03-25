@@ -112,9 +112,18 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
     private func truncateBody(_ body: String, maxBytes: Int) -> String {
         if body.utf8.count <= maxBytes { return body }
-        // Truncate to maxBytes
-        let data = Data(body.utf8.prefix(maxBytes))
-        return String(data: data, encoding: .utf8) ?? String(body.prefix(maxBytes))
+        // Truncate to maxBytes, respecting UTF-8 character boundaries
+        let utf8 = body.utf8
+        let truncatedBytes = utf8.prefix(maxBytes)
+        // Walk backwards to find a valid UTF-8 boundary
+        var endIndex = truncatedBytes.endIndex
+        while endIndex > truncatedBytes.startIndex {
+            if let result = String(utf8[truncatedBytes.startIndex..<endIndex]) {
+                return result
+            }
+            endIndex = utf8.index(before: endIndex)
+        }
+        return ""
     }
 
     /// Record a WebSocket frame event.

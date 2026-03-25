@@ -90,7 +90,7 @@ struct SettingsTab: View {
             .navigationTitle("Settings")
         }
         .trackNavigation(destination: "SettingsTab")
-        .onChange(of: analyticsEnabled) { newValue in
+        .onChange(of: analyticsEnabled) { _, newValue in
             AutoMobileSDK.shared.setEnabled(newValue)
             AutoMobileSDK.shared.trackEvent(
                 name: "analytics_toggled",

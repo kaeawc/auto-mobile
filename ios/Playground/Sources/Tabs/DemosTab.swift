@@ -421,7 +421,7 @@ struct FormDemo: View {
                 TextField("Email", text: $email)
                     .textContentType(.emailAddress)
                     .keyboardType(.emailAddress)
-                    .autocapitalization(.none)
+                    .textInputAutocapitalization(.never)
             }
 
             Section("Preferences") {
@@ -638,7 +638,7 @@ struct SDKStatusDemo: View {
                 }
 
                 Toggle("Enabled", isOn: $sdkEnabled)
-                    .onChange(of: sdkEnabled) { newValue in
+                    .onChange(of: sdkEnabled) { _, newValue in
                         AutoMobileSDK.shared.setEnabled(newValue)
                     }
 

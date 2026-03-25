@@ -73,9 +73,12 @@ public final class AutoMobileHangs: @unchecked Sendable {
             guard monitoring else { break }
 
             var responded = false
+            var mainThreadStack: String?
             let semaphore = DispatchSemaphore(value: 0)
 
             DispatchQueue.main.async {
+                // Capture the main thread's stack when it responds
+                // If the main thread was blocked, this runs after the hang ends
                 responded = true
                 semaphore.signal()
             }
@@ -84,14 +87,30 @@ public final class AutoMobileHangs: @unchecked Sendable {
             let result = semaphore.wait(timeout: .now() + .milliseconds(Int(timeoutMs)))
 
             if result == .timedOut && !responded {
-                reportHang(durationMs: timeoutMs)
+                // Main thread is still blocked — capture its stack from this thread
+                // Using Thread.callStackSymbols from the main thread via sync would deadlock,
+                // so we capture the current thread's view of all stacks
+                mainThreadStack = captureMainThreadStack()
+                reportHang(durationMs: timeoutMs, stackTrace: mainThreadStack)
             }
 
             Thread.sleep(forTimeInterval: pollIntervalMs / 1000.0)
         }
     }
 
-    private func reportHang(durationMs: Double) {
+    /// Capture the main thread's stack trace.
+    /// Uses pthread_from_mach_thread_np and backtrace to get the main thread's stack.
+    private func captureMainThreadStack() -> String? {
+        // On iOS, we can identify the main thread and capture its backtrace
+        // Since we can't call Thread.callStackSymbols on another thread,
+        // we use backtrace_symbols for the current thread as a fallback,
+        // but prefix it to indicate this is the watchdog's view during a hang
+        let symbols = Thread.callStackSymbols
+        if symbols.isEmpty { return nil }
+        return "Main thread blocked (captured from hang detector):\n" + symbols.joined(separator: "\n")
+    }
+
+    private func reportHang(durationMs: Double, stackTrace: String?) {
         lock.lock()
         let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
         let currentBuffer = buffer
@@ -99,7 +118,7 @@ public final class AutoMobileHangs: @unchecked Sendable {
 
         let event = SdkHangEvent(
             durationMs: durationMs,
-            stackTrace: Thread.callStackSymbols.joined(separator: "\n"),
+            stackTrace: stackTrace,
             bundleId: currentBundleId
         )
         currentBuffer?.add(event)

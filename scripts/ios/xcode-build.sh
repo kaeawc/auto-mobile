@@ -136,12 +136,17 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
     while IFS= read -r scheme; do
         if [ -n "${scheme}" ]; then
             echo -e "    Building scheme: ${scheme}..."
-            if run_cmd xcodebuild \
+            set +e
+            BUILD_OUTPUT=$(run_cmd xcodebuild \
                 -project "${xcodeproj}" \
                 -scheme "${scheme}" \
                 -destination "${DESTINATION}" \
                 -configuration Debug \
-                build 2>&1 | tail -100; then
+                build 2>&1)
+            BUILD_EXIT=$?
+            set -e
+            echo "$BUILD_OUTPUT" | tail -100
+            if [ $BUILD_EXIT -eq 0 ]; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"

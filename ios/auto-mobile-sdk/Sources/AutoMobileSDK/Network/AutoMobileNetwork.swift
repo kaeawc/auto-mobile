@@ -159,7 +159,7 @@ public class AutoMobileURLProtocol: URLProtocol {
     private var dataTask: URLSessionDataTask?
     private var receivedResponse: URLResponse?
     private var receivedData = Data()
-    private static let maxBodyCapture = 32 * 1024 // 32KB
+    private var totalBytesReceived = 0
 
     public override class func canInit(with request: URLRequest) -> Bool {
         guard URLProtocol.property(forKey: handledKey, in: request) == nil else {
@@ -175,6 +175,7 @@ public class AutoMobileURLProtocol: URLProtocol {
     public override func startLoading() {
         startTime = Date()
         receivedData = Data()
+        totalBytesReceived = 0
 
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
@@ -205,9 +206,11 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
     }
 
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
-        // Accumulate response data for body capture (up to limit)
-        if receivedData.count < Self.maxBodyCapture {
-            receivedData.append(data.prefix(Self.maxBodyCapture - receivedData.count))
+        totalBytesReceived += data.count
+        // Accumulate response data for body capture (up to configured limit)
+        let maxBytes = AutoMobileNetwork.shared._maxBodyBytes
+        if receivedData.count < maxBytes {
+            receivedData.append(data.prefix(maxBytes - receivedData.count))
         }
         client?.urlProtocol(self, didLoad: data)
     }
@@ -246,7 +249,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
                 requestBodySize: request.httpBody?.count,
                 statusCode: httpResponse?.statusCode,
                 responseHeaders: httpResponse?.allHeaderFields as? [String: String],
-                responseBodySize: receivedData.count,
+                responseBodySize: totalBytesReceived,
                 durationMs: durationMs,
                 requestBody: requestBody,
                 responseBody: responseBody,

@@ -168,12 +168,20 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Reset the SDK for testing. Not for production use.
     internal func reset() {
+        // Reset all subsystems in reverse initialization order
+        SwiftUINavigationAdapter.shared.stop()
         AutoMobileCrashes.shared.reset()
         AutoMobileHangs.shared.reset()
         AutoMobileOsEvents.shared.reset()
         AutoMobileNotificationObserver.shared.reset()
         AutoMobileInteractionTracker.shared.reset()
         ViewBodyTracker.shared.reset()
+        UserDefaultsInspector.shared.reset()
+        DatabaseInspector.shared.reset()
+        AutoMobileNetwork.shared.reset()
+        AutoMobileFailures.shared.reset()
+        AutoMobileBiometrics.shared.reset()
+        AutoMobileLog.shared.reset()
         lock.lock()
         eventBuffer?.shutdown()
         eventBuffer = nil

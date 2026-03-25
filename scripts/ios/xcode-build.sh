@@ -176,15 +176,14 @@ for xcodeproj in "${XCODEPROJ_ARRAY[@]}"; do
                 build 2>&1)
             XCODE_EXIT=$?
             set -e
-            if [ $XCODE_EXIT -ne 0 ]; then
-                echo "$BUILD_LOG" | grep -iE "error:" | head -20 | while IFS= read -r line; do
-                    echo "::error::${scheme}: ${line}"
-                done
-            fi
             if [ $XCODE_EXIT -eq 0 ]; then
                 echo -e "    ${GREEN}✓${NC} ${scheme} built"
             else
                 echo -e "    ${RED}✗${NC} ${scheme} failed"
+                # Emit error lines as GitHub Actions annotations for CI visibility
+                echo "$BUILD_LOG" | grep -iE "error:" | head -20 | while IFS= read -r line; do
+                    echo "::error::${scheme}: ${line}"
+                done
                 BUILD_SUCCESS=false
             fi
         fi

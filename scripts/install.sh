@@ -1726,16 +1726,14 @@ show_config_diff() {
 # Only includes paths not already on the system PATH (e.g. ~/.bun/bin,
 # /opt/homebrew/bin). Returns empty if nothing extra is needed.
 _bun_path_env() {
-    local parts=""
-    local bun_bin="${HOME}/.bun/bin"
-    if [[ ":${PATH}:" != *":${bun_bin}:"* ]]; then
-        parts="${bun_bin}"
-    fi
+    # Always include ~/.bun/bin — GUI clients (Claude Desktop, Cursor, etc.)
+    # won't have it on their PATH even if the installer's shell does.
+    local parts="${HOME}/.bun/bin"
     if command_exists brew; then
         local brew_bin
         brew_bin="$(brew --prefix 2>/dev/null)/bin"
         if [[ ":${PATH}:" != *":${brew_bin}:"* ]]; then
-            parts="${parts:+${parts}:}${brew_bin}"
+            parts="${parts}:${brew_bin}"
         fi
     fi
     echo "${parts}"

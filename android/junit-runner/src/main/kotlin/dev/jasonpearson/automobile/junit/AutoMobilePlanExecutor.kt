@@ -18,9 +18,15 @@ import org.junit.Test
 
 /**
  * Internal executor class that handles the actual execution of AutoMobile plans with parameter
- * substitution and daemon socket integration.
+ * substitution, daemon socket integration, and AI-assisted recovery via Koog.
  */
 internal object AutoMobilePlanExecutor {
+
+  /** Injectable agent for testing. When null, uses [LazyInitializer.getAgent]. */
+  @JvmStatic internal var testAgent: AutoMobileAgent? = null
+
+  private val agent: AutoMobileAgent
+    get() = testAgent ?: LazyInitializer.getAgent()
 
   /** Detected test context from stack trace inspection. */
   private data class TestContext(val className: String, val methodName: String)
@@ -260,9 +266,25 @@ internal object AutoMobilePlanExecutor {
     return processedContent
   }
 
+  // ── Plan execution with recovery ──────────────────────────────────────────
+
   private fun executeProcessedPlan(
       planContent: String,
       options: AutoMobilePlanExecutionOptions,
+  ): InternalExecutionResult {
+    return executePlanFromStep(planContent, options, startStep = 0, recoveryAlreadyAttempted = false)
+  }
+
+  /**
+   * Execute a plan starting at [startStep]. If the plan fails and recovery has not yet been
+   * attempted, the Koog agent is invoked to work around the failure. On successful recovery the
+   * plan resumes from the step after the failed one. Recovery is allowed at most once per test.
+   */
+  private fun executePlanFromStep(
+      planContent: String,
+      options: AutoMobilePlanExecutionOptions,
+      startStep: Int,
+      recoveryAlreadyAttempted: Boolean,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
@@ -276,7 +298,7 @@ internal object AutoMobilePlanExecutor {
                         java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
                 ),
             "platform" to JsonPrimitive("android"),
-            "startStep" to JsonPrimitive(0),
+            "startStep" to JsonPrimitive(startStep),
             "sessionUuid" to JsonPrimitive(sessionUuid),
         )
 
@@ -291,7 +313,7 @@ internal object AutoMobilePlanExecutor {
     }
 
     if (options.debugMode) {
-      println("Executing plan via daemon socket: executePlan")
+      println("Executing plan via daemon socket: executePlan (startStep=$startStep)")
     }
 
     DaemonHeartbeat.registerSession(sessionUuid)
@@ -313,21 +335,157 @@ internal object AutoMobilePlanExecutor {
       }
     }
 
-    return if (response.success && parsed.success) {
-      InternalExecutionResult(
+    if (response.success && parsed.success) {
+      return InternalExecutionResult(
           success = true,
           exitCode = 0,
           output = outputPayload,
           toolResults = toolResults,
       )
-    } else {
-      handleFailure(
-          CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
-          options,
-          toolResults,
+    }
+
+    // Execution failed — attempt recovery if allowed
+    val failedStepContext = buildFailedStepContext(response, json, planContent, options.device)
+    return handleFailure(
+        result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
+        options = options,
+        toolResults = toolResults,
+        failedStepContext = failedStepContext,
+        planContent = planContent,
+        recoveryAlreadyAttempted = recoveryAlreadyAttempted,
+    )
+  }
+
+  // ── Failure handling & recovery ───────────────────────────────────────────
+
+  private fun handleFailure(
+      result: CommandResult,
+      options: AutoMobilePlanExecutionOptions,
+      toolResults: List<ToolResultEntry>,
+      failedStepContext: FailedStepContext?,
+      planContent: String,
+      recoveryAlreadyAttempted: Boolean,
+  ): InternalExecutionResult {
+
+    val errorMessage =
+        "AutoMobile plan execution failed with exit code ${result.exitCode}" +
+            if (result.errorOutput.isNotEmpty()) "\nErrors: ${result.errorOutput}" else ""
+
+    System.err.println(errorMessage)
+
+    val ciMode = resolveCiMode()
+    if (!options.aiAssistance || ciMode || recoveryAlreadyAttempted || failedStepContext == null) {
+      if (recoveryAlreadyAttempted) {
+        println("Recovery already attempted for this test — failing without retry")
+      }
+      return InternalExecutionResult(
+          success = false,
+          exitCode = result.exitCode,
+          output = result.output,
+          errorMessage = errorMessage,
+          toolResults = toolResults,
       )
     }
+
+    // Attempt Koog-powered recovery
+    println("Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})")
+
+    val recoveryOutcome = agent.attemptAiRecovery(failedStepContext)
+
+    if (!recoveryOutcome.success) {
+      println("AI recovery failed")
+      return InternalExecutionResult(
+          success = false,
+          exitCode = result.exitCode,
+          output = result.output,
+          errorMessage = errorMessage,
+          aiRecoveryAttempted = true,
+          aiRecoverySuccessful = false,
+          toolResults = toolResults,
+      )
+    }
+
+    // Recovery succeeded — resume the plan from the step after the failed one
+    val resumeStep = failedStepContext.failedStepIndex + 1
+    println("AI recovery succeeded, resuming plan from step ${resumeStep + 1}")
+
+    val resumeResult = executePlanFromStep(
+        planContent = planContent,
+        options = options,
+        startStep = resumeStep,
+        recoveryAlreadyAttempted = true, // prevent recursive recovery
+    )
+
+    return InternalExecutionResult(
+        success = resumeResult.success,
+        exitCode = resumeResult.exitCode,
+        output = resumeResult.output,
+        errorMessage = resumeResult.errorMessage,
+        aiRecoveryAttempted = true,
+        aiRecoverySuccessful = resumeResult.success,
+        toolResults = toolResults + resumeResult.toolResults,
+    )
   }
+
+  // ── Build FailedStepContext from daemon response ──────────────────────────
+
+  private fun buildFailedStepContext(
+      response: DaemonResponse,
+      json: Json,
+      planContent: String,
+      deviceId: String?,
+  ): FailedStepContext? {
+    try {
+      val resultElement = response.result ?: return null
+      val contentArray = resultElement.jsonObject["content"] as? JsonArray ?: return null
+      val contentText =
+          contentArray
+              .firstOrNull { element ->
+                (element as? JsonObject)?.get("type")?.jsonPrimitive?.content == "text"
+              }
+              ?.jsonObject
+              ?.get("text")
+              ?.jsonPrimitive
+              ?.content ?: return null
+      val payload = json.parseToJsonElement(contentText).jsonObject
+
+      val failedStepObj = payload["failedStep"]?.jsonObject ?: return null
+      val failedStepIndex =
+          failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: return null
+      val failedTool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
+      val error = failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown error"
+      val failedDevice = failedStepObj["device"]?.jsonPrimitive?.content
+
+      // Build succeeded steps from toolResults in the payload
+      val succeededSteps = mutableListOf<SucceededStepSummary>()
+      val toolResultsArray = (payload["toolResults"] ?: payload["toolResult"]) as? JsonArray
+      if (toolResultsArray != null) {
+        for ((index, stepElement) in toolResultsArray.withIndex()) {
+          if (index >= failedStepIndex) break
+          val stepObj = stepElement as? JsonObject ?: continue
+          val tool =
+              stepObj["toolName"]?.jsonPrimitive?.content
+                  ?: stepObj["tool"]?.jsonPrimitive?.content
+                  ?: "unknown"
+          succeededSteps.add(SucceededStepSummary(stepIndex = index, tool = tool))
+        }
+      }
+
+      return FailedStepContext(
+          failedStepIndex = failedStepIndex,
+          failedTool = failedTool,
+          error = error,
+          succeededSteps = succeededSteps,
+          planContent = planContent,
+          deviceId = failedDevice ?: deviceId,
+      )
+    } catch (e: Exception) {
+      println("Warning: Failed to build recovery context: ${e.message}")
+      return null
+    }
+  }
+
+  // ── Response parsing ──────────────────────────────────────────────────────
 
   private fun parseDaemonToolResult(response: DaemonResponse, json: Json): ParsedToolResult {
     if (!response.success) {
@@ -527,42 +685,7 @@ internal object AutoMobilePlanExecutor {
     return responseError?.content
   }
 
-  private fun handleFailure(
-      result: CommandResult,
-      options: AutoMobilePlanExecutionOptions,
-      toolResults: List<ToolResultEntry> = emptyList(),
-  ): InternalExecutionResult {
-
-    val errorMessage =
-        "AutoMobile plan execution failed with exit code ${result.exitCode}" +
-            if (result.errorOutput.isNotEmpty()) "\nErrors: ${result.errorOutput}" else ""
-
-    System.err.println(errorMessage)
-
-    val ciMode = System.getProperty("automobile.ci.mode", "false").toBoolean()
-    if (!options.aiAssistance || ciMode) {
-      return InternalExecutionResult(
-          success = false,
-          exitCode = result.exitCode,
-          output = result.output,
-          errorMessage = errorMessage,
-          toolResults = toolResults,
-      )
-    }
-
-    // TODO: Implement AI recovery similar to AutoMobileRunner
-    println("AI recovery not yet implemented for programmatic execution")
-
-    return InternalExecutionResult(
-        success = false,
-        exitCode = result.exitCode,
-        output = result.output,
-        errorMessage = errorMessage,
-        aiRecoveryAttempted = false,
-        aiRecoverySuccessful = false,
-        toolResults = toolResults,
-    )
-  }
+  // ── Internal types ────────────────────────────────────────────────────────
 
   private data class InternalExecutionResult(
       val success: Boolean,

@@ -19,7 +19,6 @@ plugins {
   alias(libs.plugins.kotlin.serialization) apply false
   alias(libs.plugins.compose.compiler) apply false
   alias(libs.plugins.mavenPublish) apply false
-  alias(libs.plugins.dokka) apply false
 }
 
 // Read version from gradle.properties

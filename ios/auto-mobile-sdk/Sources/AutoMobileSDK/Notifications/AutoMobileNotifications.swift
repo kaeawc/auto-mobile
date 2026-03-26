@@ -155,7 +155,8 @@ final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegat
     ) {
         let actionId = response.actionIdentifier
         if actionId != UNNotificationDefaultActionIdentifier,
-           actionId != UNNotificationDismissActionIdentifier {
+           actionId != UNNotificationDismissActionIdentifier,
+           AutoMobileSDK.shared.isEnabled {
             // Post to NotificationCenter so SDK consumers can observe
             NotificationCenter.default.post(
                 name: AutoMobileNotifications.actionNotification,

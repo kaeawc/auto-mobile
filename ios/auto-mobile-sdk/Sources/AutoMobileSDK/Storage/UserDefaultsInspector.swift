@@ -94,6 +94,8 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     }
 
     private func notifyChangeListeners(suiteName: String?, key: String?) {
+        guard AutoMobileSDK.shared.isEnabled, isEnabled else { return }
+
         lock.lock()
         sequenceCounter += 1
         let seq = sequenceCounter

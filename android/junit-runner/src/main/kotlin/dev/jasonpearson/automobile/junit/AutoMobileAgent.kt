@@ -34,7 +34,7 @@ open class AutoMobileAgent(
     private val aiAgentFactory: AIAgentFactory = DefaultAIAgentFactory(),
     private val timeProvider: TimeProvider = DefaultTimeProvider(),
     private val mcpClient: MCPClient = DefaultMCPClient(),
-    private val recoveryConfigProvider: RecoveryConfigProvider = DaemonRecoveryConfigProvider(),
+    internal val recoveryConfigProvider: RecoveryConfigProvider = DaemonRecoveryConfigProvider(),
 ) {
 
   /** Supported AI model providers */

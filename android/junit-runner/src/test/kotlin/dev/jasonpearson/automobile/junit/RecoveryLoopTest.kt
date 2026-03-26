@@ -70,6 +70,19 @@ class RecoveryLoopTest {
   }
 
   @Test
+  fun `recovery does NOT fire when ai-recovery feature flag is disabled`() {
+    // Replace the agent with one whose recoveryConfigProvider returns enabled=false
+    fakeAgent = RecoveryFakeAutoMobileAgent(recoveryEnabled = false)
+    AutoMobilePlanExecutor.testAgent = fakeAgent
+    fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn"))
+
+    val result = executePlan(aiAssistance = true)
+
+    assertFalse("Test should fail when feature flag is disabled", result.success)
+    assertEquals(0, fakeAgent.recoveryCalls.size)
+  }
+
+  @Test
   fun `recovery does NOT fire in CI mode`() {
     System.setProperty("automobile.ci.mode", "true")
     fakeDaemonClient.responses.add(buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn"))
@@ -107,6 +120,32 @@ class RecoveryLoopTest {
     assertEquals("Should have made 2 daemon calls", 2, fakeDaemonClient.callArgs.size)
     val resumeArgs = fakeDaemonClient.callArgs[1]
     assertEquals(3, resumeArgs["startStep"]?.let { (it as JsonPrimitive).content.toInt() })
+  }
+
+  @Test
+  fun `resume pins to the same device that was recovered`() {
+    // Failure response includes device "emulator-5554"
+    fakeDaemonClient.responses.add(
+        buildFailureResponse(failedStepIndex = 1, failedTool = "tapOn", device = "emulator-5554")
+    )
+    fakeDaemonClient.responses.add(buildSuccessResponse())
+    fakeAgent.recoveryOutcome = RecoveryOutcome(success = true, recoveryTimeMs = 50, observeResultAfterRecovery = "{}")
+
+    // Execute with device="auto" (default)
+    executePlan(aiAssistance = true)
+
+    assertEquals("Should have made 2 daemon calls", 2, fakeDaemonClient.callArgs.size)
+    // First call should NOT have deviceId (auto mode)
+    assertNull(
+        "First call should not pin a device",
+        fakeDaemonClient.callArgs[0]["deviceId"],
+    )
+    // Resume call should pin to the recovered device
+    assertEquals(
+        "Resume should pin to recovered device",
+        "emulator-5554",
+        fakeDaemonClient.callArgs[1]["deviceId"]?.let { (it as JsonPrimitive).content },
+    )
   }
 
   @Test
@@ -180,19 +219,21 @@ class RecoveryLoopTest {
       failedTool: String,
       error: String = "Element not found",
       toolResults: JsonArray? = null,
+      device: String? = null,
   ): DaemonResponse {
+    val failedStepFields = mutableMapOf<String, JsonElement>(
+        "stepIndex" to JsonPrimitive(failedStepIndex),
+        "tool" to JsonPrimitive(failedTool),
+        "error" to JsonPrimitive(error),
+    )
+    if (device != null) {
+      failedStepFields["device"] = JsonPrimitive(device)
+    }
     val payload = mutableMapOf<String, JsonElement>(
         "success" to JsonPrimitive(false),
         "executedSteps" to JsonPrimitive(failedStepIndex),
         "totalSteps" to JsonPrimitive(5),
-        "failedStep" to
-            JsonObject(
-                mapOf(
-                    "stepIndex" to JsonPrimitive(failedStepIndex),
-                    "tool" to JsonPrimitive(failedTool),
-                    "error" to JsonPrimitive(error),
-                )
-            ),
+        "failedStep" to JsonObject(failedStepFields),
     )
     if (toolResults != null) {
       payload["toolResults"] = toolResults
@@ -256,13 +297,15 @@ private class RecoveryFakeDaemonToolClient : DaemonToolClient {
 }
 
 /** Fake agent that records recovery calls and returns a configured outcome. */
-private class RecoveryFakeAutoMobileAgent : AutoMobileAgent(
+private class RecoveryFakeAutoMobileAgent(
+    recoveryEnabled: Boolean = true,
+) : AutoMobileAgent(
     configProvider = FakeConfigProvider(),
     fileSystemOperations = FakeFileSystemOps(),
     aiAgentFactory = FakeAIAgentFactory(),
     timeProvider = FakeTimeProvider(),
     mcpClient = FakeMCPClient(),
-    recoveryConfigProvider = StaticRecoveryConfigProvider(5),
+    recoveryConfigProvider = StaticRecoveryConfigProvider(enabled = recoveryEnabled, maxToolCalls = 5),
 ) {
   var recoveryOutcome: RecoveryOutcome = RecoveryOutcome(success = false, recoveryTimeMs = 0)
   val recoveryCalls = mutableListOf<FailedStepContext>()

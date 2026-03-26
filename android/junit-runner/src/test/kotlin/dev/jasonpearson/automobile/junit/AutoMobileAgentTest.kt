@@ -39,7 +39,7 @@ class AutoMobileAgentTest {
             aiAgentFactory = mockAiAgentFactory,
             timeProvider = mockTimeProvider,
             mcpClient = mockMcpClient,
-            recoveryConfigProvider = StaticRecoveryConfigProvider(5),
+            recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = 5),
         )
   }
 
@@ -290,7 +290,7 @@ class AutoMobileAgentTest {
             aiAgentFactory = mockAiAgentFactory,
             timeProvider = mockTimeProvider,
             mcpClient = mockMcpClient,
-            recoveryConfigProvider = StaticRecoveryConfigProvider(customMaxToolCalls),
+            recoveryConfigProvider = StaticRecoveryConfigProvider(maxToolCalls = customMaxToolCalls),
         )
     val context = FailedStepContext(
         failedStepIndex = 0,

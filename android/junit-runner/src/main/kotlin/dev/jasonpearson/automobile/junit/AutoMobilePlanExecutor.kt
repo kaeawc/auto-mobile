@@ -282,11 +282,16 @@ internal object AutoMobilePlanExecutor {
    * attempted, the Koog agent is invoked to work around the failure. On successful recovery the
    * plan resumes from the step after the failed one. Recovery is allowed at most once per test.
    */
+  /**
+   * @param deviceIdOverride When non-null, pins execution to this device. Used after recovery to
+   *   ensure the resumed plan runs on the same device the agent just recovered.
+   */
   private fun executePlanFromStep(
       planContent: String,
       options: AutoMobilePlanExecutionOptions,
       startStep: Int,
       recoveryAlreadyAttempted: Boolean,
+      deviceIdOverride: String? = null,
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
@@ -304,8 +309,10 @@ internal object AutoMobilePlanExecutor {
             "sessionUuid" to JsonPrimitive(sessionUuid),
         )
 
-    if (options.device != "auto") {
-      args["deviceId"] = JsonPrimitive(options.device)
+    // Pin to the recovered device if specified, otherwise use the configured device
+    val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
+    if (effectiveDeviceId != null) {
+      args["deviceId"] = JsonPrimitive(effectiveDeviceId)
     }
 
     // Detect calling test context and include metadata for test run recording
@@ -376,9 +383,13 @@ internal object AutoMobilePlanExecutor {
     System.err.println(errorMessage)
 
     val ciMode = resolveCiMode()
-    if (!options.aiAssistance || ciMode || recoveryAlreadyAttempted || failedStepContext == null) {
+    val recoveryFlagEnabled = agent.recoveryConfigProvider.isRecoveryEnabled()
+    if (!options.aiAssistance || !recoveryFlagEnabled || ciMode || recoveryAlreadyAttempted || failedStepContext == null) {
       if (recoveryAlreadyAttempted) {
         println("Recovery already attempted for this test — failing without retry")
+      }
+      if (!recoveryFlagEnabled) {
+        println("AI recovery disabled via ai-recovery feature flag")
       }
       return InternalExecutionResult(
           success = false,
@@ -407,7 +418,8 @@ internal object AutoMobilePlanExecutor {
       )
     }
 
-    // Recovery succeeded — resume the plan from the step after the failed one
+    // Recovery succeeded — resume the plan from the step after the failed one,
+    // pinned to the same device the agent just recovered
     val resumeStep = failedStepContext.failedStepIndex + 1
     println("AI recovery succeeded, resuming plan from step ${resumeStep + 1}")
 
@@ -416,6 +428,7 @@ internal object AutoMobilePlanExecutor {
         options = options,
         startStep = resumeStep,
         recoveryAlreadyAttempted = true, // prevent recursive recovery
+        deviceIdOverride = failedStepContext.deviceId,
     )
 
     return InternalExecutionResult(

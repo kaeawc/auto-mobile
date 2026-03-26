@@ -7,7 +7,7 @@ import org.junit.Test
 class TestPlaygroundMainTest {
   @Test
   fun testPlaygroundMain() {
-    val result = AutoMobilePlan("test-plan.yaml").execute()
+    val result = AutoMobilePlan("test-plans/test-plan.yaml").execute()
     assertTrue(result.success)
   }
 }

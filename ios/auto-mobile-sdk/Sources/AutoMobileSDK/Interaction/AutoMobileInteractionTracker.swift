@@ -52,6 +52,8 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable {
         viewType: String? = nil,
         text: String? = nil
     ) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         guard _isEnabled else {
             lock.unlock()

@@ -107,6 +107,7 @@ public final class ViewBodyTracker: @unchecked Sendable {
     }
 
     private func broadcastSnapshot() {
+        guard AutoMobileSDK.shared.isEnabled else { return }
         let snapshots = getSnapshots()
         guard !snapshots.isEmpty else { return }
 

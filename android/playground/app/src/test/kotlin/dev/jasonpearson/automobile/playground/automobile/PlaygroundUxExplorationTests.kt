@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.playground.automobile
 
-import dev.jasonpearson.automobile.junit.AutoMobileTest
+import dev.jasonpearson.automobile.junit.AutoMobilePlan
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -12,35 +13,27 @@ import org.junit.Test
 class PlaygroundUxExplorationTests {
 
   @Test
-  @AutoMobileTest(
-      plan = "test-plans/playground/ux-exploration/navigate-demo-index.yaml",
-      appId = "dev.jasonpearson.automobile.playground",
-      cleanupAfter = true,
-  )
   fun testNavigateToDemoIndex() {
     // Verifies navigation from home screen to Demo Index
-    // This is the entry point for all docs/using workflow demos
+    val result =
+        AutoMobilePlan("test-plans/playground/ux-exploration/navigate-demo-index.yaml").execute()
+    assertTrue(result.success)
   }
 
   @Test
-  @AutoMobileTest(
-      plan = "test-plans/playground/ux-exploration/complete-ux-flow.yaml",
-      appId = "dev.jasonpearson.automobile.playground",
-      cleanupAfter = true,
-  )
   fun testCompleteUxFlow() {
     // Tests the full UX exploration flow: Start -> Details -> Summary
-    // Demonstrates multi-screen navigation graph discovery
+    val result =
+        AutoMobilePlan("test-plans/playground/ux-exploration/complete-ux-flow.yaml").execute()
+    assertTrue(result.success)
   }
 
   @Test
-  @AutoMobileTest(
-      plan = "test-plans/playground/ux-exploration/navigate-back-through-flow.yaml",
-      appId = "dev.jasonpearson.automobile.playground",
-      cleanupAfter = true,
-  )
   fun testNavigateBackThroughFlow() {
     // Tests reverse navigation through the UX flow
-    // Verifies bidirectional navigation graph traversal
+    val result =
+        AutoMobilePlan("test-plans/playground/ux-exploration/navigate-back-through-flow.yaml")
+            .execute()
+    assertTrue(result.success)
   }
 }

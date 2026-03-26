@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.playground.automobile
 
-import dev.jasonpearson.automobile.junit.AutoMobileTest
+import dev.jasonpearson.automobile.junit.AutoMobilePlan
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -14,25 +15,19 @@ import org.junit.Test
 class PlaygroundBugReproTests {
 
   @Test
-  @AutoMobileTest(
-      plan = "test-plans/playground/bug-repro/reproduce-counter-bug.yaml",
-      appId = "dev.jasonpearson.automobile.playground",
-      cleanupAfter = true,
-  )
   fun testReproduceCounterBug() {
     // Reproduces the intentional counter bug in the Bug Repro Demo
-    // Verifies that enabling the bug toggle causes the displayed count to stop updating
-    // while the expected count continues to increment
+    val result =
+        AutoMobilePlan("test-plans/playground/bug-repro/reproduce-counter-bug.yaml").execute()
+    assertTrue(result.success)
   }
 
   @Test
-  @AutoMobileTest(
-      plan = "test-plans/playground/bug-repro/verify-fix-with-bug-disabled.yaml",
-      appId = "dev.jasonpearson.automobile.playground",
-      cleanupAfter = true,
-  )
   fun testVerifyCorrectBehaviorWithoutBug() {
     // Regression test verifying correct counter behavior when bug is disabled
-    // Both expected and displayed counts should increment in sync
+    val result =
+        AutoMobilePlan("test-plans/playground/bug-repro/verify-fix-with-bug-disabled.yaml")
+            .execute()
+    assertTrue(result.success)
   }
 }

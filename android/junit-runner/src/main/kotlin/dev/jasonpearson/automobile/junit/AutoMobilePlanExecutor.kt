@@ -492,7 +492,7 @@ internal object AutoMobilePlanExecutor {
           error = error,
           succeededSteps = succeededSteps,
           planContent = planContent,
-          deviceId = failedDevice ?: deviceId,
+          deviceId = failedDevice ?: deviceId?.takeIf { it != "auto" },
       )
     } catch (e: Exception) {
       println("Warning: Failed to build recovery context: ${e.message}")

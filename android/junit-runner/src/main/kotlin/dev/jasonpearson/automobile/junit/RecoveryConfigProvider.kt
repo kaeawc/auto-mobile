@@ -17,20 +17,29 @@ interface RecoveryConfigProvider {
 /**
  * Reads recovery config from the daemon's feature-flag resource.
  *
- * The value is cached for the lifetime of the JVM so we only incur one daemon round-trip.
+ * The value is cached with a TTL so runtime changes to the feature flag take effect without
+ * restarting the JVM. The default TTL is 30 seconds — short enough to pick up a kill-switch
+ * toggle within a test suite run, long enough to avoid per-test daemon round-trips.
  */
-class DaemonRecoveryConfigProvider : RecoveryConfigProvider {
+class DaemonRecoveryConfigProvider(
+    private val cacheTtlMs: Long = DEFAULT_CACHE_TTL_MS,
+    private val clock: () -> Long = System::currentTimeMillis,
+) : RecoveryConfigProvider {
 
+  private data class CachedEntry(val config: CachedConfig, val fetchedAt: Long)
   private data class CachedConfig(val enabled: Boolean, val maxToolCalls: Int)
 
-  @Volatile private var cached: CachedConfig? = null
+  @Volatile private var cached: CachedEntry? = null
 
   override fun isRecoveryEnabled(): Boolean = getConfig().enabled
 
   override fun getMaxRecoveryToolCalls(): Int = getConfig().maxToolCalls
 
   private fun getConfig(): CachedConfig {
-    cached?.let { return it }
+    val entry = cached
+    if (entry != null && (clock() - entry.fetchedAt) < cacheTtlMs) {
+      return entry.config
+    }
 
     val config =
         try {
@@ -49,7 +58,7 @@ class DaemonRecoveryConfigProvider : RecoveryConfigProvider {
           CachedConfig(DEFAULT_ENABLED, DEFAULT_MAX_TOOL_CALLS)
         }
 
-    cached = config
+    cached = CachedEntry(config, clock())
     return config
   }
 
@@ -77,6 +86,7 @@ class DaemonRecoveryConfigProvider : RecoveryConfigProvider {
   companion object {
     internal const val DEFAULT_ENABLED = true
     internal const val DEFAULT_MAX_TOOL_CALLS = 5
+    internal const val DEFAULT_CACHE_TTL_MS = 30_000L
   }
 }
 

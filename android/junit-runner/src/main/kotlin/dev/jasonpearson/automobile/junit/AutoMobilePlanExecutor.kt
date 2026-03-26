@@ -295,65 +295,86 @@ internal object AutoMobilePlanExecutor {
   ): InternalExecutionResult {
 
     val json = Json { ignoreUnknownKeys = true }
-    val sessionUuid = UUID.randomUUID().toString()
+    val maxRetries = options.maxRetries.coerceAtLeast(0)
+    var attempt = 0
 
-    val args =
-        mutableMapOf<String, JsonElement>(
-            "planContent" to
-                JsonPrimitive(
-                    "base64:" +
-                        java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
-                ),
-            "platform" to JsonPrimitive("android"),
-            "startStep" to JsonPrimitive(startStep),
-            "sessionUuid" to JsonPrimitive(sessionUuid),
-        )
+    var response: DaemonResponse
+    var outputPayload: String
+    var parsed: ParsedToolResult
+    var toolResults: List<ToolResultEntry>
 
-    // Pin to the recovered device if specified, otherwise use the configured device
-    val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
-    if (effectiveDeviceId != null) {
-      args["deviceId"] = JsonPrimitive(effectiveDeviceId)
-    }
+    // Retry loop for transient failures (timeouts, daemon busy)
+    while (true) {
+      attempt++
+      val sessionUuid = UUID.randomUUID().toString()
 
-    // Detect calling test context and include metadata for test run recording
-    val testContext = detectTestContext()
-    if (testContext != null) {
-      args["testMetadata"] = buildTestMetadata(testContext)
-    }
+      val args =
+          mutableMapOf<String, JsonElement>(
+              "planContent" to
+                  JsonPrimitive(
+                      "base64:" +
+                          java.util.Base64.getEncoder().encodeToString(planContent.toByteArray())
+                  ),
+              "platform" to JsonPrimitive("android"),
+              "startStep" to JsonPrimitive(startStep),
+              "sessionUuid" to JsonPrimitive(sessionUuid),
+          )
 
-    if (options.debugMode) {
-      println("Executing plan via daemon socket: executePlan (startStep=$startStep)")
-    }
-
-    DaemonHeartbeat.registerSession(sessionUuid)
-    val response =
-        try {
-          DaemonSocketClientManager.callTool("executePlan", JsonObject(args), options.timeoutMs)
-        } finally {
-          DaemonHeartbeat.unregisterSession(sessionUuid)
-        }
-    val outputPayload =
-        response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
-    val parsed = parseDaemonToolResult(response, json)
-    val toolResults = parseToolResults(response, json, options.debugMode)
-
-    if (options.debugMode) {
-      println("Daemon response:\n$outputPayload")
-      if (!response.error.isNullOrBlank()) {
-        println("Daemon error: ${response.error}")
+      // Pin to the recovered device if specified, otherwise use the configured device
+      val effectiveDeviceId = deviceIdOverride ?: options.device.takeIf { it != "auto" }
+      if (effectiveDeviceId != null) {
+        args["deviceId"] = JsonPrimitive(effectiveDeviceId)
       }
+
+      // Detect calling test context and include metadata for test run recording
+      val testContext = detectTestContext()
+      if (testContext != null) {
+        args["testMetadata"] = buildTestMetadata(testContext)
+      }
+
+      if (options.debugMode) {
+        println("Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)")
+      }
+
+      DaemonHeartbeat.registerSession(sessionUuid)
+      response =
+          try {
+            DaemonSocketClientManager.callTool("executePlan", JsonObject(args), options.timeoutMs)
+          } finally {
+            DaemonHeartbeat.unregisterSession(sessionUuid)
+          }
+      outputPayload =
+          response.result?.let { json.encodeToString(JsonElement.serializer(), it) } ?: ""
+      parsed = parseDaemonToolResult(response, json)
+      toolResults = parseToolResults(response, json, options.debugMode)
+
+      if (options.debugMode) {
+        println("Daemon response:\n$outputPayload")
+        if (!response.error.isNullOrBlank()) {
+          println("Daemon error: ${response.error}")
+        }
+      }
+
+      val success = response.success && parsed.success
+      if (success) {
+        return InternalExecutionResult(
+            success = true,
+            exitCode = 0,
+            output = outputPayload,
+            toolResults = toolResults,
+        )
+      }
+
+      val errorMessage = response.error ?: parsed.errorMessage
+      if (attempt > maxRetries || !isTransientError(errorMessage)) {
+        break
+      }
+
+      println("Retrying plan execution after transient error (attempt $attempt): $errorMessage")
+      Thread.sleep(RETRY_BACKOFF_MS)
     }
 
-    if (response.success && parsed.success) {
-      return InternalExecutionResult(
-          success = true,
-          exitCode = 0,
-          output = outputPayload,
-          toolResults = toolResults,
-      )
-    }
-
-    // Execution failed — attempt recovery if allowed
+    // Non-transient failure or retries exhausted — attempt recovery if allowed
     val failedStepContext = buildFailedStepContext(response, json, planContent, options.device)
     return handleFailure(
         result = CommandResult(1, outputPayload, response.error ?: parsed.errorMessage),
@@ -698,6 +719,18 @@ internal object AutoMobilePlanExecutor {
     }
     val responseError = (responseElement as? JsonObject)?.get("error") as? JsonPrimitive
     return responseError?.content
+  }
+
+  // ── Retry helpers ────────────────────────────────────────────────────────
+
+  private const val RETRY_BACKOFF_MS = 2000L
+
+  private fun isTransientError(errorMessage: String?): Boolean {
+    if (errorMessage.isNullOrBlank()) return false
+    val normalized = errorMessage.lowercase()
+    return normalized.contains("request timed out") ||
+        normalized.contains("plan execution in progress") ||
+        normalized.contains("daemon request timeout")
   }
 
   // ── Internal types ────────────────────────────────────────────────────────

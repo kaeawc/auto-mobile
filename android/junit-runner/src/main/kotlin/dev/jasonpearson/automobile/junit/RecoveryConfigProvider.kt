@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.junit
 
 import kotlinx.serialization.json.Json
-import kotlinx.serialization.json.int
+import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
 
@@ -78,8 +78,11 @@ class DaemonRecoveryConfigProvider(
     val enabled = body["enabled"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
         ?: DEFAULT_ENABLED
     val configObj = body["config"]?.jsonObject
-    val maxToolCalls = configObj?.get("maxToolCalls")?.jsonPrimitive?.int
-        ?: DEFAULT_MAX_TOOL_CALLS
+    val maxToolCalls = try {
+      configObj?.get("maxToolCalls")?.jsonPrimitive?.intOrNull ?: DEFAULT_MAX_TOOL_CALLS
+    } catch (_: Exception) {
+      DEFAULT_MAX_TOOL_CALLS
+    }
     return CachedConfig(enabled, maxToolCalls)
   }
 

@@ -12,6 +12,13 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     private var _captureBodies = false
     var _maxBodyBytes: Int = 32 * 1024 // 32KB default (internal for URLProtocol access)
 
+    /// Thread-safe read of maxBodyBytes for URLProtocol callbacks.
+    var maxBodyBytes: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _maxBodyBytes
+    }
+
     /// Text content types eligible for body capture.
     static let textContentTypes: Set<String> = [
         "application/json", "text/plain", "text/html", "text/xml",
@@ -129,6 +136,20 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         return ""
     }
 
+    /// Decode data as UTF-8, walking backwards if truncated mid-character.
+    static func utf8String(from data: Data) -> String? {
+        if let str = String(data: data, encoding: .utf8) { return str }
+        // Walk backwards to find a valid UTF-8 boundary
+        var length = data.count
+        while length > 0 {
+            length -= 1
+            if let str = String(data: data.prefix(length), encoding: .utf8) {
+                return str
+            }
+        }
+        return nil
+    }
+
     /// Record a WebSocket frame event.
     public func recordWebSocketFrame(
         url: String,
@@ -237,7 +258,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
     public func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
         totalBytesReceived += data.count
         // Accumulate response data for body capture (up to configured limit)
-        let maxBytes = AutoMobileNetwork.shared._maxBodyBytes
+        let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
         if receivedData.count < maxBytes {
             receivedData.append(data.prefix(maxBytes - receivedData.count))
         }
@@ -260,15 +281,16 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
             let contentType = httpResponse?.value(forHTTPHeaderField: "Content-Type")
 
             // Capture request body from original request
+            let maxBytes = AutoMobileNetwork.shared.maxBodyBytes
             let requestBody: String? = request.httpBody.flatMap { data in
                 AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
-                    ? String(data: data.prefix(AutoMobileNetwork.shared._maxBodyBytes), encoding: .utf8)
+                    ? AutoMobileNetwork.utf8String(from: data.prefix(maxBytes))
                     : nil
             }
 
-            // Capture response body if text content type
+            // Capture response body if text content type (already byte-truncated during streaming)
             let responseBody: String? = AutoMobileNetwork.isTextContentType(contentType) && !receivedData.isEmpty
-                ? String(data: receivedData, encoding: .utf8)
+                ? AutoMobileNetwork.utf8String(from: receivedData)
                 : nil
 
             AutoMobileNetwork.shared.recordRequest(

@@ -29,7 +29,9 @@ class RecoveryLoopTest {
     AutoMobileSharedUtils.testDeviceChecker = RecoveryFakeDeviceChecker()
     DaemonHeartbeat.testController = RecoveryFakeHeartbeat()
     AutoMobilePlanExecutor.testAgent = fakeAgent
-    System.clearProperty("automobile.ci.mode")
+    // Force CI mode off so recovery tests can exercise the recovery path
+    // even when running in CI (where CI env var is set)
+    System.setProperty("automobile.ci.mode", "false")
   }
 
   @After

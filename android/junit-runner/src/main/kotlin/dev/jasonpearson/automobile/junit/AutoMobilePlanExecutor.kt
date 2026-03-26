@@ -139,8 +139,10 @@ internal object AutoMobilePlanExecutor {
   }
 
   private fun resolveCiMode(): Boolean {
-    if (System.getProperty("automobile.ci.mode", "false").toBoolean()) {
-      return true
+    val sysProp = System.getProperty("automobile.ci.mode")
+    if (sysProp != null) {
+      // Explicit system property takes precedence over environment
+      return sysProp.toBoolean()
     }
     val envValue = System.getenv("CI") ?: return false
     return envValue.equals("true", ignoreCase = true) || envValue == "1"

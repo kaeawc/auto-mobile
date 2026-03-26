@@ -202,7 +202,12 @@ public class AutoMobileURLProtocol: URLProtocol {
         }
         URLProtocol.setProperty(true, forKey: Self.handledKey, in: mutableRequest)
 
-        let session = URLSession(configuration: .default, delegate: self, delegateQueue: nil)
+        // Use ephemeral config to avoid inheriting our own URLProtocol (infinite loop).
+        // Ephemeral preserves standard HTTP semantics without persisting cookies/caches,
+        // which is acceptable since we're replaying on behalf of the caller's session.
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = config.protocolClasses?.filter { $0 != AutoMobileURLProtocol.self }
+        let session = URLSession(configuration: config, delegate: self, delegateQueue: nil)
         urlSession = session
         dataTask = session.dataTask(with: mutableRequest as URLRequest)
         dataTask?.resume()

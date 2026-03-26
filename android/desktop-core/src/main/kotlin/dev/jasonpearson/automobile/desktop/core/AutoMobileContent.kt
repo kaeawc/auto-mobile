@@ -1969,6 +1969,16 @@ private fun McpProcessesPanel(
             LOG.debug("[McpProcessesPanel] Auto-selecting device: ${autoSelectDevice.name} (${autoSelectDevice.deviceId})")
             selectingDevice = autoSelectDevice
             onDeviceSelected(autoSelectDevice.deviceId, autoSelectDevice.name)
+            // Also set the active device on the MCP server
+            kotlinx.coroutines.withContext(Dispatchers.IO) {
+                try {
+                    val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
+                    client.setActiveDevice(autoSelectDevice.deviceId, autoSelectDevice.platform)
+                    LOG.debug("[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}")
+                } catch (e: Exception) {
+                    LOG.warn("[McpProcessesPanel] Failed to set active device on MCP: ${e.message}")
+                }
+            }
         }
     }
 

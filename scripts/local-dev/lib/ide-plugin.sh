@@ -70,7 +70,7 @@ stop_desktop_app() {
   fi
   # Also kill any orphaned desktop-app Gradle run processes
   local pids
-  pids=$(pgrep -f "desktop-app:run\|dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null || true)
+  pids=$(pgrep -f "desktop-app:run" 2>/dev/null; pgrep -f "dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null) || true
   if [[ -n "${pids}" ]]; then
     echo "${pids}" | xargs kill 2>/dev/null || true
   fi

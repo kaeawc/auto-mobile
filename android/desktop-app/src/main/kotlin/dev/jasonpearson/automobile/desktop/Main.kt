@@ -34,13 +34,7 @@ private fun acquireSingleInstanceLock(): Boolean {
 fun main() {
   if (!acquireSingleInstanceLock()) {
     System.err.println("AutoMobile Desktop is already running. Exiting.")
-    // Kill the old instance so this new one takes over
-    LOCK_FILE.toFile().delete()
-    // Retry once after deleting stale lock
-    if (!acquireSingleInstanceLock()) {
-      System.err.println("Could not acquire lock. Exiting.")
-      return
-    }
+    return
   }
 
   // Force dark window decorations on macOS

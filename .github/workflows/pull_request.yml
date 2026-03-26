@@ -129,6 +129,9 @@ jobs:
               - 'android/desktop-core/**'
               - 'android/protocol/**'
               - 'android/test-plan-validation/**'
+              - 'android/gradle.properties'
+              - 'android/build.gradle.kts'
+              - 'android/gradle/libs.versions.toml'
 
       - name: "Check for IDE Plugin changes"
         id: filter-ide-plugin
@@ -145,6 +148,7 @@ jobs:
           filters: |
             desktop_app:
               - 'android/desktop-app/**'
+              - 'android/desktop-core/**'
 
       - name: "Check for Android-related changes"
         id: filter-android
@@ -340,7 +344,7 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
-          lfs: false
+          lfs: true
 
       - uses: ./.github/actions/gradle-task-run
         with:
@@ -362,7 +366,7 @@ jobs:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
-          lfs: false
+          lfs: true
 
       - uses: ./.github/actions/gradle-task-run
         with:

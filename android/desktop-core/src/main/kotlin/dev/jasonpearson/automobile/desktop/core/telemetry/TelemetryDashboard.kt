@@ -130,13 +130,6 @@ fun TelemetryDashboard(
         }
     }
 
-    // Auto-scroll to bottom when new events arrive
-    LaunchedEffect(events.size) {
-        if (autoScrollEnabled && !isPaused && events.isNotEmpty()) {
-            listState.animateScrollToItem(events.size - 1)
-        }
-    }
-
     // Collect connection state
     LaunchedEffect(telemetryPushClient) {
         val client = telemetryPushClient ?: return@LaunchedEffect
@@ -189,6 +182,13 @@ fun TelemetryDashboard(
             }
 
             result
+        }
+    }
+
+    // Auto-scroll to bottom when new events arrive
+    LaunchedEffect(filteredEvents.size) {
+        if (autoScrollEnabled && !isPaused && filteredEvents.isNotEmpty()) {
+            listState.animateScrollToItem(filteredEvents.size - 1)
         }
     }
 

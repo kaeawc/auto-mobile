@@ -80,6 +80,8 @@ fun TestDashboard(
     observationStreamClient: ObservationStreamClient? =
         null, // Real-time stream client for hierarchy/screenshot/navigation updates
     testRecordingClient: TestRecordingClient? = null, // Client for test recording operations
+    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   var currentScreen by remember { mutableStateOf(TestScreen.Dashboard) }
   var selectedTestRun by remember { mutableStateOf<TestRun?>(null) }
@@ -213,6 +215,7 @@ fun TestDashboard(
             hierarchyUpdate = currentHierarchyUpdate,
             navigationUpdate = currentNavigationUpdate,
             testRecordingClient = testRecordingClient,
+            fileSaver = fileSaver,
         )
     TestScreen.ModuleSelection ->
         ModuleSelectionScreen(
@@ -541,6 +544,8 @@ private fun RecordingTestScreen(
     hierarchyUpdate: HierarchyStreamUpdate? = null,
     navigationUpdate: NavigationGraphStreamUpdate? = null,
     testRecordingClient: TestRecordingClient? = null,
+    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   val colors = SharedTheme.globalColors
   val coroutineScope = rememberCoroutineScope()
@@ -1101,6 +1106,7 @@ private fun RecordingTestScreen(
               exportedPlan = null
               onFinishRecording()
             },
+            fileSaver = fileSaver,
         )
       }
           ?: run {
@@ -1117,6 +1123,8 @@ private fun PlanReviewPanel(
     onSave: () -> Unit,
     onCopy: () -> Unit,
     onDismiss: () -> Unit,
+    fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
+        dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
   val colors = SharedTheme.globalColors
   val scrollState = rememberScrollState()
@@ -1186,7 +1194,7 @@ private fun PlanReviewPanel(
           onClick = {
             savePlanToFile(
                 plan,
-                dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
+                fileSaver,
             ) { path -> saveSuccess = path }
             onSave()
           },

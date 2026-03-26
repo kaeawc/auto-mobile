@@ -379,7 +379,8 @@ struct HeavyComputationDemo: View {
         progress = 0
         result = "Computing in background..."
 
-        Task {
+        // Run computation on a background queue to avoid blocking the main actor
+        DispatchQueue.global(qos: .userInitiated).async {
             var sum: Double = 0
             let iterations = 10_000_000
             let updateInterval = iterations / 100
@@ -388,13 +389,14 @@ struct HeavyComputationDemo: View {
                 sum += sin(Double(i)) * cos(Double(i))
 
                 if i % updateInterval == 0 {
-                    await MainActor.run {
-                        progress = Double(i) / Double(iterations)
+                    let p = Double(i) / Double(iterations)
+                    DispatchQueue.main.async {
+                        progress = p
                     }
                 }
             }
 
-            await MainActor.run {
+            DispatchQueue.main.async {
                 progress = 1.0
                 result = String(format: "Computation result: %.6f", sum)
                 isComputing = false

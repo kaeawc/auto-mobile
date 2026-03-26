@@ -78,6 +78,8 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         responseBody: String? = nil,
         contentType: String? = nil
     ) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         let captureHeaders = _captureHeaders
         let captureBodies = _captureBodies
@@ -134,6 +136,8 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         frameType: WebSocketFrameType,
         payloadSize: Int? = nil
     ) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         let currentBuffer = buffer
         lock.unlock()

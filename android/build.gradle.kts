@@ -51,15 +51,6 @@ plugins.withId(libs.plugins.mavenPublish.get().pluginId) {
 val gradleWorkerJvmArgs = providers.gradleProperty("org.gradle.testWorker.jvmargs").get()
 
 subprojects {
-  // Force AGP's bundled Dokka (1.4.32) to use 1.9.20 which supports ASM9/JVM 21 sealed classes
-  configurations.all {
-    resolutionStrategy.eachDependency {
-      if (requested.group == "org.jetbrains.dokka") {
-        useVersion(libs.versions.dokka.get())
-      }
-    }
-  }
-
   tasks.withType<Test>().configureEach {
     jvmArgs(gradleWorkerJvmArgs.split(" ").filter { it.isNotBlank() })
   }

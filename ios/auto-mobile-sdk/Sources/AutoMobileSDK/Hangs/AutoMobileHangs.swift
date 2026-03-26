@@ -11,6 +11,7 @@ public final class AutoMobileHangs: @unchecked Sendable {
     private weak var buffer: SdkEventBuffer?
     private var watchdogThread: Thread?
     private var _isMonitoring = false
+    private var monitorGeneration: UInt64 = 0
 
     /// Threshold in milliseconds before a hang is reported. Default: 2000ms.
     public var hangThresholdMs: Double = 2000
@@ -35,10 +36,12 @@ public final class AutoMobileHangs: @unchecked Sendable {
             return
         }
         _isMonitoring = true
+        monitorGeneration &+= 1
+        let generation = monitorGeneration
         lock.unlock()
 
         let thread = Thread { [weak self] in
-            self?.watchdogLoop()
+            self?.watchdogLoop(generation: generation)
         }
         thread.name = "dev.jasonpearson.automobile.sdk.hang-detector"
         thread.qualityOfService = .userInitiated
@@ -65,10 +68,10 @@ public final class AutoMobileHangs: @unchecked Sendable {
         return _isMonitoring
     }
 
-    private func watchdogLoop() {
+    private func watchdogLoop(generation: UInt64) {
         while true {
             lock.lock()
-            let monitoring = _isMonitoring
+            let monitoring = _isMonitoring && monitorGeneration == generation
             lock.unlock()
             guard monitoring else { break }
 
@@ -105,6 +108,8 @@ public final class AutoMobileHangs: @unchecked Sendable {
     }
 
     private func reportHang(durationMs: Double, stackTrace: String?) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
         let currentBuffer = buffer

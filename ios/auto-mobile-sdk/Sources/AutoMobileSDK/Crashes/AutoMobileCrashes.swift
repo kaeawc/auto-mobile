@@ -96,27 +96,32 @@ public final class AutoMobileCrashes: @unchecked Sendable {
     // MARK: - Exception Handler
 
     private func handleException(_ exception: NSException) {
+        // Still chain to previous handler even when disabled, but skip telemetry
+        let enabled = AutoMobileSDK.shared.isEnabled
+
         lock.lock()
-        let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
         let currentBuffer = buffer
         let previousHandler = previousExceptionHandler
         lock.unlock()
 
-        let currentScreen = currentScreenProvider?()
-        let stackTrace = exception.callStackSymbols.joined(separator: "\n")
+        if enabled {
+            let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
+            let currentScreen = currentScreenProvider?()
+            let stackTrace = exception.callStackSymbols.joined(separator: "\n")
 
-        let event = SdkCrashEvent(
-            errorDomain: exception.name.rawValue,
-            errorMessage: exception.reason,
-            stackTrace: stackTrace,
-            currentScreen: currentScreen,
-            bundleId: currentBundleId,
-            appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-            deviceInfo: AutoMobileFailures.currentDeviceInfo()
-        )
+            let event = SdkCrashEvent(
+                errorDomain: exception.name.rawValue,
+                errorMessage: exception.reason,
+                stackTrace: stackTrace,
+                currentScreen: currentScreen,
+                bundleId: currentBundleId,
+                appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
+                deviceInfo: AutoMobileFailures.currentDeviceInfo()
+            )
 
-        currentBuffer?.add(event)
-        currentBuffer?.flush()
+            currentBuffer?.add(event)
+            currentBuffer?.flush()
+        }
 
         // Chain to previous handler
         previousHandler?(exception)
@@ -193,6 +198,7 @@ extension AutoMobileCrashes {
 
     /// Check if the previous session ended with a signal crash.
     func checkPreviousSignalCrash() {
+        guard AutoMobileSDK.shared.isEnabled else { return }
         guard let path = signalCrashFilePath else { return }
         let filePath = String(cString: path)
 

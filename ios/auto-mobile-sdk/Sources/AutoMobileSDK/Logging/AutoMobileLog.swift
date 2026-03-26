@@ -114,6 +114,8 @@ public final class AutoMobileLog: @unchecked Sendable {
     // MARK: - Internal
 
     private func log(level: LogLevel, tag: String?, message: String) {
+        guard AutoMobileSDK.shared.isEnabled else { return }
+
         lock.lock()
         guard !filters.isEmpty else {
             lock.unlock()

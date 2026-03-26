@@ -64,6 +64,8 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     /// Start listening for changes on a specific UserDefaults suite.
     /// Safe to call multiple times — previous observer is unregistered first.
     public func startListening(suiteName: String? = nil) {
+        guard isEnabled else { return }
+
         // Remove any existing observer before registering a new one
         stopListening()
 

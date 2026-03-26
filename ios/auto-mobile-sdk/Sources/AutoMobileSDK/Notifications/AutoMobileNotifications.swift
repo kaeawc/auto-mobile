@@ -167,12 +167,14 @@ final class NotificationActionHandler: NSObject, UNUserNotificationCenterDelegat
                 ]
             )
 
-            // Also emit as SDK event
-            let event = SdkNotificationActionEvent(
-                actionId: actionId,
-                notificationTitle: response.notification.request.content.title
-            )
-            AutoMobileSDK.shared.getEventBuffer()?.add(event)
+            // Emit as SDK event (respecting global enabled flag)
+            if AutoMobileSDK.shared.isEnabled {
+                let event = SdkNotificationActionEvent(
+                    actionId: actionId,
+                    notificationTitle: response.notification.request.content.title
+                )
+                AutoMobileSDK.shared.getEventBuffer()?.add(event)
+            }
         }
 
         // Chain to previous delegate

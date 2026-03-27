@@ -289,12 +289,22 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("reads previous calendar system before writing", async () => {
-      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleCalendar", execResult("gregory\n"));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleCalendar", execResult("buddhist\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec);
       const result = await mgr.setCalendarSystem("buddhist");
 
       expect(result.success).toBe(true);
-      expect(result.previousCalendarSystem).toBe("gregory");
+      expect(result.previousCalendarSystem).toBe("buddhist");
+    });
+
+    test("returns error when read-back does not match requested value", async () => {
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleCalendar", execResult("gregory\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec);
+      const result = await mgr.setCalendarSystem("buddhist");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
+      expect(result.calendarSystem).toBe("gregory");
     });
 
     test("returns error for empty calendarSystem", async () => {
@@ -388,12 +398,22 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("reads previous calendar system before writing", async () => {
-      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "gregory");
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "buddhist");
       const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
       const result = await mgr.setCalendarSystem("buddhist");
 
       expect(result.success).toBe(true);
-      expect(result.previousCalendarSystem).toBe("gregory");
+      expect(result.previousCalendarSystem).toBe("buddhist");
+    });
+
+    test("returns error when read-back does not match requested value", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "gregory");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setCalendarSystem("buddhist");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
+      expect(result.calendarSystem).toBe("gregory");
     });
 
     test("returns error for empty calendarSystem", async () => {

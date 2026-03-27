@@ -304,9 +304,17 @@ export class SystemConfigurationManager {
     try {
       await this.adb.executeCommand(`shell settings put system calendar_type ${trimmed}`);
       const readBack = await this.readSetting("shell settings get system calendar_type");
+      if (!readBack || readBack !== trimmed) {
+        return {
+          success: false,
+          calendarSystem: readBack ?? trimmed,
+          previousCalendarSystem,
+          error: `Read-back verification failed: expected "${trimmed}" but got "${readBack ?? "null"}"`
+        };
+      }
       return {
         success: true,
-        calendarSystem: readBack ?? trimmed,
+        calendarSystem: readBack,
         previousCalendarSystem
       };
     } catch (error) {
@@ -666,9 +674,17 @@ export class SystemConfigurationManager {
       const previousCalendarSystem = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleCalendar", calendarSystem);
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
+      if (!readBack || readBack !== calendarSystem) {
+        return {
+          success: false,
+          calendarSystem: readBack ?? calendarSystem,
+          previousCalendarSystem,
+          error: `Read-back verification failed: expected "${calendarSystem}" but got "${readBack ?? "null"}"`
+        };
+      }
       return {
         success: true,
-        calendarSystem: readBack ?? calendarSystem,
+        calendarSystem: readBack,
         previousCalendarSystem
       };
     } catch (error) {

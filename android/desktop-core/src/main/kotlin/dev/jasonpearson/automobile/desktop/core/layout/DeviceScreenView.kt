@@ -221,10 +221,9 @@ fun DeviceScreenView(
         }
     }
 
-    // Apply rotation to align the screenshot with the hierarchy coordinate system.
-    // After this, the image orientation matches the hierarchy bounds so overlays
-    // and hit testing can use direct coordinate mapping without transformation.
-    val imageBitmap = remember(rawBitmap, screenshotRotation, screenshotData) {
+    // Rotate the raw bitmap to align with the hierarchy coordinate system.
+    // After this, overlays and hit testing use direct coordinate mapping.
+    val imageBitmap = remember(rawBitmap, screenshotRotation) {
         val original = rawBitmap ?: return@remember null
         if (screenshotRotation == 0) return@remember original
 

@@ -86,7 +86,29 @@ sealed class TelemetryDisplayEvent {
         val requestBody: String?,
         val responseBody: String?,
         val contentType: String?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily parsed request body JSON — only decoded on first access. */
+        val parsedRequestBody: JsonObject? by lazy {
+            requestBody?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
+        /** Lazily parsed response body JSON — only decoded on first access. */
+        val parsedResponseBody: JsonObject? by lazy {
+            responseBody?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
 
     data class Log(
         override val timestamp: Long,
@@ -127,7 +149,19 @@ sealed class TelemetryDisplayEvent {
         val exceptionType: String?,
         val screen: String?,
         val stackTrace: List<StackTraceFrame>?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily formatted stack trace string — only built on first access. */
+        val formattedStackTrace: String by lazy {
+            stackTrace?.joinToString("\n") { frame ->
+                val location = if (frame.fileName != null && frame.lineNumber != null) {
+                    "(${frame.fileName}:${frame.lineNumber})"
+                } else {
+                    ""
+                }
+                "${frame.className}.${frame.methodName}$location"
+            } ?: ""
+        }
+    }
 
     data class Storage(
         override val timestamp: Long,
@@ -190,10 +224,21 @@ sealed class TelemetryDisplayEvent {
         val likelyCause: String?,
         val screenName: String?,
         val detailsJson: String?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily parsed JSON details — only decoded on first access. */
+        val parsedDetails: JsonObject? by lazy {
+            detailsJson?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
 }
 
-private val json = Json { ignoreUnknownKeys = true }
+private val telemetryJson = Json { ignoreUnknownKeys = true }
 
 /**
  * Converts a [TelemetryEventEnvelope] into a typed [TelemetryDisplayEvent]
@@ -214,7 +259,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 val reqJson = d.stringOrNull("request_headers_json")
                 if (reqJson != null) {
                     try {
-                        json.parseToJsonElement(reqJson).jsonObject.forEach { (k, v) ->
+                        telemetryJson.parseToJsonElement(reqJson).jsonObject.forEach { (k, v) ->
                             reqHeaders[k] = v.jsonPrimitive.content
                         }
                     } catch (_: Exception) {}
@@ -224,7 +269,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 val respJson = d.stringOrNull("response_headers_json")
                 if (respJson != null) {
                     try {
-                        json.parseToJsonElement(respJson).jsonObject.forEach { (k, v) ->
+                        telemetryJson.parseToJsonElement(respJson).jsonObject.forEach { (k, v) ->
                             respHeaders[k] = v.jsonPrimitive.content
                         }
                     } catch (_: Exception) {}
@@ -263,7 +308,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             val propsJson = d.stringOrNull("properties_json")
             if (props.isEmpty() && propsJson != null) {
                 try {
-                    val parsed = json.parseToJsonElement(propsJson).jsonObject
+                    val parsed = telemetryJson.parseToJsonElement(propsJson).jsonObject
                     parsed.forEach { (k, v) -> props[k] = v.jsonPrimitive.content }
                 } catch (_: Exception) { /* ignore parse failures */ }
             }
@@ -281,7 +326,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             val detailsJson = d.stringOrNull("details_json")
             if (details.isEmpty() && detailsJson != null) {
                 try {
-                    val parsed = json.parseToJsonElement(detailsJson).jsonObject
+                    val parsed = telemetryJson.parseToJsonElement(detailsJson).jsonObject
                     parsed.forEach { (k, v) -> details[k] = v.jsonPrimitive.content }
                 } catch (_: Exception) { /* ignore parse failures */ }
             }

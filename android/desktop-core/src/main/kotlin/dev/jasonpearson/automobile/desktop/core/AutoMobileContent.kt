@@ -265,6 +265,7 @@ fun AutoMobileContent(
 
   // Real device info (when connected to MCP)
   var realDevice by remember { mutableStateOf<BootedDevice?>(null) }
+  var realDevices by remember { mutableStateOf<List<BootedDevice>>(emptyList()) }
 
   // Connected MCP process (for creating clients)
   var connectedMcpProcess by remember { mutableStateOf<McpProcess?>(null) }
@@ -325,22 +326,27 @@ fun AutoMobileContent(
               when (val result = client.readResource("automobile:devices/booted")) {
                   is ResourceReadResult.Success -> {
                       val parsed = DeviceResourceParser.parseBootedDevices(result.content)
-                      val firstDevice = parsed?.devices?.firstOrNull()
-                      if (firstDevice != null) {
+                      val allDevices = parsed?.devices ?: emptyList()
+                      val allBootedDevices = allDevices.map { dev ->
                           val deviceType = when {
-                              firstDevice.platform == "ios" && firstDevice.isVirtual -> DeviceType.iOSSimulator
-                              firstDevice.platform == "ios" -> DeviceType.iOSPhysical
-                              firstDevice.isVirtual -> DeviceType.AndroidEmulator
+                              dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
+                              dev.platform == "ios" -> DeviceType.iOSPhysical
+                              dev.isVirtual -> DeviceType.AndroidEmulator
                               else -> DeviceType.AndroidPhysical
                           }
-                          realDevice = BootedDevice(
-                              id = firstDevice.deviceId,
-                              name = firstDevice.name,
+                          BootedDevice(
+                              id = dev.deviceId,
+                              name = dev.name,
                               type = deviceType,
-                              status = firstDevice.status,
+                              status = dev.status,
                           )
-                          activeDeviceId = firstDevice.deviceId
-                          LOG.info("Set realDevice from MCP: ${firstDevice.name} (${firstDevice.deviceId})")
+                      }
+                      realDevices = allBootedDevices
+                      val firstDevice = allBootedDevices.firstOrNull()
+                      if (firstDevice != null) {
+                          realDevice = firstDevice
+                          activeDeviceId = firstDevice.id
+                          LOG.info("Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}")
                       }
                   }
                   is ResourceReadResult.Error -> {
@@ -619,8 +625,8 @@ fun AutoMobileContent(
   val bootedDevices = if (dataSourceMode == DataSourceMode.Fake) {
     mockBootedDevices
   } else {
-    // In Real mode, show connected MCP device if available
-    listOfNotNull(realDevice)
+    // In Real mode, show all connected MCP devices
+    realDevices
   }
 
   // Compute platform based on device type for iOS/Android-specific data flow
@@ -723,16 +729,85 @@ fun AutoMobileContent(
       currentMemoryMb = currentMemoryMb,
       isDaemonConnected = connectedMcpProcess != null,
       centerContent = { mod ->
-          TelemetryDashboard(
-              telemetryPushClient = telemetryPushClient,
-              dataSourceMode = dataSourceMode,
-              onOpenSource = onOpenSource,
-              screenshotLoader = remember(clientProvider, dataSourceMode) {
-                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                      NavigationScreenshotLoader(clientProvider) else null
-              },
-              modifier = mod,
-          )
+          Column(mod) {
+              // Main view area with Layout/Navigation toggle
+              Box(Modifier.weight(if (selectedHorizontalTabId != null) 0.5f else 1f)) {
+                  val streamClient = observationStreamClient
+                  if (showNavigationView) {
+                      NavigationDashboard(
+                          highlightedScreens = replayHighlightedScreens,
+                          currentStepScreen = if (isReplaying && testFlowScreens.isNotEmpty()) testFlowScreens.getOrNull(currentReplayIndex) else null,
+                          onHighlightCleared = {
+                              testFlowScreens = emptyList()
+                              isReplaying = false
+                          },
+                          onDetailViewChanged = { isNavigationDetailView = it },
+                          dataSourceMode = dataSourceMode,
+                          clientProvider = clientProvider,
+                          selectedAppId = selectedAppId,
+                          observationStreamClient = observationStreamClient,
+                          screenshotLoader = remember(clientProvider, dataSourceMode) {
+                              if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                                  NavigationScreenshotLoader(clientProvider) else null
+                          },
+                          settingsProvider = settings,
+                      )
+                  } else if (streamClient != null) {
+                      LayoutInspectorDashboard(
+                          dataSourceMode = dataSourceMode,
+                          clientProvider = clientProvider,
+                          observationStreamClient = streamClient,
+                          platform = platformString,
+                      )
+                  }
+                  MainContentViewToggle(
+                      showNavigation = showNavigationView,
+                      onToggle = { showNavigationView = it },
+                      modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+                  )
+              }
+              // Bottom tabs
+              HorizontalTabBar(
+                  tabs = horizontalTabs,
+                  selectedTabId = selectedHorizontalTabId,
+                  onTabSelected = { selectedHorizontalTabId = it },
+              )
+              if (selectedHorizontalTabId != null) {
+                  Box(Modifier.fillMaxWidth().weight(0.5f)) {
+                      when (selectedHorizontalTabId) {
+                          "test_runs" -> TestDashboard(
+                              onNavigateToGraph = { screens ->
+                                  testFlowScreens = screens
+                                  showNavigationView = true
+                              },
+                              dataSourceMode = dataSourceMode,
+                              clientProvider = clientProvider,
+                              observationStreamClient = observationStreamClient,
+                          )
+                          "storage" -> StorageDashboard(
+                              dataSourceMode = dataSourceMode,
+                              clientProvider = clientProvider,
+                              deviceId = activeDeviceId,
+                              packageName = selectedAppId,
+                              platform = storagePlatform,
+                          )
+                          "diagnostics" -> DiagnosticsDashboard(
+                              connectedMcpProcess = connectedMcpProcess,
+                              dataSourceMode = dataSourceMode,
+                          )
+                          "telemetry" -> TelemetryDashboard(
+                              telemetryPushClient = telemetryPushClient,
+                              dataSourceMode = dataSourceMode,
+                              onOpenSource = onOpenSource,
+                              screenshotLoader = remember(clientProvider, dataSourceMode) {
+                                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                                      NavigationScreenshotLoader(clientProvider) else null
+                              },
+                          )
+                      }
+                  }
+              }
+          }
       },
       leftPaneContent = {
           // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
@@ -790,7 +865,7 @@ fun AutoMobileContent(
               Spacer(Modifier.height(16.dp))
               Text("Devices", color = colors.text.normal, fontSize = 14.sp)
               Spacer(Modifier.height(8.dp))
-              val devices = if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else listOfNotNull(realDevice)
+              val devices = if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
               devices.forEach { device ->
                   val isActive = device.id == activeDeviceId
                   Text(

@@ -11,4 +11,6 @@ interface SettingsProvider {
   var androidIde: String
   /** IDE to open Swift/ObjC files in. "auto", "xcode", "vscode" */
   var iosIde: String
+  /** Theme mode: "dark", "light", or "system" */
+  var themeMode: String
 }

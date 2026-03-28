@@ -4,6 +4,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.unit.sp
 
 /**
  * Compatibility layer that maps MaterialTheme colors to a structure matching the Jewel
@@ -28,6 +30,18 @@ data class SharedGlobalColors(
     val outlines: SharedOutlineColors,
     val panelBackground: Color,
 )
+
+/**
+ * Named text styles for consistent typography across the desktop app.
+ */
+object DesktopTypography {
+  val caption = TextStyle(fontSize = 9.sp)
+  val label = TextStyle(fontSize = 10.sp)
+  val body = TextStyle(fontSize = 11.sp)
+  val bodyLarge = TextStyle(fontSize = 12.sp)
+  val title = TextStyle(fontSize = 14.sp)
+  val heading = TextStyle(fontSize = 16.sp)
+}
 
 object SharedTheme {
   val globalColors: SharedGlobalColors

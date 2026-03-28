@@ -209,10 +209,11 @@ function insertIntoTree(
   const key = isParam ? "{id}" : segment;
 
   if (index === segments.length - 1) {
-    // Leaf position
-    const existing = node[key];
+    // Leaf position — key includes method to separate GET/POST/etc on the same path
+    const leafKey = leaf.method ? `${key}[${leaf.method}]` : key;
+    const existing = node[leafKey];
     if (existing && "success" in existing) {
-      // Merge stats with percentile recomputation
+      // Merge stats with percentile recomputation (parameterized path collapse)
       mergeLeafStats(existing as GraphLeaf & { _durations?: number[] }, leaf);
     } else if (existing && "paths" in existing) {
       // Existing branch — add stats to branch node
@@ -220,9 +221,9 @@ function insertIntoTree(
       (existing as any).method = leaf.method;
       (existing as any).type = leaf.type;
     } else {
-      node[key] = leaf;
+      node[leafKey] = leaf;
       if (isParam) {
-        (node[key] as any).parameterized = true;
+        (node[leafKey] as any).parameterized = true;
       }
     }
   } else {

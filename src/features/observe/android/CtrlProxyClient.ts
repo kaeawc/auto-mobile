@@ -588,17 +588,16 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }));
       this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
 
-      // Re-sync error simulation
+      // Always re-sync error simulation state (including disabled) so the
+      // device doesn't keep stale simulation config from a previous connection
       const sim = state.simulation;
-      if (sim) {
-        this.sendMessage(JSON.stringify({
-          type: "set_network_error_simulation",
-          enabled: true,
-          errorType: sim.errorType,
-          limit: sim.limit,
-          expiresAtEpochMs: sim.expiresAt,
-        }));
-      }
+      this.sendMessage(JSON.stringify({
+        type: "set_network_error_simulation",
+        enabled: sim !== null,
+        errorType: sim?.errorType ?? null,
+        limit: sim?.limit ?? null,
+        expiresAtEpochMs: sim?.expiresAt ?? null,
+      }));
     } catch (e) {
       logger.debug(`[CtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
     }

@@ -111,13 +111,15 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
   if (device.platform !== "android") {return;}
   try {
     const client = CtrlProxyClient.getInstance(device);
+    // Use limit (not remaining) since the server never tracks consumption —
+    // the device-side NetworkMockRuleStore manages its own remaining count
     const rules = Array.from(state.getMocks().values()).map(r => ({
       mockId: r.mockId,
       host: r.host,
       path: r.path,
       method: r.method,
       limit: r.limit,
-      remaining: r.remaining,
+      remaining: r.limit,
       statusCode: r.statusCode,
       responseHeaders: r.responseHeaders,
       responseBody: r.responseBody,

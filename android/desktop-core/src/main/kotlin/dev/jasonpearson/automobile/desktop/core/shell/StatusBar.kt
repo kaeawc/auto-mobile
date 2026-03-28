@@ -70,8 +70,8 @@ fun StatusBar(
         ) {
             if (currentFps != null) {
                 val fpsColor = when {
-                    currentFps > 55f -> Color(0xFF4CAF50)
-                    currentFps > 30f -> Color(0xFFFFC107)
+                    currentFps >= 55f -> Color(0xFF4CAF50)
+                    currentFps >= 30f -> Color(0xFFFFC107)
                     else -> Color(0xFFF44336)
                 }
                 Text(

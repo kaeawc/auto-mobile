@@ -153,8 +153,15 @@ fun ThreePaneShell(
                 .onPreviewKeyEvent { event ->
                     if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
 
-                    // Don't handle shortcuts when modal overlays are open
-                    if (showCheatSheet || showQuickJump) return@onPreviewKeyEvent false
+                    // When modal overlays are open, only allow Escape to close them
+                    if (showCheatSheet) {
+                        if (event.key == Key.Escape) {
+                            showCheatSheet = false
+                            return@onPreviewKeyEvent true
+                        }
+                        return@onPreviewKeyEvent false
+                    }
+                    if (showQuickJump) return@onPreviewKeyEvent false
 
                     when {
                         // Cmd+0 -> toggle left pane
@@ -231,6 +238,12 @@ fun ThreePaneShell(
                                     onJumpToTop?.invoke()
                                     onJumpToTop != null
                                 }
+                                // Vim / -> focus search (must be inside this branch to avoid
+                                // being shadowed by the catch-all else -> false above)
+                                Key.Slash -> {
+                                    onFocusSearch?.invoke()
+                                    onFocusSearch != null
+                                }
                                 else -> false
                             }
                         }
@@ -238,11 +251,6 @@ fun ThreePaneShell(
                         vimModeEnabled && !event.isMetaPressed && event.isShiftPressed && event.key == Key.G -> {
                             onJumpToBottom?.invoke()
                             onJumpToBottom != null
-                        }
-                        // Vim / -> focus search
-                        vimModeEnabled && !event.isMetaPressed && event.key == Key.Slash -> {
-                            onFocusSearch?.invoke()
-                            onFocusSearch != null
                         }
                         else -> false
                     }

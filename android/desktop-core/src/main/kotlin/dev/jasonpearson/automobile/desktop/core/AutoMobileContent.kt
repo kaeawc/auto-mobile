@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -105,6 +106,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.DateRange
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceVerticalPanel
 
+import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
@@ -180,6 +182,11 @@ fun AutoMobileContent(
   var isPerformancePanelCollapsed by remember { mutableStateOf(true) }
   var failuresPanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
   var performancePanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
+
+  // Three-pane shell visibility state
+  var showLeftPane by remember { mutableStateOf(true) }
+  var showRightPane by remember { mutableStateOf(true) }
+  var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
 
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
@@ -638,332 +645,77 @@ fun AutoMobileContent(
     return
   }
 
-  Column(modifier = Modifier.fillMaxSize()) {
-    // Header (rendered on top with solid background)
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .onGloballyPositioned { coordinates ->
-                headerHeight = coordinates.size.height
-            }
-    ) {
-      GlobalShellHeader(
-          devices = bootedDevices,
-          activeDeviceId = activeDeviceId,
-          onDeviceSelected = { deviceId ->
-              if (deviceId.isEmpty() || deviceId == activeDeviceId) {
-                  // Empty string or tapping active device deactivates it and shows panel
-                  activeDeviceId = null
-                  isDevicePanelExpanded = true
-                  userNavigatedToDevices = true  // User explicitly wants to browse devices
-              } else {
-                  activeDeviceId = deviceId
-                  isDevicePanelExpanded = false
-                  userNavigatedToDevices = false  // Reset when device selected
-              }
-          },
-          isDevicePanelExpanded = isDevicePanelExpanded,
-          availableEmulators = availableEmulators,
-          systemImages = systemImages,
-          onBootEmulator = { emulatorId ->
-              // TODO: Boot emulator
-          },
-          onCreateEmulator = { imageId ->
-              // TODO: Create emulator from system image
-          },
-          onCollapsePanel = {
-              isDevicePanelExpanded = false
-          },
-          needsSetup = needsSetup,
-          onSetupClick = {
-              // TODO: Open setup wizard/dialog
-          },
-          dataSourceMode = dataSourceMode,
-          onDataSourceModeChanged = { mode ->
-              LOG.info("Data source mode changed to: $mode")
-              dataSourceMode = mode
-              when (mode) {
-                  DataSourceMode.Real -> {
-                      // Deselect device to show MCP processes list
-                      LOG.info("Switching to Real mode: clearing activeDeviceId, expanding panel")
-                      activeDeviceId = null
-                      isDevicePanelExpanded = true
-                  }
-                  DataSourceMode.Fake -> {
-                      // Auto-select first device if available, collapse panel
-                      if (mockBootedDevices.isNotEmpty()) {
-                          LOG.info("Switching to Fake mode: selecting device ${mockBootedDevices.first().id}")
-                          activeDeviceId = mockBootedDevices.first().id
-                          isDevicePanelExpanded = false
-                      }
-                  }
-              }
-          },
-          onMcpDeviceSelected = { deviceId, deviceName ->
-              LOG.info("MCP device selected: $deviceId (name: $deviceName)")
-              // Store the real device info - detect type from device name
-              val name = deviceName ?: deviceId
-              val isIOS = name.contains("iPhone", ignoreCase = true) ||
-                          name.contains("iPad", ignoreCase = true) ||
-                          name.contains("iOS", ignoreCase = true) ||
-                          name.contains("Apple", ignoreCase = true)
-              val deviceType = if (isIOS) DeviceType.iOSSimulator else DeviceType.AndroidEmulator
-              realDevice = BootedDevice(
-                  id = deviceId,
-                  name = name,
-                  type = deviceType,
-                  status = "Connected",
-                  foregroundApp = null,
-                  connectedAt = System.currentTimeMillis()
-              )
-              activeDeviceIdState.value = deviceId
-              isDevicePanelExpandedState.value = false
-              userNavigatedToDevices = false  // Reset when device selected
-              notificationHandler.show("Device Connected", "Connected to device: $deviceName")
-          },
-          onProcessConnected = { process ->
-              LOG.info("onProcessConnected called with: ${process?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}")
-              connectedMcpProcess = process
-          },
-          suppressAutoSelect = userNavigatedToDevices,
-          // App selector props (kept for backwards compatibility)
-          installedApps = installedApps,
-          selectedAppId = selectedAppId,
-          isAppListLoading = isAppListLoading,
-          appDropdownExpanded = appDropdownExpanded,
-          onAppDropdownExpandedChange = { appDropdownExpanded = it },
-          onAppSelected = { appId ->
-              selectedAppId = appId
-              appDropdownExpanded = false
-              LOG.info("App selected: $appId")
-          },
-          onSettingsClicked = { showSettings = true },
-      )
-    }
-
-    // Main content area - only show when a device is selected
-    // Wrapped in a scrollable column so expanding horizontal tabs doesn't compress the layout
-    if (!isDevicePanelExpanded && activeDeviceId != null) {
-      Column(
-          modifier = Modifier.weight(1f)
-      ) {
-        // Main content: Layout Inspector (central) + Failures/Performance (right vertical panels)
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(if (selectedHorizontalTabId != null) 0.5f else 1f)
-        ) {
-            // Central content area: Layout Inspector or Navigation (toggled)
-            // Screenshot loader hoisted here so its cache persists across toggles
-            val navScreenshotLoader = remember(clientProvider, dataSourceMode) {
-                if (dataSourceMode == DataSourceMode.Real && clientProvider != null) {
-                    NavigationScreenshotLoader(clientProvider)
-                } else {
-                    null
-                }
-            }
-            Box(modifier = Modifier.weight(1f)) {
-                val streamClient = observationStreamClient
-                if (showNavigationView) {
-                    NavigationDashboard(
-                        highlightedScreens = replayHighlightedScreens,
-                        onHighlightCleared = {
-                            testFlowScreens = emptyList()
-                            isReplaying = false
-                        },
-                        onDetailViewChanged = { isDetail ->
-                            isNavigationDetailView = isDetail
-                        },
-                        dataSourceMode = dataSourceMode,
-                        clientProvider = clientProvider,
-                        selectedAppId = selectedAppId,
-                        observationStreamClient = observationStreamClient,
-                        screenshotLoader = navScreenshotLoader,
-                    )
-                } else if (streamClient != null) {
-                    LayoutInspectorDashboard(
-                        modifier = Modifier.fillMaxSize(),
-                        dataSourceMode = dataSourceMode,
-                        clientProvider = clientProvider,
-                        observationStreamClient = streamClient,
-                        platform = platformString,
-                        onRestartDaemon = {
-                            activeDeviceId = null
-                            isDevicePanelExpanded = true
-                        },
-                    )
-                }
-
-                // Segmented toggle overlay at top-start (hidden on detail views)
-                if (!isNavigationDetailView) {
-                    MainContentViewToggle(
-                        showNavigation = showNavigationView,
-                        onToggle = { showNavigationView = it },
-                        modifier = Modifier
-                            .align(Alignment.TopStart)
-                            .padding(8.dp),
-                    )
-                }
-            }
-
-            // Right vertical panels: Failures and Performance
-            FailuresVerticalPanel(
-                isCollapsed = isFailuresPanelCollapsed,
-                onToggle = { isFailuresPanelCollapsed = !isFailuresPanelCollapsed },
-                widthPx = failuresPanelWidthPx,
-                onWidthChange = { delta ->
-                    failuresPanelWidthPx = (failuresPanelWidthPx - delta).coerceIn(minPanelWidthPx, maxPanelWidthPx)
-                },
-                dateRangeLabel = failuresDateRange.label,
-                crashCount = crashCount,
-                anrCount = anrCount,
-                toolFailureCount = toolFailureCount,
-                nonFatalCount = nonFatalCount,
-                onNavigateToScreen = { screenName ->
-                    // Switch to Navigation view in main content area
-                    showNavigationView = true
-                },
-                onNavigateToTest = { testName ->
-                    // Switch to Test Runs
-                    selectedHorizontalTabId = "test_runs"
-                },
-                onNavigateToSource = { fileName, lineNumber ->
-                    // TODO: Use OpenFileDescriptor to navigate to source
-                },
-                onNewFailureNotification = { notification ->
-                    // Track if it's critical
-                    if (notification.severity == FailureSeverity.Critical ||
-                        notification.severity == FailureSeverity.High) {
-                        hasNewCriticalFailure = true
-                    }
-                    // Only show notifications for crashes and ANRs
-                    val typeLabel = when (notification.type) {
-                        FailureType.Crash -> "Crash"
-                        FailureType.ANR -> "ANR"
-                        else -> null
-                    }
-                    if (typeLabel != null) {
-                        notificationHandler.show(
-                            "New $typeLabel Detected",
-                            notification.title,
-                            isWarning = true,
-                        )
-                        // Expand failures panel and deep link
-                        isFailuresPanelCollapsed = false
-                        pendingFailureId = notification.groupId
-                    }
-                },
-                initialSelectedFailureId = pendingFailureId,
-                onFailureSelected = { pendingFailureId = null },
-                onDateRangeChanged = { newRange ->
-                    failuresDateRange = newRange
-                    // Persist to settings
-                    settingsProvider.failuresDateRange = newRange.label
-                },
-                onFailureCountsChanged = { newCrashCount, newAnrCount, newToolFailureCount, newNonFatalCount ->
-                    crashCount = newCrashCount
-                    anrCount = newAnrCount
-                    toolFailureCount = newToolFailureCount
-                    nonFatalCount = newNonFatalCount
-                },
-                initialDateRange = failuresDateRange,
-                dataSourceMode = dataSourceMode,
-                clientProvider = clientProvider,
-                streamingDataSource = streamingFailuresDataSource,
-                failuresPushClient = failuresPushClient,
-            )
-
-            PerformanceVerticalPanel(
-                isCollapsed = isPerformancePanelCollapsed,
-                onToggle = { isPerformancePanelCollapsed = !isPerformancePanelCollapsed },
-                widthPx = performancePanelWidthPx,
-                onWidthChange = { delta ->
-                    performancePanelWidthPx = (performancePanelWidthPx - delta).coerceIn(minPanelWidthPx, maxPanelWidthPx)
-                },
-                currentFps = currentFps,
-                currentFrameTimeMs = currentFrameTimeMs,
-                currentJankFrames = currentJankFrames,
-                currentMemoryMb = currentMemoryMb,
-                currentTouchLatencyMs = currentTouchLatencyMs,
-                currentRecompositionRate = currentRecompositionRate,
-                updateCounter = perfUpdateCounter,
-                onNavigateToScreen = { screenName ->
-                    showNavigationView = true
-                },
-                onNavigateToTest = { testName ->
-                    selectedHorizontalTabId = "test_runs"
-                },
-                dataSourceMode = dataSourceMode,
-                clientProvider = clientProvider,
-                observationStreamClient = observationStreamClient,
-            )
-          }
-
-          // Bottom horizontal tabs (Navigation, Test Runs, Storage)
-          HorizontalTabBar(
-              tabs = horizontalTabs,
-              selectedTabId = selectedHorizontalTabId,
-              onTabSelected = { tabId ->
-                  selectedHorizontalTabId = tabId
+  ThreePaneShell(
+      showLeftPane = showLeftPane,
+      onToggleLeftPane = { showLeftPane = !showLeftPane },
+      showRightPane = showRightPane,
+      onToggleRightPane = { showRightPane = !showRightPane },
+      showBottomPane = showBottomPane,
+      onToggleBottomPane = { showBottomPane = !showBottomPane },
+      deviceName = realDevice?.name,
+      foregroundApp = realDevice?.foregroundApp ?: installedApps.find { it.isForeground }?.packageName,
+      crashCount = crashCount,
+      anrCount = anrCount,
+      nonFatalCount = nonFatalCount,
+      toolFailureCount = toolFailureCount,
+      currentFps = currentFps,
+      currentMemoryMb = currentMemoryMb,
+      isDaemonConnected = connectedMcpProcess != null,
+      centerContent = { mod ->
+          TelemetryDashboard(
+              telemetryPushClient = telemetryPushClient,
+              dataSourceMode = dataSourceMode,
+              onOpenSource = onOpenSource,
+              screenshotLoader = remember(clientProvider, dataSourceMode) {
+                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                      NavigationScreenshotLoader(clientProvider) else null
               },
-              modifier = Modifier,
+              modifier = mod,
           )
-
-          // Expanded horizontal tab content
-          if (selectedHorizontalTabId != null) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .weight(0.5f)
-            ) {
-              when (selectedHorizontalTabId) {
-                "test_runs" -> TestDashboard(
-                    onOpenFile = { filePath ->
-                        // TODO: Open file in IDE editor
-                    },
-                    onNavigateToGraph = { screens ->
-                        // Set up test flow replay
-                        testFlowScreens = screens
-                        isReplaying = true
-                        currentReplayIndex = 0
-                        showNavigationView = true  // Switch to Navigation view
-                    },
-                    dataSourceMode = dataSourceMode,
-                    clientProvider = clientProvider,
-                    observationStreamClient = observationStreamClient,
-                )
-                "storage" -> StorageDashboard(
-                    dataSourceMode = dataSourceMode,
-                    clientProvider = clientProvider,
-                    deviceId = activeDeviceId,
-                    packageName = selectedAppId,
-                    platform = storagePlatform,
-                )
-                "diagnostics" -> DiagnosticsDashboard(
-                    connectedMcpProcess = connectedMcpProcess,
-                    dataSourceMode = dataSourceMode,
-                )
-                "telemetry" -> {
-                    val telemetryScreenshotLoader = remember(clientProvider, dataSourceMode) {
-                        if (dataSourceMode == DataSourceMode.Real && clientProvider != null) {
-                            NavigationScreenshotLoader(clientProvider)
-                        } else {
-                            null
-                        }
-                    }
-                    TelemetryDashboard(
-                        telemetryPushClient = telemetryPushClient,
-                        dataSourceMode = dataSourceMode,
-                        onOpenSource = onOpenSource,
-                        screenshotLoader = telemetryScreenshotLoader,
-                    )
-                }
+      },
+      leftPaneContent = {
+          // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
+          Column(Modifier.fillMaxSize().padding(8.dp)) {
+              Text("MCP Connection", color = colors.text.normal, fontSize = 14.sp)
+              Spacer(Modifier.height(8.dp))
+              connectedMcpProcess?.let { process ->
+                  Text("Connected: ${process.name}", color = colors.text.info, fontSize = 12.sp)
+                  Text("PID: ${process.pid}", color = colors.text.normal.copy(alpha = 0.7f), fontSize = 11.sp)
+              } ?: Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
+              Spacer(Modifier.height(16.dp))
+              Text("Devices", color = colors.text.normal, fontSize = 14.sp)
+              Spacer(Modifier.height(8.dp))
+              val devices = if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else listOfNotNull(realDevice)
+              devices.forEach { device ->
+                  val isActive = device.id == activeDeviceId
+                  Text(
+                      text = "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
+                      color = if (isActive) colors.text.info else colors.text.normal,
+                      fontSize = 12.sp,
+                      modifier = Modifier.clickable { /* device selection handled by existing code */ },
+                  )
               }
-            }
           }
-      } // end Column
-    }
-  }
+      },
+      rightPaneContent = {
+          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              Text(
+                  "Select an event to inspect",
+                  color = colors.text.normal.copy(alpha = 0.5f),
+                  fontSize = 12.sp,
+              )
+          }
+      },
+      bottomPaneContent = {
+          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+              Text(
+                  "Event Timeline",
+                  color = colors.text.normal.copy(alpha = 0.5f),
+                  fontSize = 12.sp,
+              )
+          }
+      },
+  )
 }
 
 @Composable

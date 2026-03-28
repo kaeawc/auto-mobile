@@ -562,7 +562,46 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   }
 
   protected onConnectionEstablished(): void {
-    // No additional setup needed
+    this.syncNetworkStateToDevice();
+  }
+
+  private syncNetworkStateToDevice(): void {
+    try {
+      const { NetworkState } = require("../../../server/NetworkState");
+      const state = NetworkState.getInstance();
+
+      // Re-sync mock rules
+      const mocks = state.getMocks();
+      if (mocks.size > 0) {
+        const rules = Array.from(mocks.values()).map((r: any) => ({
+          mockId: r.mockId,
+          host: r.host,
+          path: r.path,
+          method: r.method,
+          limit: r.limit,
+          remaining: r.remaining,
+          statusCode: r.statusCode,
+          responseHeaders: r.responseHeaders,
+          responseBody: r.responseBody,
+          contentType: r.contentType,
+        }));
+        this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
+      }
+
+      // Re-sync error simulation
+      const sim = state.simulation;
+      if (sim) {
+        this.sendMessage(JSON.stringify({
+          type: "set_network_error_simulation",
+          enabled: true,
+          errorType: sim.errorType,
+          limit: sim.limit,
+          expiresAtEpochMs: sim.expiresAt,
+        }));
+      }
+    } catch (e) {
+      logger.debug(`[CtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
+    }
   }
 
   protected onConnectionClosed(): void {

@@ -22,10 +22,12 @@ class FakeRepository implements TelemetryRepository {
   storageEvents: RecordStorageEventInput[] = [];
   layoutEvents: RecordLayoutEventInput[] = [];
   shouldThrow = false;
+  private nextNetworkId = 1;
 
-  async recordNetworkEvent(input: RecordNetworkEventInput): Promise<void> {
+  async recordNetworkEvent(input: RecordNetworkEventInput): Promise<number> {
     if (this.shouldThrow) {throw new Error("db error");}
     this.networkEvents.push(input);
+    return this.nextNetworkId++;
   }
   async recordLogEvent(input: RecordLogEventInput): Promise<void> {
     if (this.shouldThrow) {throw new Error("db error");}

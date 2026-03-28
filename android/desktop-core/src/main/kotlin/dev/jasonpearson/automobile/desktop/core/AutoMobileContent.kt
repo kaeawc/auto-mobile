@@ -110,12 +110,34 @@ import dev.jasonpearson.automobile.desktop.core.failures.DateRange
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceVerticalPanel
 
+import dev.jasonpearson.automobile.desktop.core.shell.CommandPalette
+import dev.jasonpearson.automobile.desktop.core.shell.CommandRegistry
+import dev.jasonpearson.automobile.desktop.core.shell.GlobalSearchOverlay
+import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
+import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
+import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
+import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
+import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationDashboard
+import dev.jasonpearson.automobile.desktop.core.navigation.NavigationMockData
 import dev.jasonpearson.automobile.desktop.core.navigation.NavigationScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.shell.SearchCategory
+import androidx.compose.ui.input.key.isCtrlPressed
+import dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver
+import kotlinx.serialization.json.buildJsonArray
+import kotlinx.serialization.json.buildJsonObject
+import kotlinx.serialization.json.put
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StorageDashboard
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
@@ -191,6 +213,18 @@ fun AutoMobileContent(
   var showLeftPane by remember { mutableStateOf(true) }
   var showRightPane by remember { mutableStateOf(true) }
   var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
+
+  // Command palette & global search state
+  var showCommandPalette by remember { mutableStateOf(false) }
+  var showGlobalSearch by remember { mutableStateOf(false) }
+
+  // Theme state toggled via command palette
+  var isDarkMode by remember { mutableStateOf(true) }
+
+  // Shared telemetry event cache for global search (populated from push client)
+  val telemetryEventCache = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+
+  // Command registry — populated after all state is declared below
 
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
@@ -560,6 +594,18 @@ fun AutoMobileContent(
       }
   }
 
+  // Populate telemetry event cache for global search (mirroring TelemetryDashboard's collection)
+  LaunchedEffect(telemetryPushClient) {
+      val client = telemetryPushClient ?: return@LaunchedEffect
+      client.telemetryEvents.collect { event ->
+          telemetryEventCache.add(event)
+          // Cap at 500 events
+          while (telemetryEventCache.size > 500) {
+              telemetryEventCache.removeAt(0)
+          }
+      }
+  }
+
   // Load installed apps with periodic polling (every 5 seconds) to keep FG state updated
   LaunchedEffect(dataSourceMode, clientProvider, activeDeviceId) {
       if (dataSourceMode == DataSourceMode.Real && clientProvider != null && activeDeviceId != null) {
@@ -664,6 +710,102 @@ fun AutoMobileContent(
   var showNavigationView by remember { mutableStateOf(false) }
   var isNavigationDetailView by remember { mutableStateOf(false) }
 
+  // Populate command registry now that all state vars are in scope
+  val commandRegistry = remember { CommandRegistry() }
+  LaunchedEffect(showLeftPane, showRightPane, showBottomPane, showNavigationView) {
+      commandRegistry.clear()
+      commandRegistry.registerAll(
+          buildDefaultCommands(
+              onToggleLeftPane = { showLeftPane = !showLeftPane },
+              onToggleRightPane = { showRightPane = !showRightPane },
+              onToggleBottomPane = { showBottomPane = !showBottomPane },
+              onClearTelemetry = { telemetryEventCache.clear() },
+              onExportEvents = {
+                  val jsonArray = buildJsonArray {
+                      telemetryEventCache.take(1000).forEach { event ->
+                          add(buildJsonObject {
+                              put("type", event::class.simpleName ?: "unknown")
+                              put("timestamp", event.timestamp)
+                          })
+                      }
+                  }
+                  SwingFileSaver.save("telemetry_events.json", jsonArray.toString()) {}
+              },
+              onSwitchToDarkMode = { isDarkMode = true },
+              onSwitchToLightMode = { isDarkMode = false },
+              onOpenSettings = { showSettings = true },
+              onTakeScreenshot = {
+                  val provider = clientProvider
+                  if (provider != null) {
+                      kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                          val client = provider()
+                          try { client.callTool("screenshot", buildJsonObject {}) } catch (_: Exception) {} finally { client.close() }
+                      }
+                  }
+              },
+              onToggleLiveLayout = { showNavigationView = !showNavigationView },
+          ),
+      )
+  }
+
+  // Search provider wired to telemetry events, navigation screens, and installed apps
+  val searchProvider: SearchResultProvider = remember(telemetryEventCache.size, installedApps.size) {
+      object : SearchResultProvider {
+          override fun search(query: String): List<SearchResult> {
+              if (query.isBlank()) return emptyList()
+              val results = mutableListOf<SearchResult>()
+              // Telemetry events (most recent 200, capped for performance)
+              telemetryEventCache.takeLast(200)
+                  .filter { it.matchesSearch(query) }
+                  .take(20)
+                  .forEachIndexed { i, event ->
+                      val (label, preview) = when (event) {
+                          is TelemetryDisplayEvent.Network -> "${event.method} ${event.url}" to "${event.statusCode}"
+                          is TelemetryDisplayEvent.Log -> "[${event.tag}] ${event.message.take(40)}" to event.tag
+                          is TelemetryDisplayEvent.Navigation -> event.destination to (event.source ?: "")
+                          is TelemetryDisplayEvent.Custom -> event.name to event.properties.entries.take(2).joinToString { "${it.key}=${it.value}" }
+                          is TelemetryDisplayEvent.Failure -> event.title to event.type
+                          else -> (event::class.simpleName ?: "Event") to ""
+                      }
+                      results.add(SearchResult(
+                          id = "tel_${i}_${event.timestamp}",
+                          category = SearchCategory.TelemetryEvent,
+                          label = label,
+                          preview = preview,
+                          onSelect = {},
+                      ))
+                  }
+              // Navigation screens from mock data
+              NavigationMockData.screens
+                  .filter { it.name.contains(query, ignoreCase = true) || it.packageName.contains(query, ignoreCase = true) }
+                  .take(10)
+                  .forEach { screen ->
+                      results.add(SearchResult(
+                          id = "nav_${screen.id}",
+                          category = SearchCategory.NavigationScreen,
+                          label = screen.name,
+                          preview = "${screen.type} · ${screen.packageName}",
+                          onSelect = {},
+                      ))
+                  }
+              // Installed apps as hierarchy elements
+              installedApps
+                  .filter { it.packageName.contains(query, ignoreCase = true) }
+                  .take(10)
+                  .forEach { app ->
+                      results.add(SearchResult(
+                          id = "app_${app.packageName}",
+                          category = SearchCategory.HierarchyElement,
+                          label = app.packageName.substringAfterLast('.'),
+                          preview = app.packageName,
+                          onSelect = { selectedAppId = app.packageName },
+                      ))
+                  }
+              return results
+          }
+      }
+  }
+
   // Setup state - true when AutoMobile service/daemon not detected or accessibility service not running
   // TODO: Replace with actual service detection
   var needsSetup by remember { mutableStateOf(false) }
@@ -716,6 +858,23 @@ fun AutoMobileContent(
     return
   }
 
+  Box(
+      modifier = Modifier
+          .fillMaxSize()
+          .onPreviewKeyEvent { event ->
+              if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+              val isModifier = event.isMetaPressed || event.isCtrlPressed
+              if (isModifier && event.isShiftPressed) {
+                  when (event.key) {
+                      Key.P -> { showCommandPalette = true; true }
+                      Key.F -> { showGlobalSearch = true; true }
+                      else -> false
+                  }
+              } else {
+                  false
+              }
+          },
+  ) {
   ThreePaneShell(
       showLeftPane = showLeftPane,
       onToggleLeftPane = { showLeftPane = !showLeftPane },
@@ -936,6 +1095,23 @@ fun AutoMobileContent(
           }
       },
   )
+
+  // Command palette overlay
+  if (showCommandPalette) {
+      CommandPalette(
+          registry = commandRegistry,
+          onDismiss = { showCommandPalette = false },
+      )
+  }
+
+  // Global search overlay
+  if (showGlobalSearch) {
+      GlobalSearchOverlay(
+          searchProvider = searchProvider,
+          onDismiss = { showGlobalSearch = false },
+      )
+  }
+  }
 }
 
 @Composable

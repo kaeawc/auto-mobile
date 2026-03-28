@@ -218,6 +218,13 @@ fun SettingsPanel(
       }
     }
 
+    // === Keyboard Shortcuts ===
+    Spacer(Modifier.height(24.dp))
+    HorizontalDivider(color = colors.text.normal.copy(alpha = 0.1f))
+    Spacer(Modifier.height(24.dp))
+
+    KeyboardShortcutsSection()
+
     // === Feature Flags ===
     if (clientProvider != null) {
       Spacer(Modifier.height(24.dp))

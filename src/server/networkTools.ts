@@ -247,6 +247,11 @@ export function registerNetworkTools(): void {
           "Network mocking is disabled. Start the server with --network-mockable to enable."
         );
       }
+      if (device.platform !== "android") {
+        throw new ActionableError(
+          "Network mocking is only supported on Android devices."
+        );
+      }
 
       let cleared: number;
       if (args.mockId) {

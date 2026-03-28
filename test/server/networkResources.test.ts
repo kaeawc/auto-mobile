@@ -116,4 +116,17 @@ describe("bucketEvents", () => {
       expect(buckets[i].bucketStart).toBeGreaterThan(buckets[i - 1].bucketStart);
     }
   });
+
+  it("caps bucket count for sparse time ranges", () => {
+    // Two events 10M seconds apart with 1s buckets would create 10M buckets without the cap
+    const events = [
+      makeEvent({ timestamp: 0 }),
+      makeEvent({ timestamp: 10_000_000_000 }),
+    ];
+
+    const buckets = bucketEvents(events, 1);
+    expect(buckets.length).toBeLessThanOrEqual(1000);
+    // The later event should still land in a bucket
+    expect(buckets[buckets.length - 1].requests).toBe(1);
+  });
 });

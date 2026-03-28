@@ -130,6 +130,8 @@ function computePercentile(sorted: number[], p: number): number {
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
+const MAX_BUCKETS = 1000;
+
 export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number): TimeSeriesBucket[] {
   if (events.length === 0) {return [];}
 
@@ -138,8 +140,14 @@ export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number
   const minTs = Math.min(...timestamps);
   const maxTs = Math.max(...timestamps);
 
-  const bucketStart = Math.floor(minTs / bucketMs) * bucketMs;
+  // Cap the number of buckets to avoid unbounded memory allocation
+  // when sparse events span a large time range
+  let bucketStart = Math.floor(minTs / bucketMs) * bucketMs;
   const bucketEnd = Math.floor(maxTs / bucketMs) * bucketMs + bucketMs;
+  const totalBuckets = Math.ceil((bucketEnd - bucketStart) / bucketMs);
+  if (totalBuckets > MAX_BUCKETS) {
+    bucketStart = bucketEnd - MAX_BUCKETS * bucketMs;
+  }
 
   const buckets: Map<number, NetworkEventWithId[]> = new Map();
   for (let ts = bucketStart; ts < bucketEnd; ts += bucketMs) {

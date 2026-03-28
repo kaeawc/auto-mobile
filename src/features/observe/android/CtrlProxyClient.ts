@@ -570,24 +570,23 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       const { NetworkState } = require("../../../server/NetworkState");
       const state = NetworkState.getInstance();
 
-      // Re-sync mock rules — use limit (not remaining) so the device-side
-      // store reinitializes fresh counts instead of replaying stale values
+      // Always sync mock rules on reconnect — use limit (not remaining) so
+      // the device-side store reinitializes fresh counts. Sending an empty
+      // list clears stale rules that may linger from a previous connection.
       const mocks = state.getMocks();
-      if (mocks.size > 0) {
-        const rules = Array.from(mocks.values()).map((r: any) => ({
-          mockId: r.mockId,
-          host: r.host,
-          path: r.path,
-          method: r.method,
-          limit: r.limit,
-          remaining: r.limit,
-          statusCode: r.statusCode,
-          responseHeaders: r.responseHeaders,
-          responseBody: r.responseBody,
-          contentType: r.contentType,
-        }));
-        this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
-      }
+      const rules = Array.from(mocks.values()).map((r: any) => ({
+        mockId: r.mockId,
+        host: r.host,
+        path: r.path,
+        method: r.method,
+        limit: r.limit,
+        remaining: r.limit,
+        statusCode: r.statusCode,
+        responseHeaders: r.responseHeaders,
+        responseBody: r.responseBody,
+        contentType: r.contentType,
+      }));
+      this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
 
       // Re-sync error simulation
       const sim = state.simulation;

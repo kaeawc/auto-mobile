@@ -79,21 +79,30 @@ fun ThreePaneShell(
     rightPaneContent: @Composable () -> Unit,
     bottomPaneContent: @Composable () -> Unit,
     modifier: Modifier = Modifier,
+    // Initial pane sizes (restored from persistence)
+    initialLeftPaneWidthDp: Float = 220f,
+    initialRightPaneWidthDp: Float = 300f,
+    initialBottomPaneHeightDp: Float = 120f,
+    // Callbacks when pane sizes change (for persistence)
+    onLeftPaneWidthChanged: ((Float) -> Unit)? = null,
+    onRightPaneWidthChanged: ((Float) -> Unit)? = null,
+    onBottomPaneHeightChanged: ((Float) -> Unit)? = null,
+    // Layout presets UI slot
+    presetsContent: (@Composable () -> Unit)? = null,
 ) {
     // Default pane widths / heights
     val defaultLeftWidth = 220.dp
     val defaultRightWidth = 300.dp
     val defaultBottomHeight = 120.dp
 
-    // Auto-collapse thresholds (as fraction of total available width)
-    // Not applicable to fixed-dp widths here but we use a minimum dp check instead
+    // Auto-collapse thresholds
     val leftCollapseMinDp = 100.dp   // below this -> auto-collapse
     val rightCollapseMinDp = 130.dp  // below this -> auto-collapse
 
-    // Resizable pane widths — animated with spring
-    var leftPaneWidth by remember { mutableStateOf(defaultLeftWidth) }
-    var rightPaneWidth by remember { mutableStateOf(defaultRightWidth) }
-    var bottomPaneHeight by remember { mutableStateOf(defaultBottomHeight) }
+    // Resizable pane widths — keyed on initial values so preset changes take effect
+    var leftPaneWidth by remember(initialLeftPaneWidthDp) { mutableStateOf(initialLeftPaneWidthDp.dp) }
+    var rightPaneWidth by remember(initialRightPaneWidthDp) { mutableStateOf(initialRightPaneWidthDp.dp) }
+    var bottomPaneHeight by remember(initialBottomPaneHeightDp) { mutableStateOf(initialBottomPaneHeightDp.dp) }
 
     Column(modifier.fillMaxSize()) {
         // macOS title bar spacer
@@ -107,6 +116,7 @@ fun ThreePaneShell(
             onToggleRightPane = onToggleRightPane,
             showBottomPane = showBottomPane,
             onToggleBottomPane = onToggleBottomPane,
+            presetsContent = presetsContent,
         )
 
         // Main 3-pane area
@@ -120,6 +130,7 @@ fun ThreePaneShell(
                     onDrag = { delta ->
                         val newWidth = (leftPaneWidth + delta).coerceIn(50.dp, 400.dp)
                         leftPaneWidth = newWidth
+                        onLeftPaneWidthChanged?.invoke(newWidth.value)
                         if (newWidth < leftCollapseMinDp) {
                             onToggleLeftPane()
                             leftPaneWidth = defaultLeftWidth
@@ -127,6 +138,7 @@ fun ThreePaneShell(
                     },
                     onReset = {
                         leftPaneWidth = defaultLeftWidth
+                        onLeftPaneWidthChanged?.invoke(defaultLeftWidth.value)
                     },
                 )
             }
@@ -158,6 +170,7 @@ fun ThreePaneShell(
                     onDrag = { delta ->
                         val newWidth = (rightPaneWidth - delta).coerceIn(50.dp, 500.dp)
                         rightPaneWidth = newWidth
+                        onRightPaneWidthChanged?.invoke(newWidth.value)
                         if (newWidth < rightCollapseMinDp) {
                             onToggleRightPane()
                             rightPaneWidth = defaultRightWidth
@@ -165,6 +178,7 @@ fun ThreePaneShell(
                     },
                     onReset = {
                         rightPaneWidth = defaultRightWidth
+                        onRightPaneWidthChanged?.invoke(defaultRightWidth.value)
                     },
                 )
                 Box(Modifier.width(rightPaneWidth).fillMaxHeight()) {
@@ -178,6 +192,7 @@ fun ThreePaneShell(
             HorizontalDividerStub(
                 onDrag = { delta ->
                     bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
+                    onBottomPaneHeightChanged?.invoke(bottomPaneHeight.value)
                 },
                 onReset = {
                     bottomPaneHeight = defaultBottomHeight
@@ -395,6 +410,7 @@ private fun PaneToggleToolbar(
     onToggleRightPane: () -> Unit,
     showBottomPane: Boolean,
     onToggleBottomPane: () -> Unit,
+    presetsContent: (@Composable () -> Unit)? = null,
 ) {
     val colors = SharedTheme.globalColors
     Row(
@@ -403,9 +419,12 @@ private fun PaneToggleToolbar(
             .height(28.dp)
             .background(colors.panelBackground)
             .padding(horizontal = 8.dp),
-        horizontalArrangement = Arrangement.End,
+        horizontalArrangement = Arrangement.Start,
         verticalAlignment = Alignment.CenterVertically,
     ) {
+        presetsContent?.invoke()
+        Spacer(Modifier.weight(1f))
+
         PaneToggleIcon(
             label = "Left",
             isActive = showLeftPane,

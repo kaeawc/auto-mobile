@@ -7,6 +7,7 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.jasonpearson.automobile.desktop.core.settings.FileWindowStateManager
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
@@ -46,14 +47,39 @@ fun main() {
       System.setProperty("apple.awt.transparentTitleBar", "true")
   }
 
+  // Load persisted window geometry (size + position)
+  val wsm = FileWindowStateManager()
+  val saved = wsm.load()
+
   application {
+    val savedX = saved.windowXDp
+    val savedY = saved.windowYDp
     val windowState = rememberWindowState(
-      size = DpSize(1440.dp, 900.dp),
-      position = WindowPosition(Alignment.Center),
+      size = DpSize(saved.windowWidthDp.dp, saved.windowHeightDp.dp),
+      position = if (savedX != null && savedY != null) {
+          WindowPosition(savedX.dp, savedY.dp)
+      } else {
+          WindowPosition(Alignment.Center)
+      },
     )
 
     Window(
-      onCloseRequest = ::exitApplication,
+      onCloseRequest = {
+          // Save window geometry before exiting
+          val current = wsm.load()
+          val pos = windowState.position
+          val posX = if (pos.isSpecified) pos.x.value else null
+          val posY = if (pos.isSpecified) pos.y.value else null
+          wsm.save(
+              current.copy(
+                  windowWidthDp = windowState.size.width.value,
+                  windowHeightDp = windowState.size.height.value,
+                  windowXDp = posX,
+                  windowYDp = posY,
+              )
+          )
+          exitApplication()
+      },
       title = "AutoMobile",
       state = windowState,
     ) {

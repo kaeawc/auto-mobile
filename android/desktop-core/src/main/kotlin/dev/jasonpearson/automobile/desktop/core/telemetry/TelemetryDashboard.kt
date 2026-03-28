@@ -160,10 +160,17 @@ fun TelemetryDashboard(
     onOpenSource: ((String, Int, String) -> Unit)? = null,
     screenshotLoader: dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader? = null,
     modifier: Modifier = Modifier,
+    initialCategoryFilter: String = "All",
+    initialSearchQuery: String = "",
+    onCategoryFilterChanged: ((String) -> Unit)? = null,
+    onSearchQueryChanged: ((String) -> Unit)? = null,
 ) {
     val colors = SharedTheme.globalColors
     val events = remember { mutableStateListOf<TelemetryDisplayEvent>() }
-    var selectedFilter by remember { mutableStateOf(CategoryFilter.All) }
+    val initialFilter = remember {
+        CategoryFilter.entries.find { it.label == initialCategoryFilter } ?: CategoryFilter.All
+    }
+    var selectedFilter by remember { mutableStateOf(initialFilter) }
     var connectionState by remember { mutableStateOf<TelemetryConnectionState?>(null) }
     var selectedEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
     val listState = rememberLazyListState()
@@ -179,11 +186,16 @@ fun TelemetryDashboard(
     val expandedGroups = remember { mutableStateListOf<String>() }
 
     // Search and severity filter state
-    var searchQuery by remember { mutableStateOf("") }
+    var searchQuery by remember { mutableStateOf(initialSearchQuery) }
     var debouncedQuery by remember { mutableStateOf("") }
     var enabledSeverities by remember { mutableStateOf(EventSeverity.entries.toSet()) }
 
+    LaunchedEffect(selectedFilter) {
+        onCategoryFilterChanged?.invoke(selectedFilter.label)
+    }
+
     LaunchedEffect(searchQuery) {
+        onSearchQueryChanged?.invoke(searchQuery)
         delay(150)
         debouncedQuery = searchQuery
     }

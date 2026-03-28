@@ -71,6 +71,10 @@ import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsPanel
+import dev.jasonpearson.automobile.desktop.core.settings.WindowStateManager
+import dev.jasonpearson.automobile.desktop.core.settings.FileWindowStateManager
+import dev.jasonpearson.automobile.desktop.core.settings.WindowState
+import dev.jasonpearson.automobile.desktop.core.settings.LayoutPreset
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
@@ -196,7 +200,11 @@ fun AutoMobileContent(
     settingsProvider: SettingsProvider = FakeSettingsProvider(),
     notificationHandler: NotificationHandler = NoOpNotificationHandler,
     onOpenSource: ((String, Int, String) -> Unit)? = null,
+    windowStateManager: WindowStateManager = remember { FileWindowStateManager() },
 ) {
+  // Restore persisted window/layout state
+  val restoredState = remember { windowStateManager.load() }
+
   var showSettings by remember { mutableStateOf(false) }
   var selectedIndex by remember { mutableIntStateOf(0) }
   val dashboardOrder = remember { mutableStateListOf(*Dashboard.entries.toTypedArray()) }
@@ -209,10 +217,48 @@ fun AutoMobileContent(
   var failuresPanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
   var performancePanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
 
-  // Three-pane shell visibility state
-  var showLeftPane by remember { mutableStateOf(true) }
-  var showRightPane by remember { mutableStateOf(true) }
-  var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
+  // Three-pane shell visibility state (restored from persistence)
+  var showLeftPane by remember { mutableStateOf(restoredState.showLeftPane) }
+  var showRightPane by remember { mutableStateOf(restoredState.showRightPane) }
+  var showBottomPane by remember { mutableStateOf(restoredState.showBottomPane) }
+
+  // Pane sizes (restored from persistence)
+  var leftPaneWidthDp by remember { mutableStateOf(restoredState.leftPaneWidthDp) }
+  var rightPaneWidthDp by remember { mutableStateOf(restoredState.rightPaneWidthDp) }
+  var bottomPaneHeightDp by remember { mutableStateOf(restoredState.bottomPaneHeightDp) }
+
+  // Layout presets
+  val presets = remember { mutableStateListOf(*restoredState.presets.toTypedArray()) }
+  var showPresetPopup by remember { mutableStateOf(false) }
+  var newPresetName by remember { mutableStateOf("") }
+
+  // Telemetry filter preferences (restored from persistence)
+  var persistedTelemetryCategoryFilter by remember { mutableStateOf(restoredState.telemetryCategoryFilter) }
+  var persistedTelemetrySearchQuery by remember { mutableStateOf(restoredState.telemetrySearchQuery) }
+
+  // Helper to build the current WindowState for saving.
+  // Re-reads the file to preserve window geometry written by Main.kt.
+  fun buildCurrentState(): WindowState {
+      val existing = windowStateManager.load()
+      return existing.copy(
+          showLeftPane = showLeftPane,
+          showRightPane = showRightPane,
+          showBottomPane = showBottomPane,
+          leftPaneWidthDp = leftPaneWidthDp,
+          rightPaneWidthDp = rightPaneWidthDp,
+          bottomPaneHeightDp = bottomPaneHeightDp,
+          telemetryCategoryFilter = persistedTelemetryCategoryFilter,
+          telemetrySearchQuery = persistedTelemetrySearchQuery,
+          presets = presets.toList(),
+      )
+  }
+
+  // Save state when the composable is disposed (e.g., window close)
+  DisposableEffect(Unit) {
+      onDispose {
+          windowStateManager.save(buildCurrentState())
+      }
+  }
 
   // Command palette & global search state
   var showCommandPalette by remember { mutableStateOf(false) }
@@ -891,6 +937,53 @@ fun AutoMobileContent(
       currentFps = currentFps,
       currentMemoryMb = currentMemoryMb,
       isDaemonConnected = connectedMcpProcess != null,
+      initialLeftPaneWidthDp = leftPaneWidthDp,
+      initialRightPaneWidthDp = rightPaneWidthDp,
+      initialBottomPaneHeightDp = bottomPaneHeightDp,
+      onLeftPaneWidthChanged = { leftPaneWidthDp = it },
+      onRightPaneWidthChanged = { rightPaneWidthDp = it },
+      onBottomPaneHeightChanged = { bottomPaneHeightDp = it },
+      presetsContent = {
+          LayoutPresetsSelector(
+              presets = presets,
+              showPopup = showPresetPopup,
+              onTogglePopup = { showPresetPopup = !showPresetPopup },
+              newPresetName = newPresetName,
+              onNewPresetNameChange = { newPresetName = it },
+              onSavePreset = {
+                  if (newPresetName.isNotBlank()) {
+                      val preset = LayoutPreset(
+                          name = newPresetName.trim(),
+                          showLeftPane = showLeftPane,
+                          showRightPane = showRightPane,
+                          showBottomPane = showBottomPane,
+                          leftPaneWidthDp = leftPaneWidthDp,
+                          rightPaneWidthDp = rightPaneWidthDp,
+                          bottomPaneHeightDp = bottomPaneHeightDp,
+                      )
+                      // Replace existing preset with same name, or add new
+                      val idx = presets.indexOfFirst { it.name == preset.name }
+                      if (idx >= 0) presets[idx] = preset else presets.add(preset)
+                      newPresetName = ""
+                      showPresetPopup = false
+                      windowStateManager.save(buildCurrentState())
+                  }
+              },
+              onApplyPreset = { preset ->
+                  showLeftPane = preset.showLeftPane
+                  showRightPane = preset.showRightPane
+                  showBottomPane = preset.showBottomPane
+                  leftPaneWidthDp = preset.leftPaneWidthDp
+                  rightPaneWidthDp = preset.rightPaneWidthDp
+                  bottomPaneHeightDp = preset.bottomPaneHeightDp
+                  showPresetPopup = false
+              },
+              onDeletePreset = { preset ->
+                  presets.removeAll { it.name == preset.name }
+                  windowStateManager.save(buildCurrentState())
+              },
+          )
+      },
       centerContent = { mod ->
           Column(mod) {
               // Main view area with Layout/Navigation toggle
@@ -968,6 +1061,10 @@ fun AutoMobileContent(
                                   if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
                                       NavigationScreenshotLoader(clientProvider) else null
                               },
+                              initialCategoryFilter = persistedTelemetryCategoryFilter,
+                              initialSearchQuery = persistedTelemetrySearchQuery,
+                              onCategoryFilterChanged = { persistedTelemetryCategoryFilter = it },
+                              onSearchQueryChanged = { persistedTelemetrySearchQuery = it },
                           )
                       }
                   }
@@ -3800,6 +3897,122 @@ private fun AppDropdownItem(
                 fontSize = 12.sp,
                 color = Color(0xFF4CAF50),
             )
+        }
+    }
+}
+
+/** Compact layout-preset selector shown in the pane toggle toolbar. */
+@Composable
+private fun LayoutPresetsSelector(
+    presets: List<LayoutPreset>,
+    showPopup: Boolean,
+    onTogglePopup: () -> Unit,
+    newPresetName: String,
+    onNewPresetNameChange: (String) -> Unit,
+    onSavePreset: () -> Unit,
+    onApplyPreset: (LayoutPreset) -> Unit,
+    onDeletePreset: (LayoutPreset) -> Unit,
+) {
+    val colors = SharedTheme.globalColors
+
+    Box {
+        // Trigger button
+        Text(
+            text = "Presets",
+            fontSize = 10.sp,
+            color = colors.text.normal.copy(alpha = if (showPopup) 1f else 0.6f),
+            modifier = Modifier
+                .clickable(onClick = onTogglePopup)
+                .padding(horizontal = 6.dp, vertical = 2.dp),
+        )
+
+        if (showPopup) {
+            Popup(
+                alignment = Alignment.TopStart,
+                onDismissRequest = onTogglePopup,
+                properties = PopupProperties(focusable = true),
+            ) {
+                Column(
+                    modifier = Modifier
+                        .width(220.dp)
+                        .background(colors.panelBackground, RoundedCornerShape(6.dp))
+                        .border(1.dp, colors.text.normal.copy(alpha = 0.15f), RoundedCornerShape(6.dp))
+                        .padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Text("Layout Presets", fontSize = 12.sp, color = colors.text.normal)
+
+                    if (presets.isEmpty()) {
+                        Text(
+                            "No presets saved yet.",
+                            fontSize = 10.sp,
+                            color = colors.text.normal.copy(alpha = 0.5f),
+                        )
+                    } else {
+                        presets.forEach { preset ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text(
+                                    text = preset.name,
+                                    fontSize = 11.sp,
+                                    color = colors.text.info,
+                                    modifier = Modifier
+                                        .clickable { onApplyPreset(preset) }
+                                        .weight(1f)
+                                        .padding(vertical = 4.dp, horizontal = 4.dp),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text = "x",
+                                    fontSize = 10.sp,
+                                    color = colors.text.normal.copy(alpha = 0.4f),
+                                    modifier = Modifier
+                                        .clickable { onDeletePreset(preset) }
+                                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                                )
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(4.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .background(colors.text.normal.copy(alpha = 0.06f), RoundedCornerShape(4.dp))
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                        ) {
+                            if (newPresetName.isEmpty()) {
+                                Text("Preset name...", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.3f))
+                            }
+                            androidx.compose.foundation.text.BasicTextField(
+                                value = newPresetName,
+                                onValueChange = onNewPresetNameChange,
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontSize = 10.sp,
+                                    color = colors.text.normal,
+                                ),
+                                singleLine = true,
+                            )
+                        }
+                        Text(
+                            text = "Save",
+                            fontSize = 10.sp,
+                            color = if (newPresetName.isNotBlank()) colors.text.info else colors.text.normal.copy(alpha = 0.3f),
+                            modifier = Modifier
+                                .clickable(enabled = newPresetName.isNotBlank(), onClick = onSavePreset)
+                                .padding(horizontal = 6.dp, vertical = 4.dp),
+                        )
+                    }
+                }
+            }
         }
     }
 }

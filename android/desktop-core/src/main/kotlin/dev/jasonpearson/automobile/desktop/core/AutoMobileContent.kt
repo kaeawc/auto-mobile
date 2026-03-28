@@ -676,12 +676,46 @@ fun AutoMobileContent(
       leftPaneContent = {
           // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
           Column(Modifier.fillMaxSize().padding(8.dp)) {
+              // Data source mode toggle
+              Text("Data Source", color = colors.text.normal, fontSize = 14.sp)
+              Spacer(Modifier.height(4.dp))
+              Row(verticalAlignment = Alignment.CenterVertically) {
+                  val realSelected = dataSourceMode == DataSourceMode.Real
+                  Text(
+                      text = "Real",
+                      color = if (realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+                      fontSize = 12.sp,
+                      modifier = Modifier.clickable { dataSourceMode = DataSourceMode.Real }
+                          .padding(end = 8.dp),
+                  )
+                  Text(
+                      text = "Fake",
+                      color = if (!realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+                      fontSize = 12.sp,
+                      modifier = Modifier.clickable { dataSourceMode = DataSourceMode.Fake }
+                          .padding(end = 8.dp),
+                  )
+              }
+              Spacer(Modifier.height(12.dp))
+
+              // MCP connection status & controls
               Text("MCP Connection", color = colors.text.normal, fontSize = 14.sp)
               Spacer(Modifier.height(8.dp))
               connectedMcpProcess?.let { process ->
                   Text("Connected: ${process.name}", color = colors.text.info, fontSize = 12.sp)
                   Text("PID: ${process.pid}", color = colors.text.normal.copy(alpha = 0.7f), fontSize = 11.sp)
-              } ?: Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
+              } ?: run {
+                  Text("Not connected", color = colors.text.warning, fontSize = 12.sp)
+                  if (dataSourceMode == DataSourceMode.Real) {
+                      Spacer(Modifier.height(4.dp))
+                      Text(
+                          text = "[Connect]",
+                          color = colors.text.info,
+                          fontSize = 12.sp,
+                          modifier = Modifier.clickable { isDevicePanelExpanded = true },
+                      )
+                  }
+              }
               Spacer(Modifier.height(16.dp))
               Text("Devices", color = colors.text.normal, fontSize = 14.sp)
               Spacer(Modifier.height(8.dp))
@@ -692,7 +726,10 @@ fun AutoMobileContent(
                       text = "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
                       color = if (isActive) colors.text.info else colors.text.normal,
                       fontSize = 12.sp,
-                      modifier = Modifier.clickable { /* device selection handled by existing code */ },
+                      modifier = Modifier.clickable {
+                          activeDeviceId = device.id
+                          isDevicePanelExpanded = false
+                      },
                   )
               }
           }

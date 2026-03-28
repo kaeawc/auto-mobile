@@ -28,6 +28,8 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -75,6 +77,16 @@ fun ThreePaneShell(
     Column(modifier.fillMaxSize()) {
         // macOS title bar spacer
         TitleBarSpacer()
+
+        // Pane toggle toolbar
+        PaneToggleToolbar(
+            showLeftPane = showLeftPane,
+            onToggleLeftPane = onToggleLeftPane,
+            showRightPane = showRightPane,
+            onToggleRightPane = onToggleRightPane,
+            showBottomPane = showBottomPane,
+            onToggleBottomPane = onToggleBottomPane,
+        )
 
         // Main 3-pane area
         Row(Modifier.weight(1f)) {
@@ -265,4 +277,61 @@ private fun StatusBarStub(
             )
         }
     }
+}
+
+/** Toolbar row with pane toggle buttons (Xcode-style). */
+@Composable
+private fun PaneToggleToolbar(
+    showLeftPane: Boolean,
+    onToggleLeftPane: () -> Unit,
+    showRightPane: Boolean,
+    onToggleRightPane: () -> Unit,
+    showBottomPane: Boolean,
+    onToggleBottomPane: () -> Unit,
+) {
+    val colors = SharedTheme.globalColors
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .height(28.dp)
+            .background(colors.panelBackground)
+            .padding(horizontal = 8.dp),
+        horizontalArrangement = Arrangement.End,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        PaneToggleButton(
+            label = "Left",
+            isActive = showLeftPane,
+            onClick = onToggleLeftPane,
+        )
+        Spacer(Modifier.width(4.dp))
+        PaneToggleButton(
+            label = "Bottom",
+            isActive = showBottomPane,
+            onClick = onToggleBottomPane,
+        )
+        Spacer(Modifier.width(4.dp))
+        PaneToggleButton(
+            label = "Right",
+            isActive = showRightPane,
+            onClick = onToggleRightPane,
+        )
+    }
+}
+
+@Composable
+private fun PaneToggleButton(
+    label: String,
+    isActive: Boolean,
+    onClick: () -> Unit,
+) {
+    val colors = SharedTheme.globalColors
+    Text(
+        text = label,
+        fontSize = 10.sp,
+        color = if (isActive) colors.text.info else colors.text.normal.copy(alpha = 0.4f),
+        modifier = Modifier
+            .clickable(onClick = onClick)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    )
 }

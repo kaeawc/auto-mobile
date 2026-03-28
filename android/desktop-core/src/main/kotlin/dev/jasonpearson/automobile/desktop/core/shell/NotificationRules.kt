@@ -72,6 +72,7 @@ data class NotificationRule(
  */
 data class ToastNotification(
     val id: String,
+    val ruleId: String,
     val ruleName: String,
     val message: String,
     val severity: NotificationSeverity,
@@ -122,6 +123,12 @@ fun ToastStack(
     onDismiss: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Dismiss overflow toasts immediately so they are not silently dropped
+    val overflow = if (toasts.size > 5) toasts.dropLast(5) else emptyList<ToastNotification>()
+    val overflowIds = overflow.map { it.id }
+    LaunchedEffect(overflowIds) {
+        overflow.forEach { onDismiss(it.id) }
+    }
     Column(
         modifier = modifier.padding(12.dp),
         verticalArrangement = Arrangement.spacedBy(6.dp),

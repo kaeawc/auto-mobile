@@ -726,14 +726,15 @@ fun AutoMobileContent(
       notificationRules.forEach { rule ->
           val msg = evaluateRule(rule, metrics)
           if (msg != null) {
-              // Avoid duplicate toasts for same rule within 10 seconds
+              // Avoid duplicate toasts for same rule within 10 seconds (keyed on stable rule.id)
               val recentlyFired = toastNotifications.any {
-                  it.ruleName == rule.name && (System.currentTimeMillis() - it.timestampMs) < 10_000
+                  it.ruleId == rule.id && (System.currentTimeMillis() - it.timestampMs) < 10_000
               }
               if (!recentlyFired) {
                   toastNotifications.add(
                       ToastNotification(
                           id = "toast_${System.currentTimeMillis()}_${rule.id}",
+                          ruleId = rule.id,
                           ruleName = rule.name,
                           message = msg,
                           severity = rule.severity,

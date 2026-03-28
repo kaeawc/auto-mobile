@@ -685,14 +685,24 @@ fun AutoMobileContent(
                       text = "Real",
                       color = if (realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
                       fontSize = 12.sp,
-                      modifier = Modifier.clickable { dataSourceMode = DataSourceMode.Real }
+                      modifier = Modifier.clickable {
+                              dataSourceMode = DataSourceMode.Real
+                              activeDeviceId = null
+                              isDevicePanelExpanded = true
+                          }
                           .padding(end = 8.dp),
                   )
                   Text(
                       text = "Fake",
                       color = if (!realSelected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
                       fontSize = 12.sp,
-                      modifier = Modifier.clickable { dataSourceMode = DataSourceMode.Fake }
+                      modifier = Modifier.clickable {
+                              dataSourceMode = DataSourceMode.Fake
+                              if (mockBootedDevices.isNotEmpty()) {
+                                  activeDeviceId = mockBootedDevices.first().id
+                                  isDevicePanelExpanded = false
+                              }
+                          }
                           .padding(end = 8.dp),
                   )
               }
@@ -732,6 +742,14 @@ fun AutoMobileContent(
                       },
                   )
               }
+              Spacer(Modifier.weight(1f))
+              Text(
+                  text = "\u2699 Settings",
+                  color = colors.text.normal,
+                  fontSize = 12.sp,
+                  modifier = Modifier.clickable { showSettings = true }
+                      .padding(vertical = 4.dp),
+              )
           }
       },
       rightPaneContent = {

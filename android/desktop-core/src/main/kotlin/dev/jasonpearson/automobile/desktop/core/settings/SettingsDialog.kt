@@ -48,6 +48,7 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -88,6 +89,27 @@ fun SettingsPanel(
       }
     }
 
+    Spacer(Modifier.height(24.dp))
+
+    // === Appearance ===
+    SectionHeader("Appearance")
+    Text(
+        "Choose the app color theme.",
+        fontSize = 12.sp,
+        color = colors.text.normal.copy(alpha = 0.6f),
+    )
+    Spacer(Modifier.height(8.dp))
+
+    var themeMode by remember { mutableStateOf(settings.themeMode) }
+    IdeSelector(
+        label = "Theme",
+        value = themeMode,
+        options = listOf("dark" to "Dark", "light" to "Light", "system" to "System"),
+        onSelected = { themeMode = it; settings.themeMode = it },
+    )
+
+    Spacer(Modifier.height(24.dp))
+    HorizontalDivider(color = colors.text.normal.copy(alpha = 0.1f))
     Spacer(Modifier.height(24.dp))
 
     // === IDE Preferences ===
@@ -442,7 +464,7 @@ private fun readConfigBoolean(config: JsonObject?, key: String, fallback: Boolea
 
 @Composable
 private fun SectionHeader(title: String) {
-  Text(title, fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+  Text(title, style = DesktopTypography.heading, fontWeight = FontWeight.SemiBold)
   Spacer(Modifier.height(8.dp))
 }
 

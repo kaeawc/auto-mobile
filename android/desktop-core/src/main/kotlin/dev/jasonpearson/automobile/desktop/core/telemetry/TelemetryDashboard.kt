@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -43,7 +44,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 
+import androidx.compose.material3.Icon
+import androidx.compose.ui.graphics.vector.ImageVector
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
+import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import kotlinx.coroutines.delay
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
@@ -61,18 +65,18 @@ private const val DETAIL_PANEL_WIDTH_MAX = 600
 
 private const val MAX_EVENTS = 1000
 
-private enum class CategoryFilter(val label: String, val icon: String) {
-    All("All", "\uD83D\uDCE1"),       // 📡
-    Network("Network", "\uD83C\uDF10"), // 🌐
-    Navigation("Nav", "\uD83E\uDDED"),  // 🧭
-    Logs("Logs", "\uD83D\uDCDD"),      // 📝
-    Os("OS", "\u2699\uFE0F"),           // ⚙️
-    Custom("Custom", "\uD83C\uDFF7\uFE0F"), // 🏷️
-    Failures("Failures", "\uD83D\uDCA5"), // 💥 (crashes + ANRs + non-fatals)
-    Storage("Storage", "\uD83D\uDDC4\uFE0F"), // 🗄️
-    Layout("Layout", "\uD83C\uDFD7\uFE0F"), // 🏗️
-    Performance("Perf", "\uD83D\uDCCA"),     // 📊
-    ToolCalls("Tools", "\uD83D\uDD27"),   // 🔧
+private enum class CategoryFilter(val label: String, val icon: ImageVector) {
+    All("All", AppIcons.All),
+    Network("Network", AppIcons.Network),
+    Navigation("Nav", AppIcons.Navigation),
+    Logs("Logs", AppIcons.Logs),
+    Os("OS", AppIcons.Os),
+    Custom("Custom", AppIcons.Custom),
+    Failures("Failures", AppIcons.Failures),
+    Storage("Storage", AppIcons.StorageCategory),
+    Layout("Layout", AppIcons.Layout),
+    Performance("Perf", AppIcons.Performance),
+    ToolCalls("Tools", AppIcons.ToolCalls),
 }
 
 /**
@@ -241,7 +245,12 @@ fun TelemetryDashboard(
                         .pointerHoverIcon(PointerIcon.Hand)
                         .padding(horizontal = 6.dp, vertical = 4.dp),
                 ) {
-                    Text(sev.icon, fontSize = 11.sp)
+                    Icon(
+                        sev.icon,
+                        contentDescription = sev.label,
+                        modifier = Modifier.size(13.dp),
+                        tint = Color(sev.color),
+                    )
                 }
             }
 
@@ -261,7 +270,7 @@ fun TelemetryDashboard(
                     .clickable { events.clear(); selectedEvent = null }
                     .then(buttonModifier),
             ) {
-                Text("\uD83D\uDDD1", fontSize = 13.sp) // 🗑
+                Icon(AppIcons.Delete, contentDescription = "Clear", modifier = Modifier.size(14.dp), tint = colors.text.normal)
             }
 
             // Pause / Resume
@@ -281,7 +290,12 @@ fun TelemetryDashboard(
                     .then(buttonModifier)
                     .then(if (isPaused) Modifier.background(Color(0xFFFFA94D).copy(alpha = 0.15f), RoundedCornerShape(4.dp)) else Modifier),
             ) {
-                Text(if (isPaused) "▶" else "⏸", fontSize = 13.sp)
+                Icon(
+                    if (isPaused) AppIcons.Play else AppIcons.Pause,
+                    contentDescription = if (isPaused) "Resume" else "Pause",
+                    modifier = Modifier.size(14.dp),
+                    tint = colors.text.normal,
+                )
             }
 
             // Restart (clear + unpause + scroll to bottom)
@@ -292,7 +306,7 @@ fun TelemetryDashboard(
                     }
                     .then(buttonModifier),
             ) {
-                Text("↻", fontSize = 13.sp)
+                Icon(AppIcons.Refresh, contentDescription = "Restart", modifier = Modifier.size(14.dp), tint = colors.text.normal)
             }
 
             // Scroll to latest (bottom) + re-enable auto-scroll
@@ -308,7 +322,7 @@ fun TelemetryDashboard(
                     }
                     .then(buttonModifier),
             ) {
-                Text("↓", fontSize = 13.sp)
+                Icon(AppIcons.ScrollDown, contentDescription = "Scroll to bottom", modifier = Modifier.size(14.dp), tint = colors.text.normal)
             }
         }
 
@@ -350,7 +364,12 @@ fun TelemetryDashboard(
                             horizontalArrangement = Arrangement.spacedBy(4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Text(filter.icon, fontSize = 11.sp)
+                            Icon(
+                                filter.icon,
+                                contentDescription = filter.label,
+                                modifier = Modifier.size(13.dp),
+                                tint = if (isSelected) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                            )
                             if (showText) {
                                 Text(
                                     filter.label,
@@ -527,26 +546,28 @@ private fun TelemetryEventRow(
         Spacer(Modifier.width(6.dp))
 
         // Category icon
-        Text(
-            when (event) {
-                is TelemetryDisplayEvent.Network -> "\uD83C\uDF10"  // 🌐
-                is TelemetryDisplayEvent.Navigation -> "\uD83E\uDDED" // 🧭
-                is TelemetryDisplayEvent.Log -> "\uD83D\uDCDD"      // 📝
-                is TelemetryDisplayEvent.Os -> "\u2699\uFE0F"       // ⚙️
-                is TelemetryDisplayEvent.Custom -> "\uD83C\uDFF7\uFE0F" // 🏷️
+        Icon(
+            imageVector = when (event) {
+                is TelemetryDisplayEvent.Network -> AppIcons.Network
+                is TelemetryDisplayEvent.Navigation -> AppIcons.Navigation
+                is TelemetryDisplayEvent.Log -> AppIcons.Logs
+                is TelemetryDisplayEvent.Os -> AppIcons.Os
+                is TelemetryDisplayEvent.Custom -> AppIcons.Custom
                 is TelemetryDisplayEvent.Failure -> when (event.type) {
-                    "crash" -> "\uD83D\uDCA5"  // 💥
-                    "anr" -> "\u231B"           // ⌛
-                    else -> "\u26A0\uFE0F"     // ⚠️
+                    "crash" -> AppIcons.Crash
+                    "anr" -> AppIcons.Anr
+                    else -> AppIcons.NonFatal
                 }
-                is TelemetryDisplayEvent.Storage -> "\uD83D\uDDC4\uFE0F" // 🗄️
-                is TelemetryDisplayEvent.Layout -> "\uD83C\uDFD7\uFE0F"  // 🏗️
-                is TelemetryDisplayEvent.Performance -> "\uD83D\uDCCA" // 📊
-                is TelemetryDisplayEvent.Memory -> "\uD83E\uDDE0" // 🧠
-                is TelemetryDisplayEvent.ToolCall -> "\uD83D\uDD27" // 🔧
-                is TelemetryDisplayEvent.Accessibility -> "\u267F" // ♿
+                is TelemetryDisplayEvent.Storage -> AppIcons.StorageCategory
+                is TelemetryDisplayEvent.Layout -> AppIcons.Layout
+                is TelemetryDisplayEvent.Performance -> AppIcons.Performance
+                is TelemetryDisplayEvent.Memory -> AppIcons.Memory
+                is TelemetryDisplayEvent.ToolCall -> AppIcons.ToolCalls
+                is TelemetryDisplayEvent.Accessibility -> AppIcons.Accessibility
             },
-            fontSize = 10.sp,
+            contentDescription = null,
+            modifier = Modifier.size(12.dp),
+            tint = textColor.copy(alpha = 0.7f),
         )
         Spacer(Modifier.width(4.dp))
 

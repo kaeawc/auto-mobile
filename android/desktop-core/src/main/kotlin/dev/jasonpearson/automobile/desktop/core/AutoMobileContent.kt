@@ -58,6 +58,7 @@ import androidx.compose.ui.window.Popup
 import androidx.compose.ui.window.PopupProperties
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
@@ -194,10 +195,10 @@ fun AutoMobileContent(
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
       listOf(
-          HorizontalTab("test_runs", "Test Runs", "🧪"),
-          HorizontalTab("storage", "Storage", "💾"),
-          HorizontalTab("diagnostics", "Diagnostics", "🩺"),
-          HorizontalTab("telemetry", "Telemetry", "📡"),
+          HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
+          HorizontalTab("storage", "Storage", AppIcons.Storage),
+          HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
+          HorizontalTab("telemetry", "Telemetry", AppIcons.Telemetry),
       )
   }
   var selectedHorizontalTabId by remember { mutableStateOf<String?>(null) }

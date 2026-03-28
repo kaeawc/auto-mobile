@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -438,10 +440,10 @@ private fun JsonObject.stringOrNull(key: String): String? =
 /**
  * Severity classification for telemetry events, used for filter toggles.
  */
-enum class EventSeverity(val label: String, val icon: String, val color: Long) {
-    Error("Errors", "\u274C", 0xFFFF6B6B),
-    Warning("Warnings", "\u26A0\uFE0F", 0xFFE0C040),
-    Info("Info", "\u2139\uFE0F", 0xFF74C0FC),
+enum class EventSeverity(val label: String, val icon: ImageVector, val color: Long) {
+    Error("Errors", AppIcons.SeverityError, 0xFFFF6B6B),
+    Warning("Warnings", AppIcons.SeverityWarning, 0xFFE0C040),
+    Info("Info", AppIcons.SeverityInfo, 0xFF74C0FC),
 }
 
 /**

@@ -15,6 +15,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -48,7 +49,7 @@ fun ConnectionStatusIndicator(
             Spacer(modifier = Modifier.width(3.dp))
             Text(
                 text = label,
-                fontSize = 10.sp,
+                style = DesktopTypography.label,
                 color = textColor.copy(alpha = 0.7f),
                 lineHeight = 10.sp,
             )

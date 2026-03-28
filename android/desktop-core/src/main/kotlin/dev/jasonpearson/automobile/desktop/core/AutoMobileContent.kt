@@ -109,7 +109,20 @@ import dev.jasonpearson.automobile.desktop.core.failures.DateRange
 import dev.jasonpearson.automobile.desktop.core.layout.LayoutInspectorDashboard
 import dev.jasonpearson.automobile.desktop.core.performance.PerformanceVerticalPanel
 
+import dev.jasonpearson.automobile.desktop.core.shell.CommandPalette
+import dev.jasonpearson.automobile.desktop.core.shell.CommandRegistry
+import dev.jasonpearson.automobile.desktop.core.shell.GlobalSearchOverlay
+import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
+import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
+import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
@@ -190,6 +203,37 @@ fun AutoMobileContent(
   var showLeftPane by remember { mutableStateOf(true) }
   var showRightPane by remember { mutableStateOf(true) }
   var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
+
+  // Command palette & global search state
+  var showCommandPalette by remember { mutableStateOf(false) }
+  var showGlobalSearch by remember { mutableStateOf(false) }
+
+  // Command registry
+  val commandRegistry = remember {
+      CommandRegistry().apply {
+          registerAll(
+              buildDefaultCommands(
+                  onToggleLeftPane = { showLeftPane = !showLeftPane },
+                  onToggleRightPane = { showRightPane = !showRightPane },
+                  onToggleBottomPane = { showBottomPane = !showBottomPane },
+                  onClearTelemetry = {},
+                  onExportEvents = {},
+                  onSwitchToDarkMode = {},
+                  onSwitchToLightMode = {},
+                  onOpenSettings = { showSettings = true },
+                  onTakeScreenshot = {},
+                  onToggleLiveLayout = {},
+              ),
+          )
+      }
+  }
+
+  // Empty search provider (to be wired to real data sources later)
+  val searchProvider = remember {
+      object : SearchResultProvider {
+          override fun search(query: String): List<SearchResult> = emptyList()
+      }
+  }
 
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
@@ -715,6 +759,22 @@ fun AutoMobileContent(
     return
   }
 
+  Box(
+      modifier = Modifier
+          .fillMaxSize()
+          .onPreviewKeyEvent { event ->
+              if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+              if (event.isMetaPressed && event.isShiftPressed) {
+                  when (event.key) {
+                      Key.P -> { showCommandPalette = true; true }
+                      Key.F -> { showGlobalSearch = true; true }
+                      else -> false
+                  }
+              } else {
+                  false
+              }
+          },
+  ) {
   ThreePaneShell(
       showLeftPane = showLeftPane,
       onToggleLeftPane = { showLeftPane = !showLeftPane },
@@ -935,6 +995,23 @@ fun AutoMobileContent(
           }
       },
   )
+
+  // Command palette overlay
+  if (showCommandPalette) {
+      CommandPalette(
+          registry = commandRegistry,
+          onDismiss = { showCommandPalette = false },
+      )
+  }
+
+  // Global search overlay
+  if (showGlobalSearch) {
+      GlobalSearchOverlay(
+          searchProvider = searchProvider,
+          onDismiss = { showGlobalSearch = false },
+      )
+  }
+  }
 }
 
 @Composable

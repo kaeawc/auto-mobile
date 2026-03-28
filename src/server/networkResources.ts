@@ -122,16 +122,16 @@ export interface TimeSeriesBucket {
 }
 
 function computePercentile(sorted: number[], p: number): number {
-  if (sorted.length === 0) return 0;
+  if (sorted.length === 0) {return 0;}
   const index = (p / 100) * (sorted.length - 1);
   const lower = Math.floor(index);
   const upper = Math.ceil(index);
-  if (lower === upper) return sorted[lower];
+  if (lower === upper) {return sorted[lower];}
   return sorted[lower] + (sorted[upper] - sorted[lower]) * (index - lower);
 }
 
 export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number): TimeSeriesBucket[] {
-  if (events.length === 0) return [];
+  if (events.length === 0) {return [];}
 
   const bucketMs = bucketSeconds * 1000;
   const timestamps = events.map(e => e.timestamp);
@@ -149,7 +149,7 @@ export function bucketEvents(events: NetworkEventWithId[], bucketSeconds: number
   for (const event of events) {
     const key = Math.floor(event.timestamp / bucketMs) * bucketMs;
     const bucket = buckets.get(key);
-    if (bucket) bucket.push(event);
+    if (bucket) {bucket.push(event);}
   }
 
   const result: TimeSeriesBucket[] = [];

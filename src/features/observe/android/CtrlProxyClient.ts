@@ -570,7 +570,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       const { NetworkState } = require("../../../server/NetworkState");
       const state = NetworkState.getInstance();
 
-      // Re-sync mock rules
+      // Re-sync mock rules — use limit (not remaining) so the device-side
+      // store reinitializes fresh counts instead of replaying stale values
       const mocks = state.getMocks();
       if (mocks.size > 0) {
         const rules = Array.from(mocks.values()).map((r: any) => ({
@@ -579,7 +580,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           path: r.path,
           method: r.method,
           limit: r.limit,
-          remaining: r.remaining,
+          remaining: r.limit,
           statusCode: r.statusCode,
           responseHeaders: r.responseHeaders,
           responseBody: r.responseBody,

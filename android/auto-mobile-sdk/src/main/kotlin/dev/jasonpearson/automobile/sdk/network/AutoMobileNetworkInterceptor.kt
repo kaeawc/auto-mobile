@@ -187,13 +187,19 @@ class AutoMobileNetworkInterceptor(
       request: okhttp3.Request,
       rule: NetworkMockRuleStore.MatchedMockRule
   ): Response {
+    val statusCode = rule.statusCode.coerceIn(100, 599)
+    val mediaType = try {
+      rule.contentType.toMediaType()
+    } catch (_: IllegalArgumentException) {
+      "application/octet-stream".toMediaType()
+    }
     val builder =
         Response.Builder()
             .request(request)
             .protocol(Protocol.HTTP_1_1)
-            .code(rule.statusCode)
+            .code(statusCode)
             .message("Mocked by AutoMobile (${rule.mockId})")
-            .body(rule.responseBody.toResponseBody(rule.contentType.toMediaType()))
+            .body(rule.responseBody.toResponseBody(mediaType))
     for ((name, value) in rule.responseHeaders) {
       builder.addHeader(name, value)
     }

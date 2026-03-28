@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
-import { NetworkState, type SimulatedErrorType, type MockRule } from "./NetworkState";
+import { NetworkState, type SimulatedErrorType } from "./NetworkState";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
@@ -64,7 +64,7 @@ const mockNetworkSchema = addDeviceTargetingToSchema(
       .positive()
       .optional()
       .describe("Number of times to serve mock before reverting. Omit for unlimited"),
-    statusCode: z.number().int().optional().describe("Response status code. Default: 200"),
+    statusCode: z.number().int().min(100).max(599).optional().describe("Response status code. Default: 200"),
     responseHeaders: z
       .record(z.string(), z.string())
       .optional()
@@ -108,7 +108,7 @@ const getNetworkGraphSchema = addDeviceTargetingToSchema(
 type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
 function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void {
-  if (device.platform !== "android") return;
+  if (device.platform !== "android") {return;}
   try {
     const client = CtrlProxyClient.getInstance(device);
     const rules = Array.from(state.getMocks().values()).map(r => ({
@@ -132,7 +132,7 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
 }
 
 function syncErrorSimulationToDevice(device: BootedDevice, state: NetworkState): void {
-  if (device.platform !== "android") return;
+  if (device.platform !== "android") {return;}
   try {
     const client = CtrlProxyClient.getInstance(device);
     const sim = state.simulation;
@@ -162,6 +162,11 @@ export function registerNetworkTools(): void {
       }
 
       if (args.simulateErrors !== undefined) {
+        if (device.platform !== "android") {
+          throw new ActionableError(
+            "Network error simulation is only supported on Android devices."
+          );
+        }
         if (args.simulateErrors.cancel) {
           state.cancelSimulation();
         } else {

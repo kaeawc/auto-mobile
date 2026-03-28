@@ -1,5 +1,5 @@
 import { describe, it, expect } from "bun:test";
-import { bucketEvents, type TimeSeriesBucket } from "../../src/server/networkResources";
+import { bucketEvents } from "../../src/server/networkResources";
 import type { NetworkEventWithId } from "../../src/db/networkEventRepository";
 
 function makeEvent(overrides: Partial<NetworkEventWithId> = {}): NetworkEventWithId {

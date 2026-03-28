@@ -781,6 +781,8 @@ fun AutoMobileContent(
                           "test_runs" -> TestDashboard(
                               onNavigateToGraph = { screens ->
                                   testFlowScreens = screens
+                                  isReplaying = true
+                                  currentReplayIndex = 0
                                   showNavigationView = true
                               },
                               dataSourceMode = dataSourceMode,
@@ -881,6 +883,28 @@ fun AutoMobileContent(
                           isDevicePanelExpanded = false
                       },
                   )
+              }
+              // App selector
+              if (installedApps.isNotEmpty()) {
+                  Spacer(Modifier.height(12.dp))
+                  Text(
+                      "App Filter",
+                      color = colors.text.normal,
+                      fontSize = 12.sp,
+                      fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                  )
+                  Spacer(Modifier.height(4.dp))
+                  installedApps.take(10).forEach { app ->
+                      val isSelected = app.packageName == selectedAppId
+                      Text(
+                          text = app.packageName.substringAfterLast('.'),
+                          color = if (isSelected) colors.text.info else colors.text.normal.copy(alpha = 0.7f),
+                          fontSize = 11.sp,
+                          modifier = Modifier
+                              .clickable { selectedAppId = app.packageName }
+                              .padding(vertical = 2.dp),
+                      )
+                  }
               }
               Spacer(Modifier.weight(1f))
               Text(

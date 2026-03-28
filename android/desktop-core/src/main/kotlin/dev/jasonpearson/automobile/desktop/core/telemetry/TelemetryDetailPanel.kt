@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -21,6 +22,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
@@ -41,8 +43,13 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.ImageBitmap
 
 import dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader
+import dev.jasonpearson.automobile.desktop.core.shell.InspectorTabBar
+import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonNull
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.buildJsonArray
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.intOrNull
 import kotlinx.serialization.json.jsonObject
@@ -73,6 +80,17 @@ fun TelemetryDetailPanel(
     val isLayoutWithHierarchy = event is TelemetryDisplayEvent.Layout &&
         event.subType == "hierarchy_change" && event.detailsJson != null
 
+    val focusedBorderColor = SharedTheme.globalColors.outlines.focused
+
+    // Toast state for share-to-clipboard confirmation
+    var showCopiedToast by remember { mutableStateOf(false) }
+    LaunchedEffect(showCopiedToast) {
+        if (showCopiedToast) {
+            kotlinx.coroutines.delay(1500)
+            showCopiedToast = false
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxHeight()
@@ -84,7 +102,6 @@ fun TelemetryDetailPanel(
                 .verticalScroll(rememberScrollState())
                 .padding(12.dp),
         ) {
-            // Header
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -97,25 +114,42 @@ fun TelemetryDetailPanel(
                     color = textColor,
                     modifier = Modifier.weight(1f),
                 )
-                // Copy as Markdown button
-                Box(
-                    modifier = Modifier
-                        .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
-                        .clickable { copyEventAsMarkdown(event) }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text("MD", fontSize = 9.sp, color = textColor.copy(alpha = 0.6f))
+                    HeaderIconButton(
+                        icon = "\u2197",
+                        textColor = textColor,
+                        focusedBorderColor = focusedBorderColor,
+                        onClick = {
+                            val jsonStr = serializeEventToJson(event)
+                            val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                            clipboard.setContents(java.awt.datatransfer.StringSelection(jsonStr), null)
+                            showCopiedToast = true
+                        },
+                    )
+                    HeaderIconButton(
+                        icon = "\u2715",
+                        textColor = textColor,
+                        focusedBorderColor = focusedBorderColor,
+                        onClick = onClose,
+                    )
                 }
-                Spacer(Modifier.width(4.dp))
+            }
+
+            if (showCopiedToast) {
                 Box(
                     modifier = Modifier
-                        .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
-                        .clickable { onClose() }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                        .padding(top = 4.dp)
+                        .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                        .padding(horizontal = 8.dp, vertical = 2.dp),
                 ) {
-                    Text("\u2715", fontSize = 11.sp, color = textColor.copy(alpha = 0.6f)) // ✕
+                    Text(
+                        "Copied to clipboard",
+                        fontSize = 9.sp,
+                        color = textColor.copy(alpha = 0.6f),
+                    )
                 }
             }
 
@@ -127,14 +161,14 @@ fun TelemetryDetailPanel(
 
             Spacer(Modifier.height(8.dp))
 
-            // Type-specific detail
+            // Type-specific detail — Network and Failure use tabbed sub-views
             when (event) {
-                is TelemetryDisplayEvent.Network -> NetworkDetail(event, textColor)
+                is TelemetryDisplayEvent.Network -> NetworkTabbedDetail(event, textColor, focusedBorderColor)
+                is TelemetryDisplayEvent.Failure -> FailureTabbedDetail(event, textColor, onOpenSource, focusedBorderColor)
                 is TelemetryDisplayEvent.Navigation -> NavigationDetail(event, textColor, screenshotLoader)
                 is TelemetryDisplayEvent.Log -> LogDetail(event, textColor)
                 is TelemetryDisplayEvent.Os -> OsDetail(event, textColor)
                 is TelemetryDisplayEvent.Custom -> CustomDetail(event, textColor)
-                is TelemetryDisplayEvent.Failure -> FailureDetail(event, textColor, onOpenSource)
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
                 is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
@@ -213,91 +247,193 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
     }
 }
 
+private fun HeaderIconButton(
+    icon: String,
+    textColor: Color,
+    focusedBorderColor: Color,
+    onClick: () -> Unit,
+) {
+    var isFocused by remember { mutableStateOf(false) }
+    Box(
+        modifier = Modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .then(
+                if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+                else Modifier
+            )
+            .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
+            .clickable { onClick() }
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 6.dp, vertical = 2.dp),
+    ) {
+        Text(icon, fontSize = 11.sp, color = textColor.copy(alpha = 0.6f))
+    }
+}
+
+/**
+ * Serialize a [TelemetryDisplayEvent] to a compact JSON string for clipboard sharing.
+ */
+private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
+    val obj = buildJsonObject {
+        put("timestamp", JsonPrimitive(event.timestamp))
+        when (event) {
+            is TelemetryDisplayEvent.Network -> {
+                put("type", JsonPrimitive("network"))
+                put("method", JsonPrimitive(event.method))
+                put("statusCode", JsonPrimitive(event.statusCode))
+                put("url", JsonPrimitive(event.url))
+                put("durationMs", JsonPrimitive(event.durationMs))
+                event.host?.let { put("host", JsonPrimitive(it)) }
+                event.path?.let { put("path", JsonPrimitive(it)) }
+                event.error?.let { put("error", JsonPrimitive(it)) }
+                event.requestBody?.let { put("requestBody", JsonPrimitive(it)) }
+                event.responseBody?.let { put("responseBody", JsonPrimitive(it)) }
+                event.contentType?.let { put("contentType", JsonPrimitive(it)) }
+                event.requestHeaders?.let { headers ->
+                    put("requestHeaders", buildJsonObject {
+                        headers.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                    })
+                }
+                event.responseHeaders?.let { headers ->
+                    put("responseHeaders", buildJsonObject {
+                        headers.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                    })
+                }
+            }
+            is TelemetryDisplayEvent.Failure -> {
+                put("type", JsonPrimitive(event.type))
+                put("severity", JsonPrimitive(event.severity))
+                put("title", JsonPrimitive(event.title))
+                put("occurrenceId", JsonPrimitive(event.occurrenceId))
+                event.exceptionType?.let { put("exceptionType", JsonPrimitive(it)) }
+                event.screen?.let { put("screen", JsonPrimitive(it)) }
+                event.stackTrace?.let { frames ->
+                    put("stackTrace", buildJsonArray {
+                        frames.forEach { f ->
+                            add(buildJsonObject {
+                                put("className", JsonPrimitive(f.className))
+                                put("methodName", JsonPrimitive(f.methodName))
+                                f.fileName?.let { put("fileName", JsonPrimitive(it)) }
+                                f.lineNumber?.let { put("lineNumber", JsonPrimitive(it)) }
+                                put("isAppCode", JsonPrimitive(f.isAppCode))
+                            })
+                        }
+                    })
+                }
+            }
+            is TelemetryDisplayEvent.Log -> {
+                put("type", JsonPrimitive("log"))
+                put("level", JsonPrimitive(event.level))
+                put("tag", JsonPrimitive(event.tag))
+                put("message", JsonPrimitive(event.message))
+            }
+            is TelemetryDisplayEvent.Navigation -> {
+                put("type", JsonPrimitive("navigation"))
+                put("destination", JsonPrimitive(event.destination))
+                event.source?.let { put("source", JsonPrimitive(it)) }
+                event.triggeringInteraction?.let { put("triggeringInteraction", JsonPrimitive(it)) }
+            }
+            is TelemetryDisplayEvent.Os -> {
+                put("type", JsonPrimitive("os"))
+                put("category", JsonPrimitive(event.category))
+                put("kind", JsonPrimitive(event.kind))
+            }
+            is TelemetryDisplayEvent.Custom -> {
+                put("type", JsonPrimitive("custom"))
+                put("name", JsonPrimitive(event.name))
+                put("properties", buildJsonObject {
+                    event.properties.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                })
+            }
+            is TelemetryDisplayEvent.Storage -> {
+                put("type", JsonPrimitive("storage"))
+                put("fileName", JsonPrimitive(event.fileName))
+                event.key?.let { put("key", JsonPrimitive(it)) }
+                event.value?.let { put("value", JsonPrimitive(it)) }
+                put("changeType", JsonPrimitive(event.changeType))
+                event.previousValue?.let { put("previousValue", JsonPrimitive(it)) }
+            }
+            is TelemetryDisplayEvent.Layout -> {
+                put("type", JsonPrimitive("layout"))
+                put("subType", JsonPrimitive(event.subType))
+                event.composableName?.let { put("composableName", JsonPrimitive(it)) }
+                event.screenName?.let { put("screenName", JsonPrimitive(it)) }
+                event.durationMs?.let { put("durationMs", JsonPrimitive(it)) }
+            }
+            is TelemetryDisplayEvent.Performance -> {
+                put("type", JsonPrimitive("performance"))
+                put("health", JsonPrimitive(event.health))
+                event.fps?.let { put("fps", JsonPrimitive(it)) }
+                event.frameTimeMs?.let { put("frameTimeMs", JsonPrimitive(it)) }
+                event.cpuUsagePercent?.let { put("cpuUsagePercent", JsonPrimitive(it)) }
+                event.memoryUsageMb?.let { put("memoryUsageMb", JsonPrimitive(it)) }
+            }
+            is TelemetryDisplayEvent.Memory -> {
+                put("type", JsonPrimitive("memory"))
+                put("packageName", JsonPrimitive(event.packageName))
+                put("passed", JsonPrimitive(event.passed))
+            }
+            is TelemetryDisplayEvent.ToolCall -> {
+                put("type", JsonPrimitive("toolcall"))
+                put("toolName", JsonPrimitive(event.toolName))
+                put("durationMs", JsonPrimitive(event.durationMs))
+                put("success", JsonPrimitive(event.success))
+                event.error?.let { put("error", JsonPrimitive(it)) }
+            }
+            is TelemetryDisplayEvent.Accessibility -> {
+                put("type", JsonPrimitive("accessibility"))
+                put("packageName", JsonPrimitive(event.packageName))
+                put("screenId", JsonPrimitive(event.screenId))
+                put("totalViolations", JsonPrimitive(event.totalViolations))
+                put("newViolations", JsonPrimitive(event.newViolations))
+            }
+        }
+    }
+    return Json.encodeToString(JsonObject.serializer(), obj)
+}
+
+/**
+ * Network event detail with tabbed sub-views: Overview, Headers, Request, Response.
+ */
 @Composable
-private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color) {
-    DetailRow("URL", event.url, textColor)
+private fun NetworkTabbedDetail(
+    event: TelemetryDisplayEvent.Network,
+    textColor: Color,
+    focusedBorderColor: Color,
+) {
+    val tabs = listOf("Overview", "Headers", "Request", "Response")
+    var selectedTab by remember(event) { mutableStateOf(0) }
+
+    InspectorTabBar(
+        tabs = tabs,
+        selected = selectedTab,
+        onSelect = { selectedTab = it },
+        textColor = textColor,
+        focusedBorderColor = focusedBorderColor,
+    )
+
+    when (selectedTab) {
+        0 -> NetworkOverviewTab(event, textColor)
+        1 -> NetworkHeadersTab(event, textColor)
+        2 -> NetworkRequestTab(event, textColor)
+        3 -> NetworkResponseTab(event, textColor)
+    }
+}
+
+@Composable
+private fun NetworkOverviewTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
     DetailRow("Method", event.method, textColor)
     DetailRow("Status", "${event.statusCode}", textColor)
+    DetailRow("URL", event.url, textColor)
+    DetailRow("Duration", "${event.durationMs}ms", textColor)
     event.host?.let { DetailRow("Host", it, textColor) }
     event.path?.let { DetailRow("Path", it, textColor) }
-    DetailRow("Duration", "${event.durationMs}ms", textColor)
     event.error?.let { DetailRow("Error", it, textColor) }
 
-    // Request/Response sizes
     val reqSize = (event.requestHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
     val respSize = (event.responseHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
     if (reqSize > 0) DetailRow("Request Size", formatByteSize(reqSize), textColor)
     if (respSize > 0) DetailRow("Response Size", formatByteSize(respSize), textColor)
-
-    // Request Headers — data table with copy button
-    Spacer(Modifier.height(8.dp))
-    val reqHeadersCopy = remember(event.requestHeaders) {
-        event.requestHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
-    }
-    CollapsibleSection(
-        "Request Headers",
-        textColor,
-        defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
-        copyText = reqHeadersCopy,
-    ) {
-        val reqHeaders = event.requestHeaders
-        if (!reqHeaders.isNullOrEmpty()) {
-            HeaderDataTable(reqHeaders, textColor)
-        } else {
-            Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-        }
-    }
-
-    // Request Body — content-type-aware rendering with copy
-    Spacer(Modifier.height(4.dp))
-    CollapsibleSection(
-        "Request Body",
-        textColor,
-        defaultExpanded = !event.requestBody.isNullOrBlank(),
-        copyText = event.requestBody,
-    ) {
-        NetworkBodyContent(
-            body = event.requestBody,
-            contentType = event.requestHeaders?.get("Content-Type"),
-            bodySize = reqSize,
-            textColor = textColor,
-        )
-    }
-
-    // Response Headers — data table with copy
-    Spacer(Modifier.height(4.dp))
-    val respHeadersCopy = remember(event.responseHeaders) {
-        event.responseHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
-    }
-    CollapsibleSection(
-        "Response Headers",
-        textColor,
-        defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
-        copyText = respHeadersCopy,
-    ) {
-        val respHeaders = event.responseHeaders
-        if (!respHeaders.isNullOrEmpty()) {
-            HeaderDataTable(respHeaders, textColor)
-        } else {
-            Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
-        }
-    }
-
-    // Response Body — content-type-aware rendering with copy
-    Spacer(Modifier.height(4.dp))
-    CollapsibleSection(
-        "Response Body",
-        textColor,
-        defaultExpanded = !event.responseBody.isNullOrBlank(),
-        copyText = event.responseBody,
-    ) {
-        NetworkBodyContent(
-            body = event.responseBody,
-            contentType = event.contentType,
-            bodySize = respSize,
-            textColor = textColor,
-        )
-    }
 
     // cURL command
     Spacer(Modifier.height(8.dp))
@@ -306,7 +442,7 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
         MonospaceBlock(curlCommand, textColor)
     }
 
-    // Run button — key on event to reset state when switching events
+    // Run button
     Spacer(Modifier.height(8.dp))
     var replayResult by remember(event) { mutableStateOf<NetworkReplayResult?>(null) }
     var isRunning by remember(event) { mutableStateOf(false) }
@@ -328,7 +464,6 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
         }.start()
     }
 
-    // Replay result
     val result = replayResult
     if (result != null) {
         Spacer(Modifier.height(8.dp))
@@ -362,6 +497,188 @@ private fun NetworkDetail(event: TelemetryDisplayEvent.Network, textColor: Color
 }
 
 @Composable
+private fun NetworkHeadersTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
+    val reqHeadersCopy = remember(event.requestHeaders) {
+        event.requestHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
+    CollapsibleSection(
+        "Request Headers",
+        textColor,
+        defaultExpanded = !event.requestHeaders.isNullOrEmpty(),
+        copyText = reqHeadersCopy,
+    ) {
+        val reqHeaders = event.requestHeaders
+        if (!reqHeaders.isNullOrEmpty()) {
+            HeaderDataTable(reqHeaders, textColor)
+        } else {
+            Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
+        }
+    }
+
+    Spacer(Modifier.height(8.dp))
+
+    val respHeadersCopy = remember(event.responseHeaders) {
+        event.responseHeaders?.entries?.joinToString("\n") { "${it.key}: ${it.value}" }
+    }
+    CollapsibleSection(
+        "Response Headers",
+        textColor,
+        defaultExpanded = !event.responseHeaders.isNullOrEmpty(),
+        copyText = respHeadersCopy,
+    ) {
+        val respHeaders = event.responseHeaders
+        if (!respHeaders.isNullOrEmpty()) {
+            HeaderDataTable(respHeaders, textColor)
+        } else {
+            Text("No headers captured", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
+        }
+    }
+}
+
+@Composable
+private fun NetworkRequestTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
+    val reqSize = (event.requestHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
+    CollapsibleSection(
+        "Request Body",
+        textColor,
+        defaultExpanded = !event.requestBody.isNullOrBlank(),
+        copyText = event.requestBody,
+    ) {
+        NetworkBodyContent(
+            body = event.requestBody,
+            contentType = event.requestHeaders?.get("Content-Type"),
+            bodySize = reqSize,
+            textColor = textColor,
+        )
+    }
+}
+
+@Composable
+private fun NetworkResponseTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
+    val respSize = (event.responseHeaders?.get("Content-Length")?.toLongOrNull()) ?: -1
+    CollapsibleSection(
+        "Response Body",
+        textColor,
+        defaultExpanded = !event.responseBody.isNullOrBlank(),
+        copyText = event.responseBody,
+    ) {
+        NetworkBodyContent(
+            body = event.responseBody,
+            contentType = event.contentType,
+            bodySize = respSize,
+            textColor = textColor,
+        )
+    }
+}
+
+/**
+ * Failure event detail with tabbed sub-views: Summary and Stack Trace.
+ */
+@Composable
+private fun FailureTabbedDetail(
+    event: TelemetryDisplayEvent.Failure,
+    textColor: Color,
+    onOpenSource: ((String, Int, String) -> Unit)?,
+    focusedBorderColor: Color,
+) {
+    val tabs = listOf("Summary", "Stack Trace")
+    var selectedTab by remember(event) { mutableStateOf(0) }
+
+    InspectorTabBar(
+        tabs = tabs,
+        selected = selectedTab,
+        onSelect = { selectedTab = it },
+        textColor = textColor,
+        focusedBorderColor = focusedBorderColor,
+    )
+
+    when (selectedTab) {
+        0 -> FailureSummaryTab(event, textColor)
+        1 -> FailureStackTraceTab(event, textColor, onOpenSource)
+    }
+}
+
+@Composable
+private fun FailureSummaryTab(event: TelemetryDisplayEvent.Failure, textColor: Color) {
+    val severityColor = when (event.severity) {
+        "critical" -> Color(0xFFFF4040)
+        "high" -> Color(0xFFFF6B6B)
+        "medium" -> Color(0xFFE0C040)
+        else -> textColor.copy(alpha = 0.7f)
+    }
+
+    Row(
+        modifier = Modifier.padding(vertical = 2.dp),
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .background(severityColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
+                .padding(horizontal = 6.dp, vertical = 1.dp),
+        ) {
+            Text(
+                event.severity.uppercase(),
+                fontSize = 9.sp,
+                fontWeight = FontWeight.Bold,
+                color = severityColor,
+            )
+        }
+    }
+
+    DetailRow("Type", event.type, textColor)
+    DetailRow("Title", event.title, textColor)
+    event.exceptionType?.let { DetailRow("Exception", it, textColor) }
+    event.screen?.let { DetailRow("Screen", it, textColor) }
+    DetailRow("Occurrence ID", event.occurrenceId, textColor)
+}
+
+@Composable
+private fun FailureStackTraceTab(
+    event: TelemetryDisplayEvent.Failure,
+    textColor: Color,
+    onOpenSource: ((String, Int, String) -> Unit)?,
+) {
+    val frames = event.stackTrace
+    if (frames.isNullOrEmpty()) {
+        Text("No stack trace available", fontSize = 9.sp, color = textColor.copy(alpha = 0.35f))
+        return
+    }
+
+    for (frame in frames) {
+        val location = buildString {
+            append(frame.fileName ?: frame.className.substringAfterLast('.'))
+            if (frame.lineNumber != null) append(":${frame.lineNumber}")
+        }
+        val frameText = "at ${frame.className}.${frame.methodName}($location)"
+
+        val fName = frame.fileName
+        val fLine = frame.lineNumber
+        if (frame.isAppCode && onOpenSource != null && fName != null && fLine != null) {
+            Text(
+                frameText,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                fontWeight = FontWeight.SemiBold,
+                color = textColor.copy(alpha = 0.9f),
+                modifier = Modifier
+                    .clickable { onOpenSource(fName, fLine, frame.className) }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(vertical = 1.dp),
+            )
+        } else {
+            Text(
+                frameText,
+                fontSize = 9.sp,
+                fontFamily = FontFamily.Monospace,
+                color = textColor.copy(alpha = 0.4f),
+                modifier = Modifier.padding(vertical = 1.dp),
+            )
+        }
+    }
+}
+
+@Composable
 private fun CollapsibleSection(
     title: String,
     textColor: Color,
@@ -369,10 +686,17 @@ private fun CollapsibleSection(
     copyText: String? = null,
     content: @Composable () -> Unit,
 ) {
+    val focusedBorderColor = SharedTheme.globalColors.outlines.focused
     var expanded by remember { mutableStateOf(defaultExpanded) }
+    var isFocused by remember { mutableStateOf(false) }
     Row(
         modifier = Modifier
             .fillMaxWidth()
+            .onFocusChanged { isFocused = it.isFocused }
+            .then(
+                if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+                else Modifier
+            )
             .clickable { expanded = !expanded }
             .pointerHoverIcon(PointerIcon.Hand)
             .padding(vertical = 2.dp),
@@ -392,8 +716,14 @@ private fun CollapsibleSection(
             modifier = Modifier.weight(1f),
         )
         if (copyText != null && expanded) {
+            var copyIsFocused by remember { mutableStateOf(false) }
             Box(
                 modifier = Modifier
+                    .onFocusChanged { copyIsFocused = it.isFocused }
+                    .then(
+                        if (copyIsFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+                        else Modifier
+                    )
                     .clickable {
                         val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
                         clipboard.setContents(java.awt.datatransfer.StringSelection(copyText), null)
@@ -401,7 +731,7 @@ private fun CollapsibleSection(
                     .pointerHoverIcon(PointerIcon.Hand)
                     .padding(4.dp),
             ) {
-                Text("\uD83D\uDCCB", fontSize = 10.sp) // 📋
+                Text("\uD83D\uDCCB", fontSize = 10.sp) // clipboard icon
             }
         }
     }
@@ -554,8 +884,15 @@ private fun ActionButton(
     enabled: Boolean = true,
     onClick: () -> Unit,
 ) {
+    val focusedBorderColor = SharedTheme.globalColors.outlines.focused
+    var isFocused by remember { mutableStateOf(false) }
     Box(
         modifier = Modifier
+            .onFocusChanged { isFocused = it.isFocused }
+            .then(
+                if (isFocused) Modifier.border(2.dp, focusedBorderColor, RoundedCornerShape(4.dp))
+                else Modifier
+            )
             .background(
                 if (enabled) textColor.copy(alpha = 0.12f) else textColor.copy(alpha = 0.05f),
                 RoundedCornerShape(4.dp),
@@ -665,89 +1002,6 @@ private fun OsDetail(event: TelemetryDisplayEvent.Os, textColor: Color) {
 private fun CustomDetail(event: TelemetryDisplayEvent.Custom, textColor: Color) {
     DetailRow("Name", event.name, textColor)
     event.properties.forEach { (k, v) -> DetailRow(k, v, textColor) }
-}
-
-@Composable
-private fun FailureDetail(event: TelemetryDisplayEvent.Failure, textColor: Color, onOpenSource: ((String, Int, String) -> Unit)?) {
-    val severityColor = when (event.severity) {
-        "critical" -> Color(0xFFFF4040)
-        "high" -> Color(0xFFFF6B6B)
-        "medium" -> Color(0xFFE0C040)
-        else -> textColor.copy(alpha = 0.7f)
-    }
-
-    Row(
-        modifier = Modifier.padding(vertical = 2.dp),
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Box(
-            modifier = Modifier
-                .background(severityColor.copy(alpha = 0.2f), RoundedCornerShape(3.dp))
-                .padding(horizontal = 6.dp, vertical = 1.dp),
-        ) {
-            Text(
-                event.severity.uppercase(),
-                fontSize = 9.sp,
-                fontWeight = FontWeight.Bold,
-                color = severityColor,
-            )
-        }
-    }
-
-    DetailRow("Title", event.title, textColor)
-    event.exceptionType?.let { DetailRow("Exception", it, textColor) }
-    event.screen?.let { DetailRow("Screen", it, textColor) }
-    DetailRow("Occurrence ID", event.occurrenceId, textColor)
-
-    // Stack trace
-    val frames = event.stackTrace
-    if (!frames.isNullOrEmpty()) {
-        Spacer(Modifier.height(8.dp))
-        Text(
-            "Stack Trace",
-            fontSize = 10.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = textColor.copy(alpha = 0.7f),
-        )
-        Spacer(Modifier.height(4.dp))
-
-        for (frame in frames) {
-            val location = buildString {
-                append(frame.fileName ?: frame.className.substringAfterLast('.'))
-                if (frame.lineNumber != null) append(":${frame.lineNumber}")
-            }
-            val frameText = "at ${frame.className}.${frame.methodName}($location)"
-
-            val fName = frame.fileName
-            val fLine = frame.lineNumber
-            if (frame.isAppCode && onOpenSource != null && fName != null && fLine != null) {
-                // Clickable app code frame
-                Text(
-                    frameText,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    fontWeight = FontWeight.SemiBold,
-                    color = textColor.copy(alpha = 0.9f),
-                    modifier = Modifier
-                        .clickable {
-                            onOpenSource(fName, fLine, frame.className)
-                        }
-                        .pointerHoverIcon(PointerIcon.Hand)
-                        .padding(vertical = 1.dp),
-                )
-            } else {
-                // Non-clickable library/platform frame
-                Text(
-                    frameText,
-                    fontSize = 9.sp,
-                    fontFamily = FontFamily.Monospace,
-                    color = textColor.copy(alpha = 0.4f),
-                    modifier = Modifier.padding(vertical = 1.dp),
-                )
-            }
-        }
-    }
 }
 
 @Composable

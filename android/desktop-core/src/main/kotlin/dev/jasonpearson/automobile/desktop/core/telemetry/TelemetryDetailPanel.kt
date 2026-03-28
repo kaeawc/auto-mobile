@@ -291,12 +291,20 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
                 event.contentType?.let { put("contentType", JsonPrimitive(it)) }
                 event.requestHeaders?.let { headers ->
                     put("requestHeaders", buildJsonObject {
-                        headers.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                        headers.forEach { (k, v) ->
+                            val redacted = if (k.equals("Authorization", ignoreCase = true) ||
+                                k.equals("Cookie", ignoreCase = true) ||
+                                k.equals("Set-Cookie", ignoreCase = true)) "[REDACTED]" else v
+                            put(k, JsonPrimitive(redacted))
+                        }
                     })
                 }
                 event.responseHeaders?.let { headers ->
                     put("responseHeaders", buildJsonObject {
-                        headers.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
+                        headers.forEach { (k, v) ->
+                            val redacted = if (k.equals("Set-Cookie", ignoreCase = true)) "[REDACTED]" else v
+                            put(k, JsonPrimitive(redacted))
+                        }
                     })
                 }
             }
@@ -386,6 +394,19 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
                 put("screenId", JsonPrimitive(event.screenId))
                 put("totalViolations", JsonPrimitive(event.totalViolations))
                 put("newViolations", JsonPrimitive(event.newViolations))
+                put("baselinedCount", JsonPrimitive(event.baselinedCount))
+                if (event.violations.isNotEmpty()) {
+                    put("violations", buildJsonArray {
+                        event.violations.forEach { v ->
+                            add(buildJsonObject {
+                                put("type", JsonPrimitive(v.type))
+                                put("severity", JsonPrimitive(v.severity))
+                                put("criterion", JsonPrimitive(v.criterion))
+                                put("message", JsonPrimitive(v.message))
+                            })
+                        }
+                    })
+                }
             }
         }
     }

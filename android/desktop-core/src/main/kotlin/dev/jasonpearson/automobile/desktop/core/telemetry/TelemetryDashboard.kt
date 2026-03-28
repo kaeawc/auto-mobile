@@ -474,7 +474,13 @@ fun TelemetryDashboard(
                         onLoadSession = { loaded ->
                             events.clear()
                             events.addAll(loaded)
+                            // Reset transient view state so stale selections don't
+                            // bleed across session boundaries.
                             selectedEvent = null
+                            timeRangeSelection = null
+                            diffLeft = null
+                            diffRight = null
+                            showDiff = false
                             showExportMenu = false
                         },
                         textColor = colors.text.normal,

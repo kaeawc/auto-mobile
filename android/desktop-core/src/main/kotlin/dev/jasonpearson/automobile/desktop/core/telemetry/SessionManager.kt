@@ -48,6 +48,15 @@ object SessionManager {
     )
 
     @Serializable
+    private data class SerializableStackFrame(
+        val className: String,
+        val methodName: String,
+        val fileName: String? = null,
+        val lineNumber: Int? = null,
+        val isAppCode: Boolean,
+    )
+
+    @Serializable
     private data class SerializableEvent(
         val type: String,
         val timestamp: Long,
@@ -86,6 +95,10 @@ object SessionManager {
         val title: String? = null,
         val exceptionType: String? = null,
         val screen: String? = null,
+        val stackFrames: List<SerializableStackFrame>? = null,
+        // Network headers (stored separately so they survive round-trips)
+        val requestHeaders: Map<String, String>? = null,
+        val responseHeaders: Map<String, String>? = null,
         // Storage
         val fileName: String? = null,
         val key: String? = null,
@@ -133,6 +146,7 @@ object SessionManager {
             type = "network", timestamp = timestamp, method = method, statusCode = statusCode,
             url = url, durationMs = durationMs, host = host, path = path, error = error,
             requestBody = requestBody, responseBody = responseBody, contentType = contentType,
+            requestHeaders = requestHeaders, responseHeaders = responseHeaders,
         )
         is TelemetryDisplayEvent.Log -> SerializableEvent(
             type = "log", timestamp = timestamp, level = level, tag = tag, message = message,
@@ -151,6 +165,12 @@ object SessionManager {
         is TelemetryDisplayEvent.Failure -> SerializableEvent(
             type = type, timestamp = timestamp, occurrenceId = occurrenceId, severity = severity,
             title = title, exceptionType = exceptionType, screen = screen,
+            stackFrames = stackTrace?.map { f ->
+                SerializableStackFrame(
+                    className = f.className, methodName = f.methodName,
+                    fileName = f.fileName, lineNumber = f.lineNumber, isAppCode = f.isAppCode,
+                )
+            },
         )
         is TelemetryDisplayEvent.Storage -> SerializableEvent(
             type = "storage", timestamp = timestamp, fileName = fileName, key = key, value = value,
@@ -187,7 +207,7 @@ object SessionManager {
         "network" -> TelemetryDisplayEvent.Network(
             timestamp = timestamp, method = method ?: "?", statusCode = statusCode ?: 0,
             url = url ?: "", durationMs = durationMs ?: 0, host = host, path = path, error = error,
-            requestHeaders = null, responseHeaders = null,
+            requestHeaders = requestHeaders, responseHeaders = responseHeaders,
             requestBody = requestBody, responseBody = responseBody, contentType = contentType,
         )
         "log" -> TelemetryDisplayEvent.Log(
@@ -208,7 +228,13 @@ object SessionManager {
         "crash", "anr", "nonfatal" -> TelemetryDisplayEvent.Failure(
             timestamp = timestamp, type = type, occurrenceId = occurrenceId ?: "",
             severity = severity ?: "medium", title = title ?: "Unknown", exceptionType = exceptionType,
-            screen = screen, stackTrace = null,
+            screen = screen,
+            stackTrace = stackFrames?.map { f ->
+                StackTraceFrame(
+                    className = f.className, methodName = f.methodName,
+                    fileName = f.fileName, lineNumber = f.lineNumber, isAppCode = f.isAppCode,
+                )
+            },
         )
         "storage" -> TelemetryDisplayEvent.Storage(
             timestamp = timestamp, fileName = fileName ?: "unknown", key = key, value = value,

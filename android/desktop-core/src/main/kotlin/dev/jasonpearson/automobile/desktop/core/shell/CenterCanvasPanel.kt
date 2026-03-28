@@ -32,7 +32,7 @@ fun CenterCanvasPanel(
 ) {
     val allEvents = remember { mutableStateListOf<TelemetryDisplayEvent>() }
 
-    LaunchedEffect(telemetryPushClient, filterState.isPaused) {
+    LaunchedEffect(telemetryPushClient) {
         val client = telemetryPushClient ?: return@LaunchedEffect
         client.telemetryEvents.collect { event ->
             if (!filterState.isPaused) {

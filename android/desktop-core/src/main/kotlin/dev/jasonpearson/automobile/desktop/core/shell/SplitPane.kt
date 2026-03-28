@@ -14,6 +14,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.width
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -60,6 +61,10 @@ fun HorizontalSplitPane(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
+    LaunchedEffect(firstPaneFraction) {
+        fraction = firstPaneFraction
+    }
+
     val colors = SharedTheme.globalColors
     val dividerColor = if (isHovered || isDragging) {
         colors.text.normal.copy(alpha = 0.3f)
@@ -86,7 +91,7 @@ fun HorizontalSplitPane(
                 .fillMaxHeight()
                 .hoverable(interactionSource)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .pointerInput(Unit) {
+                .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
                     detectDragGestures(
                         onDragStart = { isDragging = true },
                         onDragEnd = { isDragging = false },
@@ -160,6 +165,10 @@ fun VerticalSplitPane(
     val interactionSource = remember { MutableInteractionSource() }
     val isHovered by interactionSource.collectIsHoveredAsState()
 
+    LaunchedEffect(firstPaneFraction) {
+        fraction = firstPaneFraction
+    }
+
     val colors = SharedTheme.globalColors
     val dividerColor = if (isHovered || isDragging) {
         colors.text.normal.copy(alpha = 0.3f)
@@ -186,7 +195,7 @@ fun VerticalSplitPane(
                 .fillMaxWidth()
                 .hoverable(interactionSource)
                 .pointerHoverIcon(PointerIcon.Hand)
-                .pointerInput(Unit) {
+                .pointerInput(minFirstDp, minSecondDp, dragHandleWidth) {
                     detectDragGestures(
                         onDragStart = { isDragging = true },
                         onDragEnd = { isDragging = false },

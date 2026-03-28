@@ -109,6 +109,22 @@ describe("buildNetworkGraph", () => {
     expect(items.paths["{id}"]).toBeDefined();
   });
 
+  it("recomputes percentiles when merging parameterized paths", () => {
+    const events = [
+      makeEvent({ url: "https://api.example.com/users/123", path: "/users/123", durationMs: 100 }),
+      makeEvent({ url: "https://api.example.com/users/456", path: "/users/456", durationMs: 300 }),
+    ];
+
+    const result = buildNetworkGraph(events);
+    const users = result.graph[0].paths["users"] as GraphBranch;
+    const idNode = users.paths["{id}"] as GraphLeaf;
+
+    // Both durations (100, 300) merged — p50 should be 200 (midpoint), not 100 or 300
+    expect(idNode.success).toBe(2);
+    expect(idNode.p50).toBe(200);
+    expect(idNode.p95).toBe(290);
+  });
+
   it("filters by minRequests", () => {
     const events = [
       makeEvent({ path: "/popular", id: 1 }),

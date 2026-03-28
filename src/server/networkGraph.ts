@@ -139,13 +139,14 @@ export function buildNetworkGraph(
         }
 
         const sorted = [...group.durations].sort((a, b) => a - b);
-        const leaf: GraphLeaf = {
+        const leaf: GraphLeaf & { _durations?: number[] } = {
           method: group.method,
           type: group.contentType ?? undefined,
           success: group.success,
           errors: group.errors,
           p50: Math.round(computePercentile(sorted, 50)),
           p95: Math.round(computePercentile(sorted, 95)),
+          _durations: group.durations,
         };
 
         insertIntoTree(root, segments, 0, leaf);
@@ -153,11 +154,37 @@ export function buildNetworkGraph(
     }
 
     if (Object.keys(root).length > 0) {
+      stripDurations(root);
       result.push({ scheme, host, paths: root });
     }
   }
 
   return { graph: result };
+}
+
+function mergeLeafStats(
+  target: GraphLeaf & { _durations?: number[] },
+  source: GraphLeaf & { _durations?: number[] }
+): void {
+  target.success = (target.success ?? 0) + source.success;
+  target.errors = (target.errors ?? 0) + source.errors;
+  const combined = [...(target._durations ?? []), ...(source._durations ?? [])];
+  target._durations = combined;
+  const sorted = [...combined].sort((a, b) => a - b);
+  target.p50 = Math.round(computePercentile(sorted, 50));
+  target.p95 = Math.round(computePercentile(sorted, 95));
+}
+
+function stripDurations(node: Record<string, GraphNode>): void {
+  for (const key of Object.keys(node)) {
+    const val = node[key] as any;
+    if (val._durations) {
+      delete val._durations;
+    }
+    if (val.paths) {
+      stripDurations(val.paths);
+    }
+  }
 }
 
 function insertIntoTree(
@@ -168,10 +195,9 @@ function insertIntoTree(
 ): void {
   if (index >= segments.length) {
     // Root path "/" case — put stats directly
-    const existing = node[""] as GraphLeaf | undefined;
+    const existing = node[""] as (GraphLeaf & { _durations?: number[] }) | undefined;
     if (existing && "success" in existing) {
-      existing.success += leaf.success;
-      existing.errors += leaf.errors;
+      mergeLeafStats(existing, leaf);
     } else {
       node[""] = leaf;
     }
@@ -186,15 +212,11 @@ function insertIntoTree(
     // Leaf position
     const existing = node[key];
     if (existing && "success" in existing) {
-      // Merge stats
-      (existing as GraphLeaf).success += leaf.success;
-      (existing as GraphLeaf).errors += leaf.errors;
+      // Merge stats with percentile recomputation
+      mergeLeafStats(existing as GraphLeaf & { _durations?: number[] }, leaf);
     } else if (existing && "paths" in existing) {
       // Existing branch — add stats to branch node
-      (existing as any).success = ((existing as any).success ?? 0) + leaf.success;
-      (existing as any).errors = ((existing as any).errors ?? 0) + leaf.errors;
-      (existing as any).p50 = leaf.p50;
-      (existing as any).p95 = leaf.p95;
+      mergeLeafStats(existing as any, leaf);
       (existing as any).method = leaf.method;
       (existing as any).type = leaf.type;
     } else {

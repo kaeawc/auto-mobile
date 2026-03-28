@@ -104,14 +104,19 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordNetworkEventInput = { deviceId, sessionId, ...event };
 
+    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId, data: event });
+
+    // Only persist and notify when capture is enabled
+    if (!NetworkState.getInstance().capturing) {
+      return;
+    }
+
     let recordId: number | null = null;
     try {
       recordId = await this.repository.recordNetworkEvent(input);
     } catch (e) {
       logger.error(`[TelemetryRecorder] Failed to record network event: ${e}`);
     }
-
-    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId, data: event });
 
     // Notify NetworkState for resource subscription dispatch (only if we got the DB id)
     if (recordId !== null) {

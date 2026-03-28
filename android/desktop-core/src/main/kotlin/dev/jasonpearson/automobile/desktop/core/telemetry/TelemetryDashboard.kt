@@ -54,9 +54,13 @@ import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import androidx.compose.material3.Text
+import dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import javax.swing.JFileChooser
+import javax.swing.filechooser.FileNameExtensionFilter
 
 private const val GROUP_THRESHOLD = 3
 
@@ -183,6 +187,20 @@ fun TelemetryDashboard(
     var debouncedQuery by remember { mutableStateOf("") }
     var enabledSeverities by remember { mutableStateOf(EventSeverity.entries.toSet()) }
 
+    // Export/session menu state
+    var showExportMenu by remember { mutableStateOf(false) }
+
+    // Time range brush state
+    var timeRangeSelection by remember { mutableStateOf<LongRange?>(null) }
+
+    // Network waterfall toggle (only when Network filter is active)
+    var showWaterfall by remember { mutableStateOf(false) }
+
+    // Network diff: hold two events for comparison
+    var diffLeft by remember { mutableStateOf<TelemetryDisplayEvent.Network?>(null) }
+    var diffRight by remember { mutableStateOf<TelemetryDisplayEvent.Network?>(null) }
+    var showDiff by remember { mutableStateOf(false) }
+
     LaunchedEffect(searchQuery) {
         delay(150)
         debouncedQuery = searchQuery
@@ -226,9 +244,9 @@ fun TelemetryDashboard(
         events.addAll(fakeEvents)
     }
 
-    // Filtered events — chains category, severity, bookmark, and text search filters.
+    // Filtered events — chains category, severity, bookmark, time range, and text search filters.
     // derivedStateOf tracks SnapshotStateList mutations correctly.
-    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities, showBookmarksOnly) {
+    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities, showBookmarksOnly, timeRangeSelection) {
         derivedStateOf {
             var result: List<TelemetryDisplayEvent> = if (showBookmarksOnly) {
                 bookmarkedEvents.toList()
@@ -250,7 +268,6 @@ fun TelemetryDashboard(
                         CategoryFilter.Storage -> event is TelemetryDisplayEvent.Storage
                         CategoryFilter.Layout -> event is TelemetryDisplayEvent.Layout
                         CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
-                        // Touch, Gesture, Input, Memory events appear in All but have no dedicated tab
                         CategoryFilter.ToolCalls -> event is TelemetryDisplayEvent.ToolCall
                     }
                 }
@@ -259,6 +276,12 @@ fun TelemetryDashboard(
             // Severity filter
             if (enabledSeverities.size < EventSeverity.entries.size) {
                 result = result.filter { it.eventSeverity in enabledSeverities }
+            }
+
+            // Time range filter
+            val range = timeRangeSelection
+            if (range != null) {
+                result = result.filter { it.timestamp in range }
             }
 
             // Text search filter
@@ -430,6 +453,68 @@ fun TelemetryDashboard(
                     fontSize = 13.sp,
                 )
             }
+
+            Spacer(Modifier.width(4.dp))
+
+            // Export / Session menu
+            Box {
+                Box(
+                    modifier = Modifier
+                        .clickable { showExportMenu = !showExportMenu }
+                        .then(buttonModifier),
+                ) {
+                    Text("\u2B07", fontSize = 13.sp) // download arrow
+                }
+                if (showExportMenu) {
+                    ExportSessionMenu(
+                        events = events.toList(),
+                        filteredEvents = filteredEvents,
+                        selectedFilter = selectedFilter,
+                        onDismiss = { showExportMenu = false },
+                        onLoadSession = { loaded ->
+                            events.clear()
+                            events.addAll(loaded)
+                            selectedEvent = null
+                            showExportMenu = false
+                        },
+                        textColor = colors.text.normal,
+                    )
+                }
+            }
+
+            // Waterfall toggle (only when Network filter is active)
+            if (selectedFilter == CategoryFilter.Network) {
+                Box(
+                    modifier = Modifier
+                        .clickable { showWaterfall = !showWaterfall }
+                        .then(buttonModifier)
+                        .then(
+                            if (showWaterfall) Modifier.background(
+                                Color(0xFF74C0FC).copy(alpha = 0.15f),
+                                RoundedCornerShape(4.dp),
+                            ) else Modifier
+                        ),
+                ) {
+                    Text("\u2500", fontSize = 13.sp) // horizontal bar icon for waterfall
+                }
+            }
+
+            // Diff toggle (only when exactly 2 network events are selected)
+            if (selectedFilter == CategoryFilter.Network && diffLeft != null && diffRight != null) {
+                Box(
+                    modifier = Modifier
+                        .clickable { showDiff = !showDiff }
+                        .then(buttonModifier)
+                        .then(
+                            if (showDiff) Modifier.background(
+                                Color(0xFF74C0FC).copy(alpha = 0.15f),
+                                RoundedCornerShape(4.dp),
+                            ) else Modifier
+                        ),
+                ) {
+                    Text("\u2194", fontSize = 13.sp) // left-right arrow for diff
+                }
+            }
         }
 
         // Responsive category filter tabs
@@ -519,6 +604,25 @@ fun TelemetryDashboard(
             }
         }
 
+        // Time range brush (event density histogram with drag-to-select)
+        if (events.size > 1) {
+            TimeRangeBrush(
+                events = events.toList(),
+                selectedRange = timeRangeSelection,
+                onRangeChanged = { timeRangeSelection = it },
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+            )
+        }
+
+        // Network diff view (shown when enabled and two events selected)
+        if (showDiff && diffLeft != null && diffRight != null) {
+            NetworkDiffView(
+                left = diffLeft!!,
+                right = diffRight!!,
+                modifier = Modifier.fillMaxWidth().height(300.dp),
+            )
+        }
+
         // Event list + detail panel
         Row(modifier = Modifier.fillMaxSize()) {
             // Event list (takes remaining space)
@@ -534,6 +638,10 @@ fun TelemetryDashboard(
                             color = colors.text.normal.copy(alpha = 0.4f),
                         )
                     }
+                } else if (selectedFilter == CategoryFilter.Network && showWaterfall) {
+                    NetworkWaterfall(
+                        events = filteredEvents.filterIsInstance<TelemetryDisplayEvent.Network>(),
+                    )
                 } else if (selectedFilter == CategoryFilter.Network) {
                     NetworkTable(
                         filteredEvents.filterIsInstance<TelemetryDisplayEvent.Network>(),
@@ -541,7 +649,22 @@ fun TelemetryDashboard(
                         timeFormat,
                         colors.text.normal,
                         selectedEvent = selectedEvent,
-                        onEventSelected = { selectedEvent = if (selectedEvent == it) null else it },
+                        onEventSelected = { event ->
+                            // Multi-select for diff: shift-like behavior using diffLeft/diffRight
+                            if (diffLeft == null) {
+                                diffLeft = event
+                                selectedEvent = event
+                            } else if (diffRight == null && event != diffLeft) {
+                                diffRight = event
+                                selectedEvent = event
+                            } else {
+                                // Reset diff selection
+                                diffLeft = event
+                                diffRight = null
+                                showDiff = false
+                                selectedEvent = if (selectedEvent == event) null else event
+                            }
+                        },
                     )
                 } else {
                     LazyColumn(
@@ -801,7 +924,7 @@ private fun TelemetryEventRow(
     }
 }
 
-private fun networkStatusColor(statusCode: Int, error: String?, textColor: Color): Color = when {
+internal fun networkStatusColor(statusCode: Int, error: String?, textColor: Color): Color = when {
     error != null || statusCode == 0 -> Color(0xFFFF6B6B)      // Error / failed - bright red
     statusCode in 200..299 -> Color(0xFF51CF66)                 // 2xx success - bright green
     statusCode in 300..399 -> Color(0xFFFFD43B)                 // 3xx redirect - bright yellow
@@ -1320,3 +1443,116 @@ private fun generateFakeEvents(): List<TelemetryDisplayEvent> {
         ),
     )
 }
+
+/**
+ * Export and session management popup menu.
+ */
+@Composable
+private fun ExportSessionMenu(
+    events: List<TelemetryDisplayEvent>,
+    filteredEvents: List<TelemetryDisplayEvent>,
+    selectedFilter: CategoryFilter,
+    onDismiss: () -> Unit,
+    onLoadSession: (List<TelemetryDisplayEvent>) -> Unit,
+    textColor: Color,
+) {
+    val menuItemModifier = Modifier
+        .fillMaxWidth()
+        .pointerHoverIcon(PointerIcon.Hand)
+        .padding(horizontal = 10.dp, vertical = 6.dp)
+
+    Box(
+        modifier = Modifier
+            .width(200.dp)
+            .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(6.dp))
+            .padding(4.dp),
+    ) {
+        Column {
+            // Export JSON
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val content = TelemetryExporter.exportAsJson(filteredEvents)
+                        SwingFileSaver.save("telemetry.json", content) {}
+                        onDismiss()
+                    }
+                    .then(menuItemModifier),
+            ) {
+                Text("Export JSON", fontSize = 11.sp, color = textColor)
+            }
+
+            // Export CSV
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val content = TelemetryExporter.exportAsCsv(filteredEvents)
+                        SwingFileSaver.save("telemetry.csv", content) {}
+                        onDismiss()
+                    }
+                    .then(menuItemModifier),
+            ) {
+                Text("Export CSV", fontSize = 11.sp, color = textColor)
+            }
+
+            // Export HAR (only if network events exist)
+            val networkEvents = filteredEvents.filterIsInstance<TelemetryDisplayEvent.Network>()
+            if (networkEvents.isNotEmpty() || selectedFilter == CategoryFilter.Network) {
+                Box(
+                    modifier = Modifier
+                        .clickable {
+                            val content = TelemetryExporter.exportAsHar(networkEvents)
+                            SwingFileSaver.save("telemetry.har", content) {}
+                            onDismiss()
+                        }
+                        .then(menuItemModifier),
+                ) {
+                    Text("Export HAR (Network)", fontSize = 11.sp, color = textColor)
+                }
+            }
+
+            // Divider
+            Box(Modifier.fillMaxWidth().height(1.dp).background(textColor.copy(alpha = 0.1f)))
+
+            // Save Session
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val chooser = JFileChooser()
+                        chooser.selectedFile = File("session.automobile-session")
+                        chooser.fileFilter = FileNameExtensionFilter("AutoMobile Session", "automobile-session")
+                        if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
+                            var file = chooser.selectedFile
+                            if (!file.name.endsWith(".automobile-session")) {
+                                file = File(file.absolutePath + ".automobile-session")
+                            }
+                            SessionManager.saveSession(events, file)
+                        }
+                        onDismiss()
+                    }
+                    .then(menuItemModifier),
+            ) {
+                Text("Save Session", fontSize = 11.sp, color = textColor)
+            }
+
+            // Load Session
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val chooser = JFileChooser()
+                        chooser.fileFilter = FileNameExtensionFilter("AutoMobile Session", "automobile-session")
+                        if (chooser.showOpenDialog(null) == JFileChooser.APPROVE_OPTION) {
+                            val loaded = SessionManager.loadSession(chooser.selectedFile)
+                            if (loaded != null) {
+                                onLoadSession(loaded)
+                            }
+                        }
+                        onDismiss()
+                    }
+                    .then(menuItemModifier),
+            ) {
+                Text("Load Session", fontSize = 11.sp, color = textColor)
+            }
+        }
+    }
+}
+

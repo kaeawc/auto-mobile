@@ -12,11 +12,13 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
- * Left sidebar panel composing MCP connection, daemon status, and device list sections.
+ * Left sidebar panel composing MCP connection, daemon status, device list,
+ * and app filter sections.
  */
 @Composable
 fun LeftSidebarPanel(
@@ -27,6 +29,12 @@ fun LeftSidebarPanel(
     connectedProcess: McpProcess?,
     activeDeviceId: String?,
     suppressAutoSelect: Boolean,
+    installedApps: List<InstalledApp> = emptyList(),
+    selectedAppId: String? = null,
+    onAppSelected: (String?) -> Unit = {},
+    onDeviceAction: ((deviceId: String, action: String) -> Unit)? = null,
+    favoriteDeviceIds: Set<String> = emptySet(),
+    onToggleFavorite: ((deviceId: String) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = SharedTheme.globalColors
@@ -58,6 +66,16 @@ fun LeftSidebarPanel(
             onDeviceSelected = onDeviceSelected,
             activeDeviceId = activeDeviceId,
             suppressAutoSelect = suppressAutoSelect,
+            onDeviceAction = onDeviceAction,
+            favoriteDeviceIds = favoriteDeviceIds,
+            onToggleFavorite = onToggleFavorite,
+            modifier = Modifier.fillMaxWidth(),
+        )
+
+        AppFilterSection(
+            installedApps = installedApps,
+            selectedAppId = selectedAppId,
+            onAppSelected = onAppSelected,
             modifier = Modifier.fillMaxWidth(),
         )
     }

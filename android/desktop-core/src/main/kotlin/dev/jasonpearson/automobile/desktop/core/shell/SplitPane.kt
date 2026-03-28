@@ -74,7 +74,7 @@ fun HorizontalSplitPane(
     ) {
         Box(
             modifier = Modifier
-                .weight(fraction)
+                .weight(fraction.coerceIn(0.01f, 0.99f))
                 .fillMaxHeight(),
         ) {
             first()
@@ -97,10 +97,12 @@ fun HorizontalSplitPane(
                                 val minFirstPx = with(density) { minFirstDp.toPx() }
                                 val minSecondPx = with(density) { minSecondDp.toPx() }
                                 val handlePx = with(density) { dragHandleWidth.toPx() }
-                                val usable = totalWidthPx - handlePx
+                                val usable = (totalWidthPx - handlePx)
+                                    .coerceAtLeast(minFirstPx + minSecondPx)
                                 val newFirstPx = (fraction * usable + dragAmount.x)
                                     .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
-                                val newFraction = newFirstPx / usable
+                                val newFraction = (newFirstPx / usable)
+                                    .coerceIn(0.01f, 0.99f)
                                 fraction = newFraction
                                 onFractionChanged?.invoke(newFraction)
                             }
@@ -119,7 +121,7 @@ fun HorizontalSplitPane(
 
         Box(
             modifier = Modifier
-                .weight(1f - fraction)
+                .weight((1f - fraction).coerceIn(0.01f, 0.99f))
                 .fillMaxHeight(),
         ) {
             second()
@@ -172,7 +174,7 @@ fun VerticalSplitPane(
     ) {
         Box(
             modifier = Modifier
-                .weight(fraction)
+                .weight(fraction.coerceIn(0.01f, 0.99f))
                 .fillMaxWidth(),
         ) {
             first()
@@ -195,10 +197,12 @@ fun VerticalSplitPane(
                                 val minFirstPx = with(density) { minFirstDp.toPx() }
                                 val minSecondPx = with(density) { minSecondDp.toPx() }
                                 val handlePx = with(density) { dragHandleWidth.toPx() }
-                                val usable = totalHeightPx - handlePx
+                                val usable = (totalHeightPx - handlePx)
+                                    .coerceAtLeast(minFirstPx + minSecondPx)
                                 val newFirstPx = (fraction * usable + dragAmount.y)
                                     .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
-                                val newFraction = newFirstPx / usable
+                                val newFraction = (newFirstPx / usable)
+                                    .coerceIn(0.01f, 0.99f)
                                 fraction = newFraction
                                 onFractionChanged?.invoke(newFraction)
                             }
@@ -217,7 +221,7 @@ fun VerticalSplitPane(
 
         Box(
             modifier = Modifier
-                .weight(1f - fraction)
+                .weight((1f - fraction).coerceIn(0.01f, 0.99f))
                 .fillMaxWidth(),
         ) {
             second()

@@ -305,15 +305,11 @@ export function registerNetworkResources(): void {
     "Recent network errors (4xx/5xx responses). Subscribe to receive notifications on new errors.",
     "application/json",
     async () => {
-      const events = await getNetworkEvents({ statusCode: "4xx", limit: 10 });
-      const errors5xx = await getNetworkEvents({ statusCode: "5xx", limit: 10 });
-      const merged = [...events, ...errors5xx]
-        .sort((a, b) => b.timestamp - a.timestamp)
-        .slice(0, 20);
+      const errors = await getNetworkEvents({ minStatusCode: 400, limit: 20 });
       return {
         uri: NETWORK_RESOURCE_URIS.ERRORS,
         mimeType: "application/json",
-        text: JSON.stringify({ errors: merged.map(eventToSummary) }, null, 2),
+        text: JSON.stringify({ errors: errors.map(eventToSummary) }, null, 2),
       };
     }
   );

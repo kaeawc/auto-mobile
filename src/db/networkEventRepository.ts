@@ -77,6 +77,7 @@ export interface NetworkEventQuery {
   host?: string;
   method?: string;
   statusCode?: string;
+  minStatusCode?: number;
 }
 
 const BODY_TRUNCATION_LIMIT = 10_240; // 10KB
@@ -158,6 +159,9 @@ export async function getNetworkEvents(
       const base = parseInt(query.statusCode[0], 10) * 100;
       q = q.where("status_code", ">=", base).where("status_code", "<", base + 100);
     }
+  }
+  if (query.minStatusCode !== undefined) {
+    q = q.where("status_code", ">=", query.minStatusCode);
   }
 
   q = q.orderBy("timestamp", "desc").limit(query.limit ?? 100);

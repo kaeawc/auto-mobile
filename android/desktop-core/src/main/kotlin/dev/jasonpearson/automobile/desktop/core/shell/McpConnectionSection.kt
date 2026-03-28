@@ -25,6 +25,8 @@ import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.mcp.FakeMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
@@ -57,7 +59,7 @@ fun McpConnectionSection(
 
     LaunchedEffect(useRealData, refreshCounter) {
         isLoading = true
-        processes = detector.detectProcesses()
+        processes = withContext(Dispatchers.IO) { detector.detectProcesses() }
         isLoading = false
     }
 
@@ -65,8 +67,16 @@ fun McpConnectionSection(
         onProcessConnected(connectedProcess)
     }
 
-    // Auto-connect when there is exactly one Unix Socket process
+    // Clear stale connection when process list refreshes, or auto-connect
     LaunchedEffect(processes) {
+        // If the previously connected process is no longer detected, clear it
+        val current = connectedProcess
+        if (current != null && processes.none { it.pid == current.pid }) {
+            connectedProcess = null
+            onProcessConnected(null)
+        }
+
+        // Auto-connect when there is exactly one Unix Socket process
         val socketProcesses = processes.filter { it.connectionType == McpConnectionType.UnixSocket }
         if (socketProcesses.size == 1 && connectedProcess == null) {
             val autoConnect = socketProcesses.first()

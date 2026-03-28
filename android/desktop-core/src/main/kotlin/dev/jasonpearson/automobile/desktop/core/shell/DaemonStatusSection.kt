@@ -50,6 +50,7 @@ fun DaemonStatusSection(
                     client.close()
                 } catch (_: Exception) {
                     daemonStatus = null
+                    socketPath = null
                 }
             }
         } else {

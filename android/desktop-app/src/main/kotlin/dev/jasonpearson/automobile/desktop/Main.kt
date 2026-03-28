@@ -12,6 +12,23 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
 
+/**
+ * Returns true if the given window position (in dp, which at 96 dpi equals pixels on most systems)
+ * falls within the bounds of at least one currently attached screen. Falls back to true on error
+ * so a bad screen-device query never prevents the app from opening.
+ */
+private fun isPositionOnScreen(xDp: Float, yDp: Float): Boolean {
+    return try {
+        val screens = java.awt.GraphicsEnvironment.getLocalGraphicsEnvironment().screenDevices
+        screens.any { device ->
+            val bounds = device.defaultConfiguration.bounds
+            bounds.contains(xDp.toInt(), yDp.toInt())
+        }
+    } catch (_: Exception) {
+        true
+    }
+}
+
 /** Lock file ensuring only one instance of the desktop app runs at a time. */
 private val LOCK_FILE: Path = Path.of(System.getProperty("java.io.tmpdir"), "automobile-desktop.lock")
 private var lock: FileLock? = null
@@ -56,7 +73,7 @@ fun main() {
     val savedY = saved.windowYDp
     val windowState = rememberWindowState(
       size = DpSize(saved.windowWidthDp.dp, saved.windowHeightDp.dp),
-      position = if (savedX != null && savedY != null) {
+      position = if (savedX != null && savedY != null && isPositionOnScreen(savedX, savedY)) {
           WindowPosition(savedX.dp, savedY.dp)
       } else {
           WindowPosition(Alignment.Center)

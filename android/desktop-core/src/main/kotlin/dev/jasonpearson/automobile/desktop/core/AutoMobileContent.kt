@@ -90,6 +90,9 @@ import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
 import dev.jasonpearson.automobile.desktop.core.mcp.FakeMcpProcessDetector
 import dev.jasonpearson.automobile.desktop.core.mcp.RealMcpProcessDetector
+import dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory
+import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
+import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpResource
 import dev.jasonpearson.automobile.desktop.core.daemon.McpTool
@@ -309,6 +312,44 @@ fun AutoMobileContent(
                       throw UnsupportedOperationException("Cannot connect to STDIO process externally")
                   }
               }
+          }
+      }
+  }
+
+  // After MCP auto-connect, fetch booted devices and populate realDevice for the sidebar
+  LaunchedEffect(connectedMcpProcess) {
+      val process = connectedMcpProcess ?: return@LaunchedEffect
+      kotlinx.coroutines.withContext(Dispatchers.IO) {
+          try {
+              val client = McpResourceClientFactory.create(process)
+              when (val result = client.readResource("automobile:devices/booted")) {
+                  is ResourceReadResult.Success -> {
+                      val parsed = DeviceResourceParser.parseBootedDevices(result.content)
+                      val firstDevice = parsed?.devices?.firstOrNull()
+                      if (firstDevice != null) {
+                          val deviceType = when {
+                              firstDevice.platform == "ios" && firstDevice.isVirtual -> DeviceType.iOSSimulator
+                              firstDevice.platform == "ios" -> DeviceType.iOSPhysical
+                              firstDevice.isVirtual -> DeviceType.AndroidEmulator
+                              else -> DeviceType.AndroidPhysical
+                          }
+                          realDevice = BootedDevice(
+                              id = firstDevice.deviceId,
+                              name = firstDevice.name,
+                              type = deviceType,
+                              status = firstDevice.status,
+                          )
+                          activeDeviceId = firstDevice.deviceId
+                          LOG.info("Set realDevice from MCP: ${firstDevice.name} (${firstDevice.deviceId})")
+                      }
+                  }
+                  is ResourceReadResult.Error -> {
+                      LOG.info("Failed to fetch booted devices after MCP connect: ${result.message}")
+                  }
+              }
+              client.close()
+          } catch (e: Exception) {
+              LOG.info("Error fetching booted devices after MCP connect: ${e.message}")
           }
       }
   }

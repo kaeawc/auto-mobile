@@ -63,6 +63,10 @@ class CommandRegistry {
         commands.addAll(newCommands)
     }
 
+    fun clear() {
+        commands.clear()
+    }
+
     fun allCommands(): List<Command> = commands.toList()
 
     fun search(query: String): List<Command> {

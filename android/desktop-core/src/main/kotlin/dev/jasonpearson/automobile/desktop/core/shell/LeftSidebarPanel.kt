@@ -24,6 +24,7 @@ fun LeftSidebarPanel(
     onDataSourceModeChanged: (DataSourceMode) -> Unit,
     onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit,
     onProcessConnected: (McpProcess?) -> Unit,
+    connectedProcess: McpProcess?,
     activeDeviceId: String?,
     suppressAutoSelect: Boolean,
     modifier: Modifier = Modifier,
@@ -53,6 +54,7 @@ fun LeftSidebarPanel(
 
         DeviceListSection(
             dataSourceMode = dataSourceMode,
+            connectedProcess = connectedProcess,
             onDeviceSelected = onDeviceSelected,
             activeDeviceId = activeDeviceId,
             suppressAutoSelect = suppressAutoSelect,

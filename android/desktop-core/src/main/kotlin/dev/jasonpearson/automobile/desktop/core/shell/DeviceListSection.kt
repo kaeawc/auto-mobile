@@ -27,6 +27,7 @@ import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo
 import dev.jasonpearson.automobile.desktop.core.mcp.DeviceResourceParser
+import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
 import dev.jasonpearson.automobile.desktop.core.mcp.ResourceReadResult
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.Dispatchers
@@ -38,6 +39,7 @@ import kotlinx.coroutines.withContext
 @Composable
 fun DeviceListSection(
     dataSourceMode: DataSourceMode,
+    connectedProcess: McpProcess?,
     onDeviceSelected: (deviceId: String, deviceName: String?) -> Unit,
     activeDeviceId: String?,
     suppressAutoSelect: Boolean,
@@ -49,14 +51,14 @@ fun DeviceListSection(
     var isLoading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
 
-    // Fetch devices
-    LaunchedEffect(dataSourceMode) {
+    // Fetch devices – re-run when the data-source mode or connected process changes
+    LaunchedEffect(dataSourceMode, connectedProcess) {
         isLoading = true
         error = null
         val client = if (dataSourceMode == DataSourceMode.Real) {
             try {
                 val daemonClient = withContext(Dispatchers.IO) {
-                    dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
+                    dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createFromProcess(connectedProcess)
                 }
                 dev.jasonpearson.automobile.desktop.core.mcp.DaemonMcpResourceClient(daemonClient)
             } catch (e: Exception) {
@@ -68,7 +70,10 @@ fun DeviceListSection(
             dev.jasonpearson.automobile.desktop.core.mcp.McpResourceClientFactory.createFake()
         }
         try {
-            when (val result = client.readResource("automobile:devices/booted")) {
+            val result = withContext(Dispatchers.IO) {
+                client.readResource("automobile:devices/booted")
+            }
+            when (result) {
                 is ResourceReadResult.Success -> {
                     val parsed = DeviceResourceParser.parseBootedDevices(result.content)
                     bootedDevices = parsed?.devices ?: emptyList()
@@ -77,7 +82,7 @@ fun DeviceListSection(
                     error = result.message
                 }
             }
-            client.close()
+            withContext(Dispatchers.IO) { client.close() }
         } catch (e: Exception) {
             error = e.message ?: "Failed to fetch devices"
         }

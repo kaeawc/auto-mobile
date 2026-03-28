@@ -1,6 +1,32 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.mcp.McpConnectionType
+import dev.jasonpearson.automobile.desktop.core.mcp.McpProcess
+
 object McpClientFactory {
+  /**
+   * Creates a client bound to the given [McpProcess], using its connection type and address.
+   * Falls back to [createPreferred] when [process] is null.
+   */
+  fun createFromProcess(process: McpProcess?): AutoMobileClient {
+    if (process == null) return createPreferred(null)
+    return when (process.connectionType) {
+      McpConnectionType.StreamableHttp -> {
+        val port = process.port ?: 3000
+        McpHttpClient(normalizeHttpUrl("http://localhost:$port"))
+      }
+      McpConnectionType.UnixSocket -> {
+        // Unix socket processes expose an HTTP endpoint on localhost
+        val port = process.port ?: 3000
+        McpHttpClient(normalizeHttpUrl("http://localhost:$port"))
+      }
+      McpConnectionType.Stdio -> {
+        val command = process.commandLine ?: "auto-mobile"
+        McpStdioClient(command)
+      }
+    }
+  }
+
   fun createPreferred(httpServer: McpHttpServer?): AutoMobileClient {
     if (httpServer != null) {
       return McpHttpClient(httpServer.endpoint)

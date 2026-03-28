@@ -226,6 +226,10 @@ fun AutoMobileContent(
 
   // Command registry — populated after all state is declared below
 
+  // Keyboard navigation state for event list
+  var selectedEventIndex by remember { mutableIntStateOf(-1) }
+  var vimModeEnabled by remember { mutableStateOf(false) }
+
   // Horizontal tabs at bottom (Navigation, Test Runs, Storage, Diagnostics)
   val horizontalTabs = remember {
       listOf(
@@ -891,6 +895,27 @@ fun AutoMobileContent(
       currentFps = currentFps,
       currentMemoryMb = currentMemoryMb,
       isDaemonConnected = connectedMcpProcess != null,
+      onNavigateUp = {
+          if (selectedEventIndex > 0) selectedEventIndex--
+      },
+      onNavigateDown = {
+          selectedEventIndex++
+      },
+      onSelectEvent = {
+          // Opens the inspector for the currently focused event
+          if (selectedEventIndex >= 0) showRightPane = true
+      },
+      onDeselectEvent = {
+          if (showRightPane) {
+              showRightPane = false
+          } else {
+              selectedEventIndex = -1
+          }
+      },
+      onJumpToTop = { selectedEventIndex = 0 },
+      onJumpToBottom = { /* No-op until event list size is known */ },
+      onQuickJump = { /* Timestamp jump placeholder */ },
+      vimModeEnabled = vimModeEnabled,
       centerContent = { mod ->
           Column(mod) {
               // Main view area with Layout/Navigation toggle

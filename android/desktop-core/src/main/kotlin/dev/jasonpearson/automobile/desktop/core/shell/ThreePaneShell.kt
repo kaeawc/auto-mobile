@@ -28,7 +28,17 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusTarget
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.isMetaPressed
+import androidx.compose.ui.input.key.isShiftPressed
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
 import androidx.compose.ui.input.pointer.pointerInput
@@ -42,12 +52,29 @@ import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 import kotlinx.coroutines.delay
 
 /**
+ * Represents which pane currently has keyboard focus.
+ */
+enum class FocusedPane { Left, Center, Right }
+
+/**
  * Top-level three-pane shell that assembles the Xcode-style layout:
  * left sidebar, center canvas + status bar, and right inspector,
  * with a collapsible bottom timeline pane.
  *
  * All pane contents are provided via composable lambdas so callers can
  * inject real or stub implementations.
+ *
+ * Keyboard shortcuts:
+ * - Cmd+0: toggle left pane
+ * - Cmd+Shift+0: toggle right pane
+ * - Cmd+Shift+Y: toggle bottom pane
+ * - Arrow Up/Down: navigate event list
+ * - Enter: select/inspect focused event
+ * - Escape: deselect/close inspector
+ * - Tab/Shift+Tab: cycle focus between panes
+ * - Cmd+/: show shortcut cheat sheet
+ * - Cmd+K: quick jump to timestamp
+ * - Vim keys (j/k/g/G//) when vim mode is enabled
  */
 @Composable
 fun ThreePaneShell(
@@ -73,6 +100,17 @@ fun ThreePaneShell(
     networkReqPerSec: Float? = null,
     connectionStartTime: Long? = null,
     cpuUsagePercent: Float? = null,
+    // Keyboard navigation callbacks
+    onNavigateUp: (() -> Unit)? = null,
+    onNavigateDown: (() -> Unit)? = null,
+    onSelectEvent: (() -> Unit)? = null,
+    onDeselectEvent: (() -> Unit)? = null,
+    onJumpToTop: (() -> Unit)? = null,
+    onJumpToBottom: (() -> Unit)? = null,
+    onFocusSearch: (() -> Unit)? = null,
+    onQuickJump: ((Long) -> Unit)? = null,
+    // Vim mode
+    vimModeEnabled: Boolean = false,
     // Pane content slots
     centerContent: @Composable (Modifier) -> Unit,
     leftPaneContent: @Composable () -> Unit,
@@ -95,98 +133,270 @@ fun ThreePaneShell(
     var rightPaneWidth by remember { mutableStateOf(defaultRightWidth) }
     var bottomPaneHeight by remember { mutableStateOf(defaultBottomHeight) }
 
-    Column(modifier.fillMaxSize()) {
-        // macOS title bar spacer
-        TitleBarSpacer()
+    // Keyboard focus state
+    var focusedPane by remember { mutableStateOf(FocusedPane.Center) }
 
-        // Pane toggle toolbar
-        PaneToggleToolbar(
-            showLeftPane = showLeftPane,
-            onToggleLeftPane = onToggleLeftPane,
-            showRightPane = showRightPane,
-            onToggleRightPane = onToggleRightPane,
-            showBottomPane = showBottomPane,
-            onToggleBottomPane = onToggleBottomPane,
-        )
+    // Modal overlays
+    var showCheatSheet by remember { mutableStateOf(false) }
+    var showQuickJump by remember { mutableStateOf(false) }
 
-        // Main 3-pane area
-        Row(Modifier.weight(1f)) {
-            // Left sidebar (collapsible)
-            if (showLeftPane) {
-                Box(Modifier.width(leftPaneWidth).fillMaxHeight()) {
-                    leftPaneContent()
-                }
-                VerticalDividerStub(
-                    onDrag = { delta ->
-                        val newWidth = (leftPaneWidth + delta).coerceIn(50.dp, 400.dp)
-                        leftPaneWidth = newWidth
-                        if (newWidth < leftCollapseMinDp) {
+    // Focus requesters for panes
+    val leftFocusRequester = remember { FocusRequester() }
+    val centerFocusRequester = remember { FocusRequester() }
+    val rightFocusRequester = remember { FocusRequester() }
+
+    Box(modifier.fillMaxSize()) {
+        Column(
+            Modifier
+                .fillMaxSize()
+                .focusTarget()
+                .onPreviewKeyEvent { event ->
+                    if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+
+                    // Don't handle shortcuts when modal overlays are open
+                    if (showCheatSheet || showQuickJump) return@onPreviewKeyEvent false
+
+                    when {
+                        // Cmd+0 -> toggle left pane
+                        event.isMetaPressed && !event.isShiftPressed && event.key == Key.Zero -> {
                             onToggleLeftPane()
-                            leftPaneWidth = defaultLeftWidth
+                            true
                         }
-                    },
-                    onReset = {
-                        leftPaneWidth = defaultLeftWidth
-                    },
-                )
-            }
-
-            // Center canvas (flex) + status bar
-            Column(Modifier.weight(1f)) {
-                centerContent(Modifier.weight(1f))
-
-                // Status bar
-                StatusBarStub(
-                    crashCount = crashCount,
-                    anrCount = anrCount,
-                    nonFatalCount = nonFatalCount,
-                    toolFailureCount = toolFailureCount,
-                    currentFps = currentFps,
-                    currentMemoryMb = currentMemoryMb,
-                    isDaemonConnected = isDaemonConnected,
-                    deviceName = deviceName,
-                    foregroundApp = foregroundApp,
-                    networkReqPerSec = networkReqPerSec,
-                    connectionStartTime = connectionStartTime,
-                    cpuUsagePercent = cpuUsagePercent,
-                )
-            }
-
-            // Right inspector (collapsible)
-            if (showRightPane) {
-                VerticalDividerStub(
-                    onDrag = { delta ->
-                        val newWidth = (rightPaneWidth - delta).coerceIn(50.dp, 500.dp)
-                        rightPaneWidth = newWidth
-                        if (newWidth < rightCollapseMinDp) {
+                        // Cmd+Shift+0 -> toggle right pane
+                        event.isMetaPressed && event.isShiftPressed && event.key == Key.Zero -> {
                             onToggleRightPane()
-                            rightPaneWidth = defaultRightWidth
+                            true
                         }
-                    },
-                    onReset = {
-                        rightPaneWidth = defaultRightWidth
+                        // Cmd+Shift+Y -> toggle bottom pane
+                        event.isMetaPressed && event.isShiftPressed && event.key == Key.Y -> {
+                            onToggleBottomPane()
+                            true
+                        }
+                        // Cmd+/ -> shortcut cheat sheet
+                        event.isMetaPressed && event.key == Key.Slash -> {
+                            showCheatSheet = true
+                            true
+                        }
+                        // Cmd+K -> quick jump
+                        event.isMetaPressed && event.key == Key.K -> {
+                            if (onQuickJump != null) {
+                                showQuickJump = true
+                            }
+                            true
+                        }
+                        // Tab -> focus next pane
+                        !event.isMetaPressed && !event.isShiftPressed && event.key == Key.Tab -> {
+                            focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = true)
+                            requestFocusForPane(focusedPane, leftFocusRequester, centerFocusRequester, rightFocusRequester)
+                            true
+                        }
+                        // Shift+Tab -> focus previous pane
+                        !event.isMetaPressed && event.isShiftPressed && event.key == Key.Tab -> {
+                            focusedPane = cyclePane(focusedPane, showLeftPane, showRightPane, forward = false)
+                            requestFocusForPane(focusedPane, leftFocusRequester, centerFocusRequester, rightFocusRequester)
+                            true
+                        }
+                        // Arrow Up -> navigate up in event list
+                        event.key == Key.DirectionUp -> {
+                            onNavigateUp?.invoke()
+                            onNavigateUp != null
+                        }
+                        // Arrow Down -> navigate down in event list
+                        event.key == Key.DirectionDown -> {
+                            onNavigateDown?.invoke()
+                            onNavigateDown != null
+                        }
+                        // Enter -> select/inspect focused event
+                        event.key == Key.Enter -> {
+                            onSelectEvent?.invoke()
+                            onSelectEvent != null
+                        }
+                        // Escape -> deselect/close inspector
+                        event.key == Key.Escape -> {
+                            onDeselectEvent?.invoke()
+                            onDeselectEvent != null
+                        }
+                        // Vim-style keys (only when vim mode enabled and no modifier keys)
+                        vimModeEnabled && !event.isMetaPressed && !event.isShiftPressed -> {
+                            when (event.key) {
+                                Key.J -> {
+                                    onNavigateDown?.invoke()
+                                    onNavigateDown != null
+                                }
+                                Key.K -> {
+                                    onNavigateUp?.invoke()
+                                    onNavigateUp != null
+                                }
+                                Key.G -> {
+                                    onJumpToTop?.invoke()
+                                    onJumpToTop != null
+                                }
+                                else -> false
+                            }
+                        }
+                        // Vim G (Shift+g) -> jump to bottom
+                        vimModeEnabled && !event.isMetaPressed && event.isShiftPressed && event.key == Key.G -> {
+                            onJumpToBottom?.invoke()
+                            onJumpToBottom != null
+                        }
+                        // Vim / -> focus search
+                        vimModeEnabled && !event.isMetaPressed && event.key == Key.Slash -> {
+                            onFocusSearch?.invoke()
+                            onFocusSearch != null
+                        }
+                        else -> false
+                    }
+                },
+        ) {
+            // macOS title bar spacer
+            TitleBarSpacer()
+
+            // Pane toggle toolbar
+            PaneToggleToolbar(
+                showLeftPane = showLeftPane,
+                onToggleLeftPane = onToggleLeftPane,
+                showRightPane = showRightPane,
+                onToggleRightPane = onToggleRightPane,
+                showBottomPane = showBottomPane,
+                onToggleBottomPane = onToggleBottomPane,
+            )
+
+            // Main 3-pane area
+            Row(Modifier.weight(1f)) {
+                // Left sidebar (collapsible)
+                if (showLeftPane) {
+                    Box(
+                        Modifier
+                            .width(leftPaneWidth)
+                            .fillMaxHeight()
+                            .focusRequester(leftFocusRequester)
+                            .focusTarget(),
+                    ) {
+                        leftPaneContent()
+                    }
+                    VerticalDividerStub(
+                        onDrag = { delta ->
+                            leftPaneWidth = (leftPaneWidth + delta).coerceIn(150.dp, 400.dp)
+                        },
+                    )
+                }
+
+                // Center canvas (flex) + status bar
+                Column(
+                    Modifier
+                        .weight(1f)
+                        .focusRequester(centerFocusRequester)
+                        .focusTarget(),
+                ) {
+                    centerContent(Modifier.weight(1f))
+
+                    // Status bar
+                    StatusBarStub(
+                        crashCount = crashCount,
+                        anrCount = anrCount,
+                        nonFatalCount = nonFatalCount,
+                        toolFailureCount = toolFailureCount,
+                        currentFps = currentFps,
+                        currentMemoryMb = currentMemoryMb,
+                        isDaemonConnected = isDaemonConnected,
+                        deviceName = deviceName,
+                        foregroundApp = foregroundApp,
+                        networkReqPerSec = networkReqPerSec,
+                        connectionStartTime = connectionStartTime,
+                        cpuUsagePercent = cpuUsagePercent,
+                    )
+                }
+
+                // Right inspector (collapsible)
+                if (showRightPane) {
+                    VerticalDividerStub(
+                        onDrag = { delta ->
+                            rightPaneWidth = (rightPaneWidth - delta).coerceIn(200.dp, 500.dp)
+                        },
+                    )
+                    Box(
+                        Modifier
+                            .width(rightPaneWidth)
+                            .fillMaxHeight()
+                            .focusRequester(rightFocusRequester)
+                            .focusTarget(),
+                    ) {
+                        rightPaneContent()
+                    }
+                }
+            }
+
+            // Bottom timeline (collapsible)
+            if (showBottomPane) {
+                HorizontalDividerStub(
+                    onDrag = { delta ->
+                        bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
                     },
                 )
-                Box(Modifier.width(rightPaneWidth).fillMaxHeight()) {
-                    rightPaneContent()
+                Box(Modifier.fillMaxWidth().height(bottomPaneHeight)) {
+                    bottomPaneContent()
                 }
             }
         }
 
-        // Bottom timeline (collapsible)
-        if (showBottomPane) {
-            HorizontalDividerStub(
-                onDrag = { delta ->
-                    bottomPaneHeight = (bottomPaneHeight - delta).coerceIn(80.dp, 300.dp)
-                },
-                onReset = {
-                    bottomPaneHeight = defaultBottomHeight
-                },
+        // Modal overlays
+        if (showCheatSheet) {
+            ShortcutCheatSheet(
+                vimModeEnabled = vimModeEnabled,
+                onDismiss = { showCheatSheet = false },
             )
-            Box(Modifier.fillMaxWidth().height(bottomPaneHeight)) {
-                bottomPaneContent()
-            }
         }
+
+        if (showQuickJump && onQuickJump != null) {
+            QuickJumpDialog(
+                onJump = onQuickJump,
+                onDismiss = { showQuickJump = false },
+            )
+        }
+    }
+}
+
+/**
+ * Builds the ordered list of visible panes given current visibility.
+ */
+private fun visiblePanes(showLeft: Boolean, showRight: Boolean): List<FocusedPane> = buildList {
+    if (showLeft) add(FocusedPane.Left)
+    add(FocusedPane.Center)
+    if (showRight) add(FocusedPane.Right)
+}
+
+/**
+ * Cycles to the next or previous pane, skipping hidden panes.
+ */
+private fun cyclePane(
+    current: FocusedPane,
+    showLeft: Boolean,
+    showRight: Boolean,
+    forward: Boolean,
+): FocusedPane {
+    val order = visiblePanes(showLeft, showRight)
+    val currentIndex = order.indexOf(current).coerceAtLeast(0)
+    val delta = if (forward) 1 else order.size - 1
+    return order[(currentIndex + delta) % order.size]
+}
+
+/**
+ * Requests focus for the given pane.
+ */
+private fun requestFocusForPane(
+    pane: FocusedPane,
+    leftRequester: FocusRequester,
+    centerRequester: FocusRequester,
+    rightRequester: FocusRequester,
+) {
+    try {
+        when (pane) {
+            FocusedPane.Left -> leftRequester.requestFocus()
+            FocusedPane.Center -> centerRequester.requestFocus()
+            FocusedPane.Right -> rightRequester.requestFocus()
+        }
+    } catch (_: IllegalStateException) {
+        // FocusRequester not attached yet - ignore
     }
 }
 

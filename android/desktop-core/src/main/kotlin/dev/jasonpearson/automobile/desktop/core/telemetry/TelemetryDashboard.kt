@@ -25,13 +25,14 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -133,7 +134,9 @@ private const val DETAIL_PANEL_WIDTH_DEFAULT = 320
 private const val DETAIL_PANEL_WIDTH_MIN = 200
 private const val DETAIL_PANEL_WIDTH_MAX = 600
 
-private const val MAX_EVENTS = 1000
+/** Allowed max-event buffer sizes for the telemetry dashboard. */
+internal val MAX_EVENTS_OPTIONS = listOf(500, 1000, 5000, 10_000)
+private const val DEFAULT_MAX_EVENTS = 1000
 
 private enum class CategoryFilter(val label: String, val icon: ImageVector) {
     All("All", AppIcons.All),
@@ -182,6 +185,18 @@ fun TelemetryDashboard(
     var searchQuery by remember { mutableStateOf("") }
     var debouncedQuery by remember { mutableStateOf("") }
     var enabledSeverities by remember { mutableStateOf(EventSeverity.entries.toSet()) }
+    var isRegexEnabled by remember { mutableStateOf(false) }
+
+    var maxEvents by remember { mutableStateOf(DEFAULT_MAX_EVENTS) }
+    var showMaxEventsDropdown by remember { mutableStateOf(false) }
+
+    // Incremental category counts — updated when events are added/removed
+    val categoryCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
+
+    // Tracks the event count per category when the user last viewed that tab.
+    val lastSeenCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
+
+    var filteredEvents by remember { mutableStateOf<List<TelemetryDisplayEvent>>(emptyList()) }
 
     LaunchedEffect(searchQuery) {
         delay(150)
@@ -194,10 +209,9 @@ fun TelemetryDashboard(
         client.telemetryEvents.collect { event ->
             if (!isPaused) {
                 events.add(event)
-                // Cap at MAX_EVENTS (remove oldest from front)
-                while (events.size > MAX_EVENTS) {
-                    events.removeAt(0)
-                }
+                incrementCount(categoryCounts, event)
+                trimEvents(events, maxEvents, categoryCounts)
+
             }
         }
     }
@@ -224,49 +238,21 @@ fun TelemetryDashboard(
         if (dataSourceMode != DataSourceMode.Fake) return@LaunchedEffect
         val fakeEvents = generateFakeEvents()
         events.addAll(fakeEvents)
+        // Initialize incremental counts from bulk-added fake events
+        categoryCounts[CategoryFilter.All] = fakeEvents.size
+        for (e in fakeEvents) {
+            val cat = categoryOf(e) ?: continue
+            categoryCounts[cat] = (categoryCounts[cat] ?: 0) + 1
+        }
     }
 
-    // Filtered events — chains category, severity, bookmark, and text search filters.
-    // derivedStateOf tracks SnapshotStateList mutations correctly.
-    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities, showBookmarksOnly) {
-        derivedStateOf {
-            var result: List<TelemetryDisplayEvent> = if (showBookmarksOnly) {
-                bookmarkedEvents.toList()
-            } else {
-                events.toList()
-            }
-
-            // Category filter
-            if (selectedFilter != CategoryFilter.All) {
-                result = result.filter { event ->
-                    when (selectedFilter) {
-                        CategoryFilter.All -> true
-                        CategoryFilter.Network -> event is TelemetryDisplayEvent.Network
-                        CategoryFilter.Navigation -> event is TelemetryDisplayEvent.Navigation
-                        CategoryFilter.Logs -> event is TelemetryDisplayEvent.Log
-                        CategoryFilter.Os -> event is TelemetryDisplayEvent.Os
-                        CategoryFilter.Custom -> event is TelemetryDisplayEvent.Custom
-                        CategoryFilter.Failures -> event is TelemetryDisplayEvent.Failure
-                        CategoryFilter.Storage -> event is TelemetryDisplayEvent.Storage
-                        CategoryFilter.Layout -> event is TelemetryDisplayEvent.Layout
-                        CategoryFilter.Performance -> event is TelemetryDisplayEvent.Performance
-                        // Touch, Gesture, Input, Memory events appear in All but have no dedicated tab
-                        CategoryFilter.ToolCalls -> event is TelemetryDisplayEvent.ToolCall
-                    }
-                }
-            }
-
-            // Severity filter
-            if (enabledSeverities.size < EventSeverity.entries.size) {
-                result = result.filter { it.eventSeverity in enabledSeverities }
-            }
-
-            // Text search filter
-            if (debouncedQuery.isNotEmpty()) {
-                result = result.filter { it.matchesSearch(debouncedQuery) }
-            }
-
-            result
+    // Recompute filtered list via snapshotFlow so filtering runs outside composition.
+    LaunchedEffect(Unit) {
+        snapshotFlow {
+            FilterInputs(events.size, selectedFilter, debouncedQuery, enabledSeverities, isRegexEnabled, showBookmarksOnly, bookmarkedEvents.size)
+        }.collect {
+            val source = if (showBookmarksOnly) bookmarkedEvents.toList() else events.toList()
+            filteredEvents = buildFilteredList(source, selectedFilter, debouncedQuery, enabledSeverities, isRegexEnabled)
         }
     }
 
@@ -284,23 +270,9 @@ fun TelemetryDashboard(
         }
     }
 
-    // Category counts
-    val counts by remember {
-        derivedStateOf {
-            mapOf(
-                CategoryFilter.All to events.size,
-                CategoryFilter.Network to events.count { it is TelemetryDisplayEvent.Network },
-                CategoryFilter.Navigation to events.count { it is TelemetryDisplayEvent.Navigation },
-                CategoryFilter.Logs to events.count { it is TelemetryDisplayEvent.Log },
-                CategoryFilter.Os to events.count { it is TelemetryDisplayEvent.Os },
-                CategoryFilter.Custom to events.count { it is TelemetryDisplayEvent.Custom },
-                CategoryFilter.Failures to events.count { it is TelemetryDisplayEvent.Failure },
-                CategoryFilter.Storage to events.count { it is TelemetryDisplayEvent.Storage },
-                CategoryFilter.Layout to events.count { it is TelemetryDisplayEvent.Layout },
-                CategoryFilter.Performance to events.count { it is TelemetryDisplayEvent.Performance },
-                CategoryFilter.ToolCalls to events.count { it is TelemetryDisplayEvent.ToolCall },
-            )
-        }
+    // Mark current tab as seen when the selected filter changes
+    LaunchedEffect(selectedFilter) {
+        lastSeenCounts[selectedFilter] = categoryCounts[selectedFilter] ?: 0
     }
 
     Column(modifier = modifier.fillMaxSize()) {
@@ -316,6 +288,9 @@ fun TelemetryDashboard(
                 query = searchQuery,
                 onQueryChange = { searchQuery = it },
                 placeholder = "Filter events...",
+                showRegexToggle = true,
+                isRegexEnabled = isRegexEnabled,
+                onRegexToggle = { isRegexEnabled = !isRegexEnabled },
                 modifier = Modifier.weight(1f),
             )
             // Severity toggle chips
@@ -355,7 +330,10 @@ fun TelemetryDashboard(
             // Clear all events
             Box(
                 modifier = Modifier
-                    .clickable { events.clear(); selectedEvent = null }
+                    .clickable {
+                        events.clear(); selectedEvent = null
+                        categoryCounts.clear(); lastSeenCounts.clear()
+                    }
                     .then(buttonModifier),
             ) {
                 Icon(AppIcons.Delete, contentDescription = "Clear", modifier = Modifier.size(14.dp), tint = colors.text.normal)
@@ -391,6 +369,7 @@ fun TelemetryDashboard(
                 modifier = Modifier
                     .clickable {
                         events.clear(); selectedEvent = null; isPaused = false; autoScrollEnabled = true
+                        categoryCounts.clear(); lastSeenCounts.clear()
                     }
                     .then(buttonModifier),
             ) {
@@ -430,6 +409,60 @@ fun TelemetryDashboard(
                     fontSize = 13.sp,
                 )
             }
+
+            Spacer(Modifier.width(4.dp))
+
+            // Buffer fill indicator + configurable max events
+            Box {
+                Box(
+                    modifier = Modifier
+                        .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                        .clickable { showMaxEventsDropdown = !showMaxEventsDropdown }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 6.dp, vertical = 4.dp),
+                ) {
+                    Text(
+                        "${events.size}/$maxEvents",
+                        fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace,
+                        color = colors.text.normal.copy(alpha = 0.6f),
+                    )
+                }
+                if (showMaxEventsDropdown) {
+                    // Dropdown overlay
+                    Column(
+                        modifier = Modifier
+                            .padding(top = 28.dp)
+                            .background(colors.text.normal.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                            .padding(2.dp),
+                    ) {
+                        MAX_EVENTS_OPTIONS.forEach { option ->
+                            val isCurrentOption = option == maxEvents
+                            Box(
+                                modifier = Modifier
+                                    .background(
+                                        if (isCurrentOption) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
+                                        RoundedCornerShape(3.dp),
+                                    )
+                                    .clickable {
+                                        maxEvents = option
+                                        showMaxEventsDropdown = false
+                                        trimEvents(events, option, categoryCounts)
+                                    }
+                                    .pointerHoverIcon(PointerIcon.Hand)
+                                    .padding(horizontal = 8.dp, vertical = 4.dp),
+                            ) {
+                                Text(
+                                    "$option",
+                                    fontSize = 10.sp,
+                                    fontFamily = FontFamily.Monospace,
+                                    color = if (isCurrentOption) colors.text.normal else colors.text.normal.copy(alpha = 0.6f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
         }
 
         // Responsive category filter tabs
@@ -454,15 +487,21 @@ fun TelemetryDashboard(
             ) {
                 CategoryFilter.entries.forEachIndexed { index, filter ->
                     val isSelected = filter == selectedFilter
-                    val count = counts[filter] ?: 0
+                    val count = categoryCounts[filter] ?: 0
                     val showText = index < tabsWithText
+                    // Show dot when there are unseen events for this tab
+                    val lastSeen = lastSeenCounts[filter] ?: 0
+                    val hasUnseen = !isSelected && filter != CategoryFilter.All && count > lastSeen
                     Box(
                         modifier = Modifier
                             .background(
                                 if (isSelected) colors.text.normal.copy(alpha = 0.12f) else Color.Transparent,
                                 RoundedCornerShape(6.dp),
                             )
-                            .clickable { selectedFilter = filter }
+                            .clickable {
+                                selectedFilter = filter
+                                lastSeenCounts[filter] = categoryCounts[filter] ?: 0
+                            }
                             .pointerHoverIcon(PointerIcon.Hand)
                             .padding(horizontal = if (showText) 8.dp else 6.dp, vertical = 4.dp),
                     ) {
@@ -489,6 +528,14 @@ fun TelemetryDashboard(
                                         color = colors.text.normal.copy(alpha = 0.4f),
                                     )
                                 }
+                            }
+                            if (hasUnseen) {
+                                Box(
+                                    modifier = Modifier
+                                        .width(6.dp)
+                                        .height(6.dp)
+                                        .background(Color(0xFFFF6B6B), RoundedCornerShape(3.dp)),
+                                )
                             }
                         }
                     }
@@ -655,6 +702,96 @@ fun TelemetryDashboard(
             listState.animateScrollToItem(0)
         }
     }
+}
+
+/**
+ * Data class used to trigger snapshotFlow recomputations when filter inputs change.
+ */
+private data class FilterInputs(
+    val eventCount: Int,
+    val filter: CategoryFilter,
+    val query: String,
+    val severities: Set<EventSeverity>,
+    val regex: Boolean,
+    val showBookmarksOnly: Boolean,
+    val bookmarkedCount: Int,
+)
+
+/**
+ * Maps a [TelemetryDisplayEvent] to its [CategoryFilter] (excluding [CategoryFilter.All]).
+ * Returns null for event types that have no dedicated tab.
+ */
+private fun categoryOf(event: TelemetryDisplayEvent): CategoryFilter? = when (event) {
+    is TelemetryDisplayEvent.Network -> CategoryFilter.Network
+    is TelemetryDisplayEvent.Navigation -> CategoryFilter.Navigation
+    is TelemetryDisplayEvent.Log -> CategoryFilter.Logs
+    is TelemetryDisplayEvent.Os -> CategoryFilter.Os
+    is TelemetryDisplayEvent.Custom -> CategoryFilter.Custom
+    is TelemetryDisplayEvent.Failure -> CategoryFilter.Failures
+    is TelemetryDisplayEvent.Storage -> CategoryFilter.Storage
+    is TelemetryDisplayEvent.Layout -> CategoryFilter.Layout
+    is TelemetryDisplayEvent.Performance -> CategoryFilter.Performance
+    is TelemetryDisplayEvent.ToolCall -> CategoryFilter.ToolCalls
+    else -> null
+}
+
+/**
+ * Increment category counts for a newly added event.
+ */
+private fun incrementCount(
+    counts: MutableMap<CategoryFilter, Int>,
+    event: TelemetryDisplayEvent,
+) {
+    counts[CategoryFilter.All] = (counts[CategoryFilter.All] ?: 0) + 1
+    val cat = categoryOf(event)
+    if (cat != null) {
+        counts[cat] = (counts[cat] ?: 0) + 1
+    }
+}
+
+/**
+ * Remove oldest events until [events] fits within [limit], decrementing [counts].
+ */
+private fun trimEvents(
+    events: MutableList<TelemetryDisplayEvent>,
+    limit: Int,
+    counts: MutableMap<CategoryFilter, Int>,
+) {
+    while (events.size > limit) {
+        val removed = events.removeAt(0)
+        counts[CategoryFilter.All] = ((counts[CategoryFilter.All] ?: 1) - 1).coerceAtLeast(0)
+        val cat = categoryOf(removed)
+        if (cat != null) {
+            counts[cat] = ((counts[cat] ?: 1) - 1).coerceAtLeast(0)
+        }
+    }
+}
+
+/**
+ * Builds the filtered event list given the current filter/search parameters.
+ */
+private fun buildFilteredList(
+    events: List<TelemetryDisplayEvent>,
+    selectedFilter: CategoryFilter,
+    query: String,
+    enabledSeverities: Set<EventSeverity>,
+    useRegex: Boolean,
+): List<TelemetryDisplayEvent> {
+    var result: List<TelemetryDisplayEvent> = events
+
+    if (selectedFilter != CategoryFilter.All) {
+        result = result.filter { categoryOf(it) == selectedFilter }
+    }
+
+    if (enabledSeverities.size < EventSeverity.entries.size) {
+        result = result.filter { it.eventSeverity in enabledSeverities }
+    }
+
+    if (query.isNotEmpty()) {
+        result = result.filter { it.matchesSearch(query, useRegex) }
+    }
+
+    return result
 }
 
 @Composable

@@ -6,6 +6,9 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -219,6 +222,17 @@ fun HierarchyTreeView(
     }
 }
 
+/** Generate an XPath-like selector string for an element. */
+private fun buildElementSelector(element: UIElementInfo): String {
+    val simpleName = element.className.substringAfterLast(".")
+    return when {
+        !element.resourceId.isNullOrEmpty() -> "//$simpleName[@resource-id='${element.resourceId}']"
+        !element.text.isNullOrEmpty() -> "//$simpleName[@text='${element.text}']"
+        !element.contentDescription.isNullOrEmpty() -> "//$simpleName[@content-desc='${element.contentDescription}']"
+        else -> "//$simpleName"
+    }
+}
+
 @Composable
 private fun TreeNodeRow(
     node: FlatTreeNode,
@@ -239,10 +253,15 @@ private fun TreeNodeRow(
         else -> Color.Transparent
     }
 
+    // Row-level hover state for showing copy button
+    val rowInteractionSource = remember { MutableInteractionSource() }
+    val isRowHovered by rowInteractionSource.collectIsHoveredAsState()
+
     Row(
         modifier = Modifier
             .widthIn(min = 200.dp)  // Minimum width to ensure content doesn't wrap
             .background(bgColor)
+            .hoverable(rowInteractionSource)
             .pointerInput(Unit) {
                 detectTapGestures(
                     onTap = { onSelect() },
@@ -331,6 +350,26 @@ private fun TreeNodeRow(
             }
             if (node.element.isScrollable) {
                 StateIndicator("\u2195", "Scrollable") // Up-down arrow
+            }
+        }
+
+        // Copy selector button — visible on row hover
+        if (isRowHovered) {
+            val selector = remember(node.element) { buildElementSelector(node.element) }
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        clipboard.setContents(java.awt.datatransfer.StringSelection(selector), null)
+                    }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(horizontal = 4.dp, vertical = 1.dp),
+            ) {
+                Text(
+                    "\uD83D\uDCCB", // 📋
+                    fontSize = 9.sp,
+                    color = colors.text.normal.copy(alpha = 0.5f),
+                )
             }
         }
 

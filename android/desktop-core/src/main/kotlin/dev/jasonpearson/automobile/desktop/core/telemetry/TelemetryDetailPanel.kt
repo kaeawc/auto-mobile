@@ -2,6 +2,9 @@ package dev.jasonpearson.automobile.desktop.core.telemetry
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.hoverable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -21,8 +24,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerIcon
 import androidx.compose.ui.input.pointer.pointerHoverIcon
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
@@ -88,7 +95,19 @@ fun TelemetryDetailPanel(
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = textColor,
+                    modifier = Modifier.weight(1f),
                 )
+                // Copy as Markdown button
+                Box(
+                    modifier = Modifier
+                        .background(textColor.copy(alpha = 0.08f), RoundedCornerShape(4.dp))
+                        .clickable { copyEventAsMarkdown(event) }
+                        .pointerHoverIcon(PointerIcon.Hand)
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                ) {
+                    Text("MD", fontSize = 9.sp, color = textColor.copy(alpha = 0.6f))
+                }
+                Spacer(Modifier.width(4.dp))
                 Box(
                     modifier = Modifier
                         .background(textColor.copy(alpha = 0.1f), RoundedCornerShape(4.dp))
@@ -153,9 +172,16 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
 
 @Composable
 private fun DetailRow(label: String, value: String, textColor: Color) {
+    val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
     Row(
-        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .hoverable(interactionSource)
+            .padding(vertical = 2.dp),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
             label,
@@ -169,7 +195,21 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
             fontSize = 10.sp,
             fontFamily = FontFamily.Monospace,
             color = textColor.copy(alpha = 0.85f),
+            modifier = Modifier.weight(1f),
         )
+        if (isHovered) {
+            Box(
+                modifier = Modifier
+                    .clickable {
+                        val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+                        clipboard.setContents(java.awt.datatransfer.StringSelection(value), null)
+                    }
+                    .pointerHoverIcon(PointerIcon.Hand)
+                    .padding(2.dp),
+            ) {
+                Text("\uD83D\uDCCB", fontSize = 9.sp) // 📋
+            }
+        }
     }
 }
 
@@ -385,6 +425,126 @@ private fun MonospaceBlock(text: String, textColor: Color) {
             color = textColor.copy(alpha = 0.8f),
         )
     }
+}
+
+/**
+ * JSON syntax highlighting using AnnotatedString.
+ * Colors: keys=blue, string values=green, numbers=orange, booleans/null=purple.
+ */
+@Composable
+private fun SyntaxHighlightedJson(json: String, textColor: Color) {
+    val annotated = remember(json, textColor) { buildSyntaxHighlightedJson(json, textColor) }
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+            .padding(6.dp),
+    ) {
+        Text(
+            annotated,
+            fontSize = 9.sp,
+            fontFamily = FontFamily.Monospace,
+        )
+    }
+}
+
+private fun buildSyntaxHighlightedJson(json: String, baseColor: Color): AnnotatedString {
+    val keyColor = Color(0xFF82AAFF)
+    val stringColor = Color(0xFF98C379)
+    val numberColor = Color(0xFFE5C07B)
+    val keywordColor = Color(0xFFC678DD)
+    val defaultColor = baseColor.copy(alpha = 0.85f)
+
+    return buildAnnotatedString {
+        var i = 0
+        while (i < json.length) {
+            val c = json[i]
+            when {
+                c == '"' -> {
+                    // Find end of string
+                    var j = i + 1
+                    while (j < json.length) {
+                        if (json[j] == '\\') { j += 2; continue }
+                        if (json[j] == '"') { j++; break }
+                        j++
+                    }
+                    val token = json.substring(i, j)
+                    // Look ahead for ':' to determine if this is a key
+                    var k = j
+                    while (k < json.length && (json[k] == ' ' || json[k] == '\t' || json[k] == '\n')) k++
+                    val isKey = k < json.length && json[k] == ':'
+                    withStyle(SpanStyle(color = if (isKey) keyColor else stringColor)) {
+                        append(token)
+                    }
+                    i = j
+                }
+                json.startsWith("true", i) || json.startsWith("false", i) || json.startsWith("null", i) -> {
+                    val end = when {
+                        json.startsWith("true", i) -> i + 4
+                        json.startsWith("false", i) -> i + 5
+                        else -> i + 4
+                    }
+                    withStyle(SpanStyle(color = keywordColor)) { append(json.substring(i, end)) }
+                    i = end
+                }
+                c == '-' || c.isDigit() -> {
+                    var j = i
+                    if (j < json.length && json[j] == '-') j++
+                    while (j < json.length && (json[j].isDigit() || json[j] == '.' || json[j] == 'e' || json[j] == 'E' || json[j] == '+' || json[j] == '-')) j++
+                    withStyle(SpanStyle(color = numberColor)) { append(json.substring(i, j)) }
+                    i = j
+                }
+                else -> {
+                    withStyle(SpanStyle(color = defaultColor)) { append(c) }
+                    i++
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Format a TelemetryDisplayEvent as a Markdown table and copy it to the clipboard.
+ */
+private fun copyEventAsMarkdown(event: TelemetryDisplayEvent) {
+    val rows = mutableListOf<Pair<String, String>>()
+    rows.add("Type" to event.javaClass.simpleName)
+    rows.add("Time" to event.timestamp.toString())
+
+    when (event) {
+        is TelemetryDisplayEvent.Network -> {
+            rows.add("URL" to event.url)
+            rows.add("Method" to event.method)
+            rows.add("Status" to "${event.statusCode}")
+            rows.add("Duration" to "${event.durationMs}ms")
+        }
+        is TelemetryDisplayEvent.Log -> {
+            rows.add("Tag" to event.tag)
+            rows.add("Message" to event.message)
+        }
+        is TelemetryDisplayEvent.Navigation -> {
+            rows.add("Destination" to event.destination)
+            event.source?.let { rows.add("Source" to it) }
+        }
+        is TelemetryDisplayEvent.Failure -> {
+            rows.add("Title" to event.title)
+            rows.add("Severity" to event.severity)
+        }
+        is TelemetryDisplayEvent.Performance -> {
+            event.fps?.let { rows.add("FPS" to "${it.toInt()}") }
+            event.cpuUsagePercent?.let { rows.add("CPU" to "${"%.1f".format(it)}%") }
+            event.memoryUsageMb?.let { rows.add("Memory" to "${it.toInt()} MB") }
+        }
+        else -> {}
+    }
+
+    val sb = StringBuilder()
+    sb.appendLine("| Field | Value |")
+    sb.appendLine("|-------|-------|")
+    rows.forEach { (k, v) -> sb.appendLine("| $k | ${v.replace("|", "\\|")} |") }
+
+    val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
+    clipboard.setContents(java.awt.datatransfer.StringSelection(sb.toString()), null)
 }
 
 @Composable

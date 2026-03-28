@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.desktop.core.shell
 
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.ui.window.FrameWindowScope
 
 private const val APP_NAME = "AutoMobile"
 
@@ -13,10 +14,10 @@ private const val APP_NAME = "AutoMobile"
  * - Device only:  "AutoMobile — Pixel 8 API 35"
  * - Neither:      "AutoMobile"
  *
- * Place this composable inside the [Window] content block.
+ * Place this composable inside the [Window] content block (within a [FrameWindowScope]).
  */
 @Composable
-fun WindowSubtitle(
+fun FrameWindowScope.WindowSubtitle(
     deviceName: String?,
     foregroundApp: String?,
 ) {
@@ -33,8 +34,6 @@ fun WindowSubtitle(
     }
 
     LaunchedEffect(title) {
-        java.awt.Window.getWindows().filterIsInstance<java.awt.Frame>().forEach { frame ->
-            frame.title = title
-        }
+        window.title = title
     }
 }

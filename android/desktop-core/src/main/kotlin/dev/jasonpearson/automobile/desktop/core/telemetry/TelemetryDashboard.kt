@@ -27,6 +27,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.rememberCoroutineScope
@@ -239,7 +240,7 @@ fun TelemetryDashboard(
         val fakeEvents = generateFakeEvents()
         events.addAll(fakeEvents)
         // Initialize incremental counts from bulk-added fake events
-        categoryCounts[CategoryFilter.All] = fakeEvents.size
+        categoryCounts[CategoryFilter.All] = (categoryCounts[CategoryFilter.All] ?: 0) + fakeEvents.size
         for (e in fakeEvents) {
             val cat = categoryOf(e) ?: continue
             categoryCounts[cat] = (categoryCounts[cat] ?: 0) + 1
@@ -249,7 +250,7 @@ fun TelemetryDashboard(
     // Recompute filtered list via snapshotFlow so filtering runs outside composition.
     LaunchedEffect(Unit) {
         snapshotFlow {
-            FilterInputs(events.size, selectedFilter, debouncedQuery, enabledSeverities, isRegexEnabled, showBookmarksOnly, bookmarkedEvents.size)
+            FilterInputs(events.size, events.lastOrNull()?.timestamp, selectedFilter, debouncedQuery, enabledSeverities, isRegexEnabled, showBookmarksOnly, bookmarkedEvents.size)
         }.collect {
             val source = if (showBookmarksOnly) bookmarkedEvents.toList() else events.toList()
             filteredEvents = buildFilteredList(source, selectedFilter, debouncedQuery, enabledSeverities, isRegexEnabled)
@@ -617,7 +618,7 @@ fun TelemetryDashboard(
                             }
                         }
 
-                        groupedItems.forEach { listItem ->
+                        groupedItems.forEach { listItem: EventListItem ->
                             when (listItem) {
                                 is EventListItem.Single -> {
                                     emitEventRow(listItem.event, "single")
@@ -706,9 +707,13 @@ fun TelemetryDashboard(
 
 /**
  * Data class used to trigger snapshotFlow recomputations when filter inputs change.
+ * [eventVersion] captures both the size and a rolling change token so that
+ * add-then-trim cycles (where the buffer stays the same size) still re-trigger
+ * filtering.
  */
 private data class FilterInputs(
     val eventCount: Int,
+    val lastEventTimestamp: Long?,
     val filter: CategoryFilter,
     val query: String,
     val severities: Set<EventSeverity>,

@@ -16,13 +16,11 @@ object McpClientFactory {
         McpHttpClient(normalizeHttpUrl("http://localhost:$port"))
       }
       McpConnectionType.UnixSocket -> {
-        // Unix socket processes expose an HTTP endpoint on localhost
-        val port = process.port ?: 3000
-        McpHttpClient(normalizeHttpUrl("http://localhost:$port"))
+        val socketPath = process.socketPath ?: DaemonSocketPaths.socketPath()
+        McpDaemonClient(socketPath)
       }
       McpConnectionType.Stdio -> {
-        val command = process.commandLine ?: "auto-mobile"
-        McpStdioClient(command)
+        throw UnsupportedOperationException("Cannot connect to STDIO process externally")
       }
     }
   }

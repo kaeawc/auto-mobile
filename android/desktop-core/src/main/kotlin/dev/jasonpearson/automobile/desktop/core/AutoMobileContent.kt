@@ -266,9 +266,29 @@ fun AutoMobileContent(
   // Connected MCP process (for creating clients)
   var connectedMcpProcess by remember { mutableStateOf<McpProcess?>(null) }
 
+  // Counter to trigger MCP process re-detection (incremented by Connect button)
+  var mcpConnectRetryCounter by remember { mutableIntStateOf(0) }
+
   // Log when connectedMcpProcess changes
   LaunchedEffect(connectedMcpProcess) {
       LOG.info("connectedMcpProcess changed to: ${connectedMcpProcess?.let { "${it.name} (PID ${it.pid}, ${it.connectionType})" } ?: "null"}")
+  }
+
+  // Auto-detect and connect to MCP process when in Real mode
+  LaunchedEffect(dataSourceMode, connectedMcpProcess, mcpConnectRetryCounter) {
+      if (dataSourceMode == DataSourceMode.Real && connectedMcpProcess == null) {
+          kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+              val detector = RealMcpProcessDetector()
+              val processes = detector.detectProcesses()
+              LOG.info("Auto-detect MCP: found ${processes.size} process(es)")
+              val preferred = processes.firstOrNull { it.connectionType == McpConnectionType.UnixSocket }
+                  ?: processes.firstOrNull { it.connectionType == McpConnectionType.StreamableHttp }
+              if (preferred != null) {
+                  LOG.info("Auto-connecting to MCP process: ${preferred.name} (PID ${preferred.pid}, ${preferred.connectionType})")
+                  connectedMcpProcess = preferred
+              }
+          }
+      }
   }
 
   // Client provider function for dashboards to access MCP data
@@ -719,10 +739,10 @@ fun AutoMobileContent(
                   if (dataSourceMode == DataSourceMode.Real) {
                       Spacer(Modifier.height(4.dp))
                       Text(
-                          text = "[Connect]",
+                          text = "[Retry Detection]",
                           color = colors.text.info,
                           fontSize = 12.sp,
-                          modifier = Modifier.clickable { isDevicePanelExpanded = true },
+                          modifier = Modifier.clickable { mcpConnectRetryCounter++ },
                       )
                   }
               }

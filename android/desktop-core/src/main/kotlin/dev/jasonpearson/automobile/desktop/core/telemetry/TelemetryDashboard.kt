@@ -58,6 +58,76 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+private const val GROUP_THRESHOLD = 3
+
+/**
+ * Returns a category key used to group consecutive same-type events.
+ */
+private fun TelemetryDisplayEvent.categoryKey(): String = when (this) {
+    is TelemetryDisplayEvent.Network -> "Network"
+    is TelemetryDisplayEvent.Navigation -> "Navigation"
+    is TelemetryDisplayEvent.Log -> "Log"
+    is TelemetryDisplayEvent.Os -> "OS"
+    is TelemetryDisplayEvent.Custom -> "Custom"
+    is TelemetryDisplayEvent.Failure -> "Failure"
+    is TelemetryDisplayEvent.Storage -> "Storage"
+    is TelemetryDisplayEvent.Layout -> "Layout"
+    is TelemetryDisplayEvent.Performance -> "Performance"
+    is TelemetryDisplayEvent.Memory -> "Memory"
+    is TelemetryDisplayEvent.ToolCall -> "ToolCall"
+    is TelemetryDisplayEvent.Accessibility -> "Accessibility"
+}
+
+/**
+ * A row in the event list: either a single event or a collapsible group of
+ * 3+ consecutive same-type events.
+ */
+private sealed class EventListItem {
+    data class Single(val event: TelemetryDisplayEvent) : EventListItem()
+    data class Group(
+        val categoryKey: String,
+        val events: List<TelemetryDisplayEvent>,
+        val isExpanded: Boolean,
+    ) : EventListItem()
+}
+
+/**
+ * Processes a flat event list into [EventListItem]s, collapsing runs of 3+
+ * consecutive same-category events into groups.
+ */
+private fun groupEvents(
+    events: List<TelemetryDisplayEvent>,
+    expandedGroups: Set<String>,
+): List<EventListItem> {
+    if (events.isEmpty()) return emptyList()
+    val result = mutableListOf<EventListItem>()
+    var runStart = 0
+    while (runStart < events.size) {
+        val key = events[runStart].categoryKey()
+        var runEnd = runStart + 1
+        while (runEnd < events.size && events[runEnd].categoryKey() == key) {
+            runEnd++
+        }
+        if (runEnd - runStart >= GROUP_THRESHOLD) {
+            val groupId = "${key}_${events[runStart].timestamp}"
+            val expanded = groupId in expandedGroups
+            result.add(
+                EventListItem.Group(
+                    categoryKey = key,
+                    events = events.subList(runStart, runEnd),
+                    isExpanded = expanded,
+                )
+            )
+        } else {
+            for (i in runStart until runEnd) {
+                result.add(EventListItem.Single(events[i]))
+            }
+        }
+        runStart = runEnd
+    }
+    return result
+}
+
 private const val DETAIL_PANEL_WIDTH_KEY = "automobile.telemetry.detailPanelWidth"
 private const val DETAIL_PANEL_WIDTH_DEFAULT = 320
 private const val DETAIL_PANEL_WIDTH_MIN = 200
@@ -100,6 +170,13 @@ fun TelemetryDashboard(
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
     var isPaused by remember { mutableStateOf(false) }
     var autoScrollEnabled by remember { mutableStateOf(true) }
+
+    // Bookmarks (survives clear operations)
+    val bookmarkedEvents = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+    var showBookmarksOnly by remember { mutableStateOf(false) }
+
+    // Event grouping expand/collapse state
+    val expandedGroups = remember { mutableStateListOf<String>() }
 
     // Search and severity filter state
     var searchQuery by remember { mutableStateOf("") }
@@ -149,11 +226,15 @@ fun TelemetryDashboard(
         events.addAll(fakeEvents)
     }
 
-    // Filtered events — chains category, severity, and text search filters.
+    // Filtered events — chains category, severity, bookmark, and text search filters.
     // derivedStateOf tracks SnapshotStateList mutations correctly.
-    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities) {
+    val filteredEvents by remember(selectedFilter, debouncedQuery, enabledSeverities, showBookmarksOnly) {
         derivedStateOf {
-            var result: List<TelemetryDisplayEvent> = events.toList()
+            var result: List<TelemetryDisplayEvent> = if (showBookmarksOnly) {
+                bookmarkedEvents.toList()
+            } else {
+                events.toList()
+            }
 
             // Category filter
             if (selectedFilter != CategoryFilter.All) {
@@ -186,6 +267,13 @@ fun TelemetryDashboard(
             }
 
             result
+        }
+    }
+
+    // Grouped event list items for the LazyColumn
+    val groupedItems by remember {
+        derivedStateOf {
+            groupEvents(filteredEvents, expandedGroups.toSet())
         }
     }
 
@@ -324,6 +412,24 @@ fun TelemetryDashboard(
             ) {
                 Icon(AppIcons.ScrollDown, contentDescription = "Scroll to bottom", modifier = Modifier.size(14.dp), tint = colors.text.normal)
             }
+
+            // Bookmarks toggle
+            Box(
+                modifier = Modifier
+                    .clickable { showBookmarksOnly = !showBookmarksOnly }
+                    .then(buttonModifier)
+                    .then(
+                        if (showBookmarksOnly) Modifier.background(
+                            Color(0xFFFFD43B).copy(alpha = 0.15f),
+                            RoundedCornerShape(4.dp),
+                        ) else Modifier
+                    ),
+            ) {
+                Text(
+                    if (showBookmarksOnly) "\u2605" else "\u2606", // ★ filled / ☆ outline
+                    fontSize = 13.sp,
+                )
+            }
         }
 
         // Responsive category filter tabs
@@ -442,21 +548,53 @@ fun TelemetryDashboard(
                         state = listState,
                         modifier = Modifier.fillMaxSize(),
                     ) {
-                        items(filteredEvents, key = { "${it.timestamp}_${System.identityHashCode(it)}" }) { event ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .then(
-                                        if (event == selectedEvent) {
-                                            Modifier.background(colors.text.normal.copy(alpha = 0.08f))
-                                        } else {
-                                            Modifier
+                        fun emitEventRow(
+                            event: TelemetryDisplayEvent,
+                            keyPrefix: String,
+                            indented: Boolean = false,
+                        ) {
+                            item(key = "${keyPrefix}_${event.timestamp}_${System.identityHashCode(event)}") {
+                                EventRowWithBookmark(
+                                    event = event,
+                                    timeFormat = timeFormat,
+                                    textColor = colors.text.normal,
+                                    isSelected = event == selectedEvent,
+                                    isBookmarked = event in bookmarkedEvents,
+                                    onToggleBookmark = {
+                                        if (event in bookmarkedEvents) bookmarkedEvents.remove(event)
+                                        else bookmarkedEvents.add(event)
+                                    },
+                                    onClick = { selectedEvent = if (selectedEvent == event) null else event },
+                                    indented = indented,
+                                )
+                            }
+                        }
+
+                        groupedItems.forEach { listItem ->
+                            when (listItem) {
+                                is EventListItem.Single -> {
+                                    emitEventRow(listItem.event, "single")
+                                }
+                                is EventListItem.Group -> {
+                                    val groupId = "${listItem.categoryKey}_${listItem.events.first().timestamp}"
+                                    item(key = "group_header_$groupId") {
+                                        GroupHeader(
+                                            categoryKey = listItem.categoryKey,
+                                            count = listItem.events.size,
+                                            isExpanded = listItem.isExpanded,
+                                            textColor = colors.text.normal,
+                                            onClick = {
+                                                if (groupId in expandedGroups) expandedGroups.remove(groupId)
+                                                else expandedGroups.add(groupId)
+                                            },
+                                        )
+                                    }
+                                    if (listItem.isExpanded) {
+                                        listItem.events.forEach { event ->
+                                            emitEventRow(event, "grouped", indented = true)
                                         }
-                                    )
-                                    .clickable { selectedEvent = if (selectedEvent == event) null else event }
-                                    .pointerHoverIcon(PointerIcon.Hand)
-                            ) {
-                                TelemetryEventRow(event, timeFormat, colors.text.normal)
+                                    }
+                                }
                             }
                         }
                     }
@@ -515,6 +653,80 @@ fun TelemetryDashboard(
     LaunchedEffect(filteredEvents.size) {
         if (listState.firstVisibleItemIndex <= 2) {
             listState.animateScrollToItem(0)
+        }
+    }
+}
+
+@Composable
+private fun GroupHeader(
+    categoryKey: String,
+    count: Int,
+    isExpanded: Boolean,
+    textColor: Color,
+    onClick: () -> Unit,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(textColor.copy(alpha = 0.04f))
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 8.dp, vertical = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(
+            if (isExpanded) "\u25BC" else "\u25B6", // ▼ / ▶
+            fontSize = 9.sp,
+            color = textColor.copy(alpha = 0.6f),
+        )
+        Text(
+            "$count $categoryKey events",
+            fontSize = 11.sp,
+            fontFamily = FontFamily.Monospace,
+            fontWeight = FontWeight.SemiBold,
+            color = textColor.copy(alpha = 0.7f),
+        )
+    }
+}
+
+@Composable
+private fun EventRowWithBookmark(
+    event: TelemetryDisplayEvent,
+    timeFormat: SimpleDateFormat,
+    textColor: Color,
+    isSelected: Boolean,
+    isBookmarked: Boolean,
+    onToggleBookmark: () -> Unit,
+    onClick: () -> Unit,
+    indented: Boolean = false,
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .then(
+                if (isSelected) Modifier.background(textColor.copy(alpha = 0.08f))
+                else Modifier
+            )
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(start = if (indented) 16.dp else 0.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .clickable(onClick = onToggleBookmark)
+                .pointerHoverIcon(PointerIcon.Hand)
+                .padding(start = 4.dp, end = 2.dp, top = 2.dp, bottom = 2.dp),
+        ) {
+            Text(
+                if (isBookmarked) "\u2605" else "\u2606",
+                fontSize = 10.sp,
+                color = if (isBookmarked) Color(0xFFFFD43B) else textColor.copy(alpha = 0.25f),
+            )
+        }
+        Box(modifier = Modifier.weight(1f)) {
+            TelemetryEventRow(event, timeFormat, textColor)
         }
     }
 }

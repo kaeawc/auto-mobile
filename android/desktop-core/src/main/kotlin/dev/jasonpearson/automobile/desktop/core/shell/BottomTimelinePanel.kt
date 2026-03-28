@@ -75,7 +75,10 @@ fun BottomTimelinePanel(
                     TimelineScreenshotOverlay(
                         screenshotEvents = screenshotEvents,
                         timelineState = timelineState,
-                        onScreenshotClicked = { onEventSelected(it) },
+                        onScreenshotClicked = {
+                        timelineState.selectedEventTimestamp = it.timestamp
+                        onEventSelected(it)
+                    },
                         modifier = Modifier.fillMaxWidth().height(84.dp),
                     )
                 }

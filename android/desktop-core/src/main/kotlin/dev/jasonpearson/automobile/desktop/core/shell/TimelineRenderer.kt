@@ -140,7 +140,7 @@ fun TimelineRenderer(
             .horizontalScroll(scrollState)
             .width(maxOf(totalWidthDp, 200.dp))
             .fillMaxSize()
-            .pointerInput(Unit) {
+            .pointerInput(minTimestamp, basePixelsPerMs, timelineState.zoomLevel) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent()

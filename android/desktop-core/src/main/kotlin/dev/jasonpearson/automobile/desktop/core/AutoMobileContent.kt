@@ -323,37 +323,40 @@ fun AutoMobileContent(
       kotlinx.coroutines.withContext(Dispatchers.IO) {
           try {
               val client = McpResourceClientFactory.create(process)
-              when (val result = client.readResource("automobile:devices/booted")) {
-                  is ResourceReadResult.Success -> {
-                      val parsed = DeviceResourceParser.parseBootedDevices(result.content)
-                      val allDevices = parsed?.devices ?: emptyList()
-                      val allBootedDevices = allDevices.map { dev ->
-                          val deviceType = when {
-                              dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
-                              dev.platform == "ios" -> DeviceType.iOSPhysical
-                              dev.isVirtual -> DeviceType.AndroidEmulator
-                              else -> DeviceType.AndroidPhysical
+              try {
+                  when (val result = client.readResource("automobile:devices/booted")) {
+                      is ResourceReadResult.Success -> {
+                          val parsed = DeviceResourceParser.parseBootedDevices(result.content)
+                          val allDevices = parsed?.devices ?: emptyList()
+                          val allBootedDevices = allDevices.map { dev ->
+                              val deviceType = when {
+                                  dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
+                                  dev.platform == "ios" -> DeviceType.iOSPhysical
+                                  dev.isVirtual -> DeviceType.AndroidEmulator
+                                  else -> DeviceType.AndroidPhysical
+                              }
+                              BootedDevice(
+                                  id = dev.deviceId,
+                                  name = dev.name,
+                                  type = deviceType,
+                                  status = dev.status,
+                              )
                           }
-                          BootedDevice(
-                              id = dev.deviceId,
-                              name = dev.name,
-                              type = deviceType,
-                              status = dev.status,
-                          )
+                          realDevices = allBootedDevices
+                          val firstDevice = allBootedDevices.firstOrNull()
+                          if (firstDevice != null) {
+                              realDevice = firstDevice
+                              activeDeviceId = firstDevice.id
+                              LOG.info("Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}")
+                          }
                       }
-                      realDevices = allBootedDevices
-                      val firstDevice = allBootedDevices.firstOrNull()
-                      if (firstDevice != null) {
-                          realDevice = firstDevice
-                          activeDeviceId = firstDevice.id
-                          LOG.info("Set realDevice from MCP: ${firstDevice.name} (${firstDevice.id}), total devices: ${allBootedDevices.size}")
+                      is ResourceReadResult.Error -> {
+                          LOG.info("Failed to fetch booted devices after MCP connect: ${result.message}")
                       }
                   }
-                  is ResourceReadResult.Error -> {
-                      LOG.info("Failed to fetch booted devices after MCP connect: ${result.message}")
-                  }
+              } finally {
+                  client.close()
               }
-              client.close()
           } catch (e: Exception) {
               LOG.info("Error fetching booted devices after MCP connect: ${e.message}")
           }
@@ -874,6 +877,7 @@ fun AutoMobileContent(
                       fontSize = 12.sp,
                       modifier = Modifier.clickable {
                           activeDeviceId = device.id
+                          realDevice = device
                           isDevicePanelExpanded = false
                       },
                   )

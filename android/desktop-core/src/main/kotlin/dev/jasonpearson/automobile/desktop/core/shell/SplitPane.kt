@@ -18,6 +18,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -54,7 +55,8 @@ fun HorizontalSplitPane(
     dividerWidth: Dp = 1.dp,
     dragHandleWidth: Dp = 8.dp,
 ) {
-    val density = LocalDensity.current
+    val currentDensity by rememberUpdatedState(LocalDensity.current)
+    val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
     var fraction by remember { mutableStateOf(firstPaneFraction) }
     var totalWidthPx by remember { mutableStateOf(0) }
     var isDragging by remember { mutableStateOf(false) }
@@ -99,9 +101,9 @@ fun HorizontalSplitPane(
                         onDrag = { change, dragAmount ->
                             change.consume()
                             if (totalWidthPx > 0) {
-                                val minFirstPx = with(density) { minFirstDp.toPx() }
-                                val minSecondPx = with(density) { minSecondDp.toPx() }
-                                val handlePx = with(density) { dragHandleWidth.toPx() }
+                                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
                                 val usable = (totalWidthPx - handlePx)
                                     .coerceAtLeast(minFirstPx + minSecondPx)
                                 val newFirstPx = (fraction * usable + dragAmount.x)
@@ -109,7 +111,7 @@ fun HorizontalSplitPane(
                                 val newFraction = (newFirstPx / usable)
                                     .coerceIn(0.01f, 0.99f)
                                 fraction = newFraction
-                                onFractionChanged?.invoke(newFraction)
+                                currentOnFractionChanged?.invoke(newFraction)
                             }
                         },
                     )
@@ -158,7 +160,8 @@ fun VerticalSplitPane(
     dividerWidth: Dp = 1.dp,
     dragHandleWidth: Dp = 8.dp,
 ) {
-    val density = LocalDensity.current
+    val currentDensity by rememberUpdatedState(LocalDensity.current)
+    val currentOnFractionChanged by rememberUpdatedState(onFractionChanged)
     var fraction by remember { mutableStateOf(firstPaneFraction) }
     var totalHeightPx by remember { mutableStateOf(0) }
     var isDragging by remember { mutableStateOf(false) }
@@ -203,9 +206,9 @@ fun VerticalSplitPane(
                         onDrag = { change, dragAmount ->
                             change.consume()
                             if (totalHeightPx > 0) {
-                                val minFirstPx = with(density) { minFirstDp.toPx() }
-                                val minSecondPx = with(density) { minSecondDp.toPx() }
-                                val handlePx = with(density) { dragHandleWidth.toPx() }
+                                val minFirstPx = with(currentDensity) { minFirstDp.toPx() }
+                                val minSecondPx = with(currentDensity) { minSecondDp.toPx() }
+                                val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
                                 val usable = (totalHeightPx - handlePx)
                                     .coerceAtLeast(minFirstPx + minSecondPx)
                                 val newFirstPx = (fraction * usable + dragAmount.y)
@@ -213,7 +216,7 @@ fun VerticalSplitPane(
                                 val newFraction = (newFirstPx / usable)
                                     .coerceIn(0.01f, 0.99f)
                                 fraction = newFraction
-                                onFractionChanged?.invoke(newFraction)
+                                currentOnFractionChanged?.invoke(newFraction)
                             }
                         },
                     )

@@ -106,6 +106,7 @@ fun HorizontalSplitPane(
                                 val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
                                 val usable = (totalWidthPx - handlePx)
                                     .coerceAtLeast(minFirstPx + minSecondPx)
+                                if (usable <= 0f) return@detectDragGestures
                                 val newFirstPx = (fraction * usable + dragAmount.x)
                                     .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
                                 val newFraction = (newFirstPx / usable)
@@ -211,6 +212,7 @@ fun VerticalSplitPane(
                                 val handlePx = with(currentDensity) { dragHandleWidth.toPx() }
                                 val usable = (totalHeightPx - handlePx)
                                     .coerceAtLeast(minFirstPx + minSecondPx)
+                                if (usable <= 0f) return@detectDragGestures
                                 val newFirstPx = (fraction * usable + dragAmount.y)
                                     .coerceIn(minFirstPx, (usable - minSecondPx).coerceAtLeast(minFirstPx))
                                 val newFraction = (newFirstPx / usable)

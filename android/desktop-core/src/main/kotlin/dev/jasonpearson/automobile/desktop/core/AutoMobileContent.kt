@@ -879,6 +879,7 @@ fun AutoMobileContent(
                                   testFlowScreens = screens
                                   isReplaying = true
                                   currentReplayIndex = 0
+                                  if (!centerOpenTabs.contains(CenterTabType.Navigation)) centerOpenTabs.add(CenterTabType.Navigation)
                                   selectedCenterTab = CenterTabType.Navigation
                               },
                               dataSourceMode = dataSourceMode,

@@ -247,6 +247,7 @@ private fun DetailRow(label: String, value: String, textColor: Color) {
     }
 }
 
+@Composable
 private fun HeaderIconButton(
     icon: String,
     textColor: Color,
@@ -415,6 +416,10 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
 
 /**
  * Network event detail with tabbed sub-views: Overview, Headers, Request, Response.
+ *
+ * Replay state ([replayResult] and [isRunning]) is hoisted here so it survives
+ * tab switches — if they lived inside [NetworkOverviewTab] they would be disposed
+ * whenever the user navigated away from that tab.
  */
 @Composable
 private fun NetworkTabbedDetail(
@@ -425,6 +430,10 @@ private fun NetworkTabbedDetail(
     val tabs = listOf("Overview", "Headers", "Request", "Response")
     var selectedTab by remember(event) { mutableStateOf(0) }
 
+    // Hoist replay state to this level so it persists across tab switches.
+    var replayResult by remember(event) { mutableStateOf<NetworkReplayResult?>(null) }
+    var isRunning by remember(event) { mutableStateOf(false) }
+
     InspectorTabBar(
         tabs = tabs,
         selected = selectedTab,
@@ -434,7 +443,26 @@ private fun NetworkTabbedDetail(
     )
 
     when (selectedTab) {
-        0 -> NetworkOverviewTab(event, textColor)
+        0 -> NetworkOverviewTab(
+            event = event,
+            textColor = textColor,
+            replayResult = replayResult,
+            isRunning = isRunning,
+            onRunReplay = { isRunning = true; replayResult = null
+                Thread {
+                    val result = NetworkRequestRunner.run(
+                        url = event.url,
+                        method = event.method,
+                        requestHeaders = event.requestHeaders,
+                        requestBody = event.requestBody,
+                    )
+                    javax.swing.SwingUtilities.invokeLater {
+                        replayResult = result
+                        isRunning = false
+                    }
+                }.start()
+            },
+        )
         1 -> NetworkHeadersTab(event, textColor)
         2 -> NetworkRequestTab(event, textColor)
         3 -> NetworkResponseTab(event, textColor)
@@ -442,7 +470,13 @@ private fun NetworkTabbedDetail(
 }
 
 @Composable
-private fun NetworkOverviewTab(event: TelemetryDisplayEvent.Network, textColor: Color) {
+private fun NetworkOverviewTab(
+    event: TelemetryDisplayEvent.Network,
+    textColor: Color,
+    replayResult: NetworkReplayResult?,
+    isRunning: Boolean,
+    onRunReplay: () -> Unit,
+) {
     DetailRow("Method", event.method, textColor)
     DetailRow("Status", "${event.statusCode}", textColor)
     DetailRow("URL", event.url, textColor)
@@ -463,26 +497,11 @@ private fun NetworkOverviewTab(event: TelemetryDisplayEvent.Network, textColor: 
         MonospaceBlock(curlCommand, textColor)
     }
 
-    // Run button
+    // Run button — state is owned by the parent NetworkTabbedDetail so it
+    // persists when the user switches away from this tab and back.
     Spacer(Modifier.height(8.dp))
-    var replayResult by remember(event) { mutableStateOf<NetworkReplayResult?>(null) }
-    var isRunning by remember(event) { mutableStateOf(false) }
-
     ActionButton(if (isRunning) "Running..." else "Run", textColor, enabled = !isRunning) {
-        isRunning = true
-        replayResult = null
-        Thread {
-            val result = NetworkRequestRunner.run(
-                url = event.url,
-                method = event.method,
-                requestHeaders = event.requestHeaders,
-                requestBody = event.requestBody,
-            )
-            javax.swing.SwingUtilities.invokeLater {
-                replayResult = result
-                isRunning = false
-            }
-        }.start()
+        onRunReplay()
     }
 
     val result = replayResult

@@ -621,7 +621,7 @@ fun TelemetryDashboard(
         }
 
         // Network diff view (shown when enabled and two events selected)
-        if (showDiff && diffLeft != null && diffRight != null) {
+        if (showDiff && diffLeft != null && diffRight != null && selectedFilter == CategoryFilter.Network) {
             NetworkDiffView(
                 left = diffLeft!!,
                 right = diffRight!!,

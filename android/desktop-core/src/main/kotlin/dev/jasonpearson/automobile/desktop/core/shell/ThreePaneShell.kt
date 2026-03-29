@@ -159,7 +159,7 @@ fun ThreePaneShell(
                             showCheatSheet = false
                             return@onPreviewKeyEvent true
                         }
-                        return@onPreviewKeyEvent false
+                        return@onPreviewKeyEvent true
                     }
                     if (showQuickJump) return@onPreviewKeyEvent false
 
@@ -425,7 +425,7 @@ private fun TitleBarSpacer() {
 
 /** Thin vertical divider with horizontal drag-to-resize. Double-tap resets to default. */
 @Composable
-private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit) {
+private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) {
     val density = LocalDensity.current
     Box(
         Modifier
@@ -446,7 +446,7 @@ private fun VerticalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit) {
 
 /** Thin horizontal divider with vertical drag-to-resize. Double-tap resets to default. */
 @Composable
-private fun HorizontalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit) {
+private fun HorizontalDividerStub(onDrag: (Dp) -> Unit, onReset: () -> Unit = {}) {
     val density = LocalDensity.current
     Box(
         Modifier

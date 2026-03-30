@@ -9,7 +9,8 @@ import {
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_RUNNER_SHA256,
-  IOS_CTRL_PROXY_SHA256_CHECKSUM
+  IOS_CTRL_PROXY_SHA256_CHECKSUM,
+  usesMutableLatestRelease
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -522,6 +523,9 @@ export class IOSCtrlProxyBuilder {
 
   private getExpectedChecksum(): string {
     const override = IOSCtrlProxyBuilder.expectedChecksumOverride;
+    if (override === null && usesMutableLatestRelease(IOS_CTRL_PROXY_RELEASE_VERSION)) {
+      return "";
+    }
     return override ?? IOS_CTRL_PROXY_SHA256_CHECKSUM ?? "";
   }
 

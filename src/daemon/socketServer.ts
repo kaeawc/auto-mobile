@@ -21,9 +21,11 @@ import {
   RELEASE_VERSION,
   APK_SHA256_CHECKSUM,
   APK_URL,
+  IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_APP_HASH,
+  usesMutableLatestRelease,
 } from "../constants/release";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
@@ -272,13 +274,13 @@ export class UnixSocketServer {
           releaseVersion: RELEASE_VERSION,
           android: {
             ctrlProxy: {
-              expectedSha256: APK_SHA256_CHECKSUM,
+              expectedSha256: usesMutableLatestRelease(RELEASE_VERSION) ? "" : APK_SHA256_CHECKSUM,
               url: APK_URL,
             },
           },
           ios: {
             xcTestService: {
-              expectedSha256: IOS_CTRL_PROXY_SHA256_CHECKSUM,
+              expectedSha256: usesMutableLatestRelease(IOS_CTRL_PROXY_RELEASE_VERSION) ? "" : IOS_CTRL_PROXY_SHA256_CHECKSUM,
               expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
               url: IOS_CTRL_PROXY_IPA_URL,
             },

@@ -12,11 +12,18 @@
  * scripts/generate-release-constants.sh
  *
  * For local development, RELEASE_VERSION "latest" fetches from the most recent
- * GitHub release, and the empty checksum skips verification (not recommended for production).
+ * GitHub release. Because the "latest" asset can change over time, runtime
+ * checksum verification is only reliable for pinned release versions.
  */
 
-export const RELEASE_VERSION: string = "latest";
-export const APK_URL: string = RELEASE_VERSION === "latest"
+export const LATEST_RELEASE_VERSION = "latest";
+
+export function usesMutableLatestRelease(version: string): boolean {
+  return version.trim().toLowerCase() === LATEST_RELEASE_VERSION;
+}
+
+export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
+export const APK_URL: string = RELEASE_VERSION === LATEST_RELEASE_VERSION
   ? `https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy-debug.apk`
   : `https://github.com/kaeawc/auto-mobile/releases/download/v${RELEASE_VERSION}/control-proxy-debug.apk`;
 export const APK_SHA256_CHECKSUM: string = "96f88c02e1ab63d86c7bd6d6088c21a8db947c85d59c0ec875270e81814b762b"; // Empty = skip verification (local dev only)
@@ -27,8 +34,8 @@ export const APK_SHA256_CHECKSUM: string = "96f88c02e1ab63d86c7bd6d6088c21a8db94
  * CtrlProxy is distributed via GitHub releases as a prebuilt bundle.
  * The default "latest" version targets the most recent release.
  */
-export const IOS_CTRL_PROXY_RELEASE_VERSION: string = "latest";
-export const IOS_CTRL_PROXY_IPA_URL: string = IOS_CTRL_PROXY_RELEASE_VERSION === "latest"
+export const IOS_CTRL_PROXY_RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
+export const IOS_CTRL_PROXY_IPA_URL: string = IOS_CTRL_PROXY_RELEASE_VERSION === LATEST_RELEASE_VERSION
   ? "https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy.ipa"
   : `https://github.com/kaeawc/auto-mobile/releases/download/v${IOS_CTRL_PROXY_RELEASE_VERSION}/control-proxy.ipa`;
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = "98d19b9bd985026d8dbc45f4374322a64fe4af10836b02c4f423d947267e9417"; // Empty = skip verification (local dev only)

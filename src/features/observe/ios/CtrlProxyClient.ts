@@ -13,6 +13,7 @@
  */
 
 import WebSocket from "ws";
+import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
@@ -498,14 +499,20 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     }
   }
 
+  private sdkEventPollInterval: ReturnType<typeof setInterval> | null = null;
+
   protected onConnectionEstablished(): void {
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
     this.isRequestingServiceRestart = false;
     logger.info(`[CtrlProxyClient] Connection established, reset failure counter`);
+
+    // Start polling for SDK events from the CtrlProxy HTTP endpoint
+    this.startSdkEventPolling();
   }
 
   protected onConnectionClosed(): void {
+    this.stopSdkEventPolling();
     this.cachedHierarchy = null;
 
     if (this.hierarchyNavigationDetector) {
@@ -521,6 +528,140 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         !this.isRequestingServiceRestart) {
       this.triggerServiceRestart();
     }
+  }
+
+  private startSdkEventPolling(): void {
+    this.stopSdkEventPolling();
+    const host = this.resolveWebSocketHost();
+    const url = `http://${host}:${this.port}/sdk-events`;
+    this.sdkEventPollInterval = setInterval(async () => {
+      try {
+        const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
+        if (!resp.ok) return;
+        const batches = await resp.json() as Array<{ bundleId?: string; events?: Array<{ type: string; timestamp: number; payload: Record<string, unknown> }> }>;
+        for (const batch of batches) {
+          if (!batch.events) continue;
+          for (const event of batch.events) {
+            await this.recordSdkEvent(event, batch.bundleId ?? null);
+          }
+        }
+      } catch {
+        // Polling failure is non-fatal
+      }
+    }, 2000);
+  }
+
+  private stopSdkEventPolling(): void {
+    if (this.sdkEventPollInterval) {
+      clearInterval(this.sdkEventPollInterval);
+      this.sdkEventPollInterval = null;
+    }
+  }
+
+  private async recordSdkEvent(event: { type: string; timestamp: number; payload: Record<string, unknown> }, applicationId: string | null): Promise<void> {
+    try {
+      const recorder = TelemetryRecorder.getInstance();
+      // Save and restore context to avoid race with Android device context
+      const prevContext = recorder.getContext();
+      recorder.setContext(this.device.deviceId, null);
+      const ts = event.timestamp;
+      const p = event.payload;
+
+      try {
+      switch (event.type) {
+        case "network":
+          await recorder.recordNetworkEvent({
+            timestamp: ts, applicationId,
+            url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
+            statusCode: (p.statusCode as number) ?? 0, durationMs: (p.durationMs as number) ?? 0,
+            requestBodySize: (p.requestBodySize as number) ?? -1, responseBodySize: (p.responseBodySize as number) ?? -1,
+            protocol: (p.protocol as string) ?? null, host: (p.host as string) ?? null,
+            path: (p.path as string) ?? null, error: (p.error as string) ?? null,
+            requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
+            responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
+            requestBody: (p.requestBody as string) ?? null, responseBody: (p.responseBody as string) ?? null,
+            contentType: (p.contentType as string) ?? null,
+          });
+          break;
+        case "log":
+          await recorder.recordLogEvent({
+            timestamp: ts, applicationId,
+            level: (p.level as number) ?? 0, tag: (p.tag as string) ?? "",
+            message: (p.message as string) ?? "", filterName: (p.filterName as string) ?? "",
+          });
+          break;
+        case "lifecycle":
+          await recorder.recordOsEvent({
+            timestamp: ts, applicationId,
+            category: "lifecycle", kind: (p.state as string) ?? "unknown",
+            details: p as Record<string, string>,
+          });
+          break;
+        case "custom":
+          await recorder.recordCustomEvent({
+            timestamp: ts, applicationId,
+            name: (p.name as string) ?? "custom", properties: (p.properties as Record<string, string>) ?? {},
+          });
+          break;
+        case "handled_exception":
+        case "crash":
+        case "hang":
+          await recorder.recordOsEvent({
+            timestamp: ts, applicationId,
+            category: event.type, kind: (p.exceptionType as string) ?? (p.errorDomain as string) ?? "unknown",
+            details: { message: (p.message as string) ?? "", screen: (p.screen as string) ?? "" },
+          });
+          break;
+        case "storage":
+          await recorder.recordStorageEvent({
+            timestamp: ts, applicationId,
+            fileName: (p.fileName as string) ?? "", key: (p.key as string) ?? "",
+            value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
+          });
+          break;
+        default:
+          // Record unknown types as custom events
+          await recorder.recordCustomEvent({
+            timestamp: ts, applicationId,
+            name: event.type, properties: { data: JSON.stringify(p).substring(0, 1000) },
+          });
+      }
+      } finally {
+        // Restore previous context so Android events aren't affected
+        recorder.setContext(prevContext.deviceId, prevContext.sessionId);
+      }
+    } catch {
+      // Non-fatal
+    }
+  }
+
+  /** Record a layout telemetry event from iOS hierarchy update */
+  private recordLayoutTelemetryEvent(hierarchy: CtrlProxyHierarchy): void {
+    try {
+      const recorder = TelemetryRecorder.getInstance();
+      recorder.setContext(this.device.deviceId, null);
+      const nodeCount = this.countNodes(hierarchy.hierarchy);
+      void recorder.recordLayoutEvent({
+        timestamp: Date.now(),
+        applicationId: hierarchy.packageName ?? null,
+        subType: "hierarchy_update",
+        composableName: null,
+        composableId: null,
+        recompositionCount: null,
+        durationMs: null,
+        likelyCause: null,
+        detailsJson: JSON.stringify({ nodeCount }),
+      });
+    } catch {
+      // Non-fatal — telemetry recording should never break observation
+    }
+  }
+
+  private countNodes(node: CtrlProxyNode | CtrlProxyNode[] | null): number {
+    if (!node) return 0;
+    if (Array.isArray(node)) return node.reduce((sum, n) => sum + this.countNodes(n), 0);
+    const children = (node as { children?: CtrlProxyNode[] }).children;
+    return 1 + (children ? children.reduce((sum: number, c: CtrlProxyNode) => sum + this.countNodes(c), 0) : 0);
   }
 
   /**
@@ -587,6 +728,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
     if (type === "hierarchy_update" && message.data) {
       this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
+      // Record layout telemetry event for iOS
+      this.recordLayoutTelemetryEvent(message.data);
     }
 
     // Handle request/response messages (with requestId) first

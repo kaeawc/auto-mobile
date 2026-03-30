@@ -161,15 +161,31 @@ private enum class CategoryFilter(val label: String, val icon: ImageVector) {
 fun TelemetryDashboard(
     telemetryPushClient: TelemetryPushClient?,
     dataSourceMode: DataSourceMode,
-    onOpenSource: ((String, Int, String) -> Unit)? = null,
-    screenshotLoader: dev.jasonpearson.automobile.desktop.core.navigation.ScreenshotLoader? = null,
+    activeDeviceId: String? = null,
+    selectedEvent: TelemetryDisplayEvent? = null,
+    onEventSelected: (TelemetryDisplayEvent?) -> Unit = {},
     modifier: Modifier = Modifier,
 ) {
     val colors = SharedTheme.globalColors
+    // Per-device event cache so switching devices preserves events
+    val deviceEventCache = remember { mutableMapOf<String, List<TelemetryDisplayEvent>>() }
     val events = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+    var previousDeviceId by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(activeDeviceId) {
+        // Save current events to cache before switching
+        if (previousDeviceId != null && events.isNotEmpty()) {
+            deviceEventCache[previousDeviceId!!] = events.toList()
+        }
+        // Restore cached events for the new device, or clear
+        events.clear()
+        val cached = activeDeviceId?.let { deviceEventCache[it] }
+        if (cached != null) {
+            events.addAll(cached)
+        }
+        previousDeviceId = activeDeviceId
+    }
     var selectedFilter by remember { mutableStateOf(CategoryFilter.All) }
     var connectionState by remember { mutableStateOf<TelemetryConnectionState?>(null) }
-    var selectedEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
     var isPaused by remember { mutableStateOf(false) }
@@ -205,14 +221,23 @@ fun TelemetryDashboard(
     }
 
     // Collect telemetry events from the push client (newest at bottom)
+    // Track the latest timestamp from cached events to skip duplicates from backfill
+    val cachedMaxTimestamp = remember { mutableStateOf(0L) }
+    LaunchedEffect(activeDeviceId) {
+        cachedMaxTimestamp.value = events.maxOfOrNull { it.timestamp } ?: 0L
+    }
     LaunchedEffect(telemetryPushClient, isPaused) {
         val client = telemetryPushClient ?: return@LaunchedEffect
         client.telemetryEvents.collect { event ->
             if (!isPaused) {
+                // Skip events we already have from cache restore
+                if (event.timestamp <= cachedMaxTimestamp.value &&
+                    events.any { it.timestamp == event.timestamp && it::class == event::class }) {
+                    return@collect
+                }
                 events.add(event)
                 incrementCount(categoryCounts, event)
                 trimEvents(events, maxEvents, categoryCounts)
-
             }
         }
     }
@@ -332,7 +357,7 @@ fun TelemetryDashboard(
             Box(
                 modifier = Modifier
                     .clickable {
-                        events.clear(); selectedEvent = null
+                        events.clear(); onEventSelected(null)
                         categoryCounts.clear(); lastSeenCounts.clear()
                     }
                     .then(buttonModifier),
@@ -369,7 +394,7 @@ fun TelemetryDashboard(
             Box(
                 modifier = Modifier
                     .clickable {
-                        events.clear(); selectedEvent = null; isPaused = false; autoScrollEnabled = true
+                        events.clear(); onEventSelected(null); isPaused = false; autoScrollEnabled = true
                         categoryCounts.clear(); lastSeenCounts.clear()
                     }
                     .then(buttonModifier),
@@ -589,7 +614,7 @@ fun TelemetryDashboard(
                         timeFormat,
                         colors.text.normal,
                         selectedEvent = selectedEvent,
-                        onEventSelected = { selectedEvent = if (selectedEvent == it) null else it },
+                        onEventSelected = { onEventSelected(if (selectedEvent == it) null else it) },
                     )
                 } else {
                     LazyColumn(
@@ -612,7 +637,7 @@ fun TelemetryDashboard(
                                         if (event in bookmarkedEvents) bookmarkedEvents.remove(event)
                                         else bookmarkedEvents.add(event)
                                     },
-                                    onClick = { selectedEvent = if (selectedEvent == event) null else event },
+                                    onClick = { onEventSelected(if (selectedEvent == event) null else event) },
                                     indented = indented,
                                 )
                             }
@@ -649,51 +674,7 @@ fun TelemetryDashboard(
                 }
             }
 
-            // Detail panel with draggable divider (shown when an event is selected)
-            val selected = selectedEvent
-            if (selected != null) {
-                val density = LocalDensity.current
-                var detailWidthDp by remember {
-                    mutableStateOf(DETAIL_PANEL_WIDTH_DEFAULT.dp)
-                }
-
-                // Draggable divider — 6dp hit target, 1px visual line
-                Box(
-                    modifier = Modifier
-                        .width(6.dp)
-                        .fillMaxHeight()
-                        .pointerHoverIcon(PointerIcon(java.awt.Cursor(java.awt.Cursor.W_RESIZE_CURSOR)))
-                        .pointerInput(Unit) {
-                            detectDragGestures(
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    val deltaDp = with(density) { (-dragAmount.x).toDp() }
-                                    detailWidthDp = (detailWidthDp + deltaDp)
-                                        .coerceIn(DETAIL_PANEL_WIDTH_MIN.dp, DETAIL_PANEL_WIDTH_MAX.dp)
-                                },
-                                onDragEnd = { /* width persisted in memory only */ },
-                            )
-                        },
-                    contentAlignment = Alignment.Center,
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .width(1.dp)
-                            .fillMaxHeight()
-                            .background(colors.text.normal.copy(alpha = 0.1f)),
-                    )
-                }
-
-                TelemetryDetailPanel(
-                    event = selected,
-                    timeFormat = timeFormat,
-                    textColor = colors.text.normal,
-                    onClose = { selectedEvent = null },
-                    onOpenSource = onOpenSource,
-                    screenshotLoader = screenshotLoader,
-                    modifier = Modifier.width(detailWidthDp),
-                )
-            }
+            // Detail panel moved to the right inspector pane (RightInspectorPanel)
         }
     }
 

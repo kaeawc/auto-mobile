@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -196,7 +197,7 @@ fun HierarchyTreeView(
                     state = listState,
                     modifier = Modifier.widthIn(min = estimatedContentWidth),
                 ) {
-                    items(flatNodes, key = { it.element.id }) { node ->
+                    itemsIndexed(flatNodes, key = { index, node -> "${index}_${node.element.id}" }) { _, node ->
                         TreeNodeRow(
                             node = node,
                             isSelected = node.element.id == selectedElementId,

@@ -1,6 +1,32 @@
 import Foundation
 import Network
 
+/// Global buffer for SDK events received via HTTP POST.
+/// Shared across all WebSocketConnection instances.
+public final class SdkEventBuffer {
+    public static let shared = SdkEventBuffer()
+    private let lock = NSLock()
+    private var buffer: [Data] = []
+    private let maxEvents = 500
+
+    private init() {}
+
+    public func append(_ data: Data) {
+        lock.lock()
+        buffer.append(data)
+        while buffer.count > maxEvents { buffer.removeFirst() }
+        lock.unlock()
+    }
+
+    public func drain() -> [Data] {
+        lock.lock()
+        let events = buffer
+        buffer.removeAll()
+        lock.unlock()
+        return events
+    }
+}
+
 /// WebSocket server for CtrlProxy iOS
 /// Implements RFC 6455 WebSocket protocol over TCP
 public class WebSocketServer: WebSocketServing {
@@ -332,6 +358,10 @@ class WebSocketConnection {
                 self.handleWebSocketUpgrade(request)
             } else if request.contains("GET /health") {
                 self.handleHealthCheck()
+            } else if request.contains("POST /sdk-events") {
+                self.handleSdkEventsPost(request)
+            } else if request.contains("GET /sdk-events") {
+                self.handleSdkEventsGet()
             } else {
                 // Not a WebSocket request, try again
                 self.receiveHTTPUpgrade()
@@ -342,6 +372,32 @@ class WebSocketConnection {
     private func handleHealthCheck() {
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}"
         connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
+            self?.connection.cancel()
+        })
+    }
+
+    private func handleSdkEventsPost(_ request: String) {
+        if let bodyRange = request.range(of: "\r\n\r\n") {
+            let body = String(request[bodyRange.upperBound...])
+            if let bodyData = body.data(using: .utf8), !bodyData.isEmpty {
+                SdkEventBuffer.shared.append(bodyData)
+                print("[CtrlProxy] Received SDK event batch (\(bodyData.count) bytes)")
+            }
+        }
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
+        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
+            self?.connection.cancel()
+        })
+    }
+
+    private func handleSdkEventsGet() {
+        let events = SdkEventBuffer.shared.drain()
+        let combined = "[" + events.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: ",") + "]"
+        let bodyData = combined.data(using: .utf8) ?? Data()
+        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(bodyData.count)\r\n\r\n"
+        var responseData = response.data(using: .utf8) ?? Data()
+        responseData.append(bodyData)
+        connection.send(content: responseData, completion: .contentProcessed { [weak self] _ in
             self?.connection.cancel()
         })
     }

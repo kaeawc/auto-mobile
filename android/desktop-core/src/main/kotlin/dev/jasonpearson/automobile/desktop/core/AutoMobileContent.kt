@@ -126,6 +126,11 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTab
 import dev.jasonpearson.automobile.desktop.core.tabs.HorizontalTabBar
+import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
+import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
+import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
+import dev.jasonpearson.automobile.desktop.core.layout.StreamConnectionGracePeriod
+import dev.jasonpearson.automobile.desktop.core.shell.RightInspectorPanel
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDashboard
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.matchesSearch
@@ -172,6 +177,55 @@ private const val IOS_SPRINGBOARD = "com.apple.springboard"
  * Select the default app to show in the navigation graph.
  * Priority: foreground app > launcher/springboard > first app in list
  */
+private data class DeviceFilterState(
+    val minApi: Int = 28, val maxApi: Int = 35, val googleApisOnly: Boolean = false,
+    val minIos: Int = 16, val maxIos: Int = 26,
+    val showIphone: Boolean = true, val showIpad: Boolean = true,
+)
+
+private fun loadDeviceFilter(file: java.io.File): DeviceFilterState {
+    try {
+        if (file.exists()) {
+            val element = kotlinx.serialization.json.Json.parseToJsonElement(file.readText())
+            val obj = element as? kotlinx.serialization.json.JsonObject ?: return DeviceFilterState()
+            fun intField(key: String, default: Int) = (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toIntOrNull() ?: default
+            fun boolField(key: String, default: Boolean) = (obj[key] as? kotlinx.serialization.json.JsonPrimitive)?.content?.toBooleanStrictOrNull() ?: default
+            return DeviceFilterState(
+                minApi = intField("minApi", 28), maxApi = intField("maxApi", 35),
+                googleApisOnly = boolField("googleApisOnly", false),
+                minIos = intField("minIos", 16), maxIos = intField("maxIos", 26),
+                showIphone = boolField("showIphone", true), showIpad = boolField("showIpad", true),
+            )
+        }
+    } catch (_: Exception) {}
+    return DeviceFilterState()
+}
+
+private fun saveDeviceFilter(file: java.io.File, minApi: Int, maxApi: Int, googleApisOnly: Boolean, minIos: Int, maxIos: Int, showIphone: Boolean, showIpad: Boolean) {
+    try {
+        file.parentFile?.mkdirs()
+        file.writeText("{\"minApi\":$minApi,\"maxApi\":$maxApi,\"googleApisOnly\":$googleApisOnly,\"minIos\":$minIos,\"maxIos\":$maxIos,\"showIphone\":$showIphone,\"showIpad\":$showIpad}")
+    } catch (_: Exception) {}
+}
+
+@Composable
+private fun FilterChip(label: String, selected: Boolean, onClick: () -> Unit) {
+    val colors = SharedTheme.globalColors
+    Text(
+        text = label,
+        fontSize = 10.sp,
+        color = if (selected) colors.text.info else colors.text.normal.copy(alpha = 0.5f),
+        modifier = Modifier
+            .background(
+                if (selected) colors.text.info.copy(alpha = 0.12f) else colors.text.normal.copy(alpha = 0.06f),
+                RoundedCornerShape(12.dp),
+            )
+            .clickable(onClick = onClick)
+            .pointerHoverIcon(PointerIcon.Hand)
+            .padding(horizontal = 10.dp, vertical = 4.dp),
+    )
+}
+
 private fun selectDefaultApp(apps: List<InstalledApp>, deviceType: DeviceType?): String? {
     // First priority: foreground app
     apps.find { it.isForeground }?.let { return it.packageName }
@@ -213,6 +267,9 @@ fun AutoMobileContent(
   var showLeftPane by remember { mutableStateOf(true) }
   var showRightPane by remember { mutableStateOf(true) }
   var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
+  var selectedTelemetryEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
+  var isLiveLayoutMode by remember { mutableStateOf(false) }
+  val layoutInspectorState = rememberLayoutInspectorState()
 
   // Command palette & global search state
   var showCommandPalette by remember { mutableStateOf(false) }
@@ -236,7 +293,6 @@ fun AutoMobileContent(
           HorizontalTab("test_runs", "Test Runs", AppIcons.TestRuns),
           HorizontalTab("storage", "Storage", AppIcons.Storage),
           HorizontalTab("diagnostics", "Diagnostics", AppIcons.Diagnostics),
-          HorizontalTab("telemetry", "Telemetry", AppIcons.Telemetry),
       )
   }
   var selectedHorizontalTabId by remember { mutableStateOf<String?>(null) }
@@ -305,6 +361,7 @@ fun AutoMobileContent(
   // Real device info (when connected to MCP)
   var realDevice by remember { mutableStateOf<BootedDevice?>(null) }
   var realDevices by remember { mutableStateOf<List<BootedDevice>>(emptyList()) }
+  var deviceImages by remember { mutableStateOf<List<dev.jasonpearson.automobile.desktop.core.mcp.DeviceImageInfo>>(emptyList()) }
 
   // Connected MCP process (for creating clients)
   var connectedMcpProcess by remember { mutableStateOf<McpProcess?>(null) }
@@ -399,12 +456,103 @@ fun AutoMobileContent(
           } catch (e: Exception) {
               LOG.info("Error fetching booted devices after MCP connect: ${e.message}")
           }
+          // Also fetch device images
+          try {
+              val client = McpResourceClientFactory.create(process)
+              try {
+                  when (val result = client.readResource("automobile:devices/images")) {
+                      is ResourceReadResult.Success -> {
+                          val parsed = DeviceResourceParser.parseDeviceImages(result.content)
+                          deviceImages = parsed?.images ?: emptyList()
+                      }
+                      is ResourceReadResult.Error -> {}
+                  }
+              } finally { client.close() }
+          } catch (_: Exception) {}
+      }
+  }
+
+  // Poll device lists every 5 seconds to detect boot/kill changes
+  LaunchedEffect(connectedMcpProcess) {
+      val process = connectedMcpProcess ?: return@LaunchedEffect
+      while (true) {
+          kotlinx.coroutines.delay(5000)
+          kotlinx.coroutines.withContext(Dispatchers.IO) {
+              try {
+                  val client = McpResourceClientFactory.create(process)
+                  try {
+                      when (val result = client.readResource("automobile:devices/booted")) {
+                          is ResourceReadResult.Success -> {
+                              val parsed = DeviceResourceParser.parseBootedDevices(result.content)
+                              val allDevices = parsed?.devices ?: emptyList()
+                              val newDevices = allDevices
+                                  .filter { it.name != "Unknown" && it.status == "booted" }
+                                  .map { dev ->
+                                      val deviceType = when {
+                                          dev.platform == "ios" && dev.isVirtual -> DeviceType.iOSSimulator
+                                          dev.platform == "ios" -> DeviceType.iOSPhysical
+                                          dev.isVirtual -> DeviceType.AndroidEmulator
+                                          else -> DeviceType.AndroidPhysical
+                                      }
+                                      BootedDevice(id = dev.deviceId, name = dev.name, type = deviceType, status = dev.status)
+                                  }
+                              realDevices = newDevices
+                              // Clear active device if it's no longer in the list
+                              if (activeDeviceId != null && newDevices.none { it.id == activeDeviceId }) {
+                                  activeDeviceId = null
+                                  realDevice = null
+                              }
+                          }
+                          is ResourceReadResult.Error -> {}
+                      }
+                      when (val result = client.readResource("automobile:devices/images")) {
+                          is ResourceReadResult.Success -> {
+                              val parsed = DeviceResourceParser.parseDeviceImages(result.content)
+                              deviceImages = parsed?.images ?: emptyList()
+                          }
+                          is ResourceReadResult.Error -> {}
+                      }
+                  } finally { client.close() }
+              } catch (_: Exception) {}
+          }
       }
   }
 
   // Observation stream client for real-time hierarchy/screenshot updates
   // Only created when a device is connected; disposed when device disconnects
   var observationStreamClient by remember { mutableStateOf<ObservationStreamClient?>(null) }
+
+  // Feed stream data into the shared layout inspector state for live layout mode
+  val liveStreamClient = observationStreamClient
+  LaunchedEffect(liveStreamClient, isLiveLayoutMode) {
+      if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
+      liveStreamClient.hierarchyUpdates.collect { update ->
+          update.data?.let { hierarchyJson ->
+              val result = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                  val parsed = parseHierarchyFromJson(hierarchyJson) ?: return@withContext null
+                  val changedIds = layoutInspectorState.computeChangedElements(layoutInspectorState.currentElementMap, parsed.elementMap)
+                  parsed to changedIds
+              }
+              result?.let { layoutInspectorState.applyHierarchyUpdate(it.first, it.second) }
+          }
+      }
+  }
+  LaunchedEffect(liveStreamClient, isLiveLayoutMode) {
+      if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
+      liveStreamClient.screenshotUpdates.collect { update ->
+          update.screenshotBase64?.let { base64 ->
+              val screenshotData = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                  java.util.Base64.getDecoder().decode(base64)
+              }
+              layoutInspectorState.updateScreenshot(
+                  data = screenshotData,
+                  width = update.screenWidth,
+                  height = update.screenHeight,
+                  timestamp = update.timestamp,
+              )
+          }
+      }
+  }
 
   // Push socket client for real-time failure notifications
   // Only created when a device is connected in Real mode; disposed when device disconnects
@@ -917,83 +1065,73 @@ fun AutoMobileContent(
       onQuickJump = { /* Timestamp jump placeholder */ },
       vimModeEnabled = vimModeEnabled,
       centerContent = { mod ->
-          Column(mod) {
-              // Main view area with Layout/Navigation toggle
-              Box(Modifier.weight(if (selectedHorizontalTabId != null) 0.5f else 1f)) {
-                  val streamClient = observationStreamClient
-                  if (showNavigationView) {
-                      NavigationDashboard(
-                          highlightedScreens = replayHighlightedScreens,
-                          currentStepScreen = if (isReplaying && testFlowScreens.isNotEmpty()) testFlowScreens.getOrNull(currentReplayIndex) else null,
-                          onHighlightCleared = {
-                              testFlowScreens = emptyList()
-                              isReplaying = false
-                          },
-                          onDetailViewChanged = { isNavigationDetailView = it },
-                          dataSourceMode = dataSourceMode,
-                          clientProvider = clientProvider,
-                          selectedAppId = selectedAppId,
-                          observationStreamClient = observationStreamClient,
-                          screenshotLoader = remember(clientProvider, dataSourceMode) {
-                              if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                                  NavigationScreenshotLoader(clientProvider) else null
-                          },
-                          settingsProvider = settings,
-                      )
-                  } else if (streamClient != null) {
-                      LayoutInspectorDashboard(
-                          dataSourceMode = dataSourceMode,
-                          clientProvider = clientProvider,
-                          observationStreamClient = streamClient,
-                          platform = platformString,
-                      )
-                  }
-                  MainContentViewToggle(
-                      showNavigation = showNavigationView,
-                      onToggle = { showNavigationView = it },
-                      modifier = Modifier.align(Alignment.TopStart).padding(8.dp),
+          if (isLiveLayoutMode) {
+              // Live layout mode: center shows device screenshot with element overlays
+              Box(mod.background(colors.text.normal.copy(alpha = 0.02f))) {
+                  DeviceScreenView(
+                      screenshotData = layoutInspectorState.screenshotData,
+                      screenWidth = layoutInspectorState.screenWidth,
+                      screenHeight = layoutInspectorState.screenHeight,
+                      rotation = layoutInspectorState.rotation,
+                      hierarchy = layoutInspectorState.hierarchy,
+                      selectedElementId = layoutInspectorState.selectedElementId,
+                      hoveredElementId = layoutInspectorState.hoveredElementId,
+                      onElementSelected = { layoutInspectorState.selectElement(it) },
+                      onElementHovered = { layoutInspectorState.hoverElement(it) },
+                      showTapTargetIssues = layoutInspectorState.showTapTargetIssues,
+                      onToggleTapTargetIssues = { layoutInspectorState.toggleTapTargetIssues() },
+                      connectionStatus = layoutInspectorState.connectionStatus,
+                      socketExists = true,
+                      elementMap = layoutInspectorState.currentElementMap.takeIf { it.isNotEmpty() },
+                      modifier = Modifier.fillMaxSize(),
                   )
               }
-              // Bottom tabs
-              HorizontalTabBar(
-                  tabs = horizontalTabs,
-                  selectedTabId = selectedHorizontalTabId,
-                  onTabSelected = { selectedHorizontalTabId = it },
-              )
-              if (selectedHorizontalTabId != null) {
-                  Box(Modifier.fillMaxWidth().weight(0.5f)) {
-                      when (selectedHorizontalTabId) {
-                          "test_runs" -> TestDashboard(
-                              onNavigateToGraph = { screens ->
-                                  testFlowScreens = screens
-                                  isReplaying = true
-                                  currentReplayIndex = 0
-                                  showNavigationView = true
-                              },
-                              dataSourceMode = dataSourceMode,
-                              clientProvider = clientProvider,
-                              observationStreamClient = observationStreamClient,
-                          )
-                          "storage" -> StorageDashboard(
-                              dataSourceMode = dataSourceMode,
-                              clientProvider = clientProvider,
-                              deviceId = activeDeviceId,
-                              packageName = selectedAppId,
-                              platform = storagePlatform,
-                          )
-                          "diagnostics" -> DiagnosticsDashboard(
-                              connectedMcpProcess = connectedMcpProcess,
-                              dataSourceMode = dataSourceMode,
-                          )
-                          "telemetry" -> TelemetryDashboard(
-                              telemetryPushClient = telemetryPushClient,
-                              dataSourceMode = dataSourceMode,
-                              onOpenSource = onOpenSource,
-                              screenshotLoader = remember(clientProvider, dataSourceMode) {
-                                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
-                                      NavigationScreenshotLoader(clientProvider) else null
-                              },
-                          )
+          } else {
+              Column(mod) {
+                  // Telemetry is the primary center content
+                  TelemetryDashboard(
+                      telemetryPushClient = telemetryPushClient,
+                      dataSourceMode = dataSourceMode,
+                      activeDeviceId = activeDeviceId,
+                      selectedEvent = selectedTelemetryEvent,
+                      onEventSelected = { event ->
+                          selectedTelemetryEvent = event
+                          if (event != null && !showRightPane) showRightPane = true
+                      },
+                      modifier = Modifier.weight(1f),
+                  )
+                  // Bottom tabs for secondary views
+                  HorizontalTabBar(
+                      tabs = horizontalTabs,
+                      selectedTabId = selectedHorizontalTabId,
+                      onTabSelected = { selectedHorizontalTabId = it },
+                  )
+                  if (selectedHorizontalTabId != null) {
+                      Box(Modifier.fillMaxWidth().weight(0.5f)) {
+                          when (selectedHorizontalTabId) {
+                              "test_runs" -> TestDashboard(
+                                  onNavigateToGraph = { screens ->
+                                      testFlowScreens = screens
+                                      isReplaying = true
+                                      currentReplayIndex = 0
+                                      showNavigationView = true
+                                  },
+                                  dataSourceMode = dataSourceMode,
+                                  clientProvider = clientProvider,
+                                  observationStreamClient = observationStreamClient,
+                              )
+                              "storage" -> StorageDashboard(
+                                  dataSourceMode = dataSourceMode,
+                                  clientProvider = clientProvider,
+                                  deviceId = activeDeviceId,
+                                  packageName = selectedAppId,
+                                  platform = storagePlatform,
+                              )
+                              "diagnostics" -> DiagnosticsDashboard(
+                                  connectedMcpProcess = connectedMcpProcess,
+                                  dataSourceMode = dataSourceMode,
+                              )
+                          }
                       }
                   }
               }
@@ -1001,7 +1139,7 @@ fun AutoMobileContent(
       },
       leftPaneContent = {
           // Stub: replaced by real LeftSidebarPanel when Unit 2 merges
-          Column(Modifier.fillMaxSize().padding(8.dp)) {
+          Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(8.dp)) {
               // Data source mode toggle
               Text("Data Source", color = colors.text.normal, fontSize = 14.sp)
               Spacer(Modifier.height(4.dp))
@@ -1053,23 +1191,232 @@ fun AutoMobileContent(
                   }
               }
               Spacer(Modifier.height(16.dp))
-              Text("Devices", color = colors.text.normal, fontSize = 14.sp)
+              Text("Booted Devices", color = colors.text.normal, fontSize = 14.sp)
               Spacer(Modifier.height(8.dp))
               val devices = if (dataSourceMode == DataSourceMode.Fake) mockBootedDevices else realDevices
+              if (devices.isEmpty()) {
+                  Text("No booted devices", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.5f))
+              }
               devices.forEach { device ->
                   val isActive = device.id == activeDeviceId
-                  Text(
-                      text = "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
-                      color = if (isActive) colors.text.info else colors.text.normal,
-                      fontSize = 12.sp,
-                      modifier = Modifier.clickable {
-                          activeDeviceId = device.id
-                          realDevice = device
-                          isDevicePanelExpanded = false
-                      },
-                  )
+                  Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
+                  ) {
+                      Text(
+                          text = "${if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "\uD83C\uDF4E" else "\uD83E\uDD16"} ${device.name}",
+                          color = if (isActive) colors.text.info else colors.text.normal,
+                          fontSize = 12.sp,
+                          modifier = Modifier.weight(1f).clickable {
+                              activeDeviceId = device.id
+                              realDevice = device
+                              isDevicePanelExpanded = false
+                          },
+                      )
+                      // Kill button
+                      Text(
+                          "\u23F9",
+                          fontSize = 10.sp,
+                          color = colors.text.error.copy(alpha = 0.6f),
+                          modifier = Modifier
+                              .clickable {
+                                  val platform = if (device.type == DeviceType.iOSSimulator || device.type == DeviceType.iOSPhysical) "ios" else "android"
+                                  kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                                      try {
+                                          val client = clientProvider?.invoke()
+                                          LOG.info("Killing device ${device.name} (${device.id}) via ${client?.transportName}")
+                                          client?.killDevice(device.name, device.id, platform)
+                                      } catch (e: Exception) {
+                                          LOG.info("Failed to kill device: ${e.message}")
+                                      }
+                                  }
+                              }
+                              .pointerHoverIcon(PointerIcon.Hand)
+                              .padding(4.dp),
+                      )
+                  }
               }
-              // App selector
+
+              // Device images (available to boot) — grouped by platform with filters
+              if (deviceImages.isNotEmpty()) {
+                  Spacer(Modifier.height(12.dp))
+
+                  // Persisted filter state — read/write to ~/.automobile/device-filter.json
+                  val filterFile = remember { java.io.File(System.getProperty("user.home"), ".automobile/device-filter.json") }
+                  val savedFilter = remember { loadDeviceFilter(filterFile) }
+                  var minApiFilter by remember { mutableStateOf(savedFilter.minApi.toFloat()) }
+                  var maxApiFilter by remember { mutableStateOf(savedFilter.maxApi.toFloat()) }
+                  var googleApisOnly by remember { mutableStateOf(savedFilter.googleApisOnly) }
+                  var minIosFilter by remember { mutableStateOf(savedFilter.minIos.toFloat()) }
+                  var maxIosFilter by remember { mutableStateOf(savedFilter.maxIos.toFloat()) }
+                  var showIphone by remember { mutableStateOf(savedFilter.showIphone) }
+                  var showIpad by remember { mutableStateOf(savedFilter.showIpad) }
+                  var imagesExpanded by remember { mutableStateOf(false) }
+
+                  fun saveFilters() {
+                      saveDeviceFilter(filterFile, minApiFilter.toInt(), maxApiFilter.toInt(), googleApisOnly, minIosFilter.toInt(), maxIosFilter.toInt(), showIphone, showIpad)
+                  }
+
+                  Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      modifier = Modifier.fillMaxWidth().clickable { imagesExpanded = !imagesExpanded }.pointerHoverIcon(PointerIcon.Hand),
+                  ) {
+                      Text(if (imagesExpanded) "\u25BE" else "\u25B8", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                      Spacer(Modifier.width(4.dp))
+                      Text("Available Devices", color = colors.text.normal, fontSize = 14.sp)
+                      Spacer(Modifier.weight(1f))
+                      Text("${deviceImages.size}", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.4f))
+                  }
+
+                  if (imagesExpanded) {
+                      Spacer(Modifier.height(4.dp))
+                      val bootedIds = devices.map { it.id }.toSet()
+                      val androidImages = deviceImages.filter { it.platform == "android" && (it.deviceId == null || it.deviceId !in bootedIds) }
+                      val iosImages = deviceImages.filter { it.platform == "ios" && (it.deviceId == null || it.deviceId !in bootedIds) }
+                      var showAndroid by remember { mutableStateOf(true) }
+                      var showIos by remember { mutableStateOf(true) }
+
+                      // ── Android group ──
+                      if (androidImages.isNotEmpty()) {
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              modifier = Modifier.fillMaxWidth().clickable { showAndroid = !showAndroid }.pointerHoverIcon(PointerIcon.Hand).padding(vertical = 2.dp),
+                          ) {
+                              Text(if (showAndroid) "\u25BE" else "\u25B8", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                              Spacer(Modifier.width(4.dp))
+                              Text("\uD83E\uDD16 Android", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
+                              Spacer(Modifier.weight(1f))
+                              Text("${androidImages.size}", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.4f))
+                          }
+                          if (showAndroid) {
+                              // API range sliders
+                              Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 12.dp)) {
+                                  Text("API ${minApiFilter.toInt()}-${maxApiFilter.toInt()}", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f), modifier = Modifier.width(55.dp))
+                                  Column(Modifier.weight(1f)) {
+                                      androidx.compose.material3.Slider(
+                                          value = minApiFilter, onValueChange = { minApiFilter = it.coerceAtMost(maxApiFilter) },
+                                          onValueChangeFinished = { saveFilters() }, valueRange = 21f..35f, steps = 13,
+                                          modifier = Modifier.fillMaxWidth().height(16.dp),
+                                      )
+                                      androidx.compose.material3.Slider(
+                                          value = maxApiFilter, onValueChange = { maxApiFilter = it.coerceAtLeast(minApiFilter) },
+                                          onValueChangeFinished = { saveFilters() }, valueRange = 21f..35f, steps = 13,
+                                          modifier = Modifier.fillMaxWidth().height(16.dp),
+                                      )
+                                  }
+                              }
+                              // Google APIs chip
+                              Row(modifier = Modifier.padding(start = 12.dp)) {
+                                  FilterChip("Google APIs", googleApisOnly) { googleApisOnly = !googleApisOnly; saveFilters() }
+                              }
+                              Spacer(Modifier.height(2.dp))
+                              // Filtered list
+                              val filteredAndroid = androidImages.filter { image ->
+                                  val apiLevel = extractApiLevel(image.target)
+                                      ?: Regex("""(?i)api[_-]?(\d+)""").find(image.name)?.groupValues?.get(1)?.toIntOrNull()
+                                  val hasGoogleApis = image.target?.contains("google", ignoreCase = true) == true ||
+                                      image.name.contains("-ga-", ignoreCase = true) || image.name.contains("Google", ignoreCase = true)
+                                  if (googleApisOnly && !hasGoogleApis) return@filter false
+                                  if (apiLevel != null) apiLevel in minApiFilter.toInt()..maxApiFilter.toInt() else true
+                              }.sortedBy { it.name }
+                              filteredAndroid.forEach { image ->
+                                  Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 12.dp, top = 1.dp, bottom = 1.dp)) {
+                                      Text(image.name, color = colors.text.normal.copy(alpha = 0.6f), fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                      Text("\u25B6", fontSize = 9.sp, color = Color(0xFF4CAF50).copy(alpha = 0.7f), modifier = Modifier.clickable { kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) { try { clientProvider?.invoke()?.startDevice(image.name, image.platform, image.deviceId) } catch (_: Exception) {} } }.pointerHoverIcon(PointerIcon.Hand).padding(4.dp))
+                                  }
+                              }
+                              if (filteredAndroid.isEmpty()) Text("No matching images", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.4f), modifier = Modifier.padding(start = 12.dp))
+                          }
+                      }
+
+                      // ── iOS group ──
+                      if (iosImages.isNotEmpty()) {
+                          Spacer(Modifier.height(4.dp))
+                          Row(
+                              verticalAlignment = Alignment.CenterVertically,
+                              modifier = Modifier.fillMaxWidth().clickable { showIos = !showIos }.pointerHoverIcon(PointerIcon.Hand).padding(vertical = 2.dp),
+                          ) {
+                              Text(if (showIos) "\u25BE" else "\u25B8", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.5f))
+                              Spacer(Modifier.width(4.dp))
+                              Text("\uD83C\uDF4E iOS", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.7f))
+                              Spacer(Modifier.weight(1f))
+                              Text("${iosImages.size}", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.4f))
+                          }
+                          if (showIos) {
+                              // Collect all available versions sorted, for slider steps
+                              val allVersions = remember(iosImages) {
+                                  iosImages.mapNotNull { it.iosVersion }.distinct().sortedWith(compareBy(
+                                      { it.substringBefore('.').toIntOrNull() ?: 0 },
+                                      { it.substringAfter('.', "0").toIntOrNull() ?: 0 },
+                                  ))
+                              }
+                              // Version slider using index into sorted version list
+                              if (allVersions.size >= 2) {
+                                  val maxIdx = (allVersions.size - 1).toFloat()
+                                  var minIdx by remember { mutableStateOf(0f) }
+                                  var maxIdxState by remember { mutableStateOf(maxIdx) }
+                                  val minVer = allVersions.getOrElse(minIdx.toInt()) { allVersions.first() }
+                                  val maxVer = allVersions.getOrElse(maxIdxState.toInt().coerceAtMost(allVersions.size - 1)) { allVersions.last() }
+
+                                  Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 12.dp)) {
+                                      Text("$minVer\u2013$maxVer", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f), modifier = Modifier.width(65.dp))
+                                      Column(Modifier.weight(1f)) {
+                                          androidx.compose.material3.Slider(
+                                              value = minIdx, onValueChange = { minIdx = it.coerceAtMost(maxIdxState) },
+                                              onValueChangeFinished = { saveFilters() }, valueRange = 0f..maxIdx, steps = (allVersions.size - 2).coerceAtLeast(0),
+                                              modifier = Modifier.fillMaxWidth().height(16.dp),
+                                          )
+                                          androidx.compose.material3.Slider(
+                                              value = maxIdxState, onValueChange = { maxIdxState = it.coerceAtLeast(minIdx) },
+                                              onValueChangeFinished = { saveFilters() }, valueRange = 0f..maxIdx, steps = (allVersions.size - 2).coerceAtLeast(0),
+                                              modifier = Modifier.fillMaxWidth().height(16.dp),
+                                          )
+                                      }
+                                  }
+
+                                  // iPhone / iPad chips
+                                  Row(modifier = Modifier.padding(start = 12.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                      FilterChip("iPhone", showIphone) { showIphone = !showIphone; saveFilters() }
+                                      FilterChip("iPad", showIpad) { showIpad = !showIpad; saveFilters() }
+                                  }
+                                  Spacer(Modifier.height(2.dp))
+
+                                  // Determine selected version range
+                                  val selectedVersions = allVersions.subList(minIdx.toInt(), (maxIdxState.toInt() + 1).coerceAtMost(allVersions.size)).toSet()
+
+                                  // Filter by version range + device type
+                                  val filteredIos = iosImages.filter { image ->
+                                      val ver = image.iosVersion
+                                      val inRange = ver == null || ver in selectedVersions
+                                      val isIphone = image.name.contains("iPhone", ignoreCase = true)
+                                      val isIpad = image.name.contains("iPad", ignoreCase = true)
+                                      val typeOk = when {
+                                          isIphone -> showIphone
+                                          isIpad -> showIpad
+                                          else -> true // Apple Watch, Apple TV, etc.
+                                      }
+                                      inRange && typeOk
+                                  }.sortedBy { it.name }
+
+                                  // Group by version, sorted descending
+                                  val iosByVersion = filteredIos.groupBy { it.iosVersion ?: "Unknown" }.toSortedMap(compareByDescending { it })
+                                  iosByVersion.forEach { (version, images) ->
+                                      Text("iOS $version", fontSize = 9.sp, color = colors.text.normal.copy(alpha = 0.5f), modifier = Modifier.padding(start = 12.dp, top = 4.dp))
+                                      images.forEach { image ->
+                                          Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth().padding(start = 16.dp, top = 1.dp, bottom = 1.dp)) {
+                                              Text(image.name, color = colors.text.normal.copy(alpha = 0.6f), fontSize = 10.sp, modifier = Modifier.weight(1f), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                              Text("\u25B6", fontSize = 9.sp, color = Color(0xFF4CAF50).copy(alpha = 0.7f), modifier = Modifier.clickable { kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) { try { clientProvider?.invoke()?.startDevice(image.name, image.platform, image.deviceId) } catch (_: Exception) {} } }.pointerHoverIcon(PointerIcon.Hand).padding(4.dp))
+                                          }
+                                      }
+                                  }
+                                  if (filteredIos.isEmpty()) Text("No matching simulators", fontSize = 10.sp, color = colors.text.normal.copy(alpha = 0.4f), modifier = Modifier.padding(start = 12.dp))
+                              }
+                          }
+                      }
+                  }
+              }
+
+              // App filter dropdown
               if (installedApps.isNotEmpty()) {
                   Spacer(Modifier.height(12.dp))
                   Text(
@@ -1079,19 +1426,43 @@ fun AutoMobileContent(
                       fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
                   )
                   Spacer(Modifier.height(4.dp))
-                  installedApps.take(10).forEach { app ->
-                      val isSelected = app.packageName == selectedAppId
+                  var appDropdownExpanded by remember { mutableStateOf(false) }
+                  Box {
                       Text(
-                          text = app.packageName.substringAfterLast('.'),
-                          color = if (isSelected) colors.text.info else colors.text.normal.copy(alpha = 0.7f),
+                          text = selectedAppId?.substringAfterLast('.') ?: "All apps",
+                          color = if (selectedAppId != null) colors.text.info else colors.text.normal.copy(alpha = 0.6f),
                           fontSize = 11.sp,
                           modifier = Modifier
-                              .clickable { selectedAppId = app.packageName }
-                              .padding(vertical = 2.dp),
+                              .fillMaxWidth()
+                              .background(colors.text.normal.copy(alpha = 0.05f), RoundedCornerShape(4.dp))
+                              .clickable { appDropdownExpanded = true }
+                              .pointerHoverIcon(PointerIcon.Hand)
+                              .padding(horizontal = 8.dp, vertical = 6.dp),
                       )
+                      androidx.compose.material3.DropdownMenu(
+                          expanded = appDropdownExpanded,
+                          onDismissRequest = { appDropdownExpanded = false },
+                      ) {
+                          androidx.compose.material3.DropdownMenuItem(
+                              text = { Text("All apps", fontSize = 11.sp) },
+                              onClick = { selectedAppId = null; appDropdownExpanded = false },
+                          )
+                          installedApps.forEach { app ->
+                              androidx.compose.material3.DropdownMenuItem(
+                                  text = {
+                                      Text(
+                                          app.packageName.substringAfterLast('.'),
+                                          fontSize = 11.sp,
+                                          color = if (app.packageName == selectedAppId) colors.text.info else colors.text.normal,
+                                      )
+                                  },
+                                  onClick = { selectedAppId = app.packageName; appDropdownExpanded = false },
+                              )
+                          }
+                      }
                   }
               }
-              Spacer(Modifier.weight(1f))
+              Spacer(Modifier.height(16.dp))
               Text(
                   text = "\u2699 Settings",
                   color = colors.text.normal,
@@ -1102,13 +1473,25 @@ fun AutoMobileContent(
           }
       },
       rightPaneContent = {
-          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-              Text(
-                  "Select an event to inspect",
-                  color = colors.text.normal.copy(alpha = 0.5f),
-                  fontSize = 12.sp,
-              )
-          }
+          RightInspectorPanel(
+              selectedEvent = selectedTelemetryEvent,
+              onClose = {
+                  if (isLiveLayoutMode) isLiveLayoutMode = false
+                  else selectedTelemetryEvent = null
+              },
+              isLiveMode = isLiveLayoutMode,
+              onToggleLiveMode = { live ->
+                  isLiveLayoutMode = live
+                  if (live && !showRightPane) showRightPane = true
+              },
+              layoutInspectorState = layoutInspectorState,
+              hasDevice = observationStreamClient != null,
+              onOpenSource = onOpenSource,
+              screenshotLoader = remember(clientProvider, dataSourceMode) {
+                  if (dataSourceMode == DataSourceMode.Real && clientProvider != null)
+                      NavigationScreenshotLoader(clientProvider) else null
+              },
+          )
       },
       bottomPaneContent = {
           Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1136,8 +1519,8 @@ fun AutoMobileContent(
           onDismiss = { showGlobalSearch = false },
       )
   }
-  }
-}
+  } // Box
+} // AutoMobileContent
 
 @Composable
 private fun MainContentViewToggle(

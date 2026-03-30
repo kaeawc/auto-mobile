@@ -35,7 +35,10 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.Image
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.width
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -526,12 +529,27 @@ private fun NetworkOverviewTab(
             }
         }
         CollapsibleSection("Response Body", textColor, copyText = result.responseBody) {
-            NetworkBodyContent(
-                body = result.responseBody,
-                contentType = result.responseHeaders["content-type"],
-                bodySize = result.responseBody?.length?.toLong() ?: -1,
-                textColor = textColor,
-            )
+            val contentType = result.responseHeaders.entries.find { it.key.equals("content-type", ignoreCase = true) }?.value
+            if (result.responseBodyBytes != null && contentType?.startsWith("image/") == true) {
+                // Render image from raw bytes
+                val bitmap = remember(result.responseBodyBytes) {
+                    try { org.jetbrains.skia.Image.makeFromEncoded(result.responseBodyBytes).toComposeImageBitmap() } catch (_: Exception) { null }
+                }
+                if (bitmap != null) {
+                    Box(Modifier.fillMaxWidth().background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp)).padding(8.dp)) {
+                        Image(bitmap = bitmap, contentDescription = "Response image", modifier = Modifier.fillMaxWidth().heightIn(max = 400.dp), contentScale = ContentScale.Fit)
+                    }
+                } else {
+                    Text("Image (${contentType}, ${formatByteSize(result.responseBodyBytes.size.toLong())})", fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
+                }
+            } else {
+                NetworkBodyContent(
+                    body = result.responseBody,
+                    contentType = contentType,
+                    bodySize = result.responseBody?.length?.toLong() ?: result.responseBodyBytes?.size?.toLong() ?: -1,
+                    textColor = textColor,
+                )
+            }
         }
     }
 }

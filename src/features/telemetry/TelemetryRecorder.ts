@@ -18,6 +18,7 @@ export interface TelemetryEvent {
   category: TelemetryCategory;
   timestamp: number;
   deviceId: string | null;
+  sessionId: string | null;
   data: unknown;
 }
 
@@ -104,7 +105,7 @@ export class TelemetryRecorder {
     const { deviceId, sessionId } = this.snapshotContext();
     const input: RecordNetworkEventInput = { deviceId, sessionId, ...event };
 
-    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "network", timestamp: event.timestamp, deviceId, sessionId, data: event });
 
     // Only persist and notify when capture is enabled
     if (!NetworkState.getInstance().capturing) {
@@ -152,7 +153,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record log event: ${e}`);
     }
 
-    this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   async recordCustomEvent(event: {
@@ -170,7 +171,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record custom event: ${e}`);
     }
 
-    this.pushToSocket({ category: "custom", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "custom", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   async recordOsEvent(event: {
@@ -189,7 +190,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record OS event: ${e}`);
     }
 
-    this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "os", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   async recordNavigationEvent(event: {
@@ -211,7 +212,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record navigation event: ${e}`);
     }
 
-    this.pushToSocket({ category: "navigation", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "navigation", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   /**
@@ -234,6 +235,7 @@ export class TelemetryRecorder {
       category: event.type,
       timestamp: event.timestamp,
       deviceId,
+      sessionId,
       data: event,
     });
   }
@@ -256,7 +258,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record storage event: ${e}`);
     }
 
-    this.pushToSocket({ category: "storage", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "storage", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   async recordLayoutEvent(event: {
@@ -280,7 +282,7 @@ export class TelemetryRecorder {
       logger.error(`[TelemetryRecorder] Failed to record layout event: ${e}`);
     }
 
-    this.pushToSocket({ category: "layout", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "layout", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   /**
@@ -300,11 +302,12 @@ export class TelemetryRecorder {
     health: string;
     changedMetrics: string[];
   }): void {
-    const { deviceId } = this.snapshotContext();
+    const { deviceId, sessionId: perfSessionId } = this.snapshotContext();
     this.pushToSocket({
       category: "performance",
       timestamp: event.timestamp,
       deviceId,
+      sessionId: perfSessionId,
       data: event,
     });
   }
@@ -319,7 +322,7 @@ export class TelemetryRecorder {
     args?: Record<string, unknown> | null;
   }): void {
     const { deviceId } = this.snapshotContext();
-    this.pushToSocket({ category: "toolcall", timestamp: event.timestamp, deviceId, data: event });
+    this.pushToSocket({ category: "toolcall", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
 

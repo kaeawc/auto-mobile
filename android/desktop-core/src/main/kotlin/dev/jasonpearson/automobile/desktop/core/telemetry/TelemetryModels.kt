@@ -23,6 +23,7 @@ data class TelemetryPushRequest(
     val command: String,
     val category: String? = null,
     val deviceId: String? = null,
+    val sessionId: String? = null,
 )
 
 /**
@@ -45,6 +46,7 @@ data class TelemetryPushResponse(
 data class TelemetryEventEnvelope(
     val category: String,
     val timestamp: Long,
+    val deviceId: String? = null,
     val data: JsonObject,
 )
 
@@ -71,6 +73,8 @@ data class AccessibilityViolationInfo(
  */
 sealed class TelemetryDisplayEvent {
     abstract val timestamp: Long
+    /** Device ID that generated this event, if known. Used for per-device filtering. */
+    open val deviceId: String? = null
 
     data class Network(
         override val timestamp: Long,

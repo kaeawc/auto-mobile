@@ -141,10 +141,10 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerNavigationTools();
   registerNotificationTools();
   // Plan tools (executePlan, recordSteps, startTestRecording, exportPlan)
-  // moved out of daemonMode gate so MCP recording is available in stdio/no-proxy mode.
-  // executePlan's multi-device allocation still requires daemon (DaemonState), but will
-  // throw a clear error if attempted without daemon — single-device execution works fine.
-  // Critical section tools remain daemon-only as they depend on DaemonState's lock manager.
+  // registered outside the daemonMode gate so MCP recording works in stdio mode
+  // (the standard MCP transport agents use). executePlan multi-device allocation
+  // still requires daemon and throws a clear error without it.
+  // Critical section tools remain daemon-only (DaemonState lock manager).
   registerPlanTools();
   if (daemonMode) {
     registerCriticalSectionTools();

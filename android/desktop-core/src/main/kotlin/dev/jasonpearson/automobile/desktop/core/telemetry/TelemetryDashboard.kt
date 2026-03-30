@@ -167,20 +167,31 @@ fun TelemetryDashboard(
     modifier: Modifier = Modifier,
 ) {
     val colors = SharedTheme.globalColors
-    // Per-device event cache so switching devices preserves events
+    // Per-device event + count cache so switching devices preserves state
     val deviceEventCache = remember { mutableMapOf<String, List<TelemetryDisplayEvent>>() }
+    val deviceCountCache = remember { mutableMapOf<String, Map<CategoryFilter, Int>>() }
     val events = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+    // Incremental category counts — declared here so device switch can access them
+    val categoryCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
+    val lastSeenCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
     var previousDeviceId by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(activeDeviceId) {
-        // Save current events to cache before switching
+        // Save current events + counts to cache before switching
         if (previousDeviceId != null && events.isNotEmpty()) {
             deviceEventCache[previousDeviceId!!] = events.toList()
+            deviceCountCache[previousDeviceId!!] = categoryCounts.toMap()
         }
-        // Restore cached events for the new device, or clear
+        // Restore cached events + counts for the new device, or clear
         events.clear()
+        categoryCounts.clear()
+        lastSeenCounts.clear()
         val cached = activeDeviceId?.let { deviceEventCache[it] }
         if (cached != null) {
             events.addAll(cached)
+        }
+        val cachedCounts = activeDeviceId?.let { deviceCountCache[it] }
+        if (cachedCounts != null) {
+            categoryCounts.putAll(cachedCounts)
         }
         previousDeviceId = activeDeviceId
     }
@@ -207,11 +218,7 @@ fun TelemetryDashboard(
     var maxEvents by remember { mutableStateOf(DEFAULT_MAX_EVENTS) }
     var showMaxEventsDropdown by remember { mutableStateOf(false) }
 
-    // Incremental category counts — updated when events are added/removed
-    val categoryCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
-
-    // Tracks the event count per category when the user last viewed that tab.
-    val lastSeenCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
+    // categoryCounts and lastSeenCounts declared above (before device switch LaunchedEffect)
 
     var filteredEvents by remember { mutableStateOf<List<TelemetryDisplayEvent>>(emptyList()) }
 

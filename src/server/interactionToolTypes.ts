@@ -43,6 +43,7 @@ export interface PressKeyArgs {
 export interface InputTextArgs {
   text: string;
   imeAction?: "done" | "next" | "search" | "send" | "go" | "previous";
+  dismissKeyboard?: boolean;
   platform: Platform;
 }
 

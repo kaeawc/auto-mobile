@@ -1,5 +1,5 @@
 import yaml from "js-yaml";
-import { Plan, PlanStep } from "../models";
+import { Plan } from "../models";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import { PlanValidator } from "../utils/plan/PlanValidator";

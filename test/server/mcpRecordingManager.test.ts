@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, spyOn, afterEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import {
   startMcpRecording,
   stopMcpRecording,

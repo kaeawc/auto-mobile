@@ -545,62 +545,64 @@ val TelemetryDisplayEvent.eventSeverity: EventSeverity
 
 /**
  * Full-text search across all relevant fields of a telemetry event.
+ *
+ * @param useRegex When true, [query] is compiled as a case-insensitive regex.
+ *   Invalid regex patterns gracefully return false (no match).
  */
-fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
+fun TelemetryDisplayEvent.matchesSearch(query: String, useRegex: Boolean = false): Boolean {
     if (query.isBlank()) return true
-    val q = query.lowercase()
-    return when (this) {
-        is TelemetryDisplayEvent.Network ->
-            method.lowercase().contains(q) ||
-            "$statusCode".contains(q) ||
-            url.lowercase().contains(q) ||
-            host?.lowercase()?.contains(q) == true ||
-            path?.lowercase()?.contains(q) == true ||
-            error?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Log ->
-            tag.lowercase().contains(q) ||
-            message.lowercase().contains(q)
-        is TelemetryDisplayEvent.Navigation ->
-            destination.lowercase().contains(q) ||
-            source?.lowercase()?.contains(q) == true ||
-            triggeringInteraction?.lowercase()?.contains(q) == true ||
-            arguments?.values?.any { it.lowercase().contains(q) } == true
-        is TelemetryDisplayEvent.Os ->
-            category.lowercase().contains(q) ||
-            kind.lowercase().contains(q) ||
-            details?.values?.any { it.lowercase().contains(q) } == true
-        is TelemetryDisplayEvent.Custom ->
-            name.lowercase().contains(q) ||
-            properties.entries.any { it.key.lowercase().contains(q) || it.value.lowercase().contains(q) }
-        is TelemetryDisplayEvent.Failure ->
-            type.lowercase().contains(q) ||
-            title.lowercase().contains(q) ||
-            exceptionType?.lowercase()?.contains(q) == true ||
-            screen?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Storage ->
-            fileName.lowercase().contains(q) ||
-            key?.lowercase()?.contains(q) == true ||
-            value?.lowercase()?.contains(q) == true ||
-            changeType.lowercase().contains(q)
-        is TelemetryDisplayEvent.Layout ->
-            subType.lowercase().contains(q) ||
-            composableName?.lowercase()?.contains(q) == true ||
-            screenName?.lowercase()?.contains(q) == true ||
-            likelyCause?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Performance ->
-            health.lowercase().contains(q) ||
-            changedMetrics.any { it.lowercase().contains(q) } ||
-            "performance".contains(q)
-        is TelemetryDisplayEvent.ToolCall ->
-            toolName.lowercase().contains(q) ||
-            error?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Accessibility ->
-            packageName.lowercase().contains(q) ||
-            screenId.lowercase().contains(q) ||
-            violations.any { it.type.lowercase().contains(q) || it.message.lowercase().contains(q) }
-        is TelemetryDisplayEvent.Memory ->
-            packageName.lowercase().contains(q) ||
-            violations.any { it.lowercase().contains(q) } ||
-            "memory".contains(q)
+
+    if (useRegex) {
+        val regex = try {
+            Regex(query, RegexOption.IGNORE_CASE)
+        } catch (_: java.util.regex.PatternSyntaxException) {
+            return false
+        }
+        return anyField { regex.containsMatchIn(it) }
     }
+
+    val q = query.lowercase()
+    return anyField { it.lowercase().contains(q) }
 }
+
+/**
+ * Short-circuit iteration over searchable fields.  Avoids allocating
+ * intermediate lists -- the [predicate] is tested lazily and returns
+ * as soon as the first match is found.
+ */
+private inline fun TelemetryDisplayEvent.anyField(predicate: (String) -> Boolean): Boolean =
+    when (this) {
+        is TelemetryDisplayEvent.Network ->
+            predicate(method) || predicate("$statusCode") || predicate(url) ||
+            host?.let(predicate) == true || path?.let(predicate) == true ||
+            error?.let(predicate) == true
+        is TelemetryDisplayEvent.Log ->
+            predicate(tag) || predicate(message)
+        is TelemetryDisplayEvent.Navigation ->
+            predicate(destination) || source?.let(predicate) == true ||
+            triggeringInteraction?.let(predicate) == true ||
+            arguments?.values?.any(predicate) == true
+        is TelemetryDisplayEvent.Os ->
+            predicate(category) || predicate(kind) ||
+            details?.values?.any(predicate) == true
+        is TelemetryDisplayEvent.Custom ->
+            predicate(name) || properties.keys.any(predicate) || properties.values.any(predicate)
+        is TelemetryDisplayEvent.Failure ->
+            predicate(type) || predicate(title) ||
+            exceptionType?.let(predicate) == true || screen?.let(predicate) == true
+        is TelemetryDisplayEvent.Storage ->
+            predicate(fileName) || key?.let(predicate) == true ||
+            value?.let(predicate) == true || predicate(changeType)
+        is TelemetryDisplayEvent.Layout ->
+            predicate(subType) || composableName?.let(predicate) == true ||
+            screenName?.let(predicate) == true || likelyCause?.let(predicate) == true
+        is TelemetryDisplayEvent.Performance ->
+            predicate(health) || changedMetrics.any(predicate) || predicate("performance")
+        is TelemetryDisplayEvent.ToolCall ->
+            predicate(toolName) || error?.let(predicate) == true
+        is TelemetryDisplayEvent.Accessibility ->
+            predicate(packageName) || predicate(screenId) ||
+            violations.any { predicate(it.type) || predicate(it.message) }
+        is TelemetryDisplayEvent.Memory ->
+            predicate(packageName) || violations.any(predicate) || predicate("memory")
+    }

@@ -994,34 +994,36 @@ private fun NavigationDetail(
     event.arguments?.forEach { (k, v) -> DetailRow("Arg: $k", v, textColor) }
     event.metadata?.forEach { (k, v) -> DetailRow("Meta: $k", v, textColor) }
 
-    // Screenshot thumbnail — fixed-size box prevents layout re-measurement crashes
+    // Screenshot thumbnail
     val uri = event.screenshotUri
     if (uri != null && screenshotLoader != null) {
         Spacer(Modifier.height(8.dp))
         var bitmap by remember(uri) { mutableStateOf<ImageBitmap?>(null) }
+        var loadFailed by remember(uri) { mutableStateOf(false) }
         LaunchedEffect(uri) {
-            bitmap = screenshotLoader.load(uri)
+            val result = screenshotLoader.load(uri)
+            bitmap = result
+            loadFailed = result == null
         }
-        Box(
-            modifier = Modifier
-                .width(280.dp)
-                .height(200.dp)
-                .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
-            contentAlignment = Alignment.Center,
-        ) {
-            val loadedBitmap = bitmap
-            if (loadedBitmap != null) {
-                Image(
-                    bitmap = loadedBitmap,
-                    contentDescription = "Screenshot of ${event.destination}",
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            } else {
-                Text(
-                    "Loading...",
-                    fontSize = 9.sp,
-                    color = textColor.copy(alpha = 0.4f),
-                )
+        if (!loadFailed) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 300.dp)
+                    .background(textColor.copy(alpha = 0.05f), RoundedCornerShape(4.dp)),
+                contentAlignment = Alignment.Center,
+            ) {
+                val loadedBitmap = bitmap
+                if (loadedBitmap != null) {
+                    Image(
+                        bitmap = loadedBitmap,
+                        contentDescription = "Screenshot of ${event.destination}",
+                        modifier = Modifier.fillMaxWidth(),
+                        contentScale = ContentScale.Fit,
+                    )
+                } else {
+                    Text("Loading...", fontSize = 9.sp, color = textColor.copy(alpha = 0.4f))
+                }
             }
         }
     }

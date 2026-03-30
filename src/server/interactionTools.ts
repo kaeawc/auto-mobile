@@ -21,9 +21,8 @@ import {
   BootedDevice,
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
-import { DefaultElementFinder } from "../features/utility/ElementFinder";
 
-import { RealObserveScreen } from "../features/observe/ObserveScreen";
+
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
@@ -420,7 +419,6 @@ export const clipboardSchema = addDeviceTargetingToSchema(z.object({
 // Tool Registration
 // ============================================================================
 
-const sharedElementFinder = new DefaultElementFinder();
 
 export function registerInteractionTools() {
   // Tap on handler

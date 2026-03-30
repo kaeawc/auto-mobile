@@ -40,6 +40,7 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     public func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
+        NSLog("[AutoMobileSDK] broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
 
         let envelopes = events.compactMap { event -> SdkEventEnvelope? in
             try? SdkEventEnvelope(event)
@@ -66,11 +67,12 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
             request.httpMethod = "POST"
             request.httpBody = data
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            NSLog("[AutoMobileSDK] Posting \(data.count) bytes to \(url.absoluteString)")
             urlSession.dataTask(with: request) { _, response, error in
                 if let error = error {
-                    print("[AutoMobileSDK] SDK event POST failed: \(error.localizedDescription)")
+                    NSLog("[AutoMobileSDK] SDK event POST failed: \(error.localizedDescription)")
                 } else if let httpResponse = response as? HTTPURLResponse {
-                    print("[AutoMobileSDK] SDK event POST: \(httpResponse.statusCode), \(data.count) bytes")
+                    NSLog("[AutoMobileSDK] SDK event POST: \(httpResponse.statusCode), \(data.count) bytes")
                 }
             }.resume()
         }

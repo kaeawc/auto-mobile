@@ -122,7 +122,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Track a custom event with optional properties.
     public func trackEvent(name: String, properties: [String: String] = [:]) {
-        guard isEnabled else { return }
+        guard isEnabled else {
+            NSLog("[AutoMobileSDK] trackEvent(\(name)) skipped: SDK disabled")
+            return
+        }
+        NSLog("[AutoMobileSDK] trackEvent(\(name)), buffer=\(eventBuffer != nil ? "exists" : "nil")")
         let event = SdkCustomEvent(name: name, properties: properties)
         eventBuffer?.add(event)
     }

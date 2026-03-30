@@ -538,11 +538,23 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       try {
         const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
         if (!resp.ok) return;
-        const batches = await resp.json() as Array<{ bundleId?: string; events?: Array<{ type: string; timestamp: number; payload: Record<string, unknown> }> }>;
+        const batches = await resp.json() as Array<{
+          bundleId?: string;
+          events?: Array<{ eventType: string; payload: string }>;
+        }>;
         for (const batch of batches) {
           if (!batch.events) continue;
-          for (const event of batch.events) {
-            await this.recordSdkEvent(event, batch.bundleId ?? null);
+          for (const envelope of batch.events) {
+            try {
+              // SDK envelopes have base64-encoded payload
+              const payloadJson = Buffer.from(envelope.payload, "base64").toString("utf-8");
+              const payload = JSON.parse(payloadJson) as Record<string, unknown>;
+              const timestamp = (payload.timestamp as number) ?? Date.now();
+              await this.recordSdkEvent(
+                { type: envelope.eventType, timestamp, payload },
+                batch.bundleId ?? null,
+              );
+            } catch { /* skip malformed */ }
           }
         }
       } catch {
@@ -569,7 +581,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
       try {
       switch (event.type) {
-        case "network":
+        case "network_request":
           await recorder.recordNetworkEvent({
             timestamp: ts, applicationId,
             url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
@@ -594,7 +606,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
           await recorder.recordOsEvent({
             timestamp: ts, applicationId,
             category: "lifecycle", kind: (p.state as string) ?? "unknown",
-            details: p as Record<string, string>,
+            details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
           });
           break;
         case "custom":
@@ -612,10 +624,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             details: { message: (p.message as string) ?? "", screen: (p.screen as string) ?? "" },
           });
           break;
-        case "storage":
+        case "storage_changed":
           await recorder.recordStorageEvent({
             timestamp: ts, applicationId,
-            fileName: (p.fileName as string) ?? "", key: (p.key as string) ?? "",
+            fileName: (p.suiteName as string) ?? "", key: (p.key as string) ?? "",
             value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
           });
           break;

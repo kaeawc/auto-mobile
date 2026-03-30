@@ -6,8 +6,6 @@
 
 Almost all other tool calls have built-in observation via the [interaction loop](interaction-loop.md), but we also have a standalone [observe](observe/index.md) tool that specifically performs just that action to get the AI agent up to speed.
 
-- ✅ `assertVisible` polls the view hierarchy until an element matching text or resource ID is visible (or times out). Useful as a gate between interaction steps in test plans.
-
 #### Interactions
 
 - 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match).

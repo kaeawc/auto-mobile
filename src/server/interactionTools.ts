@@ -22,7 +22,7 @@ import {
 } from "../models";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
-import { AssertVisible } from "../features/action/AssertVisible";
+
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
@@ -63,7 +63,6 @@ import type {
   RecentAppsArgs,
   RotateArgs,
   ClipboardArgs,
-  AssertVisibleArgs,
 } from "./interactionToolTypes";
 
 import {
@@ -105,7 +104,6 @@ export type {
   RecentAppsArgs,
   RotateArgs,
   ClipboardArgs,
-  AssertVisibleArgs,
 };
 
 // Re-export system tray helpers for backward compatibility
@@ -417,22 +415,6 @@ export const clipboardSchema = addDeviceTargetingToSchema(z.object({
   text: z.string().optional().describe("Text to copy (required for 'copy' action)"),
   platform: platformSchema
 }));
-
-const assertVisibleByTextSchema = addDeviceTargetingToSchema(z.object({
-  text: z.string().min(1).describe("Element text to find"),
-  containerElementId: z.string().optional().describe("Container element ID to scope search"),
-  timeout: z.number().min(500).max(60000).optional().describe("Timeout in ms (default: 5000, min: 500, max: 60000). Use higher values for screens with loading/network calls"),
-  platform: platformSchema
-}).strict());
-
-const assertVisibleByIdSchema = addDeviceTargetingToSchema(z.object({
-  id: z.string().min(1).describe("Element resource ID / accessibility identifier"),
-  containerElementId: z.string().optional().describe("Container element ID to scope search"),
-  timeout: z.number().min(500).max(60000).optional().describe("Timeout in ms (default: 5000, min: 500, max: 60000). Use higher values for screens with loading/network calls"),
-  platform: platformSchema
-}).strict());
-
-export const assertVisibleSchema = z.union([assertVisibleByTextSchema, assertVisibleByIdSchema]);
 
 // ============================================================================
 // Tool Registration
@@ -950,18 +932,6 @@ export function registerInteractionTools() {
     }
   };
 
-  const assertVisibleHandler = async (
-    device: BootedDevice,
-    args: AssertVisibleArgs,
-    _progress?: ProgressCallback,
-    signal?: AbortSignal
-  ) => {
-    const observeScreen = new RealObserveScreen(device);
-    const assertVisible = new AssertVisible(observeScreen, sharedElementFinder);
-    const result = await assertVisible.execute(args, signal);
-    return createJSONToolResponse(result);
-  };
-
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "clearText",
@@ -1114,12 +1084,4 @@ export function registerInteractionTools() {
     false // Does not support progress notifications
   );
 
-  // Register the assertVisible tool
-  ToolRegistry.registerDeviceAware(
-    "assertVisible",
-    "Assert that an element is visible on screen (polls until found or timeout)",
-    assertVisibleSchema,
-    assertVisibleHandler,
-    false // Does not support progress notifications
-  );
 }

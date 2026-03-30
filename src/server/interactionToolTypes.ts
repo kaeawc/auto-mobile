@@ -153,11 +153,3 @@ export interface ClipboardArgs {
   text?: string;
   platform: Platform;
 }
-
-export interface AssertVisibleArgs {
-  text?: string;
-  id?: string;
-  containerElementId?: string;
-  timeout?: number;
-  platform: Platform;
-}

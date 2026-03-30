@@ -13,18 +13,12 @@ steps:
   - tool: launchApp
     appId: com.example.app
 
-  - tool: assertVisible
-    text: "Login"
-
   - tool: tapOn
     action: tap
     text: "Login"
 
   - tool: inputText
     text: "user@example.com"
-
-  - tool: assertVisible
-    text: "Welcome"
 ```
 
 ```kotlin

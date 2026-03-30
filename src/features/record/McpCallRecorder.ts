@@ -9,9 +9,8 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   // App lifecycle
   "launchApp",
   "terminateApp",
-  // Observation / assertion
+  // Observation
   "observe",
-  "assertVisible",
   // Interaction
   "tapOn",
   "swipeOn",

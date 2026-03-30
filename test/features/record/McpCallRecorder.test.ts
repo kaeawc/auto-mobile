@@ -64,14 +64,13 @@ describe("McpCallRecorder", () => {
 
       recorder.record("launchApp", { appId: "com.test" });
       recorder.record("observe", {});
-      recorder.record("assertVisible", { text: "Hello" });
       recorder.record("tapOn", { text: "Login" });
       recorder.record("inputText", { text: "test" });
       recorder.record("pressButton", { button: "back" });
       recorder.record("swipeOn", { direction: "up" });
       recorder.record("terminateApp", { appId: "com.test" });
 
-      expect(recorder.stepCount).toBe(8);
+      expect(recorder.stepCount).toBe(7);
     });
 
     test("ignores infrastructure tools", () => {
@@ -123,7 +122,7 @@ describe("McpCallRecorder", () => {
       const recorder = new McpCallRecorder();
       recorder.start();
 
-      recorder.record("assertVisible", {
+      recorder.record("tapOn", {
         text: "My Inbox",
         timeout: 10000,
         containerElementId: "com.test:id/container",
@@ -182,8 +181,7 @@ describe("PLAN_RELEVANT_TOOLS", () => {
 
   test("includes observation and lifecycle tools", () => {
     expect(PLAN_RELEVANT_TOOLS.has("observe")).toBe(true);
-    expect(PLAN_RELEVANT_TOOLS.has("assertVisible")).toBe(true);
-    expect(PLAN_RELEVANT_TOOLS.has("launchApp")).toBe(true);
+expect(PLAN_RELEVANT_TOOLS.has("launchApp")).toBe(true);
     expect(PLAN_RELEVANT_TOOLS.has("terminateApp")).toBe(true);
     expect(PLAN_RELEVANT_TOOLS.has("setUIState")).toBe(true);
   });

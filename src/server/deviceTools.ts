@@ -10,20 +10,21 @@ import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingM
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
+import { platformSchema } from "./toolSchemaHelpers";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
-  platform: z.enum(["android", "ios"]).describe("Platform")
+  platform: platformSchema
 });
 
 export const listDevicesSchema = z.object({
-  platform: z.enum(["android", "ios"]).optional().describe("Platform")
+  platform: platformSchema.optional()
 });
 
 export const startDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device name"),
-    platform: z.enum(["android", "ios"]).describe("Platform"),
+    platform: platformSchema,
     deviceId: z.string().optional().describe("Device ID"),
     isRunning: z.boolean().optional().describe("Running status"),
     source: z.string().optional().describe("Source (local/remote)")
@@ -35,7 +36,7 @@ export const killDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device image name"),
     deviceId: z.string().describe("Device ID"),
-    platform: z.enum(["android", "ios"]).describe("Platform")
+    platform: platformSchema
   })
 });
 

@@ -21,6 +21,60 @@ import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapp
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
+/**
+ * The Anthropic API (and many MCP clients) reject tool input schemas that have
+ * `anyOf` or `oneOf` at the top level. Zod's `z.union()` produces exactly that.
+ * This function flattens union branches into a single `type: "object"` schema
+ * by merging all properties from every branch. Required fields are dropped because
+ * different branches require different keys.
+ *
+ * Note: `allOf` is NOT handled here — it has a different semantic (intersection)
+ * and would require a different merging strategy (all fields required, not any).
+ *
+ * Trade-off: the flattened schema loses mutual-exclusivity information, so LLMs may
+ * send invalid property combinations. The server-side Zod union still validates at
+ * runtime, but the error messages are less clear than a well-structured schema.
+ *
+ * TODO: Replace top-level z.union() usage with a discriminator field (e.g.
+ * `strategy: "text" | "id" | "clickable"`) so schemas are MCP-compliant without
+ * needing this lossy flattening step.
+ */
+export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<string, unknown> {
+  const branches = (schema.anyOf ?? schema.oneOf) as Record<string, unknown>[] | undefined;
+  if (!branches || !Array.isArray(branches)) {
+    return schema;
+  }
+
+  const mergedProperties: Record<string, unknown> = {};
+  const seenAdditionalProperties = new Set<boolean | undefined>();
+
+  for (const branch of branches) {
+    const props = branch.properties as Record<string, unknown> | undefined;
+    if (props) {
+      for (const [key, value] of Object.entries(props)) {
+        if (!mergedProperties[key]) {
+          mergedProperties[key] = value;
+        }
+      }
+    }
+    if (typeof branch.additionalProperties === "boolean") {
+      seenAdditionalProperties.add(branch.additionalProperties);
+    }
+  }
+
+  const result: Record<string, unknown> = {
+    ...(schema.$schema ? { $schema: schema.$schema } : {}),
+    type: "object",
+    properties: mergedProperties,
+  };
+
+  if (seenAdditionalProperties.size === 1) {
+    result.additionalProperties = [...seenAdditionalProperties][0];
+  }
+
+  return result;
+}
+
 // Progress notification interface
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -515,7 +569,7 @@ class ToolRegistryClass {
     return this.getAllTools().map(tool => ({
       name: tool.name,
       description: tool.description,
-      inputSchema: toJSONSchema(tool.schema),
+      inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
       ...(tool.outputSchema ? { outputSchema: toJSONSchema(tool.outputSchema) } : {})
     }));
   }

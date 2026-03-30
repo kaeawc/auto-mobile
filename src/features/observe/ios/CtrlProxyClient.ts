@@ -609,6 +609,15 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
           });
           break;
+        case "navigation":
+          await recorder.recordNavigationEvent({
+            timestamp: ts, applicationId,
+            destination: (p.destination as string) ?? "unknown",
+            source: (p.source as string) ?? null,
+            arguments: (p.arguments as Record<string, string>) ?? null,
+            metadata: (p.metadata as Record<string, string>) ?? null,
+          });
+          break;
         case "custom":
           await recorder.recordCustomEvent({
             timestamp: ts, applicationId,
@@ -655,11 +664,13 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       recorder.setContext(this.device.deviceId, null);
       const nodeCount = this.countNodes(hierarchy.hierarchy);
       // Include the full hierarchy for view tree display in the desktop app
+      // Use the raw hierarchy object which includes all nested children
       const hierarchyJson = JSON.stringify({
         nodeCount,
         packageName: hierarchy.packageName,
         hierarchy: hierarchy.hierarchy,
         windows: hierarchy.windows,
+        updatedAt: hierarchy.updatedAt,
       });
       void recorder.recordLayoutEvent({
         timestamp: Date.now(),
@@ -667,10 +678,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         subType: "hierarchy_change",
         composableName: null,
         composableId: null,
-        recompositionCount: null,
+        recompositionCount: nodeCount,
         durationMs: null,
         likelyCause: null,
-        detailsJson: hierarchyJson.length < 50000 ? hierarchyJson : JSON.stringify({ nodeCount }),
+        detailsJson: hierarchyJson.length < 200000 ? hierarchyJson : JSON.stringify({ nodeCount, truncated: true }),
         screenName: hierarchy.packageName ?? null,
       });
       recorder.setContext(prevContext.deviceId, prevContext.sessionId);

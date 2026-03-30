@@ -26,6 +26,7 @@ class ServerConfig {
   private _appearanceDefaults: AppearanceConfigInput = {};
   private _skipCtrlProxyDownload: boolean = false;
   private _networkMockableEnabled: boolean = false;
+  private _mcpRecordingEnabled: boolean = false;
 
   private constructor() {}
 
@@ -126,6 +127,14 @@ class ServerConfig {
 
   isNetworkMockableEnabled(): boolean {
     return this._networkMockableEnabled;
+  }
+
+  setMcpRecordingEnabled(enabled: boolean): void {
+    this._mcpRecordingEnabled = enabled;
+  }
+
+  isMcpRecordingEnabled(): boolean {
+    return this._mcpRecordingEnabled;
   }
 
 }

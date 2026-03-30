@@ -46,6 +46,7 @@ function parseArgs(): {
   daemonCommand?: string;
   daemonArgs: string[];
   skipCtrlProxyDownload: boolean;
+  mcpRecording: boolean;
   noProxy: boolean;
   noDaemon: boolean;
   } {
@@ -100,6 +101,7 @@ function parseArgs(): {
   const rawElementSearch = args.includes("--raw-element-search");
   const skipCtrlProxyDownload = args.includes("--skip-ctrl-proxy-download") || args.includes("--skip-accessibility-download");
   const networkMockable = args.includes("--network-mockable");
+  const mcpRecording = args.includes("--mcp-recording");
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -291,6 +293,7 @@ function parseArgs(): {
     daemonArgs,
     skipCtrlProxyDownload,
     networkMockable,
+    mcpRecording,
     noProxy,
     noDaemon,
   };
@@ -359,6 +362,7 @@ async function main() {
       daemonArgs,
       skipCtrlProxyDownload,
       networkMockable,
+      mcpRecording,
       noProxy,
       noDaemon,
     } = parseArgs();
@@ -402,6 +406,7 @@ async function main() {
       ["accessibility-audit", a11yAuditMode, "--accessibility-audit", accessibilityConfig],
       ["predictive-ui", predictiveUi, "--predictive/--predictive-ui"],
       ["raw-element-search", rawElementSearch, "--raw-element-search"],
+      ["mcp-recording", mcpRecording, "--mcp-recording"],
     ];
 
     for (const [key, enabled, flagLabel, config] of cliOverrides) {
@@ -451,6 +456,7 @@ async function main() {
         debug,
         debugPerf,
         planExecutionLockScope,
+        mcpRecording,
         videoQualityPreset: videoRecordingDefaults.qualityPreset,
         videoTargetBitrateKbps: videoRecordingDefaults.targetBitrateKbps,
         videoMaxThroughputMbps: videoRecordingDefaults.maxThroughputMbps,

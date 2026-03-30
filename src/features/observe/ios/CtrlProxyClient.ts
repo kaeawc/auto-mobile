@@ -651,19 +651,29 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   private recordLayoutTelemetryEvent(hierarchy: CtrlProxyHierarchy): void {
     try {
       const recorder = TelemetryRecorder.getInstance();
+      const prevContext = recorder.getContext();
       recorder.setContext(this.device.deviceId, null);
       const nodeCount = this.countNodes(hierarchy.hierarchy);
+      // Include the full hierarchy for view tree display in the desktop app
+      const hierarchyJson = JSON.stringify({
+        nodeCount,
+        packageName: hierarchy.packageName,
+        hierarchy: hierarchy.hierarchy,
+        windows: hierarchy.windows,
+      });
       void recorder.recordLayoutEvent({
         timestamp: Date.now(),
         applicationId: hierarchy.packageName ?? null,
-        subType: "hierarchy_update",
+        subType: "hierarchy_change",
         composableName: null,
         composableId: null,
         recompositionCount: null,
         durationMs: null,
         likelyCause: null,
-        detailsJson: JSON.stringify({ nodeCount }),
+        detailsJson: hierarchyJson.length < 50000 ? hierarchyJson : JSON.stringify({ nodeCount }),
+        screenName: hierarchy.packageName ?? null,
       });
+      recorder.setContext(prevContext.deviceId, prevContext.sessionId);
     } catch {
       // Non-fatal — telemetry recording should never break observation
     }

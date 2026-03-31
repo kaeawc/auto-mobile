@@ -16,6 +16,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _bundleId: String?
     private var _sdkContext: SdkContext?
     private var eventBuffer: SdkEventBuffer?
+    private var _dropCounter: DefaultDropCounter?
     private var sessionTracker: SessionTracker?
     private var sessionObservers: [NSObjectProtocol] = []
 
@@ -40,7 +41,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
 
-        let buffer = SdkEventBuffer { [weak self] events in
+        let counter = DefaultDropCounter()
+        _dropCounter = counter
+
+        let buffer = SdkEventBuffer(dropCounter: counter) { [weak self] events in
             let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)
         }
@@ -241,6 +245,13 @@ public final class AutoMobileSDK: @unchecked Sendable {
         sdkContext?.removeTag(key)
     }
 
+    /// The drop counter tracking events lost due to buffer overflow, disabled state, or flush errors.
+    public var dropCounter: (any DropCounting)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _dropCounter
+    }
+
     // MARK: - Testing Support
 
     /// Reset the SDK for testing. Not for production use.
@@ -279,6 +290,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let bufferToShutdown = eventBuffer
         _sdkContext = nil
         eventBuffer = nil
+        _dropCounter = nil
         listeners.removeAll()
         _isEnabled = true
         _isInitialized = false

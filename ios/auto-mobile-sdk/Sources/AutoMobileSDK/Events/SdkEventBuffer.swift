@@ -14,22 +14,25 @@ public protocol EventBuffering: AnyObject, Sendable {
 public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private let maxBufferSize: Int
     private let flushIntervalMs: Int
-    private let onFlush: @Sendable ([any SdkEvent]) -> Void
+    private let onFlush: @Sendable ([any SdkEvent]) throws -> Void
     private let lock = NSLock()
     private var buffer: [any SdkEvent] = []
     private var timer: (any TimerScheduling)?
     private let timerFactory: () -> any TimerScheduling
     private var _isBufferEnabled = true
+    private let dropCounter: (any DropCounting)?
 
     public init(
         maxBufferSize: Int = 50,
         flushIntervalMs: Int = 500,
         timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() },
-        onFlush: @escaping @Sendable ([any SdkEvent]) -> Void
+        dropCounter: (any DropCounting)? = nil,
+        onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void
     ) {
         self.maxBufferSize = maxBufferSize
         self.flushIntervalMs = flushIntervalMs
         self.timerFactory = timerFactory
+        self.dropCounter = dropCounter
         self.onFlush = onFlush
     }
 
@@ -70,6 +73,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         lock.lock()
         guard _isBufferEnabled else {
             lock.unlock()
+            dropCounter?.increment(.disabled)
             return
         }
         buffer.append(event)
@@ -89,7 +93,11 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         let events = buffer
         buffer.removeAll(keepingCapacity: true)
         lock.unlock()
-        onFlush(events)
+        do {
+            try onFlush(events)
+        } catch {
+            dropCounter?.increment(.flushError, count: events.count)
+        }
     }
 
     public func shutdown() {
@@ -100,7 +108,11 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         buffer.removeAll()
         lock.unlock()
         if !remaining.isEmpty {
-            onFlush(remaining)
+            do {
+                try onFlush(remaining)
+            } catch {
+                dropCounter?.increment(.flushError, count: remaining.count)
+            }
         }
     }
 }

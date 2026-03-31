@@ -45,6 +45,37 @@ final class FakeTimer: TimerScheduling, @unchecked Sendable {
     }
 }
 
+// MARK: - FakeDropCounter
+
+final class FakeDropCounter: DropCounting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var counts: [DropReason: Int] = [:]
+
+    func increment(_ reason: DropReason) {
+        lock.lock()
+        counts[reason, default: 0] += 1
+        lock.unlock()
+    }
+
+    func increment(_ reason: DropReason, count: Int) {
+        lock.lock()
+        counts[reason, default: 0] += count
+        lock.unlock()
+    }
+
+    func snapshot() -> [DropReason: Int] {
+        lock.lock()
+        defer { lock.unlock() }
+        return counts
+    }
+
+    func reset() {
+        lock.lock()
+        counts.removeAll()
+        lock.unlock()
+    }
+}
+
 // MARK: - FakeEventBuffer
 
 final class FakeEventBuffer: EventBuffering, @unchecked Sendable {

@@ -163,7 +163,7 @@ export interface CtrlProxyService {
   ): Promise<CtrlProxyPinchResult>;
 
   requestSetText(
-    text: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
+    text: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker, dismissKeyboard?: boolean
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
@@ -1112,9 +1112,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   // ===========================================================================
 
   async requestSetText(
-    text: string, resourceId?: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    text: string, resourceId?: string, timeoutMs: number = 5000, perf?: PerformanceTracker, dismissKeyboard: boolean = false
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestSetText(text, resourceId, timeoutMs, perf);
+    return this.text.requestSetText(text, resourceId, timeoutMs, perf, dismissKeyboard);
   }
 
   async requestClearText(

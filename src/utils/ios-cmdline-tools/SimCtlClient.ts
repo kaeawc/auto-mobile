@@ -522,6 +522,13 @@ export class SimCtlClient implements SimCtl {
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
+    // Open Simulator.app focused on this specific device
+    try {
+      await this.openSimulatorApp(udid);
+    } catch {
+      logger.debug("Could not open Simulator.app (non-fatal)");
+    }
+
     // simctl boot is synchronous, so we return a mock ChildProcess
     const mockProcess = {
       pid: this.timer.now(), // Use timestamp as mock PID

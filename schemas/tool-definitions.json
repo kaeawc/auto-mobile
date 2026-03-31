@@ -1611,6 +1611,7 @@
       "properties": {
         "text": {
           "type": "string",
+          "minLength": 1,
           "description": "Text to input"
         },
         "imeAction": {
@@ -1624,6 +1625,10 @@
             "go",
             "previous"
           ]
+        },
+        "dismissKeyboard": {
+          "description": "(Android only) Dismiss soft keyboard after input. Overrides server-level --dismiss-keyboard-after-input flag. Ignored on iOS.",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",

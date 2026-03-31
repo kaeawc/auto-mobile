@@ -33,7 +33,7 @@ androidx-startup = "1.2.0"
 coil = "3.4.0"
 core-splashscreen = "1.2.0"
 kotlinx-coroutines-test = "1.10.2"
-media3 = "1.9.3"
+media3 = "1.10.0"
 
 # Library versions
 clikt = "5.1.0"
@@ -59,7 +59,7 @@ material = "1.13.0"
 lifecycleViewmodelNavigation3Android = "2.10.0"
 
 # Network and server libraries
-ktor = "3.4.1"
+ktor = "3.4.2"
 okhttp = "5.3.2"
 
 # Publishing

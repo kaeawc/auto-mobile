@@ -90,12 +90,15 @@ object RecompositionTracker {
     )
   }
 
+  private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+
   private fun broadcastSnapshot() {
     val ctx = context ?: return
     val payload = buildSnapshotJson(ctx.packageName)
     val intent =
         Intent(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT).apply {
           putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT, payload)
+          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
         }
     ctx.sendBroadcast(intent)
   }

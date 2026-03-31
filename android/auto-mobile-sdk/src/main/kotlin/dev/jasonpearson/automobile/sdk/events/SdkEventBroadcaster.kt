@@ -73,11 +73,14 @@ object SdkEventBroadcaster {
       )
     )
 
+  private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+
   private fun sendBatchIntent(context: Context, batchJson: String) {
     try {
       val intent = Intent(ACTION_SDK_EVENT_BATCH).apply {
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.EVENT_BATCH)
+        setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
       }
       context.sendBroadcast(intent)
     } catch (_: Exception) {

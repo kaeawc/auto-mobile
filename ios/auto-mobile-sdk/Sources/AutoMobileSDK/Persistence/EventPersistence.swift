@@ -61,7 +61,8 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
             .sorted(by: { file1, file2 in
                 let ts1 = Self.extractTimestamp(from: file1.lastPathComponent) ?? 0
                 let ts2 = Self.extractTimestamp(from: file2.lastPathComponent) ?? 0
-                return ts1 < ts2
+                if ts1 != ts2 { return ts1 < ts2 }
+                return file1.lastPathComponent < file2.lastPathComponent
             })
         else { return [] }
 

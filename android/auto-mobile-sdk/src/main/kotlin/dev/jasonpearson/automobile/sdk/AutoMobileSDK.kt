@@ -192,6 +192,8 @@ object AutoMobileSDK {
    */
   fun setEnabled(enabled: Boolean) {
     isEnabled = enabled
+    eventBuffer?.isEnabled = enabled
+    RecompositionTracker.setEnabled(enabled)
   }
 
   /** Returns whether navigation tracking is currently enabled. */

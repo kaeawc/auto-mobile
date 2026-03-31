@@ -135,6 +135,45 @@ class SdkEventBufferTest {
   }
 
   @Test
+  fun `add when disabled is ignored`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+    )
+
+    buffer.isEnabled = false
+    buffer.add(makeEvent(1))
+    buffer.add(makeEvent(2))
+    buffer.flush()
+
+    assertEquals(0, flushed.size, "No events should be buffered when disabled")
+  }
+
+  @Test
+  fun `re-enabling allows events again`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+    )
+
+    buffer.isEnabled = false
+    buffer.add(makeEvent(1))
+
+    buffer.isEnabled = true
+    buffer.add(makeEvent(2))
+    buffer.flush()
+
+    assertEquals(1, flushed.size, "Should flush after re-enabling")
+    assertEquals(1, flushed[0].size, "Only the event added after re-enabling should be present")
+  }
+
+  @Test
   fun `onFlush exceptions are swallowed`() {
     var callCount = 0
     val buffer = SdkEventBuffer(

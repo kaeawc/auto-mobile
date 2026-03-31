@@ -9,6 +9,7 @@ import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
+import { createPerformanceTracker } from "../utils/PerformanceTracker";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -132,29 +133,40 @@ export function registerDeviceTools() {
 
   // Start emulator handler
   const startDeviceHandler = async (args: StartDeviceArgs, progress?: ProgressCallback) => {
+    const perf = createPerformanceTracker(true);
+    perf.serial("startDevice");
     try {
       if (args.device.platform === "ios" && !args.device.deviceId) {
         throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
       }
 
       const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      perf.startOperation("launchProcess");
       const childProcess = await deviceUtils.startDevice(args.device);
+      perf.endOperation("launchProcess");
 
       if (progress) {
         await progress(60, 100, "Device started, waiting for readiness...");
       }
 
       // Wait for device to be ready
+      perf.startOperation("waitForReady");
       const readyDevice = await deviceUtils.waitForDeviceReady(args.device, args.timeoutMs);
+      perf.endOperation("waitForReady");
 
       if (progress) {
         await progress(100, 100, "Device is ready for use");
       }
 
       // Notify that booted device resources have changed
+      perf.startOperation("notifyResources");
       await notifyBootedDeviceResourcesUpdated();
       await notifyDeviceImageResourcesUpdated();
       await syncInstalledAppResources();
+      perf.endOperation("notifyResources");
+
+      perf.end();
+      const timing = perf.getTimings();
 
       return createJSONToolResponse({
         message: `${args.device.platform} '${args.device.name}' started and is ready`,
@@ -163,9 +175,11 @@ export function registerDeviceTools() {
         isReady: true,
         deviceId: readyDevice.deviceId,
         source: args.device.source,
-        platform: args.device.platform
+        platform: args.device.platform,
+        timing,
       });
     } catch (error) {
+      perf.end();
       if (error instanceof ActionableError) {
         throw error;
       }
@@ -174,7 +188,10 @@ export function registerDeviceTools() {
   };
 
   const killDeviceHandler = async (args: KillDeviceArgs) => {
+    const perf = createPerformanceTracker(true);
+    perf.serial("killDevice");
     try {
+      perf.startOperation("stopRecordings");
       const activeRecordings = await listActiveVideoRecordings({
         deviceId: args.device.deviceId,
         platform: args.device.platform,
@@ -188,11 +205,11 @@ export function registerDeviceTools() {
           );
         }
       }
+      perf.endOperation("stopRecordings");
 
-      // Stop CtrlProxy iOS before shutting down iOS simulators to prevent
-      // the auto-reconnect logic from restarting the service (and keeping
-      // the simulator alive).
+      // Stop CtrlProxy iOS before shutting down iOS simulators
       if (args.device.platform === "ios") {
+        perf.startOperation("stopCtrlProxy");
         try {
           const xcTestManager = IOSCtrlProxyManager.getInstance({
             name: args.device.name,
@@ -204,25 +221,34 @@ export function registerDeviceTools() {
         } catch (error) {
           logger.warn(`[DeviceTools] Failed to stop CtrlProxy iOS before kill: ${error}`);
         }
+        perf.endOperation("stopCtrlProxy");
       }
 
       const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
+      perf.startOperation("killProcess");
       await deviceUtils.killDevice(args.device);
+      perf.endOperation("killProcess");
 
-      // Clear installed apps cache for this device session
+      perf.startOperation("cleanup");
       const { InstalledAppsRepository } = await import("../db/installedAppsRepository");
       const repo = new InstalledAppsRepository();
       await repo.clearDeviceSession(args.device.deviceId);
+      perf.endOperation("cleanup");
 
-      // Notify that booted device resources have changed
+      perf.startOperation("notifyResources");
       await notifyBootedDeviceResourcesUpdated();
       await notifyDeviceImageResourcesUpdated();
       await syncInstalledAppResources();
+      perf.endOperation("notifyResources");
+
+      perf.end();
+      const timing = perf.getTimings();
 
       return createJSONToolResponse({
         message: `${args.device.platform} '${args.device.name}' shutdown successfully`,
         udid: args.device.deviceId,
         name: args.device.name,
+        timing,
         platform: args.device.platform
       });
     } catch (error) {

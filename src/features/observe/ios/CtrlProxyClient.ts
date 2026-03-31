@@ -14,6 +14,7 @@
 
 import WebSocket from "ws";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
+import { getFailureRecorder } from "../../failures/FailureRecorder";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
@@ -661,13 +662,49 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             name: (p.name as string) ?? "custom", properties: (p.properties as Record<string, string>) ?? {},
           });
           break;
-        case "handled_exception":
-        case "crash":
+        case "handled_exception": {
+          const failureRecorder = getFailureRecorder();
+          const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+          const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
+          const stackStr = (p.stackTrace as string) ?? "";
+          const stackFrames = stackStr.split("\n").filter(Boolean).map(line => ({
+            className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
+            isAppCode: line.includes(applicationId ?? ""),
+          }));
+          await failureRecorder.recordNonFatal({
+            exceptionType: exType, exceptionMessage: exMsg,
+            stackTrace: stackFrames,
+            customMessage: (p.customMessage as string) ?? undefined,
+            deviceId: this.device.deviceId,
+            deviceModel: "iOS Simulator", os: "iOS",
+            appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
+            currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+          });
+          break;
+        }
+        case "crash": {
+          const crashRecorder = getFailureRecorder();
+          const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+          const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
+          const crashStack = ((p.stackTrace as string) ?? "").split("\n").filter(Boolean).map(line => ({
+            className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
+            isAppCode: line.includes(applicationId ?? ""),
+          }));
+          await crashRecorder.recordCrash({
+            exceptionType: crashType, exceptionMessage: crashMsg,
+            stackTrace: crashStack,
+            deviceId: this.device.deviceId,
+            deviceModel: "iOS Simulator", os: "iOS",
+            appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
+            currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+          });
+          break;
+        }
         case "hang":
           await recorder.recordOsEvent({
             timestamp: ts, applicationId,
-            category: event.type, kind: (p.exceptionType as string) ?? (p.errorDomain as string) ?? "unknown",
-            details: { message: (p.message as string) ?? "", screen: (p.screen as string) ?? "" },
+            category: "hang", kind: `${(p.durationMs as number) ?? 0}ms`,
+            details: { durationMs: String((p.durationMs as number) ?? 0) },
           });
           break;
         case "storage_changed":

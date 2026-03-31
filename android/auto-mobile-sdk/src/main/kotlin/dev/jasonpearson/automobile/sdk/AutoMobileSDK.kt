@@ -20,8 +20,12 @@ import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
+import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
 import androidx.annotation.RequiresPermission
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -58,6 +62,8 @@ object AutoMobileSDK {
   private var context: Context? = null
   private var eventBuffer: SdkEventBuffer? = null
   private var mainHandler: Handler? = null
+  private var sessionTracker: SessionTracker? = null
+  private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -100,6 +106,9 @@ object AutoMobileSDK {
     AutoMobileAnr.initialize(appContext)
     AutoMobileBiometrics.initialize(appContext)
 
+    val tracker = SessionTracker()
+    sessionTracker = tracker
+
     // Subsystems that register lifecycle observers or activity callbacks must run on main thread
     val handler = Handler(Looper.getMainLooper())
     mainHandler = handler
@@ -107,6 +116,18 @@ object AutoMobileSDK {
       // Guard: if shutdown() was called before this posted block runs, no-op.
       if (this@AutoMobileSDK.context == null) return@post
       AutoMobileOsEvents.initialize(appContext, buffer)
+
+      // Register session tracker with process lifecycle
+      val observer = object : DefaultLifecycleObserver {
+        override fun onStart(owner: LifecycleOwner) {
+          tracker.onForeground()
+        }
+        override fun onStop(owner: LifecycleOwner) {
+          tracker.onBackground()
+        }
+      }
+      sessionLifecycleObserver = observer
+      ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
       RecompositionTracker.initialize(appContext)
       RecompositionTracker.setEnabled(isEnabled)
       AutoMobileNotifications.initialize(appContext)
@@ -227,6 +248,9 @@ object AutoMobileSDK {
     )
   }
 
+  /** Returns the current session ID, or null if no active session. */
+  fun currentSessionId(): String? = sessionTracker?.currentSessionId()
+
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
 
@@ -243,11 +267,15 @@ object AutoMobileSDK {
     // Tear down subsystem hooks. Lifecycle observer removal and click
     // tracker unregistration must happen on the main thread.
     val ctx = context
+    val sessionObserver = sessionLifecycleObserver
     if (ctx != null) {
       val teardown = Runnable {
         AutoMobileOsEvents.shutdown(ctx)
         AutoMobileBroadcastInterceptor.shutdown(ctx)
         AutoMobileClickTracker.shutdown(ctx)
+        sessionObserver?.let {
+          ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
+        }
       }
       if (Looper.myLooper() == Looper.getMainLooper()) {
         teardown.run()
@@ -255,6 +283,10 @@ object AutoMobileSDK {
         Handler(Looper.getMainLooper()).post(teardown)
       }
     }
+
+    sessionTracker?.shutdown()
+    sessionTracker = null
+    sessionLifecycleObserver = null
 
     eventBuffer?.shutdown()
     eventBuffer = null

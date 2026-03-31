@@ -190,7 +190,7 @@ fun CodeSampleSlideItemPreview() {
                 tapOn(text = "Sign In")
 
                 // Verify success
-                assertVisible(text = "Welcome")
+                observe(waitFor = WaitFor(text = "Welcome"))
             }
             """
                 .trimIndent(),
@@ -221,7 +221,7 @@ fun CodeSampleSlideItemDarkPreview() {
                 tapOn(text = "Sign In")
 
                 // Verify success
-                assertVisible(text = "Welcome")
+                observe(waitFor = WaitFor(text = "Welcome"))
             }
             """
                 .trimIndent(),

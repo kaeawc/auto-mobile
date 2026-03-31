@@ -17,6 +17,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _sdkContext: SdkContext?
     private var eventBuffer: SdkEventBuffer?
     private var _dropCounter: DefaultDropCounter?
+    private var eventPersistence: (any EventPersisting)?
     private var sessionTracker: SessionTracker?
     private var sessionObservers: [NSObjectProtocol] = []
 
@@ -44,6 +45,18 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let counter = DefaultDropCounter()
         _dropCounter = counter
 
+        // Set up disk-first event persistence
+        let persistence: any EventPersisting
+        if let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+            let eventsDir = cachesDir.appendingPathComponent("automobile_events")
+            persistence = FileEventPersistence(directory: eventsDir)
+        } else {
+            let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("automobile_events")
+            persistence = FileEventPersistence(directory: tmpDir)
+        }
+        self.eventPersistence = persistence
+        SdkEventBroadcaster.shared.persistence = persistence
+
         let buffer = SdkEventBuffer(dropCounter: counter) { [weak self] events in
             let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)
@@ -52,6 +65,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.unlock()
 
         buffer.start()
+
+        // Replay any pending batches from previous sessions and clean up old ones
+        persistence.cleanup(maxAgeDays: 7)
+        SdkEventBroadcaster.shared.replayPending(bundleId: resolvedBundleId)
 
         // Initialize subsystems
         AutoMobileLog.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
@@ -291,6 +308,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _sdkContext = nil
         eventBuffer = nil
         _dropCounter = nil
+        eventPersistence = nil
+        SdkEventBroadcaster.shared.persistence = nil
         listeners.removeAll()
         _isEnabled = true
         _isInitialized = false

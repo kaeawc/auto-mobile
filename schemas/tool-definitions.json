@@ -73,7 +73,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "locale": {
           "description": "Locale tag (e.g., ar-SA, ja-JP)",
@@ -142,7 +142,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -194,7 +194,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -483,7 +483,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1526,7 +1526,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1576,7 +1576,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1636,7 +1636,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1718,7 +1718,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1768,7 +1768,7 @@
                 "android",
                 "ios"
               ],
-              "description": "Platform"
+              "description": "Target platform"
             }
           },
           "required": [
@@ -1850,7 +1850,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         }
       },
       "required": [
@@ -1867,12 +1867,12 @@
       "type": "object",
       "properties": {
         "platform": {
-          "description": "Platform",
           "type": "string",
           "enum": [
             "android",
             "ios"
-          ]
+          ],
+          "description": "Target platform"
         }
       },
       "additionalProperties": false
@@ -1891,7 +1891,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "waitFor": {
           "description": "Wait for element to appear before returning observation",
@@ -3615,7 +3615,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -3721,7 +3721,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -3810,7 +3810,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -3863,7 +3863,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -3915,7 +3915,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -3954,7 +3954,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4000,7 +4000,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4039,7 +4039,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4081,7 +4081,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4120,7 +4120,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4165,7 +4165,7 @@
                 "android",
                 "ios"
               ],
-              "description": "Platform"
+              "description": "Target platform"
             },
             "deviceId": {
               "description": "Device ID",
@@ -4362,7 +4362,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -5284,7 +5284,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -5389,7 +5389,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "elementId": {
           "type": "string",

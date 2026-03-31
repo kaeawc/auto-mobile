@@ -16,7 +16,8 @@ let package = Package(
     targets: [
         .target(
             name: "AutoMobileSDK",
-            path: "Sources/AutoMobileSDK"
+            path: "Sources/AutoMobileSDK",
+            resources: [.process("PrivacyInfo.xcprivacy")]
         ),
         .testTarget(
             name: "AutoMobileSDKTests",

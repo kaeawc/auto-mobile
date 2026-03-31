@@ -24,7 +24,7 @@ object SdkEventBroadcaster {
    * @param context Application context for sending broadcasts
    * @param events The events to broadcast
    */
-  fun broadcastBatch(context: Context, events: List<SdkEvent>) {
+  internal fun broadcastBatch(context: Context, events: List<SdkEvent>) {
     if (events.isEmpty()) return
 
     val batches = splitIntoBatches(events, context.packageName)

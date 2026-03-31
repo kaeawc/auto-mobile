@@ -25,7 +25,7 @@ object AutoMobileNetwork {
    * @param buffer The shared SDK event buffer
    * @param ruleStore Optional rule matcher for mock enforcement and error simulation
    */
-  fun initialize(
+  internal fun initialize(
       applicationId: String?,
       buffer: SdkEventBuffer,
       ruleStore: NetworkMockRuleStore.RuleMatcher? = null,

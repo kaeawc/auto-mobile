@@ -220,5 +220,5 @@ object AutoMobileSDK {
   }
 
   /** Returns the shared event buffer, or null if not initialized. */
-  fun getEventBuffer(): SdkEventBuffer? = eventBuffer
+  internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
 }

@@ -48,7 +48,7 @@ object AutoMobileClickTracker {
     private val wrappedActivities = java.util.WeakHashMap<Activity, Boolean>()
     @Volatile private var lastTapProcessedAt = 0L
 
-    fun initialize(application: Application, appId: String?, buffer: SdkEventBuffer) {
+    internal fun initialize(application: Application, appId: String?, buffer: SdkEventBuffer) {
         this.buffer = buffer
         this.applicationId = appId
 

@@ -18,7 +18,7 @@ object AutoMobileLog {
   @Volatile private var applicationId: String? = null
   private val filters = CopyOnWriteArrayList<CompiledLogFilter>()
 
-  fun initialize(applicationId: String?, buffer: SdkEventBuffer) {
+  internal fun initialize(applicationId: String?, buffer: SdkEventBuffer) {
     this.applicationId = applicationId
     this.buffer = buffer
   }

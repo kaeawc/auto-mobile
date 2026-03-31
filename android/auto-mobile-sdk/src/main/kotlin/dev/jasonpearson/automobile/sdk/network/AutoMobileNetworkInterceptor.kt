@@ -27,7 +27,7 @@ import okio.Buffer
  * This class references OkHttp types which must be on the classpath. The SDK declares
  * OkHttp as `compileOnly` so consumers must bring their own OkHttp dependency.
  */
-class AutoMobileNetworkInterceptor(
+internal class AutoMobileNetworkInterceptor(
     private val buffer: SdkEventBuffer,
     private val applicationId: String? = null,
     /** Capture request and response headers (may contain auth tokens) */

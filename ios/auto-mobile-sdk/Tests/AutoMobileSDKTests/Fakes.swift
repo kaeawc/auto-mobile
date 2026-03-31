@@ -57,6 +57,12 @@ final class FakeDropCounter: DropCounting, @unchecked Sendable {
         lock.unlock()
     }
 
+    func increment(_ reason: DropReason, count: Int) {
+        lock.lock()
+        counts[reason, default: 0] += count
+        lock.unlock()
+    }
+
     func snapshot() -> [DropReason: Int] {
         lock.lock()
         defer { lock.unlock() }

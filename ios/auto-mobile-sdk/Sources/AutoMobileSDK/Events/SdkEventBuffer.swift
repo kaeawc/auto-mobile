@@ -96,7 +96,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         do {
             try onFlush(events)
         } catch {
-            dropCounter?.increment(.flushError)
+            dropCounter?.increment(.flushError, count: events.count)
         }
     }
 
@@ -111,7 +111,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
             do {
                 try onFlush(remaining)
             } catch {
-                dropCounter?.increment(.flushError)
+                dropCounter?.increment(.flushError, count: remaining.count)
             }
         }
     }

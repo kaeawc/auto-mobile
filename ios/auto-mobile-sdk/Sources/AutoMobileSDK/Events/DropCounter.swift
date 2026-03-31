@@ -10,8 +10,17 @@ public enum DropReason: String, Codable, Sendable, CaseIterable {
 /// Tracks dropped event counts by reason.
 public protocol DropCounting: AnyObject, Sendable {
     func increment(_ reason: DropReason)
+    func increment(_ reason: DropReason, count: Int)
     func snapshot() -> [DropReason: Int]
     func reset()
+}
+
+public extension DropCounting {
+    func increment(_ reason: DropReason, count: Int) {
+        for _ in 0..<count {
+            increment(reason)
+        }
+    }
 }
 
 /// Thread-safe default implementation of ``DropCounting``.
@@ -24,6 +33,12 @@ public final class DefaultDropCounter: DropCounting, @unchecked Sendable {
     public func increment(_ reason: DropReason) {
         lock.lock()
         counts[reason, default: 0] += 1
+        lock.unlock()
+    }
+
+    public func increment(_ reason: DropReason, count: Int) {
+        lock.lock()
+        counts[reason, default: 0] += count
         lock.unlock()
     }
 

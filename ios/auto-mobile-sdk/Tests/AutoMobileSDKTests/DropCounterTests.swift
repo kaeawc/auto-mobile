@@ -36,6 +36,17 @@ final class DefaultDropCounterTests: XCTestCase {
         XCTAssertTrue(snap.isEmpty)
     }
 
+    func testIncrementByCount() {
+        let counter = DefaultDropCounter()
+        counter.increment(.flushError, count: 5)
+        counter.increment(.disabled, count: 3)
+        counter.increment(.flushError, count: 2)
+
+        let snap = counter.snapshot()
+        XCTAssertEqual(snap[.flushError], 7)
+        XCTAssertEqual(snap[.disabled], 3)
+    }
+
     func testConcurrentAccess() {
         let counter = DefaultDropCounter()
         let iterations = 1000
@@ -79,7 +90,7 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
         XCTAssertTrue(dropCounter.snapshot().isEmpty)
     }
 
-    func testFlushErrorCounted() {
+    func testFlushErrorCountedPerEvent() {
         struct FlushError: Error {}
         let dropCounter = FakeDropCounter()
         let buffer = SdkEventBuffer(
@@ -91,12 +102,14 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
         }
 
         buffer.add(SdkCustomEvent(name: "e1"))
+        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkCustomEvent(name: "e3"))
         buffer.flush()
 
-        XCTAssertEqual(dropCounter.snapshot()[.flushError], 1)
+        XCTAssertEqual(dropCounter.snapshot()[.flushError], 3)
     }
 
-    func testShutdownFlushErrorCounted() {
+    func testShutdownFlushErrorCountedPerEvent() {
         struct FlushError: Error {}
         let dropCounter = FakeDropCounter()
         let buffer = SdkEventBuffer(
@@ -108,8 +121,9 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
         }
 
         buffer.add(SdkCustomEvent(name: "e1"))
+        buffer.add(SdkCustomEvent(name: "e2"))
         buffer.shutdown()
 
-        XCTAssertEqual(dropCounter.snapshot()[.flushError], 1)
+        XCTAssertEqual(dropCounter.snapshot()[.flushError], 2)
     }
 }

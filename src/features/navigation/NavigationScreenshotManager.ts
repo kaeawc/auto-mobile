@@ -191,6 +191,35 @@ export class NavigationScreenshotManager {
     }
   }
 
+  /**
+   * Store a pre-captured screenshot buffer (e.g., from iOS CtrlProxy).
+   * Resizes to standard dimensions and saves as WebP.
+   */
+  public async storeScreenshot(
+    appId: string,
+    screenName: string,
+    imageBuffer: Buffer,
+    _format: string = "png"
+  ): Promise<string | null> {
+    try {
+      await this.fs.ensureDir(this.screenshotDir);
+      const resizedBuffer = await Image.fromBuffer(imageBuffer)
+        .resize(this.targetWidth, this.targetHeight, true)
+        .webp({ quality: this.webpQuality })
+        .toBuffer();
+      const filename = this.generateFilename(appId, screenName);
+      const finalPath = path.join(this.screenshotDir, filename);
+      await this.fs.writeFileBuffer(finalPath, resizedBuffer);
+      await this.deleteOldScreenshots(appId, screenName, finalPath);
+      this.cleanupLRU().catch(() => {});
+      logger.info(`[NAV_SCREENSHOT] Stored iOS screenshot for ${screenName} (${Math.round(resizedBuffer.length / 1024)}KB)`);
+      return finalPath;
+    } catch (error) {
+      logger.warn(`[NAV_SCREENSHOT] Failed to store screenshot: ${error}`);
+      return null;
+    }
+  }
+
   private async doCaptureAndStore(
     device: BootedDevice,
     adb: AdbClient,

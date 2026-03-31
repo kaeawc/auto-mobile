@@ -27,6 +27,7 @@ import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostCon
 import { isRunningInDocker } from "../../../utils/dockerEnv";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
+import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import {
   HierarchyNavigationDetector,
   HierarchyNavigationUpdateMetrics
@@ -609,15 +610,21 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
           });
           break;
-        case "navigation":
+        case "navigation": {
+          const destination = (p.destination as string) ?? "unknown";
           await recorder.recordNavigationEvent({
             timestamp: ts, applicationId,
-            destination: (p.destination as string) ?? "unknown",
+            destination,
             source: (p.source as string) ?? null,
             arguments: (p.arguments as Record<string, string>) ?? null,
             metadata: (p.metadata as Record<string, string>) ?? null,
           });
+          // Capture a screenshot for this navigation event via the CtrlProxy
+          if (applicationId && destination) {
+            this.captureNavigationScreenshot(applicationId, destination).catch(() => {});
+          }
           break;
+        }
         case "custom":
           await recorder.recordCustomEvent({
             timestamp: ts, applicationId,
@@ -653,6 +660,29 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       }
     } catch {
       // Non-fatal
+    }
+  }
+
+  /** Capture and store a screenshot for an iOS navigation event */
+  private async captureNavigationScreenshot(applicationId: string, destination: string): Promise<void> {
+    try {
+      const result = await this.requestScreenshot(3000);
+      if (result?.data) {
+        const screenshotManager = NavigationScreenshotManager.getInstance();
+        const bytes = Buffer.from(result.data, "base64");
+        const screenshotPath = await screenshotManager.storeScreenshot(
+          applicationId,
+          destination,
+          bytes,
+          result.format ?? "png",
+        );
+        if (screenshotPath) {
+          await this.getNavigationGraphManager()
+            .updateNodeScreenshot(applicationId, destination, screenshotPath);
+        }
+      }
+    } catch (error) {
+      logger.debug(`[CtrlProxyClient] iOS nav screenshot capture skipped: ${error}`);
     }
   }
 

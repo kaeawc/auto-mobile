@@ -130,16 +130,35 @@ object AutoMobileCrashes {
             val stackTrace =
                 StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
 
-            // Collect all-thread dumps for full crash context
-            val allThreadsBuilder = StringBuilder()
-            allThreadsBuilder.append(stackTrace)
+            // Collect all-thread dumps for full crash context.
+            // Cap total size to avoid exceeding Android's 1MB Binder transaction limit
+            // when sending the broadcast (the payload is duplicated in both JSON and
+            // legacy extras, so 50KB keeps us well under the 100KB batch limit).
+            val maxAllThreadBytes = 50_000
+            val allThreadsBuilder = StringBuilder(stackTrace)
             allThreadsBuilder.append("\n\n--- All Threads ---\n")
-            for ((t, frames) in Thread.getAllStackTraces()) {
+            val allTraces = Thread.getAllStackTraces()
+            var includedCount = 0
+            var truncated = false
+            for ((t, frames) in allTraces) {
                 if (t.id == thread.id) continue // skip crashing thread (already included)
-                allThreadsBuilder.append("\n\"${t.name}\" ${t.state}\n")
-                for (frame in frames) {
-                    allThreadsBuilder.append("    at $frame\n")
+                val threadDump = buildString {
+                    append("\n\"${t.name}\" ${t.state}\n")
+                    for (frame in frames) {
+                        append("    at $frame\n")
+                    }
                 }
+                if (allThreadsBuilder.length + threadDump.length > maxAllThreadBytes) {
+                    truncated = true
+                    break
+                }
+                allThreadsBuilder.append(threadDump)
+                includedCount++
+            }
+            if (truncated) {
+                val totalOtherThreads = allTraces.keys.count { it.id != thread.id }
+                val remaining = totalOtherThreads - includedCount
+                allThreadsBuilder.append("\n(truncated — $remaining more threads omitted)\n")
             }
             val fullStackTrace = allThreadsBuilder.toString()
 

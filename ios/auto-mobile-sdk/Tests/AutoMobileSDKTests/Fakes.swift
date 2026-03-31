@@ -292,6 +292,68 @@ final class FakeSessionTracker: SessionTracking, @unchecked Sendable {
     }
 }
 
+// MARK: - FakeEventPersistence
+
+final class FakeEventPersistence: EventPersisting, @unchecked Sendable {
+    private let lock = NSLock()
+    private var batches: [(String, [any SdkEvent])] = []
+    private var _persistCallCount = 0
+    private var _removeCallCount = 0
+    private var _cleanupCallCount = 0
+
+    var persistCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _persistCallCount
+    }
+
+    var removeCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _removeCallCount
+    }
+
+    var cleanupCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _cleanupCallCount
+    }
+
+    var batchCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return batches.count
+    }
+
+    func persist(_ events: [any SdkEvent]) -> String? {
+        let id = UUID().uuidString
+        lock.lock()
+        batches.append((id, events))
+        _persistCallCount += 1
+        lock.unlock()
+        return id
+    }
+
+    func loadPending() -> [(batchId: String, events: [any SdkEvent])] {
+        lock.lock()
+        defer { lock.unlock() }
+        return batches
+    }
+
+    func removeBatch(_ batchId: String) {
+        lock.lock()
+        batches.removeAll { $0.0 == batchId }
+        _removeCallCount += 1
+        lock.unlock()
+    }
+
+    func cleanup(maxAgeDays: Int) {
+        lock.lock()
+        _cleanupCallCount += 1
+        lock.unlock()
+    }
+}
+
 // MARK: - FakeEventBroadcaster
 
 final class FakeEventBroadcaster: EventBroadcasting, @unchecked Sendable {

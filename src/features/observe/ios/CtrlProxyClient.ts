@@ -612,13 +612,21 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
           break;
         case "navigation": {
           const destination = (p.destination as string) ?? "unknown";
+          const navSource = (p.source as string) ?? null;
+          const navArgs = (p.arguments as Record<string, string>) ?? null;
+          const navMeta = (p.metadata as Record<string, string>) ?? null;
           await recorder.recordNavigationEvent({
             timestamp: ts, applicationId,
-            destination,
-            source: (p.source as string) ?? null,
-            arguments: (p.arguments as Record<string, string>) ?? null,
-            metadata: (p.metadata as Record<string, string>) ?? null,
+            destination, source: navSource, arguments: navArgs, metadata: navMeta,
           });
+          // Record in navigation graph (creates nodes for screenshot lookup)
+          try {
+            await this.getNavigationGraphManager().recordNavigationEvent({
+              applicationId, destination, source: navSource,
+              arguments: navArgs ?? {}, metadata: navMeta ?? {},
+              triggeringInteraction: null,
+            });
+          } catch { /* non-fatal */ }
           // Capture a screenshot for this navigation event via the CtrlProxy
           if (applicationId && destination) {
             this.captureNavigationScreenshot(applicationId, destination).catch(() => {});

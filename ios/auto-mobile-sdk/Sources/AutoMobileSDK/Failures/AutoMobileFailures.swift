@@ -51,6 +51,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         let currentBuffer = buffer
         lock.unlock()
 
+        NSLog("[AutoMobileSDK] recordHandledException: domain=\(nsError.domain), buffer=\(currentBuffer != nil ? "exists" : "nil")")
         let sdkEvent = SdkHandledExceptionEvent(
             timestamp: event.timestamp,
             errorDomain: event.errorDomain,

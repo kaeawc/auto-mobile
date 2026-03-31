@@ -335,7 +335,7 @@ class WebSocketConnection {
     // MARK: - WebSocket Handshake
 
     private func receiveHTTPUpgrade() {
-        connection.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self] data, _, isComplete, error in
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 1_000_000) { [weak self] data, _, isComplete, error in
             guard let self = self else { return }
 
             if let error = error {
@@ -377,12 +377,17 @@ class WebSocketConnection {
     }
 
     private func handleSdkEventsPost(_ request: String) {
+        // Extract body from after the header separator
         if let bodyRange = request.range(of: "\r\n\r\n") {
             let body = String(request[bodyRange.upperBound...])
             if let bodyData = body.data(using: .utf8), !bodyData.isEmpty {
                 SdkEventBuffer.shared.append(bodyData)
                 print("[CtrlProxy] Received SDK event batch (\(bodyData.count) bytes)")
+            } else {
+                print("[CtrlProxy] POST /sdk-events: empty body after headers")
             }
+        } else {
+            print("[CtrlProxy] POST /sdk-events: no header separator found in \(request.count) chars")
         }
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 13\r\n\r\n{\"ok\":true}\r\n"
         connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in

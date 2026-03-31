@@ -49,10 +49,14 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     }
 
     /// Configure whether to capture request/response bodies.
+    /// In release builds, body capture is always disabled to prevent leaking
+    /// auth tokens, credentials, or PII.
     public func setCaptureBodies(_ capture: Bool) {
+        #if DEBUG
         lock.lock()
         _captureBodies = capture
         lock.unlock()
+        #endif
     }
 
     /// Configure maximum body bytes to capture (default: 32KB).

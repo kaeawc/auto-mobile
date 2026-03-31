@@ -149,7 +149,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
-        if !enabled {
+        if enabled {
+            buffer?.start()
+        } else {
             buffer?.stop()
         }
     }

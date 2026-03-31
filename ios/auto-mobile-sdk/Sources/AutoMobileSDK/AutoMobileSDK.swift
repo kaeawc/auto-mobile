@@ -11,6 +11,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _isEnabled = true
     private var _isInitialized = false
     private var _bundleId: String?
+    private var _sdkContext: SdkContext?
     private var eventBuffer: SdkEventBuffer?
 
     private init() {}
@@ -26,6 +27,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
             return
         }
         _isInitialized = true
+
+        let context = SdkContext()
+        context.appVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
+        _sdkContext = context
 
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
@@ -177,6 +182,27 @@ public final class AutoMobileSDK: @unchecked Sendable {
         return eventBuffer
     }
 
+    // MARK: - Context
+
+    /// The SDK context holding ambient state attached to events.
+    public var sdkContext: SdkContext? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _sdkContext
+    }
+
+    public func setUserId(_ userId: String?) {
+        sdkContext?.userId = userId
+    }
+
+    public func setTag(_ key: String, value: String) {
+        sdkContext?.setTag(key, value: value)
+    }
+
+    public func removeTag(_ key: String) {
+        sdkContext?.removeTag(key)
+    }
+
     // MARK: - Testing Support
 
     /// Reset the SDK for testing. Not for production use.
@@ -200,6 +226,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock
         lock.lock()
         let bufferToShutdown = eventBuffer
+        _sdkContext = nil
         eventBuffer = nil
         listeners.removeAll()
         _isEnabled = true

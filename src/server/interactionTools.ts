@@ -25,6 +25,7 @@ import { createJSONToolResponse, createStructuredToolResponse } from "../utils/t
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import { serverConfig } from "../utils/ServerConfig";
 import {
   createElementIdTextSelectorSchema,
   elementContainerSchema,
@@ -334,9 +335,11 @@ export const clearStateSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
-  text: z.string().describe("Text to input"),
+  text: z.string().min(1).describe("Text to input"),
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
+  dismissKeyboard: z.boolean().optional()
+    .describe("(Android only) Dismiss soft keyboard after input. Overrides server-level --dismiss-keyboard-after-input flag. Ignored on iOS."),
   platform: z.enum(["android", "ios"]).describe("Platform")
 }));
 
@@ -724,8 +727,9 @@ export function registerInteractionTools() {
   // Input text handler
   const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
     RecompositionTracker.getInstance().recordInteraction();
+    const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
     const inputText = new InputText(device);
-    const result = await inputText.execute(args.text, args.imeAction);
+    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard);
     return createJSONToolResponse({
       message: `Input text`,
       observation: result.observation,

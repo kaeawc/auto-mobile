@@ -1,9 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+  <permission
+      android:name="${applicationId}.permission.DEBUG_INSPECT"
+      android:protectionLevel="signature" />
+
   <application>
     <receiver
       android:name="dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver"
-      android:exported="true">
+      android:exported="true"
+      android:permission="${applicationId}.permission.DEBUG_INSPECT">
       <intent-filter>
         <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_POST" />
       </intent-filter>
@@ -20,11 +25,13 @@
     <provider
       android:name="dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider"
       android:authorities="${applicationId}.automobile.database"
-      android:exported="true" />
+      android:exported="true"
+      android:permission="${applicationId}.permission.DEBUG_INSPECT" />
 
     <provider
       android:name="dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider"
       android:authorities="${applicationId}.automobile.sharedprefs"
-      android:exported="true" />
+      android:exported="true"
+      android:permission="${applicationId}.permission.DEBUG_INSPECT" />
   </application>
 </manifest>

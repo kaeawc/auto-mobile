@@ -245,20 +245,26 @@ final class DefaultUserDefaultsDriver: UserDefaultsDriver, @unchecked Sendable {
     }
 
     func setValue(suiteName: String?, key: String, value: Any?, type: KeyValueType) {
+        #if DEBUG
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         defaults.set(value, forKey: key)
+        #endif
     }
 
     func removeValue(suiteName: String?, key: String) {
+        #if DEBUG
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         defaults.removeObject(forKey: key)
+        #endif
     }
 
     func clear(suiteName: String?) {
+        #if DEBUG
         guard let defaults = resolveDefaults(suiteName: suiteName) else { return }
         for key in defaults.dictionaryRepresentation().keys {
             defaults.removeObject(forKey: key)
         }
+        #endif
     }
 
     private func typeOf(_ value: Any) -> KeyValueType {

@@ -29,18 +29,27 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         config.waitsForConnectivity = false
         self.urlSession = URLSession(configuration: config)
 
-        // Default CtrlProxy port
+        #if DEBUG
+        // Default CtrlProxy port — only in debug builds
         self.ctrlProxyUrl = URL(string: "http://localhost:8765/sdk-events")
+        #else
+        self.ctrlProxyUrl = nil
+        #endif
     }
 
     /// Configure the CtrlProxy endpoint URL. Pass nil to disable HTTP forwarding.
+    /// No-op in release builds.
     public func setCtrlProxyUrl(_ url: URL?) {
+        #if DEBUG
         self.ctrlProxyUrl = url
+        #endif
     }
 
     public func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
+        #if DEBUG
         NSLog("[AutoMobileSDK] broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
+        #endif
 
         let envelopes = events.compactMap { event -> SdkEventEnvelope? in
             try? SdkEventEnvelope(event)
@@ -61,6 +70,7 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
             userInfo: [Self.eventBatchUserInfoKey: data]
         )
 
+        #if DEBUG
         // HTTP POST to CtrlProxy for cross-process telemetry forwarding
         if let url = ctrlProxyUrl {
             var request = URLRequest(url: url)
@@ -76,5 +86,6 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
                 }
             }.resume()
         }
+        #endif
     }
 }

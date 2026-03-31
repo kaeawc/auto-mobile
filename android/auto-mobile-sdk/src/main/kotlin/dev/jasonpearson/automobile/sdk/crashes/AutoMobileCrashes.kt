@@ -10,6 +10,7 @@ import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import java.io.PrintWriter
 import java.io.StringWriter
+import java.util.concurrent.atomic.AtomicBoolean
 
 /**
  * SDK API for detecting and reporting unhandled crashes.
@@ -49,8 +50,8 @@ object AutoMobileCrashes {
     const val EXTRA_SDK_INT = "sdk_int"
 
     private var context: Context? = null
-    private var originalHandler: Thread.UncaughtExceptionHandler? = null
-    private var isInstalled = false
+    @Volatile private var originalHandler: Thread.UncaughtExceptionHandler? = null
+    private val isInstalled = AtomicBoolean(false)
 
     /** Provider for current screen name - set by navigation tracking */
     var currentScreenProvider: (() -> String?)? = null
@@ -65,7 +66,7 @@ object AutoMobileCrashes {
      * @param context Application context (use applicationContext, not activity context)
      */
     fun initialize(context: Context) {
-        if (isInstalled) {
+        if (!isInstalled.compareAndSet(false, true)) {
             Log.d(TAG, "AutoMobileCrashes already initialized")
             return
         }
@@ -77,7 +78,6 @@ object AutoMobileCrashes {
 
         // Install our handler
         Thread.setDefaultUncaughtExceptionHandler(AutoMobileExceptionHandler())
-        isInstalled = true
 
         Log.d(TAG, "AutoMobileCrashes initialized - crash detection enabled")
     }
@@ -85,7 +85,24 @@ object AutoMobileCrashes {
     /**
      * Check if crash detection is initialized.
      */
-    fun isInitialized(): Boolean = isInstalled
+    fun isInitialized(): Boolean = isInstalled.get()
+
+    /**
+     * Uninstall crash detection, restoring the original uncaught exception handler.
+     */
+    fun uninstall() {
+        if (!isInstalled.compareAndSet(true, false)) return
+        // Only restore the original handler if we're still the current handler.
+        // Another SDK may have installed a handler after us — don't clobber it.
+        val currentHandler = Thread.getDefaultUncaughtExceptionHandler()
+        if (currentHandler is AutoMobileExceptionHandler) {
+            Thread.setDefaultUncaughtExceptionHandler(originalHandler)
+        }
+        originalHandler = null
+        context = null
+        currentScreenProvider = null
+        Log.d(TAG, "AutoMobileCrashes uninstalled - crash detection disabled")
+    }
 
     private class AutoMobileExceptionHandler : Thread.UncaughtExceptionHandler {
         override fun uncaughtException(thread: Thread, throwable: Throwable) {
@@ -98,7 +115,12 @@ object AutoMobileCrashes {
 
             // Call the original handler to preserve default crash behavior
             // This ensures the app terminates normally and system crash dialogs appear
-            originalHandler?.uncaughtException(thread, throwable)
+            try {
+                originalHandler?.uncaughtException(thread, throwable)
+            } catch (e: Exception) {
+                // Original handler threw — ensure process terminates
+                Runtime.getRuntime().exit(1)
+            }
         }
     }
 
@@ -110,7 +132,41 @@ object AutoMobileCrashes {
 
         try {
             val timestamp = System.currentTimeMillis()
-            val stackTrace = StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
+            val stackTrace =
+                StringWriter().also { throwable.printStackTrace(PrintWriter(it)) }.toString()
+
+            // Collect all-thread dumps for full crash context.
+            // Cap total size to avoid exceeding Android's 1MB Binder transaction limit
+            // when sending the broadcast (the payload is duplicated in both JSON and
+            // legacy extras, so 50KB keeps us well under the 100KB batch limit).
+            val maxAllThreadBytes = 50_000
+            val allThreadsBuilder = StringBuilder(stackTrace)
+            allThreadsBuilder.append("\n\n--- All Threads ---\n")
+            val allTraces = Thread.getAllStackTraces()
+            var includedCount = 0
+            var truncated = false
+            for ((t, frames) in allTraces) {
+                if (t.id == thread.id) continue // skip crashing thread (already included)
+                val threadDump = buildString {
+                    append("\n\"${t.name}\" ${t.state}\n")
+                    for (frame in frames) {
+                        append("    at $frame\n")
+                    }
+                }
+                if (allThreadsBuilder.length + threadDump.length > maxAllThreadBytes) {
+                    truncated = true
+                    break
+                }
+                allThreadsBuilder.append(threadDump)
+                includedCount++
+            }
+            if (truncated) {
+                val totalOtherThreads = allTraces.keys.count { it.id != thread.id }
+                val remaining = totalOtherThreads - includedCount
+                allThreadsBuilder.append("\n(truncated — $remaining more threads omitted)\n")
+            }
+            val fullStackTrace = allThreadsBuilder.toString()
+
             val currentScreen = currentScreenProvider?.invoke()
             val appVersion = getAppVersion(ctx)
 
@@ -120,7 +176,7 @@ object AutoMobileCrashes {
                 applicationId = ctx.packageName,
                 exceptionClass = throwable.javaClass.name,
                 exceptionMessage = throwable.message,
-                stackTrace = stackTrace,
+                stackTrace = fullStackTrace,
                 threadName = thread.name,
                 currentScreen = currentScreen,
                 appVersion = appVersion,
@@ -144,7 +200,7 @@ object AutoMobileCrashes {
                 putExtra(EXTRA_TIMESTAMP, timestamp)
                 putExtra(EXTRA_EXCEPTION_CLASS, throwable.javaClass.name)
                 putExtra(EXTRA_EXCEPTION_MESSAGE, throwable.message)
-                putExtra(EXTRA_STACK_TRACE, stackTrace)
+                putExtra(EXTRA_STACK_TRACE, fullStackTrace)
                 putExtra(EXTRA_THREAD_NAME, thread.name)
                 putExtra(EXTRA_CURRENT_SCREEN, currentScreen)
                 putExtra(EXTRA_PACKAGE_NAME, ctx.packageName)
@@ -156,6 +212,12 @@ object AutoMobileCrashes {
             }
 
             ctx.sendBroadcast(intent)
+
+            // Allow time for the broadcast to be dispatched before process termination
+            try {
+                Thread.sleep(200)
+            } catch (_: InterruptedException) {}
+
             Log.i(TAG, "Broadcasted crash: ${throwable.javaClass.name} on thread ${thread.name}")
         } catch (e: Exception) {
             Log.e(TAG, "Failed to broadcast crash", e)

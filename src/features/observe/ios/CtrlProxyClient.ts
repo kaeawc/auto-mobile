@@ -615,21 +615,43 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
           const navSource = (p.source as string) ?? null;
           const navArgs = (p.arguments as Record<string, string>) ?? null;
           const navMeta = (p.metadata as Record<string, string>) ?? null;
-          await recorder.recordNavigationEvent({
-            timestamp: ts, applicationId,
-            destination, source: navSource, arguments: navArgs, metadata: navMeta,
-          });
-          // Record in navigation graph (creates nodes for screenshot lookup)
-          try {
-            await this.getNavigationGraphManager().recordNavigationEvent({
-              applicationId, destination, source: navSource,
-              arguments: navArgs ?? {}, metadata: navMeta ?? {},
-              triggeringInteraction: null,
-            });
-          } catch { /* non-fatal */ }
-          // Capture a screenshot for this navigation event via the CtrlProxy
+          // Capture screenshot FIRST, then record with URI so the push includes it
+          let screenshotUri: string | null = null;
           if (applicationId && destination) {
-            this.captureNavigationScreenshot(applicationId, destination).catch(() => {});
+            try {
+              const path = await this.captureNavigationScreenshot(applicationId, destination);
+              if (path) {
+                // Record in navigation graph to get the node ID for the URI
+                await this.getNavigationGraphManager().recordNavigationEvent({
+                  applicationId, destination, source: navSource,
+                  arguments: navArgs ?? {}, metadata: navMeta ?? {},
+                  triggeringInteraction: null,
+                });
+                await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
+                // Look up the node ID for the screenshot URI
+                try {
+                  const { getDatabase } = await import("../../../db");
+                  const db = getDatabase();
+                  const node = await (db as any)
+                    .selectFrom("navigation_nodes")
+                    .select(["id"])
+                    .where("app_id", "=", applicationId)
+                    .where("screen_name", "=", destination)
+                    .executeTakeFirst();
+                  if (node) {
+                    screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
+                  }
+                } catch { /* non-fatal */ }
+              }
+            } catch { /* non-fatal — record event even without screenshot */ }
+          }
+          // Only publish if we have a screenshot
+          if (screenshotUri) {
+            await recorder.recordNavigationEvent({
+              timestamp: ts, applicationId,
+              destination, source: navSource, arguments: navArgs, metadata: navMeta,
+              screenshotUri,
+            });
           }
           break;
         }
@@ -671,27 +693,19 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     }
   }
 
-  /** Capture and store a screenshot for an iOS navigation event */
-  private async captureNavigationScreenshot(applicationId: string, destination: string): Promise<void> {
+  /** Capture and store a screenshot for an iOS navigation event. Returns the stored path or null. */
+  private async captureNavigationScreenshot(applicationId: string, destination: string): Promise<string | null> {
     try {
       const result = await this.requestScreenshot(3000);
       if (result?.data) {
         const screenshotManager = NavigationScreenshotManager.getInstance();
         const bytes = Buffer.from(result.data, "base64");
-        const screenshotPath = await screenshotManager.storeScreenshot(
-          applicationId,
-          destination,
-          bytes,
-          result.format ?? "png",
-        );
-        if (screenshotPath) {
-          await this.getNavigationGraphManager()
-            .updateNodeScreenshot(applicationId, destination, screenshotPath);
-        }
+        return await screenshotManager.storeScreenshot(applicationId, destination, bytes, result.format ?? "png");
       }
     } catch (error) {
       logger.debug(`[CtrlProxyClient] iOS nav screenshot capture skipped: ${error}`);
     }
+    return null;
   }
 
   /** Record a layout telemetry event from iOS hierarchy update */

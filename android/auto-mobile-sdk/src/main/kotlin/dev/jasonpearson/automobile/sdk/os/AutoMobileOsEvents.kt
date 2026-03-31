@@ -42,7 +42,7 @@ object AutoMobileOsEvents {
   @Volatile private var lastBatteryCharging: Boolean? = null
 
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
-  fun initialize(context: Context, buffer: SdkEventBuffer) {
+  internal fun initialize(context: Context, buffer: SdkEventBuffer) {
     this.buffer = buffer
     this.applicationId = context.packageName
     registerLifecycleObserver()

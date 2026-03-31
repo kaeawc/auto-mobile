@@ -20,7 +20,7 @@ import kotlin.concurrent.withLock
  * @param onFlush Callback invoked with the batch of events to send
  * @param executor Optional executor for periodic flush scheduling (for testing)
  */
-class SdkEventBuffer(
+internal class SdkEventBuffer(
   private val maxBufferSize: Int = 50,
   private val flushIntervalMs: Long = 500,
   private val onFlush: (List<SdkEvent>) -> Unit,

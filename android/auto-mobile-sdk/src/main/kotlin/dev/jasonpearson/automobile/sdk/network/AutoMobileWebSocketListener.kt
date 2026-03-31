@@ -22,7 +22,7 @@ import java.util.UUID
  * @param applicationId Optional application ID
  * @param connectionId Unique ID for this WebSocket connection (auto-generated)
  */
-class AutoMobileWebSocketListener(
+internal class AutoMobileWebSocketListener(
   private val delegate: WebSocketListener,
   private val url: String,
   private val buffer: SdkEventBuffer,

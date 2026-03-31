@@ -31,7 +31,7 @@ object AutoMobileBroadcastInterceptor {
   @Volatile private var applicationId: String? = null
   private var receiver: BroadcastReceiver? = null
 
-  fun initialize(context: Context, buffer: SdkEventBuffer) {
+  internal fun initialize(context: Context, buffer: SdkEventBuffer) {
     this.buffer = buffer
     this.applicationId = context.packageName
 

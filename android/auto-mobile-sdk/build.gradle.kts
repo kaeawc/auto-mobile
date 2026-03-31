@@ -43,7 +43,7 @@ android {
 
 dependencies {
   // Protocol module for type-safe event serialization
-  api(project(":protocol"))
+  implementation(project(":protocol"))
 
   // Android core libraries
   implementation(libs.androidx.core)

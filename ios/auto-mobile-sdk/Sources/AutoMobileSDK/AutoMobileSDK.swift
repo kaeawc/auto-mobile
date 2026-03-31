@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(UIKit)
+import UIKit
+#endif
 
 /// Main entry point for the AutoMobile iOS SDK.
 /// Provides navigation event tracking, log filtering, network monitoring,
@@ -13,6 +16,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _bundleId: String?
     private var _sdkContext: SdkContext?
     private var eventBuffer: SdkEventBuffer?
+    private var sessionTracker: SessionTracker?
+    private var sessionObservers: [NSObjectProtocol] = []
 
     private init() {}
 
@@ -60,6 +65,32 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         // Start navigation adapter
         SwiftUINavigationAdapter.shared.start()
+
+        // Session tracking
+        let tracker = SessionTracker()
+        lock.lock()
+        self.sessionTracker = tracker
+        lock.unlock()
+
+        #if canImport(UIKit) && !os(watchOS)
+        let fgObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didBecomeActiveNotification,
+            object: nil,
+            queue: .main
+        ) { [weak tracker] _ in
+            tracker?.onForeground()
+        }
+        let bgObserver = NotificationCenter.default.addObserver(
+            forName: UIApplication.didEnterBackgroundNotification,
+            object: nil,
+            queue: .main
+        ) { [weak tracker] _ in
+            tracker?.onBackground()
+        }
+        lock.lock()
+        sessionObservers.append(contentsOf: [fgObserver, bgObserver])
+        lock.unlock()
+        #endif
     }
 
     // MARK: - Navigation Listeners
@@ -121,6 +152,13 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return listeners.count
+    }
+
+    // MARK: - Session
+
+    /// Returns the current session ID, or nil if no session is active.
+    public func currentSessionId() -> String? {
+        return sessionTracker?.currentSessionId()
     }
 
     // MARK: - Custom Events
@@ -221,6 +259,19 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileFailures.shared.reset()
         AutoMobileBiometrics.shared.reset()
         AutoMobileLog.shared.reset()
+
+        // Shut down session tracker and remove observers
+        lock.lock()
+        let trackerToShutdown = sessionTracker
+        sessionTracker = nil
+        let observersToRemove = sessionObservers
+        sessionObservers.removeAll()
+        lock.unlock()
+
+        trackerToShutdown?.shutdown()
+        for observer in observersToRemove {
+            NotificationCenter.default.removeObserver(observer)
+        }
 
         // Extract buffer under lock, then shut it down OUTSIDE the lock
         // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock

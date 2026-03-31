@@ -227,6 +227,40 @@ final class FakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 }
 
+// MARK: - FakeSessionTracker
+
+final class FakeSessionTracker: SessionTracking, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _sessionId: String?
+    var foregroundCount = 0
+    var backgroundCount = 0
+
+    func currentSessionId() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _sessionId
+    }
+
+    func onForeground() {
+        lock.lock()
+        foregroundCount += 1
+        if _sessionId == nil { _sessionId = UUID().uuidString }
+        lock.unlock()
+    }
+
+    func onBackground() {
+        lock.lock()
+        backgroundCount += 1
+        lock.unlock()
+    }
+
+    func shutdown() {
+        lock.lock()
+        _sessionId = nil
+        lock.unlock()
+    }
+}
+
 // MARK: - FakeEventBroadcaster
 
 final class FakeEventBroadcaster: EventBroadcasting, @unchecked Sendable {

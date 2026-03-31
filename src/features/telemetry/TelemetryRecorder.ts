@@ -230,7 +230,7 @@ export class TelemetryRecorder {
     timestamp: number;
     stackTrace?: Array<{ className: string; methodName: string; fileName: string | null; lineNumber: number | null; isAppCode: boolean }> | null;
   }): void {
-    const { deviceId } = this.snapshotContext();
+    const { deviceId, sessionId } = this.snapshotContext();
     this.pushToSocket({
       category: event.type,
       timestamp: event.timestamp,

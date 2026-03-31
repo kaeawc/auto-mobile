@@ -235,7 +235,7 @@ export class TelemetryRecorder {
     const context = this.snapshotContext();
     const deviceId = event.deviceId ?? context.deviceId;
     const sessionId = context.sessionId;
-    if (!deviceId) return; // Never push failure events without a device ID
+    // Failures without deviceId will be filtered by the telemetry push server's matchesFilter
     this.pushToSocket({
       category: event.type,
       timestamp: event.timestamp,
@@ -326,7 +326,7 @@ export class TelemetryRecorder {
     error?: string | null;
     args?: Record<string, unknown> | null;
   }): void {
-    const { deviceId } = this.snapshotContext();
+    const { deviceId, sessionId } = this.snapshotContext();
     this.pushToSocket({ category: "toolcall", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 

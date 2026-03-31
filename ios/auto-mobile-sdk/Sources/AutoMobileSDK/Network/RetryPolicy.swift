@@ -19,7 +19,8 @@ public struct RetryPolicy: Sendable {
         let retryable = statusCode == 0 || statusCode == 408 || statusCode == 429 ||
                         (statusCode >= 500 && statusCode <= 599)
         guard retryable else { return (false, 0) }
-        let delay = min(baseDelayMs * (1 << attempt), maxDelayMs)
+        let clampedAttempt = min(attempt, 30)
+        let delay = min(baseDelayMs * (1 << clampedAttempt), maxDelayMs)
         let jitter = Int.random(in: 0...max(1, delay / 4))
         return (true, delay + jitter)
     }

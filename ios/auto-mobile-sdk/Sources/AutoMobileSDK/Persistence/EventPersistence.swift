@@ -58,7 +58,11 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
 
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter({ $0.lastPathComponent.hasPrefix("events_") && $0.pathExtension == "json" })
-            .sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+            .sorted(by: { file1, file2 in
+                let ts1 = Self.extractTimestamp(from: file1.lastPathComponent) ?? 0
+                let ts2 = Self.extractTimestamp(from: file2.lastPathComponent) ?? 0
+                return ts1 < ts2
+            })
         else { return [] }
 
         let decoder = JSONDecoder()
@@ -106,6 +110,11 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
     }
 
     // MARK: - Private
+
+    private static func extractTimestamp(from filename: String) -> Double? {
+        let name = filename.replacingOccurrences(of: "events_", with: "").replacingOccurrences(of: ".json", with: "")
+        return Double(name.components(separatedBy: "_").first ?? "")
+    }
 
     private func decodeEvent(type: SdkEventType, data: Data, decoder: JSONDecoder) -> (any SdkEvent)? {
         switch type {

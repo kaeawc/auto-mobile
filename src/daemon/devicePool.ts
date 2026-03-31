@@ -7,6 +7,7 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
+import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 
 /**
  * Error class for device pool operations with retryability flag.
@@ -112,7 +113,9 @@ export class DevicePool {
    */
   async initializeWithDevices(devices: BootedDevice[]): Promise<void> {
     const now = this.seedLastUsedAt(this.timer.now());
+    const perf = createGlobalPerformanceTracker();
 
+    perf.startOperation("populatePool");
     for (const device of devices) {
       this.devices.set(device.deviceId, {
         id: device.deviceId,
@@ -128,6 +131,7 @@ export class DevicePool {
       this.deviceSessionStarts.set(device.deviceId, now);
       await this.setDeviceSessionTracking(device.deviceId, now);
     }
+    perf.endOperation("populatePool");
 
     logger.info(`Device pool initialized with ${devices.length} devices`);
   }
@@ -143,6 +147,7 @@ export class DevicePool {
    */
   async refreshDevices(): Promise<number> {
     const startTime = this.timer.now();
+    const perf = createGlobalPerformanceTracker();
     try {
       logger.info("Refreshing device pool - discovering connected devices...");
 
@@ -151,13 +156,16 @@ export class DevicePool {
       const androidSdkRoot = process.env.ANDROID_SDK_ROOT || "(not set)";
       logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
 
+      perf.startOperation("deviceDiscovery");
       const bootedDevices = await this.deviceManager.getBootedDevices("either");
+      perf.endOperation("deviceDiscovery");
       const discoveryTime = this.timer.now() - startTime;
       logger.info(`Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`);
 
       const now = this.seedLastUsedAt(this.timer.now());
       let addedCount = 0;
 
+      perf.startOperation("poolUpdate");
       for (const device of bootedDevices) {
         if (!this.devices.has(device.deviceId)) {
           this.devices.set(device.deviceId, {
@@ -177,6 +185,7 @@ export class DevicePool {
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
         }
       }
+      perf.endOperation("poolUpdate");
 
       if (addedCount > 0) {
         logger.info(`Device pool refreshed: added ${addedCount} new devices (total: ${this.devices.size})`);

@@ -12,7 +12,7 @@ import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "../features/observe/android";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
-import { createPerformanceTracker } from "./PerformanceTracker";
+import { createPerformanceTracker, createGlobalPerformanceTracker } from "./PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
 
@@ -234,22 +234,29 @@ export class DeviceSessionManager implements DeviceSessionManager {
    */
   public async detectConnectedPlatforms(): Promise<BootedDevice[]> {
     const devices: BootedDevice[] = [];
+    const perf = createGlobalPerformanceTracker();
 
     try {
       // Check for Android devices via ADB
+      perf.startOperation("androidDeviceScan");
       const androidDevices = await this.adb.getBootedAndroidDevices();
+      perf.endOperation("androidDeviceScan");
       devices.push(...androidDevices);
     } catch (error) {
+      perf.endOperation("androidDeviceScan");
       logger.warn(`Failed to detect Android devices: ${error}`);
     }
 
     try {
       // Check for iOS devices/simulators via xcrun simctl
       if (this.simctl) {
+        perf.startOperation("iosSimulatorScan");
         const iosDevices = await this.simctl.getBootedSimulators();
+        perf.endOperation("iosSimulatorScan");
         devices.push(...iosDevices);
       }
     } catch (error) {
+      perf.endOperation("iosSimulatorScan");
       logger.warn(`Failed to detect iOS devices: ${error}`);
     }
 
@@ -716,18 +723,26 @@ export class DeviceSessionManager implements DeviceSessionManager {
    * Find an available Android device or start an emulator
    */
   public async findOrStartAndroidDevice(options?: DeviceReadyOptions): Promise<BootedDevice> {
+    const perf = createGlobalPerformanceTracker();
+
+    perf.startOperation("listBootedDevices");
     const allDevices = await this.deviceUtils.getBootedDevices("android");
+    perf.endOperation("listBootedDevices");
 
     if (allDevices.length > 0) {
       // Use the first available device
       const device = allDevices[0];
       const deviceId = device.deviceId!;
+      perf.startOperation("verifyDevice");
       await this.verifyAndroidDevice(deviceId, options);
+      perf.endOperation("verifyDevice");
       return device;
     }
 
     // No devices - try to start a device from an image
+    perf.startOperation("listImages");
     const availableImages = await this.deviceUtils.listDeviceImages("android");
+    perf.endOperation("listImages");
 
     if (availableImages.length === 0) {
       throw new ActionableError(
@@ -738,10 +753,14 @@ export class DeviceSessionManager implements DeviceSessionManager {
     // Start the first available AVD
     const deviceImage = availableImages[0];
     logger.info(`Starting Android emulator ${deviceImage}...`);
+    perf.startOperation("startDevice");
     await this.deviceUtils.startDevice(deviceImage);
+    perf.endOperation("startDevice");
 
     // Wait for the emulator to fully boot and get its device ID
+    perf.startOperation("waitForReady");
     const newDevice = await this.deviceUtils.waitForDeviceReady(deviceImage);
+    perf.endOperation("waitForReady");
 
     if (!newDevice) {
       throw new ActionableError(
@@ -749,7 +768,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
       );
     }
 
+    perf.startOperation("verifyDevice");
     await this.verifyAndroidDevice(newDevice.deviceId!, options);
+    perf.endOperation("verifyDevice");
     return newDevice;
   }
 
@@ -760,7 +781,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     if (!this.simctl) {
       throw new ActionableError("iOS simulator tools not available");
     }
+    const perf = createGlobalPerformanceTracker();
+
+    perf.startOperation("listSimulators");
     const allDevices = await this.simctl.listSimulatorImages();
+    perf.endOperation("listSimulators");
     allDevices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
 
     if (allDevices.length === 0) {
@@ -770,14 +795,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // Check for already booted simulators first
+    perf.startOperation("checkBooted");
     const bootedDevices = await this.simctl.getBootedSimulators();
+    perf.endOperation("checkBooted");
     bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
 
     if (bootedDevices.length > 0) {
       // Use the first booted device
       const device = bootedDevices[0];
       logger.info(`[DeviceSessionManager] Selected booted iOS simulator ${device.name} (${device.deviceId})`);
+      perf.startOperation("verifyDevice");
       await this.verifyIosDevice(device.deviceId!, options);
+      perf.endOperation("verifyDevice");
       return device;
     }
 
@@ -786,8 +815,12 @@ export class DeviceSessionManager implements DeviceSessionManager {
     const deviceId = device.deviceId!;
     logger.info(`[DeviceSessionManager] Booting iOS simulator ${device.name} (${deviceId})...`);
 
+    perf.startOperation("bootSimulator");
     const bootedDevice = await this.simctl!.bootSimulator(deviceId);
+    perf.endOperation("bootSimulator");
+    perf.startOperation("verifyDevice");
     await this.verifyIosDevice(deviceId, options);
+    perf.endOperation("verifyDevice");
     return bootedDevice;
   }
 

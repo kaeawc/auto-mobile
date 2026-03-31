@@ -32,6 +32,7 @@ class SdkEventBuffer(
   private val buffer = mutableListOf<SdkEvent>()
   private var flushTask: ScheduledFuture<*>? = null
   @Volatile private var isShutdown = false
+  @Volatile var isEnabled: Boolean = true
 
   /** Start the periodic flush timer. */
   fun start() {
@@ -49,7 +50,7 @@ class SdkEventBuffer(
 
   /** Add an event to the buffer. Flushes immediately if buffer is full. */
   fun add(event: SdkEvent) {
-    if (isShutdown) return
+    if (isShutdown || !isEnabled) return
 
     val shouldFlush: Boolean
     val snapshot: List<SdkEvent>

@@ -83,6 +83,7 @@ object AutoMobileSDK {
     val buffer = SdkEventBuffer(
       onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
     )
+    buffer.isEnabled = isEnabled
     buffer.start()
     eventBuffer = buffer
 
@@ -103,6 +104,7 @@ object AutoMobileSDK {
     mainHandler.post {
       AutoMobileOsEvents.initialize(appContext, buffer)
       RecompositionTracker.initialize(appContext)
+      RecompositionTracker.setEnabled(isEnabled)
       AutoMobileNotifications.initialize(appContext)
       if (appContext is Application) {
         AutoMobileClickTracker.initialize(appContext, appContext.packageName, buffer)
@@ -192,6 +194,8 @@ object AutoMobileSDK {
    */
   fun setEnabled(enabled: Boolean) {
     isEnabled = enabled
+    eventBuffer?.isEnabled = enabled
+    RecompositionTracker.setEnabled(enabled)
   }
 
   /** Returns whether navigation tracking is currently enabled. */

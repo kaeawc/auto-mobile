@@ -64,7 +64,7 @@ object RecompositionTracker {
 
   internal fun isEnabled(): Boolean = enabled.get()
 
-  private fun setEnabled(isEnabled: Boolean) {
+  internal fun setEnabled(isEnabled: Boolean) {
     if (enabled.getAndSet(isEnabled) == isEnabled) {
       return
     }

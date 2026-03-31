@@ -536,16 +536,16 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     this.stopSdkEventPolling();
     const host = this.resolveWebSocketHost();
     const url = `http://${host}:${this.port}/sdk-events`;
-    this.sdkEventPollInterval = setInterval(async () => {
+    this.sdkEventPollInterval = this.timer.setInterval(async () => {
       try {
         const resp = await fetch(url, { signal: AbortSignal.timeout(2000) });
-        if (!resp.ok) return;
+        if (!resp.ok) {return;}
         const batches = await resp.json() as Array<{
           bundleId?: string;
           events?: Array<{ eventType: string; payload: string }>;
         }>;
         for (const batch of batches) {
-          if (!batch.events) continue;
+          if (!batch.events) {continue;}
           for (const envelope of batch.events) {
             try {
               // SDK envelopes have base64-encoded payload
@@ -567,7 +567,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
   private stopSdkEventPolling(): void {
     if (this.sdkEventPollInterval) {
-      clearInterval(this.sdkEventPollInterval);
+      this.timer.clearInterval(this.sdkEventPollInterval);
       this.sdkEventPollInterval = null;
     }
   }
@@ -582,145 +582,145 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       const p = event.payload;
 
       try {
-      switch (event.type) {
-        case "network_request":
-          await recorder.recordNetworkEvent({
-            timestamp: ts, applicationId,
-            url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
-            statusCode: (p.statusCode as number) ?? 0, durationMs: (p.durationMs as number) ?? 0,
-            requestBodySize: (p.requestBodySize as number) ?? -1, responseBodySize: (p.responseBodySize as number) ?? -1,
-            protocol: (p.protocol as string) ?? null, host: (p.host as string) ?? null,
-            path: (p.path as string) ?? null, error: (p.error as string) ?? null,
-            requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
-            responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
-            requestBody: (p.requestBody as string) ?? null, responseBody: (p.responseBody as string) ?? null,
-            contentType: (p.contentType as string) ?? null,
-          });
-          break;
-        case "log":
-          await recorder.recordLogEvent({
-            timestamp: ts, applicationId,
-            level: (p.level as number) ?? 0, tag: (p.tag as string) ?? "",
-            message: (p.message as string) ?? "", filterName: (p.filterName as string) ?? "",
-          });
-          break;
-        case "lifecycle":
-          await recorder.recordOsEvent({
-            timestamp: ts, applicationId,
-            category: "lifecycle", kind: (p.state as string) ?? "unknown",
-            details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
-          });
-          break;
-        case "navigation": {
-          const destination = (p.destination as string) ?? "unknown";
-          const navSource = (p.source as string) ?? null;
-          const navArgs = (p.arguments as Record<string, string>) ?? null;
-          const navMeta = (p.metadata as Record<string, string>) ?? null;
-          // Capture screenshot FIRST, then record with URI so the push includes it
-          let screenshotUri: string | null = null;
-          if (applicationId && destination) {
-            try {
-              const path = await this.captureNavigationScreenshot(applicationId, destination);
-              if (path) {
-                // Record in navigation graph to get the node ID for the URI
-                await this.getNavigationGraphManager().recordNavigationEvent({
-                  applicationId, destination, source: navSource,
-                  arguments: navArgs ?? {}, metadata: navMeta ?? {},
-                  triggeringInteraction: null,
-                });
-                await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
-                // Look up the node ID for the screenshot URI
-                try {
-                  const { getDatabase } = await import("../../../db");
-                  const db = getDatabase();
-                  const node = await (db as any)
-                    .selectFrom("navigation_nodes")
-                    .select(["id"])
-                    .where("app_id", "=", applicationId)
-                    .where("screen_name", "=", destination)
-                    .executeTakeFirst();
-                  if (node) {
-                    screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
-                  }
-                } catch { /* non-fatal */ }
-              }
-            } catch { /* non-fatal — record event even without screenshot */ }
-          }
-          // Only publish if we have a screenshot
-          if (screenshotUri) {
-            await recorder.recordNavigationEvent({
+        switch (event.type) {
+          case "network_request":
+            await recorder.recordNetworkEvent({
               timestamp: ts, applicationId,
-              destination, source: navSource, arguments: navArgs, metadata: navMeta,
-              screenshotUri,
+              url: (p.url as string) ?? "", method: (p.method as string) ?? "GET",
+              statusCode: (p.statusCode as number) ?? 0, durationMs: (p.durationMs as number) ?? 0,
+              requestBodySize: (p.requestBodySize as number) ?? -1, responseBodySize: (p.responseBodySize as number) ?? -1,
+              protocol: (p.protocol as string) ?? null, host: (p.host as string) ?? null,
+              path: (p.path as string) ?? null, error: (p.error as string) ?? null,
+              requestHeaders: (p.requestHeaders as Record<string, string>) ?? null,
+              responseHeaders: (p.responseHeaders as Record<string, string>) ?? null,
+              requestBody: (p.requestBody as string) ?? null, responseBody: (p.responseBody as string) ?? null,
+              contentType: (p.contentType as string) ?? null,
             });
+            break;
+          case "log":
+            await recorder.recordLogEvent({
+              timestamp: ts, applicationId,
+              level: (p.level as number) ?? 0, tag: (p.tag as string) ?? "",
+              message: (p.message as string) ?? "", filterName: (p.filterName as string) ?? "",
+            });
+            break;
+          case "lifecycle":
+            await recorder.recordOsEvent({
+              timestamp: ts, applicationId,
+              category: "lifecycle", kind: (p.state as string) ?? "unknown",
+              details: { state: (p.state as string) ?? "", bundleId: (p.bundleId as string) ?? "" },
+            });
+            break;
+          case "navigation": {
+            const destination = (p.destination as string) ?? "unknown";
+            const navSource = (p.source as string) ?? null;
+            const navArgs = (p.arguments as Record<string, string>) ?? null;
+            const navMeta = (p.metadata as Record<string, string>) ?? null;
+            // Capture screenshot FIRST, then record with URI so the push includes it
+            let screenshotUri: string | null = null;
+            if (applicationId && destination) {
+              try {
+                const path = await this.captureNavigationScreenshot(applicationId, destination);
+                if (path) {
+                // Record in navigation graph to get the node ID for the URI
+                  await this.getNavigationGraphManager().recordNavigationEvent({
+                    applicationId, destination, source: navSource,
+                    arguments: navArgs ?? {}, metadata: navMeta ?? {},
+                    triggeringInteraction: null,
+                  });
+                  await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
+                  // Look up the node ID for the screenshot URI
+                  try {
+                    const { getDatabase } = await import("../../../db");
+                    const db = getDatabase();
+                    const node = await (db as any)
+                      .selectFrom("navigation_nodes")
+                      .select(["id"])
+                      .where("app_id", "=", applicationId)
+                      .where("screen_name", "=", destination)
+                      .executeTakeFirst();
+                    if (node) {
+                      screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
+                    }
+                  } catch { /* non-fatal */ }
+                }
+              } catch { /* non-fatal — record event even without screenshot */ }
+            }
+            // Only publish if we have a screenshot
+            if (screenshotUri) {
+              await recorder.recordNavigationEvent({
+                timestamp: ts, applicationId,
+                destination, source: navSource, arguments: navArgs, metadata: navMeta,
+                screenshotUri,
+              });
+            }
+            break;
           }
-          break;
-        }
-        case "custom":
-          await recorder.recordCustomEvent({
-            timestamp: ts, applicationId,
-            name: (p.name as string) ?? "custom", properties: (p.properties as Record<string, string>) ?? {},
-          });
-          break;
-        case "handled_exception": {
-          const failureRecorder = getFailureRecorder();
-          const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-          const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
-          const stackStr = (p.stackTrace as string) ?? "";
-          const stackFrames = stackStr.split("\n").filter(Boolean).map(line => ({
-            className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-            isAppCode: line.includes(applicationId ?? ""),
-          }));
-          await failureRecorder.recordNonFatal({
-            exceptionType: exType, exceptionMessage: exMsg,
-            stackTrace: stackFrames,
-            customMessage: (p.customMessage as string) ?? undefined,
-            deviceId: this.device.deviceId,
-            deviceModel: "iOS Simulator", os: "iOS",
-            appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
-            currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-          });
-          break;
-        }
-        case "crash": {
-          const crashRecorder = getFailureRecorder();
-          const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
-          const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
-          const crashStack = ((p.stackTrace as string) ?? "").split("\n").filter(Boolean).map(line => ({
-            className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
-            isAppCode: line.includes(applicationId ?? ""),
-          }));
-          await crashRecorder.recordCrash({
-            exceptionType: crashType, exceptionMessage: crashMsg,
-            stackTrace: crashStack,
-            deviceId: this.device.deviceId,
-            deviceModel: "iOS Simulator", os: "iOS",
-            appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
-            currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
-          });
-          break;
-        }
-        case "hang":
-          await recorder.recordOsEvent({
-            timestamp: ts, applicationId,
-            category: "hang", kind: `${(p.durationMs as number) ?? 0}ms`,
-            details: { durationMs: String((p.durationMs as number) ?? 0) },
-          });
-          break;
-        case "storage_changed":
-          await recorder.recordStorageEvent({
-            timestamp: ts, applicationId,
-            fileName: (p.suiteName as string) ?? "", key: (p.key as string) ?? "",
-            value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
-          });
-          break;
-        default:
+          case "custom":
+            await recorder.recordCustomEvent({
+              timestamp: ts, applicationId,
+              name: (p.name as string) ?? "custom", properties: (p.properties as Record<string, string>) ?? {},
+            });
+            break;
+          case "handled_exception": {
+            const failureRecorder = getFailureRecorder();
+            const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+            const exMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Handled exception";
+            const stackStr = (p.stackTrace as string) ?? "";
+            const stackFrames = stackStr.split("\n").filter(Boolean).map(line => ({
+              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
+              isAppCode: line.includes(applicationId ?? ""),
+            }));
+            await failureRecorder.recordNonFatal({
+              exceptionType: exType, exceptionMessage: exMsg,
+              stackTrace: stackFrames,
+              customMessage: (p.customMessage as string) ?? undefined,
+              deviceId: this.device.deviceId,
+              deviceModel: "iOS Simulator", os: "iOS",
+              appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
+              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+            });
+            break;
+          }
+          case "crash": {
+            const crashRecorder = getFailureRecorder();
+            const crashType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
+            const crashMsg = (p.exceptionMessage as string) ?? (p.message as string) ?? "Crash";
+            const crashStack = ((p.stackTrace as string) ?? "").split("\n").filter(Boolean).map(line => ({
+              className: "", methodName: line.trim(), fileName: null as string | null, lineNumber: null as number | null,
+              isAppCode: line.includes(applicationId ?? ""),
+            }));
+            await crashRecorder.recordCrash({
+              exceptionType: crashType, exceptionMessage: crashMsg,
+              stackTrace: crashStack,
+              deviceId: this.device.deviceId,
+              deviceModel: "iOS Simulator", os: "iOS",
+              appVersion: "1.0", sessionId: `ios-${this.device.deviceId}-${ts}`,
+              currentScreen: (p.currentScreen as string) ?? (p.screen as string) ?? undefined,
+            });
+            break;
+          }
+          case "hang":
+            await recorder.recordOsEvent({
+              timestamp: ts, applicationId,
+              category: "hang", kind: `${(p.durationMs as number) ?? 0}ms`,
+              details: { durationMs: String((p.durationMs as number) ?? 0) },
+            });
+            break;
+          case "storage_changed":
+            await recorder.recordStorageEvent({
+              timestamp: ts, applicationId,
+              fileName: (p.suiteName as string) ?? "", key: (p.key as string) ?? "",
+              value: (p.value as string) ?? "", operation: (p.operation as string) ?? "write",
+            });
+            break;
+          default:
           // Record unknown types as custom events
-          await recorder.recordCustomEvent({
-            timestamp: ts, applicationId,
-            name: event.type, properties: { data: JSON.stringify(p).substring(0, 1000) },
-          });
-      }
+            await recorder.recordCustomEvent({
+              timestamp: ts, applicationId,
+              name: event.type, properties: { data: JSON.stringify(p).substring(0, 1000) },
+            });
+        }
       } finally {
         // Restore previous context so Android events aren't affected
         recorder.setContext(prevContext.deviceId, prevContext.sessionId);
@@ -780,8 +780,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   }
 
   private countNodes(node: CtrlProxyNode | CtrlProxyNode[] | null): number {
-    if (!node) return 0;
-    if (Array.isArray(node)) return node.reduce((sum, n) => sum + this.countNodes(n), 0);
+    if (!node) {return 0;}
+    if (Array.isArray(node)) {return node.reduce((sum, n) => sum + this.countNodes(n), 0);}
     const children = (node as { children?: CtrlProxyNode[] }).children;
     return 1 + (children ? children.reduce((sum: number, c: CtrlProxyNode) => sum + this.countNodes(c), 0) : 0);
   }

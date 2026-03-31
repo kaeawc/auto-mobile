@@ -174,6 +174,24 @@ class SdkEventBufferTest {
   }
 
   @Test
+  fun `flush error counts each dropped event`() {
+    val counter = DefaultDropCounter()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 5,
+      flushIntervalMs = 60_000,
+      onFlush = { throw RuntimeException("delivery failed") },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      dropCounter = counter,
+    )
+
+    // Add 5 events to trigger capacity flush
+    repeat(5) { buffer.add(makeEvent(it)) }
+
+    val snapshot = counter.snapshot()
+    assertEquals(5L, snapshot[DropReason.FLUSH_ERROR], "Each dropped event should be counted individually")
+  }
+
+  @Test
   fun `onFlush exceptions are swallowed`() {
     var callCount = 0
     val buffer = SdkEventBuffer(

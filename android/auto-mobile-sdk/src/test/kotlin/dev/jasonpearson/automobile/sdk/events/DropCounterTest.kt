@@ -119,6 +119,6 @@ class DropCounterTest {
     buffer.add(makeEvent(1))
     buffer.add(makeEvent(2)) // triggers capacity flush which throws
 
-    assertEquals(1L, counter.snapshot()[DropReason.FLUSH_ERROR])
+    assertEquals(2L, counter.snapshot()[DropReason.FLUSH_ERROR], "Each dropped event should be counted")
   }
 }

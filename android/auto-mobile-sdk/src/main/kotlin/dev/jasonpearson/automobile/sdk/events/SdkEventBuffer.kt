@@ -106,7 +106,7 @@ internal class SdkEventBuffer(
     try {
       onFlush(events)
     } catch (_: Exception) {
-      dropCounter?.increment(DropReason.FLUSH_ERROR)
+      repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
     }
   }
 }

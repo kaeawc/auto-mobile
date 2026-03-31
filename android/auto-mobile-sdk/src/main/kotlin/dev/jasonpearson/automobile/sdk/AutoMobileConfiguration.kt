@@ -15,7 +15,9 @@ package dev.jasonpearson.automobile.sdk
 data class AutoMobileConfiguration internal constructor(
   val bufferSize: Int,
   val flushIntervalMs: Long,
+  /** Maximum breadcrumbs retained in the ring buffer. Consumed by the breadcrumb trail feature (#1698). */
   val maxBreadcrumbs: Int,
+  /** Background inactivity timeout before a session is rotated, in milliseconds. Consumed by the session tracker (#1695). */
   val sessionTimeoutMs: Long,
 ) {
 

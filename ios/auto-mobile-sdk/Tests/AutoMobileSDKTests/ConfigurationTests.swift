@@ -70,6 +70,32 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertNotNil(sendable)
     }
 
+    func testNegativeValuesClampedToOne() {
+        let config = AutoMobileConfiguration(
+            bufferSize: -5,
+            flushIntervalMs: -100,
+            maxBreadcrumbs: -1,
+            sessionTimeoutMs: -999
+        )
+        XCTAssertEqual(config.bufferSize, 1)
+        XCTAssertEqual(config.flushIntervalMs, 1)
+        XCTAssertEqual(config.maxBreadcrumbs, 1)
+        XCTAssertEqual(config.sessionTimeoutMs, 1)
+    }
+
+    func testZeroValuesClampedToOne() {
+        let config = AutoMobileConfiguration(
+            bufferSize: 0,
+            flushIntervalMs: 0,
+            maxBreadcrumbs: 0,
+            sessionTimeoutMs: 0
+        )
+        XCTAssertEqual(config.bufferSize, 1)
+        XCTAssertEqual(config.flushIntervalMs, 1)
+        XCTAssertEqual(config.maxBreadcrumbs, 1)
+        XCTAssertEqual(config.sessionTimeoutMs, 1)
+    }
+
     func testResetClearsConfiguration() {
         AutoMobileSDK.shared.initialize(bundleId: "com.test.app")
         XCTAssertNotNil(AutoMobileSDK.shared.configuration)

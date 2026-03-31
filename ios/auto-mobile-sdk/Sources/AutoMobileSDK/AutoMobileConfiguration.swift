@@ -20,10 +20,10 @@ public struct AutoMobileConfiguration: Sendable {
         maxBreadcrumbs: Int = 100,
         sessionTimeoutMs: Int = 30_000
     ) {
-        self.bufferSize = bufferSize
-        self.flushIntervalMs = flushIntervalMs
-        self.maxBreadcrumbs = maxBreadcrumbs
-        self.sessionTimeoutMs = sessionTimeoutMs
+        self.bufferSize = max(bufferSize, 1)
+        self.flushIntervalMs = max(flushIntervalMs, 1)
+        self.maxBreadcrumbs = max(maxBreadcrumbs, 1)
+        self.sessionTimeoutMs = max(sessionTimeoutMs, 1)
     }
 
     /// A configuration with all default values.

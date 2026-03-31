@@ -141,10 +141,19 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// Enable or disable the SDK.
+    /// When disabled, the event buffer stops accepting events and its flush timer is cancelled.
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
         _isEnabled = enabled
+        let buffer = eventBuffer
         lock.unlock()
+
+        buffer?.isBufferEnabled = enabled
+        if enabled {
+            buffer?.start()
+        } else {
+            buffer?.stop()
+        }
     }
 
     /// Whether the SDK has been initialized.

@@ -2,8 +2,10 @@ import Foundation
 
 /// Protocol for event buffering to allow faking in tests.
 public protocol EventBuffering: AnyObject, Sendable {
+    var isBufferEnabled: Bool { get set }
     func add(_ event: any SdkEvent)
     func start()
+    func stop()
     func shutdown()
     func flush()
 }
@@ -17,6 +19,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private var buffer: [any SdkEvent] = []
     private var timer: (any TimerScheduling)?
     private let timerFactory: () -> any TimerScheduling
+    private var _isBufferEnabled = true
 
     public init(
         maxBufferSize: Int = 50,
@@ -30,6 +33,19 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         self.onFlush = onFlush
     }
 
+    public var isBufferEnabled: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _isBufferEnabled
+        }
+        set {
+            lock.lock()
+            _isBufferEnabled = newValue
+            lock.unlock()
+        }
+    }
+
     public func start() {
         lock.lock()
         defer { lock.unlock() }
@@ -41,9 +57,21 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         }
     }
 
+    /// Stop the periodic flush timer without flushing remaining events.
+    public func stop() {
+        lock.lock()
+        defer { lock.unlock() }
+        timer?.cancel()
+        timer = nil
+    }
+
     public func add(_ event: any SdkEvent) {
         var shouldFlush = false
         lock.lock()
+        guard _isBufferEnabled else {
+            lock.unlock()
+            return
+        }
         buffer.append(event)
         shouldFlush = buffer.count >= maxBufferSize
         lock.unlock()

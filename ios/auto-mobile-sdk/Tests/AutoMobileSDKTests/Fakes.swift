@@ -51,8 +51,10 @@ final class FakeEventBuffer: EventBuffering, @unchecked Sendable {
     private let lock = NSLock()
     private var _events: [any SdkEvent] = []
     private var _started = false
+    private var _stopped = false
     private var _shutdown = false
     private var _flushed = false
+    private var _isBufferEnabled = true
 
     var events: [any SdkEvent] {
         lock.lock()
@@ -78,6 +80,25 @@ final class FakeEventBuffer: EventBuffering, @unchecked Sendable {
         return _flushed
     }
 
+    var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _stopped
+    }
+
+    var isBufferEnabled: Bool {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            return _isBufferEnabled
+        }
+        set {
+            lock.lock()
+            _isBufferEnabled = newValue
+            lock.unlock()
+        }
+    }
+
     func add(_ event: any SdkEvent) {
         lock.lock()
         _events.append(event)
@@ -87,6 +108,12 @@ final class FakeEventBuffer: EventBuffering, @unchecked Sendable {
     func start() {
         lock.lock()
         _started = true
+        lock.unlock()
+    }
+
+    func stop() {
+        lock.lock()
+        _stopped = true
         lock.unlock()
     }
 

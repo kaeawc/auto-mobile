@@ -12,7 +12,7 @@ public final class UserDefaultsInspector: @unchecked Sendable {
     private init() {}
 
     private var changeListeners: [UserDefaultsChangeListener] = []
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var sequenceCounter: Int64 = 0
     private var kvoObserver: NSObjectProtocol?
 

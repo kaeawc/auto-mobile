@@ -10,7 +10,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var events: [HandledExceptionEvent] = []
     private let maxEvents = 100
 

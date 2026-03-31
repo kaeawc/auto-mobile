@@ -9,7 +9,7 @@ public final class ViewBodyTracker: @unchecked Sendable {
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
     private var _isEnabled = false
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var snapshotTimer: (any TimerScheduling)?
     private let snapshotIntervalMs: Int = 1000
 

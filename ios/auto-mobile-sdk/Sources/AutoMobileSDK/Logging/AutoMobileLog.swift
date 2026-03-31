@@ -9,7 +9,7 @@ public final class AutoMobileLog: @unchecked Sendable {
     private let lock = NSLock()
     private var filters: [String: LogFilter] = [:]
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
 
     private init() {}
 

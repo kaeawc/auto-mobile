@@ -8,7 +8,13 @@ import type { Session } from "../daemon/sessionManager";
 import type { DevicePool } from "../daemon/devicePool";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import { APK_SHA256_CHECKSUM, IOS_CTRL_PROXY_SHA256_CHECKSUM } from "../constants/release";
+import {
+  APK_SHA256_CHECKSUM,
+  IOS_CTRL_PROXY_RELEASE_VERSION,
+  IOS_CTRL_PROXY_SHA256_CHECKSUM,
+  RELEASE_VERSION,
+  usesMutableLatestRelease
+} from "../constants/release";
 import { defaultTimer } from "../utils/SystemTimer";
 
 // Resource URIs
@@ -338,7 +344,7 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isEnabled(),
         manager.getInstalledApkSha256(),
       ]);
-      const expectedSha256 = APK_SHA256_CHECKSUM;
+      const expectedSha256 = usesMutableLatestRelease(RELEASE_VERSION) ? "" : APK_SHA256_CHECKSUM;
       const isCompatible = expectedSha256.length === 0 ||
         (installedSha256 !== null && installedSha256.toLowerCase() === expectedSha256.toLowerCase());
       return {
@@ -355,7 +361,7 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         manager.isInstalled(),
         manager.isRunning(),
       ]);
-      const expectedSha256 = IOS_CTRL_PROXY_SHA256_CHECKSUM;
+      const expectedSha256 = usesMutableLatestRelease(IOS_CTRL_PROXY_RELEASE_VERSION) ? "" : IOS_CTRL_PROXY_SHA256_CHECKSUM;
       return {
         installed,
         enabled: running,

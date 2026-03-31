@@ -158,8 +158,13 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           ])
           .where("failure_groups.type", "=", failureType);
 
+        // Always filter by device — never send failures with empty/null device_id
         if (deviceId) {
           q = q.where("failure_occurrences.device_id", "=", deviceId);
+        } else {
+          // Even without a device filter, exclude failures with no device_id
+          q = q.where("failure_occurrences.device_id", "is not", null)
+               .where("failure_occurrences.device_id", "!=", "");
         }
 
         const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();

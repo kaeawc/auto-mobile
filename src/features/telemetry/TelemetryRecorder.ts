@@ -229,8 +229,13 @@ export class TelemetryRecorder {
     screen?: string | null;
     timestamp: number;
     stackTrace?: Array<{ className: string; methodName: string; fileName: string | null; lineNumber: number | null; isAppCode: boolean }> | null;
+    deviceId?: string | null;
   }): void {
-    const { deviceId, sessionId } = this.snapshotContext();
+    // Use explicit deviceId if provided, otherwise fall back to context
+    const context = this.snapshotContext();
+    const deviceId = event.deviceId ?? context.deviceId;
+    const sessionId = context.sessionId;
+    if (!deviceId) return; // Never push failure events without a device ID
     this.pushToSocket({
       category: event.type,
       timestamp: event.timestamp,

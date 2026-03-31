@@ -242,6 +242,10 @@ export class FailureRecorder implements FailureRecorderService {
    * Record a crash (exception)
    */
   async recordCrash(input: RecordCrashInput): Promise<string> {
+    if (!input.deviceId) {
+      logger.warn("[FailureRecorder] Skipping crash without deviceId");
+      return "";
+    }
     const signature = this.generateCrashSignature(input.exceptionType, input.stackTrace);
     const severity = this.calculateCrashSeverity(input.exceptionType);
     const title = this.generateCrashTitle(input.exceptionType, input.stackTrace);
@@ -292,6 +296,7 @@ export class FailureRecorder implements FailureRecorderService {
         screen: input.currentScreen ?? null,
         timestamp: this.timer.now(),
         stackTrace: input.stackTrace,
+        deviceId: input.deviceId,
       });
 
       return occurrenceId;
@@ -367,6 +372,10 @@ export class FailureRecorder implements FailureRecorderService {
    * Record a non-fatal (handled) exception
    */
   async recordNonFatal(input: RecordNonFatalInput): Promise<string> {
+    if (!input.deviceId) {
+      logger.warn("[FailureRecorder] Skipping non-fatal without deviceId");
+      return "";
+    }
     const signature = this.generateNonFatalSignature(input.exceptionType, input.stackTrace);
     const severity = this.calculateNonFatalSeverity(input.exceptionType);
     const title = this.generateNonFatalTitle(input.exceptionType, input.stackTrace);
@@ -419,6 +428,7 @@ export class FailureRecorder implements FailureRecorderService {
         screen: input.currentScreen ?? null,
         timestamp: this.timer.now(),
         stackTrace: input.stackTrace,
+        deviceId: input.deviceId,
       });
 
       return occurrenceId;

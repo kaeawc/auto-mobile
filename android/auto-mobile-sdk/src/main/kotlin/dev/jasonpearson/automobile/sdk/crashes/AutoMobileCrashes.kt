@@ -8,9 +8,13 @@ import android.util.Log
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
+import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
+import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTracking
 import java.io.PrintWriter
 import java.io.StringWriter
 import java.util.concurrent.atomic.AtomicBoolean
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * SDK API for detecting and reporting unhandled crashes.
@@ -48,6 +52,10 @@ object AutoMobileCrashes {
     const val EXTRA_DEVICE_MANUFACTURER = "device_manufacturer"
     const val EXTRA_OS_VERSION = "os_version"
     const val EXTRA_SDK_INT = "sdk_int"
+    const val EXTRA_BREADCRUMBS = "breadcrumbs"
+
+    /** Maximum size in bytes for the breadcrumbs JSON extra. */
+    private const val MAX_BREADCRUMBS_BYTES = 50_000
 
     private var context: Context? = null
     @Volatile private var originalHandler: Thread.UncaughtExceptionHandler? = null
@@ -55,6 +63,9 @@ object AutoMobileCrashes {
 
     /** Provider for current screen name - set by navigation tracking */
     var currentScreenProvider: (() -> String?)? = null
+
+    /** Breadcrumb trail attached to crash reports. Set by AutoMobileSDK. */
+    var breadcrumbTrail: BreadcrumbTracking? = null
 
     /**
      * Initialize crash detection with application context.
@@ -101,6 +112,7 @@ object AutoMobileCrashes {
         originalHandler = null
         context = null
         currentScreenProvider = null
+        breadcrumbTrail = null
         Log.d(TAG, "AutoMobileCrashes uninstalled - crash detection disabled")
     }
 
@@ -209,6 +221,9 @@ object AutoMobileCrashes {
                 putExtra(EXTRA_DEVICE_MANUFACTURER, Build.MANUFACTURER)
                 putExtra(EXTRA_OS_VERSION, Build.VERSION.RELEASE)
                 putExtra(EXTRA_SDK_INT, Build.VERSION.SDK_INT)
+
+                // Attach breadcrumb trail snapshot
+                serializeBreadcrumbs()?.let { putExtra(EXTRA_BREADCRUMBS, it) }
             }
 
             ctx.sendBroadcast(intent)
@@ -222,6 +237,51 @@ object AutoMobileCrashes {
         } catch (e: Exception) {
             Log.e(TAG, "Failed to broadcast crash", e)
         }
+    }
+
+    /**
+     * Serialize the breadcrumb trail snapshot to a JSON string.
+     * If the result exceeds [MAX_BREADCRUMBS_BYTES], the oldest breadcrumbs are
+     * dropped until it fits.
+     */
+    private fun serializeBreadcrumbs(): String? {
+        val crumbs = breadcrumbTrail?.snapshot() ?: return null
+        if (crumbs.isEmpty()) return null
+
+        val json = breadcrumbsToJson(crumbs)
+        if (json.toByteArray(Charsets.UTF_8).size <= MAX_BREADCRUMBS_BYTES) return json
+
+        // Binary search for the largest suffix that fits within the size limit.
+        var lo = 1
+        var hi = crumbs.size - 1
+        var bestStart = crumbs.size // nothing fits
+        while (lo <= hi) {
+            val mid = (lo + hi) / 2
+            val candidate = breadcrumbsToJson(crumbs.subList(mid, crumbs.size))
+            if (candidate.toByteArray(Charsets.UTF_8).size <= MAX_BREADCRUMBS_BYTES) {
+                bestStart = mid
+                hi = mid - 1
+            } else {
+                lo = mid + 1
+            }
+        }
+        if (bestStart >= crumbs.size) return null
+        return breadcrumbsToJson(crumbs.subList(bestStart, crumbs.size))
+    }
+
+    private fun breadcrumbsToJson(list: List<Breadcrumb>): String {
+        val arr = JSONArray()
+        for (bc in list) {
+            val obj = JSONObject()
+            obj.put("timestamp", bc.timestamp)
+            obj.put("category", bc.category.name)
+            obj.put("message", bc.message)
+            if (bc.metadata.isNotEmpty()) {
+                obj.put("metadata", JSONObject(bc.metadata))
+            }
+            arr.put(obj)
+        }
+        return arr.toString()
     }
 
     private fun getAppVersion(context: Context): String? {

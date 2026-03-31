@@ -10,6 +10,9 @@ import dev.jasonpearson.automobile.sdk.context.SdkContext
 import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
+import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
+import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory
+import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
@@ -67,6 +70,7 @@ object AutoMobileSDK {
   private var sessionTracker: SessionTracker? = null
   private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
   private var sdkContext: SdkContext? = null
+  private var breadcrumbTrail: BreadcrumbTrail? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -115,6 +119,9 @@ object AutoMobileSDK {
     SharedPreferencesInspector.initialize(appContext)
     AutoMobileFailures.initialize(appContext)
     AutoMobileCrashes.initialize(appContext)
+    val trail = BreadcrumbTrail()
+    breadcrumbTrail = trail
+    AutoMobileCrashes.breadcrumbTrail = trail
     AutoMobileAnr.initialize(appContext)
     AutoMobileBiometrics.initialize(appContext)
 
@@ -191,6 +198,8 @@ object AutoMobileSDK {
       }
     }
 
+    addBreadcrumb(event.destination, BreadcrumbCategory.NAVIGATION, event.metadata)
+
     // Route navigation events through the shared event buffer so they are
     // batched and broadcast on the buffer's background thread instead of
     // blocking the caller (which is often the main thread).
@@ -249,6 +258,9 @@ object AutoMobileSDK {
    */
   fun trackEvent(name: String, properties: Map<String, String> = emptyMap()) {
     if (!isEnabled) return
+
+    addBreadcrumb(name, BreadcrumbCategory.CUSTOM, properties)
+
     val buf = eventBuffer ?: return
     buf.add(
       SdkCustomEvent(
@@ -262,6 +274,29 @@ object AutoMobileSDK {
 
   /** Returns the current session ID, or null if no active session. */
   fun currentSessionId(): String? = sessionTracker?.currentSessionId()
+
+  /**
+   * Add a breadcrumb to the trail. Breadcrumbs are attached to crash reports
+   * so that recent app activity is visible when diagnosing crashes.
+   *
+   * @param message A short description of the breadcrumb
+   * @param category The category (defaults to CUSTOM)
+   * @param metadata Optional key-value metadata
+   */
+  fun addBreadcrumb(
+    message: String,
+    category: BreadcrumbCategory = BreadcrumbCategory.CUSTOM,
+    metadata: Map<String, String> = emptyMap(),
+  ) {
+    breadcrumbTrail?.add(
+      Breadcrumb(
+        timestamp = System.currentTimeMillis(),
+        category = category,
+        message = message,
+        metadata = metadata,
+      ),
+    )
+  }
 
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
@@ -317,6 +352,8 @@ object AutoMobileSDK {
     eventBuffer = null
     sdkContext?.reset()
     sdkContext = null
+    breadcrumbTrail?.clear()
+    breadcrumbTrail = null
     RecompositionTracker.reset()
     listeners.clear()
     isEnabled = true

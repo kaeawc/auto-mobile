@@ -266,16 +266,18 @@ object AutoMobileSDK {
 
     // Tear down subsystem hooks. Lifecycle observer removal and click
     // tracker unregistration must happen on the main thread.
+    // Read sessionLifecycleObserver inside the Runnable so we see the
+    // value assigned by a concurrent init handler, not a stale snapshot.
     val ctx = context
-    val sessionObserver = sessionLifecycleObserver
     if (ctx != null) {
       val teardown = Runnable {
         AutoMobileOsEvents.shutdown(ctx)
         AutoMobileBroadcastInterceptor.shutdown(ctx)
         AutoMobileClickTracker.shutdown(ctx)
-        sessionObserver?.let {
+        sessionLifecycleObserver?.let {
           ProcessLifecycleOwner.get().lifecycle.removeObserver(it)
         }
+        sessionLifecycleObserver = null
       }
       if (Looper.myLooper() == Looper.getMainLooper()) {
         teardown.run()
@@ -286,7 +288,6 @@ object AutoMobileSDK {
 
     sessionTracker?.shutdown()
     sessionTracker = null
-    sessionLifecycleObserver = null
 
     eventBuffer?.shutdown()
     eventBuffer = null

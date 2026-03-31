@@ -92,7 +92,12 @@ object AutoMobileCrashes {
      */
     fun uninstall() {
         if (!isInstalled.compareAndSet(true, false)) return
-        Thread.setDefaultUncaughtExceptionHandler(originalHandler)
+        // Only restore the original handler if we're still the current handler.
+        // Another SDK may have installed a handler after us — don't clobber it.
+        val currentHandler = Thread.getDefaultUncaughtExceptionHandler()
+        if (currentHandler is AutoMobileExceptionHandler) {
+            Thread.setDefaultUncaughtExceptionHandler(originalHandler)
+        }
         originalHandler = null
         context = null
         currentScreenProvider = null

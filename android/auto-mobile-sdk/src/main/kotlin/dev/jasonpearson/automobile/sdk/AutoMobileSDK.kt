@@ -6,6 +6,8 @@ import android.os.Looper
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
+import dev.jasonpearson.automobile.sdk.context.SdkContext
+import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
@@ -64,6 +66,7 @@ object AutoMobileSDK {
   private var mainHandler: Handler? = null
   private var sessionTracker: SessionTracker? = null
   private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
+  private var sdkContext: SdkContext? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -93,6 +96,15 @@ object AutoMobileSDK {
     buffer.isEnabled = isEnabled
     buffer.start()
     eventBuffer = buffer
+
+    // Initialize SDK context with app version from PackageManager
+    val ctx = SdkContext()
+    try {
+      ctx.appVersion = appContext.packageManager.getPackageInfo(appContext.packageName, 0).versionName
+    } catch (_: Exception) {
+      // PackageManager lookup may fail in test environments
+    }
+    sdkContext = ctx
 
     // Thread-safe subsystems — can initialize from any thread
     NetworkMockRuleStore.initialize(appContext)
@@ -254,6 +266,18 @@ object AutoMobileSDK {
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
 
+  /** Sets the user identifier on the SDK context. */
+  fun setUserId(userId: String?) { sdkContext?.userId = userId }
+
+  /** Sets a tag on the SDK context. */
+  fun setTag(key: String, value: String) { sdkContext?.setTag(key, value) }
+
+  /** Removes a tag from the SDK context. */
+  fun removeTag(key: String) { sdkContext?.removeTag(key) }
+
+  /** Returns an immutable snapshot of the current SDK context, or null if not initialized. */
+  fun getContextSnapshot(): SdkContextSnapshot? = sdkContext?.snapshot()
+
   /**
    * Shuts down the SDK, releasing all resources. After calling this method, [initialize] may be
    * called again to restart the SDK.
@@ -290,6 +314,8 @@ object AutoMobileSDK {
 
     eventBuffer?.shutdown()
     eventBuffer = null
+    sdkContext?.reset()
+    sdkContext = null
     RecompositionTracker.reset()
     listeners.clear()
     isEnabled = true

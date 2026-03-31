@@ -57,6 +57,7 @@ object AutoMobileSDK {
   private var isEnabled = true
   private var context: Context? = null
   private var eventBuffer: SdkEventBuffer? = null
+  private var mainHandler: Handler? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -100,8 +101,11 @@ object AutoMobileSDK {
     AutoMobileBiometrics.initialize(appContext)
 
     // Subsystems that register lifecycle observers or activity callbacks must run on main thread
-    val mainHandler = Handler(Looper.getMainLooper())
-    mainHandler.post {
+    val handler = Handler(Looper.getMainLooper())
+    mainHandler = handler
+    handler.post {
+      // Guard: if shutdown() was called before this posted block runs, no-op.
+      if (this@AutoMobileSDK.context == null) return@post
       AutoMobileOsEvents.initialize(appContext, buffer)
       RecompositionTracker.initialize(appContext)
       RecompositionTracker.setEnabled(isEnabled)
@@ -231,6 +235,19 @@ object AutoMobileSDK {
    * called again to restart the SDK.
    */
   fun shutdown() {
+    // Cancel any pending main-thread init work so a fast init→shutdown
+    // sequence doesn't re-register hooks after shutdown completes.
+    mainHandler?.removeCallbacksAndMessages(null)
+    mainHandler = null
+
+    // Tear down OS event hooks and broadcast interceptor to prevent
+    // duplicate registrations on a subsequent initialize() call.
+    val ctx = context
+    if (ctx != null) {
+      AutoMobileOsEvents.shutdown(ctx)
+      AutoMobileBroadcastInterceptor.shutdown(ctx)
+    }
+
     eventBuffer?.shutdown()
     eventBuffer = null
     RecompositionTracker.reset()

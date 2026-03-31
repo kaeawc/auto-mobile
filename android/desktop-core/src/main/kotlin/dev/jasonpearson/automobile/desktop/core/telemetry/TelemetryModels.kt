@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.telemetry
 
+import androidx.compose.ui.graphics.vector.ImageVector
+import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
@@ -21,6 +23,7 @@ data class TelemetryPushRequest(
     val command: String,
     val category: String? = null,
     val deviceId: String? = null,
+    val sessionId: String? = null,
 )
 
 /**
@@ -43,6 +46,7 @@ data class TelemetryPushResponse(
 data class TelemetryEventEnvelope(
     val category: String,
     val timestamp: Long,
+    val deviceId: String? = null,
     val data: JsonObject,
 )
 
@@ -69,6 +73,8 @@ data class AccessibilityViolationInfo(
  */
 sealed class TelemetryDisplayEvent {
     abstract val timestamp: Long
+    /** Device ID that generated this event, if known. Used for per-device filtering. */
+    open val deviceId: String? = null
 
     data class Network(
         override val timestamp: Long,
@@ -84,7 +90,29 @@ sealed class TelemetryDisplayEvent {
         val requestBody: String?,
         val responseBody: String?,
         val contentType: String?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily parsed request body JSON — only decoded on first access. */
+        val parsedRequestBody: JsonObject? by lazy {
+            requestBody?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+
+        /** Lazily parsed response body JSON — only decoded on first access. */
+        val parsedResponseBody: JsonObject? by lazy {
+            responseBody?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
 
     data class Log(
         override val timestamp: Long,
@@ -125,7 +153,19 @@ sealed class TelemetryDisplayEvent {
         val exceptionType: String?,
         val screen: String?,
         val stackTrace: List<StackTraceFrame>?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily formatted stack trace string — only built on first access. */
+        val formattedStackTrace: String by lazy {
+            stackTrace?.joinToString("\n") { frame ->
+                val location = if (frame.fileName != null && frame.lineNumber != null) {
+                    "(${frame.fileName}:${frame.lineNumber})"
+                } else {
+                    ""
+                }
+                "${frame.className}.${frame.methodName}$location"
+            } ?: ""
+        }
+    }
 
     data class Storage(
         override val timestamp: Long,
@@ -188,10 +228,21 @@ sealed class TelemetryDisplayEvent {
         val likelyCause: String?,
         val screenName: String?,
         val detailsJson: String?,
-    ) : TelemetryDisplayEvent()
+    ) : TelemetryDisplayEvent() {
+        /** Lazily parsed JSON details — only decoded on first access. */
+        val parsedDetails: JsonObject? by lazy {
+            detailsJson?.let {
+                try {
+                    telemetryJson.parseToJsonElement(it).jsonObject
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+    }
 }
 
-private val json = Json { ignoreUnknownKeys = true }
+private val telemetryJson = Json { ignoreUnknownKeys = true }
 
 /**
  * Converts a [TelemetryEventEnvelope] into a typed [TelemetryDisplayEvent]
@@ -212,7 +263,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 val reqJson = d.stringOrNull("request_headers_json")
                 if (reqJson != null) {
                     try {
-                        json.parseToJsonElement(reqJson).jsonObject.forEach { (k, v) ->
+                        telemetryJson.parseToJsonElement(reqJson).jsonObject.forEach { (k, v) ->
                             reqHeaders[k] = v.jsonPrimitive.content
                         }
                     } catch (_: Exception) {}
@@ -222,7 +273,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                 val respJson = d.stringOrNull("response_headers_json")
                 if (respJson != null) {
                     try {
-                        json.parseToJsonElement(respJson).jsonObject.forEach { (k, v) ->
+                        telemetryJson.parseToJsonElement(respJson).jsonObject.forEach { (k, v) ->
                             respHeaders[k] = v.jsonPrimitive.content
                         }
                     } catch (_: Exception) {}
@@ -261,7 +312,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             val propsJson = d.stringOrNull("properties_json")
             if (props.isEmpty() && propsJson != null) {
                 try {
-                    val parsed = json.parseToJsonElement(propsJson).jsonObject
+                    val parsed = telemetryJson.parseToJsonElement(propsJson).jsonObject
                     parsed.forEach { (k, v) -> props[k] = v.jsonPrimitive.content }
                 } catch (_: Exception) { /* ignore parse failures */ }
             }
@@ -279,7 +330,7 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             val detailsJson = d.stringOrNull("details_json")
             if (details.isEmpty() && detailsJson != null) {
                 try {
-                    val parsed = json.parseToJsonElement(detailsJson).jsonObject
+                    val parsed = telemetryJson.parseToJsonElement(detailsJson).jsonObject
                     parsed.forEach { (k, v) -> details[k] = v.jsonPrimitive.content }
                 } catch (_: Exception) { /* ignore parse failures */ }
             }
@@ -438,10 +489,10 @@ private fun JsonObject.stringOrNull(key: String): String? =
 /**
  * Severity classification for telemetry events, used for filter toggles.
  */
-enum class EventSeverity(val label: String, val icon: String, val color: Long) {
-    Error("Errors", "\u274C", 0xFFFF6B6B),
-    Warning("Warnings", "\u26A0\uFE0F", 0xFFE0C040),
-    Info("Info", "\u2139\uFE0F", 0xFF74C0FC),
+enum class EventSeverity(val label: String, val icon: ImageVector, val color: Long) {
+    Error("Errors", AppIcons.SeverityError, 0xFFFF6B6B),
+    Warning("Warnings", AppIcons.SeverityWarning, 0xFFE0C040),
+    Info("Info", AppIcons.SeverityInfo, 0xFF74C0FC),
 }
 
 /**
@@ -498,62 +549,64 @@ val TelemetryDisplayEvent.eventSeverity: EventSeverity
 
 /**
  * Full-text search across all relevant fields of a telemetry event.
+ *
+ * @param useRegex When true, [query] is compiled as a case-insensitive regex.
+ *   Invalid regex patterns gracefully return false (no match).
  */
-fun TelemetryDisplayEvent.matchesSearch(query: String): Boolean {
+fun TelemetryDisplayEvent.matchesSearch(query: String, useRegex: Boolean = false): Boolean {
     if (query.isBlank()) return true
-    val q = query.lowercase()
-    return when (this) {
-        is TelemetryDisplayEvent.Network ->
-            method.lowercase().contains(q) ||
-            "$statusCode".contains(q) ||
-            url.lowercase().contains(q) ||
-            host?.lowercase()?.contains(q) == true ||
-            path?.lowercase()?.contains(q) == true ||
-            error?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Log ->
-            tag.lowercase().contains(q) ||
-            message.lowercase().contains(q)
-        is TelemetryDisplayEvent.Navigation ->
-            destination.lowercase().contains(q) ||
-            source?.lowercase()?.contains(q) == true ||
-            triggeringInteraction?.lowercase()?.contains(q) == true ||
-            arguments?.values?.any { it.lowercase().contains(q) } == true
-        is TelemetryDisplayEvent.Os ->
-            category.lowercase().contains(q) ||
-            kind.lowercase().contains(q) ||
-            details?.values?.any { it.lowercase().contains(q) } == true
-        is TelemetryDisplayEvent.Custom ->
-            name.lowercase().contains(q) ||
-            properties.entries.any { it.key.lowercase().contains(q) || it.value.lowercase().contains(q) }
-        is TelemetryDisplayEvent.Failure ->
-            type.lowercase().contains(q) ||
-            title.lowercase().contains(q) ||
-            exceptionType?.lowercase()?.contains(q) == true ||
-            screen?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Storage ->
-            fileName.lowercase().contains(q) ||
-            key?.lowercase()?.contains(q) == true ||
-            value?.lowercase()?.contains(q) == true ||
-            changeType.lowercase().contains(q)
-        is TelemetryDisplayEvent.Layout ->
-            subType.lowercase().contains(q) ||
-            composableName?.lowercase()?.contains(q) == true ||
-            screenName?.lowercase()?.contains(q) == true ||
-            likelyCause?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Performance ->
-            health.lowercase().contains(q) ||
-            changedMetrics.any { it.lowercase().contains(q) } ||
-            "performance".contains(q)
-        is TelemetryDisplayEvent.ToolCall ->
-            toolName.lowercase().contains(q) ||
-            error?.lowercase()?.contains(q) == true
-        is TelemetryDisplayEvent.Accessibility ->
-            packageName.lowercase().contains(q) ||
-            screenId.lowercase().contains(q) ||
-            violations.any { it.type.lowercase().contains(q) || it.message.lowercase().contains(q) }
-        is TelemetryDisplayEvent.Memory ->
-            packageName.lowercase().contains(q) ||
-            violations.any { it.lowercase().contains(q) } ||
-            "memory".contains(q)
+
+    if (useRegex) {
+        val regex = try {
+            Regex(query, RegexOption.IGNORE_CASE)
+        } catch (_: java.util.regex.PatternSyntaxException) {
+            return false
+        }
+        return anyField { regex.containsMatchIn(it) }
     }
+
+    val q = query.lowercase()
+    return anyField { it.lowercase().contains(q) }
 }
+
+/**
+ * Short-circuit iteration over searchable fields.  Avoids allocating
+ * intermediate lists -- the [predicate] is tested lazily and returns
+ * as soon as the first match is found.
+ */
+private inline fun TelemetryDisplayEvent.anyField(predicate: (String) -> Boolean): Boolean =
+    when (this) {
+        is TelemetryDisplayEvent.Network ->
+            predicate(method) || predicate("$statusCode") || predicate(url) ||
+            host?.let(predicate) == true || path?.let(predicate) == true ||
+            error?.let(predicate) == true
+        is TelemetryDisplayEvent.Log ->
+            predicate(tag) || predicate(message)
+        is TelemetryDisplayEvent.Navigation ->
+            predicate(destination) || source?.let(predicate) == true ||
+            triggeringInteraction?.let(predicate) == true ||
+            arguments?.values?.any(predicate) == true
+        is TelemetryDisplayEvent.Os ->
+            predicate(category) || predicate(kind) ||
+            details?.values?.any(predicate) == true
+        is TelemetryDisplayEvent.Custom ->
+            predicate(name) || properties.keys.any(predicate) || properties.values.any(predicate)
+        is TelemetryDisplayEvent.Failure ->
+            predicate(type) || predicate(title) ||
+            exceptionType?.let(predicate) == true || screen?.let(predicate) == true
+        is TelemetryDisplayEvent.Storage ->
+            predicate(fileName) || key?.let(predicate) == true ||
+            value?.let(predicate) == true || predicate(changeType)
+        is TelemetryDisplayEvent.Layout ->
+            predicate(subType) || composableName?.let(predicate) == true ||
+            screenName?.let(predicate) == true || likelyCause?.let(predicate) == true
+        is TelemetryDisplayEvent.Performance ->
+            predicate(health) || changedMetrics.any(predicate) || predicate("performance")
+        is TelemetryDisplayEvent.ToolCall ->
+            predicate(toolName) || error?.let(predicate) == true
+        is TelemetryDisplayEvent.Accessibility ->
+            predicate(packageName) || predicate(screenId) ||
+            violations.any { predicate(it.type) || predicate(it.message) }
+        is TelemetryDisplayEvent.Memory ->
+            predicate(packageName) || violations.any(predicate) || predicate("memory")
+    }

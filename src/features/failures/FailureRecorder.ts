@@ -292,6 +292,7 @@ export class FailureRecorder implements FailureRecorderService {
         screen: input.currentScreen ?? null,
         timestamp: this.timer.now(),
         stackTrace: input.stackTrace,
+        deviceId: input.deviceId,
       });
 
       return occurrenceId;
@@ -419,6 +420,7 @@ export class FailureRecorder implements FailureRecorderService {
         screen: input.currentScreen ?? null,
         timestamp: this.timer.now(),
         stackTrace: input.stackTrace,
+        deviceId: input.deviceId,
       });
 
       return occurrenceId;

@@ -10,7 +10,7 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable {
     public static let shared = AutoMobileInteractionTracker()
 
     private let lock = NSLock()
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var bundleId: String?
     private var _isEnabled = false
     private var lastTapProcessedAt: TimeInterval = 0

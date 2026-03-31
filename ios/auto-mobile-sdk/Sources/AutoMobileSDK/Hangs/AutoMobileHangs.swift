@@ -8,7 +8,7 @@ public final class AutoMobileHangs: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var watchdogThread: Thread?
     private var _isMonitoring = false
     private var monitorGeneration: UInt64 = 0

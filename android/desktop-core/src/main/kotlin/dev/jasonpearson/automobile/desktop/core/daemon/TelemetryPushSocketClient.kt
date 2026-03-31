@@ -303,9 +303,13 @@ class TelemetryPushSocketClient : TelemetryPushClient {
             "telemetry_push" -> {
                 val envelope = response.data
                 if (envelope != null) {
-                    val event = parseTelemetryEvent(envelope)
-                    if (event != null) {
-                        _telemetryEvents.tryEmit(event)
+                    try {
+                        val event = parseTelemetryEvent(envelope)
+                        if (event != null) {
+                            _telemetryEvents.tryEmit(event)
+                        }
+                    } catch (e: Exception) {
+                        log.warn("Failed to parse telemetry push message: ${e.message}")
                     }
                 }
             }

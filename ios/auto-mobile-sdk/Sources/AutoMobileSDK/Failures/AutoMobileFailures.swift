@@ -10,7 +10,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var events: [HandledExceptionEvent] = []
     private let maxEvents = 100
 
@@ -51,6 +51,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         let currentBuffer = buffer
         lock.unlock()
 
+        NSLog("[AutoMobileSDK] recordHandledException: domain=\(nsError.domain), buffer=\(currentBuffer != nil ? "exists" : "nil")")
         let sdkEvent = SdkHandledExceptionEvent(
             timestamp: event.timestamp,
             errorDomain: event.errorDomain,

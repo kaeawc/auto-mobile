@@ -7,7 +7,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var _captureHeaders = false
     private var _captureBodies = false
     var _maxBodyBytes: Int = 32 * 1024 // 32KB default (internal for URLProtocol access)

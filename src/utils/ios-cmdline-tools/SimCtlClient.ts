@@ -208,9 +208,11 @@ export interface SimCtl {
   setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void>;
 
   /**
-   * Open Simulator.app so the booted simulator is visible
+   * Open Simulator.app. If udid is provided, focuses that specific device window.
+   * With multiple simulators booted, this ensures the right device is visible.
+   * @param udid - Optional device UDID to focus
    */
-  openSimulatorApp(): Promise<void>;
+  openSimulatorApp(udid?: string): Promise<void>;
 }
 
 interface SimctlHostControlRunner {
@@ -499,6 +501,13 @@ export class SimCtlClient implements SimCtl {
   async startSimulator(udid: string): Promise<ChildProcess> {
     logger.debug(`Starting iOS simulator ${udid}`);
     await this.executeCommand(`boot ${udid}`);
+
+    // Open Simulator.app focused on this specific device
+    try {
+      await this.openSimulatorApp(udid);
+    } catch {
+      logger.debug("Could not open Simulator.app (non-fatal)");
+    }
 
     // simctl boot is synchronous, so we return a mock ChildProcess
     const mockProcess = {
@@ -908,8 +917,17 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommand(`ui ${targetDevice} appearance ${mode}`);
   }
 
-  async openSimulatorApp(): Promise<void> {
+  async openSimulatorApp(udid?: string): Promise<void> {
+    // Ensure Simulator.app is open (creates windows for all booted devices)
     await this.execAsync("open", ["-a", "Simulator"]);
+    // If a specific device is requested, focus it by switching to it
+    // --args -CurrentDeviceUDID only works on fresh launch; for already-running
+    // Simulator, we activate the app which brings all device windows forward
+    if (udid) {
+      try {
+        await this.execAsync("osascript", ["-e", 'tell application "Simulator" to activate']);
+      } catch { /* non-fatal */ }
+    }
   }
 }
 

@@ -9,4 +9,5 @@ class FakeSettingsProvider(
     override var failuresDateRange: String = "24h",
     override var androidIde: String = "auto",
     override var iosIde: String = "auto",
+    override var themeMode: String = "dark",
 ) : SettingsProvider

@@ -33,6 +33,8 @@ import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from 
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
 import { CtrlProxyClient } from "../features/observe/android";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios/CtrlProxyClient";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
@@ -537,34 +539,20 @@ export class Daemon {
     server.setOnSubscriberConnected((deviceId: string | null) => {
       logger.info(`[Daemon] IDE plugin subscribed to observation stream (device: ${deviceId ?? "all"}), ensuring WebSocket connections...`);
 
-      // Get all Android devices from the device pool
       const allDevices = this.devicePool.getAllDevices();
+
+      // Android: ensure accessibility service WebSocket is connected
       const androidDevices = allDevices.filter(d => d.platform === "android");
-
-      if (androidDevices.length === 0) {
-        logger.info("[Daemon] No Android devices in pool to connect");
-        return;
-      }
-
-      // For each Android device, ensure the accessibility service WebSocket is connected
       for (const pooledDevice of androidDevices) {
-        // If a specific device was requested, only connect to that one
-        if (deviceId !== null && pooledDevice.id !== deviceId) {
-          continue;
-        }
-
+        if (deviceId !== null && pooledDevice.id !== deviceId) continue;
         try {
-          // Create a BootedDevice from the pooled device info
           const bootedDevice = {
             deviceId: pooledDevice.id,
             name: pooledDevice.name,
             platform: pooledDevice.platform as "android",
           };
-
-          // Get or create the accessibility service client for this device
-          const client = CtrlProxyClient.getInstance(bootedDevice, null);
-
-          // Trigger WebSocket connection (async, fire-and-forget)
+          const adb = defaultAdbClientFactory.create(pooledDevice.id);
+          const client = CtrlProxyClient.getInstance(bootedDevice, adb);
           client.ensureConnected().then(connected => {
             if (connected) {
               logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);
@@ -577,6 +565,36 @@ export class Daemon {
         } catch (error) {
           logger.warn(`[Daemon] Error setting up WebSocket for ${pooledDevice.id}: ${error}`);
         }
+      }
+
+      // iOS: ensure CtrlProxy is set up and connected
+      const iosDevices = allDevices.filter(d => d.platform === "ios");
+      for (const pooledDevice of iosDevices) {
+        if (deviceId !== null && pooledDevice.id !== deviceId) continue;
+        try {
+          const bootedDevice = {
+            deviceId: pooledDevice.id,
+            name: pooledDevice.name,
+            platform: "ios" as const,
+          };
+          logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${pooledDevice.id}`);
+          const client = IOSCtrlProxyClient.getInstance(bootedDevice, null);
+          client.ensureConnected().then(connected => {
+            if (connected) {
+              logger.info(`[Daemon] CtrlProxy iOS connected to ${pooledDevice.id} for observation stream`);
+            } else {
+              logger.warn(`[Daemon] Failed to connect CtrlProxy iOS to ${pooledDevice.id}`);
+            }
+          }).catch(error => {
+            logger.warn(`[Daemon] Error connecting CtrlProxy iOS to ${pooledDevice.id}: ${error}`);
+          });
+        } catch (error) {
+          logger.warn(`[Daemon] Error setting up CtrlProxy iOS for ${pooledDevice.id}: ${error}`);
+        }
+      }
+
+      if (allDevices.length === 0) {
+        logger.info("[Daemon] No devices in pool to connect");
       }
     });
 

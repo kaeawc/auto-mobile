@@ -26,6 +26,7 @@ data class NetworkReplayResult(
     val durationMs: Long,
     val responseHeaders: Map<String, String>,
     val responseBody: String?,
+    val responseBodyBytes: ByteArray? = null,
     val error: String?,
 )
 
@@ -77,7 +78,7 @@ object NetworkRequestRunner : NetworkRequestExecutor {
                 else -> builder.method(method, bodyPublisher)
             }
 
-            val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+            val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofByteArray())
             val durationMs = System.currentTimeMillis() - startMs
 
             val respHeaders = mutableMapOf<String, String>()
@@ -87,11 +88,17 @@ object NetworkRequestRunner : NetworkRequestExecutor {
                 }
             }
 
+            val bodyBytes = response.body()
+            val contentType = respHeaders.entries.find { it.key.equals("content-type", ignoreCase = true) }?.value ?: ""
+            val isBinary = contentType.startsWith("image/") || contentType.startsWith("audio/") || contentType.startsWith("video/") || contentType.contains("octet-stream")
+            val bodyStr = if (isBinary) null else String(bodyBytes, Charsets.UTF_8)
+
             NetworkReplayResult(
                 statusCode = response.statusCode(),
                 durationMs = durationMs,
                 responseHeaders = respHeaders,
-                responseBody = response.body(),
+                responseBody = bodyStr,
+                responseBodyBytes = if (isBinary) bodyBytes else null,
                 error = null,
             )
         } catch (e: Exception) {

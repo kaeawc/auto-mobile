@@ -24,6 +24,7 @@ const SOCKET_CONFIG: SocketServerConfig = {
 interface TelemetryFilter {
   category: string | null; // "network", "log", "custom", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
   deviceId: string | null;
+  sessionId: string | null;
 }
 
 interface TelemetryPushMessage {
@@ -53,11 +54,15 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     return {
       category: (request.category as string) ?? null,
       deviceId: (request.deviceId as string) ?? null,
+      sessionId: (request.sessionId as string) ?? null,
     };
   }
 
   protected matchesFilter(filter: TelemetryFilter, data: TelemetryEvent): boolean {
     if (filter.category !== null && filter.category !== data.category) {
+      return false;
+    }
+    if (filter.sessionId !== null && filter.sessionId !== data.sessionId) {
       return false;
     }
     if (filter.deviceId !== null && filter.deviceId !== data.deviceId) {
@@ -88,16 +93,16 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       shouldInclude("os") ? getOsEvents({ deviceId, limit }) : [],
     ]);
     for (const r of networkRows) {
-      events.push({ category: "network", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "network", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
     for (const r of logRows) {
-      events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
     for (const r of customRows) {
-      events.push({ category: "custom", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "custom", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
     for (const r of osRows) {
-      events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
 
     if (shouldInclude("navigation")) {
@@ -125,6 +130,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           category: "navigation",
           timestamp: r.timestamp,
           deviceId: r.deviceId,
+          sessionId: r.sessionId ?? null,
           data: { ...r, screenshotUri },
         });
       }
@@ -152,8 +158,13 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
           ])
           .where("failure_groups.type", "=", failureType);
 
+        // Always filter by device — never send failures with empty/null device_id
         if (deviceId) {
           q = q.where("failure_occurrences.device_id", "=", deviceId);
+        } else {
+          // Even without a device filter, exclude failures with no device_id
+          q = q.where("failure_occurrences.device_id", "is not", null)
+               .where("failure_occurrences.device_id", "!=", "");
         }
 
         const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();
@@ -177,6 +188,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
             category: failureType,
             timestamp: r.timestamp,
             deviceId: r.deviceId,
+            sessionId: r.sessionId ?? null,
             data: {
               type: r.type, occurrenceId: r.occurrenceId, groupId: r.groupId,
               severity: r.severity, title: r.title, exceptionType,
@@ -195,10 +207,10 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       shouldInclude("layout") ? getLayoutEvents({ deviceId, limit }) : [],
     ]);
     for (const r of storageRows) {
-      events.push({ category: "storage", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "storage", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
     for (const r of layoutRows) {
-      events.push({ category: "layout", timestamp: r.timestamp, deviceId: r.deviceId, data: r });
+      events.push({ category: "layout", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
 
     // Sort oldest-first so dashboard shows them in correct order

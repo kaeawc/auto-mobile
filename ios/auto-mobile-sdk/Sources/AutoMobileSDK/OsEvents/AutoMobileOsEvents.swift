@@ -12,7 +12,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     public static let shared = AutoMobileOsEvents()
 
     private let lock = NSLock()
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var bundleId: String?
     private var _isInitialized = false
 

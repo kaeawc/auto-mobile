@@ -10,7 +10,7 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     public static let shared = AutoMobileNotificationObserver()
 
     private let lock = NSLock()
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var bundleId: String?
     private var _isInitialized = false
     private var observers: [NSObjectProtocol] = []

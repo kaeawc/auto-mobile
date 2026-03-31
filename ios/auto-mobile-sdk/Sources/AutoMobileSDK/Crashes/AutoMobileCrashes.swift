@@ -10,7 +10,7 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     private let lock = NSLock()
     private var bundleId: String?
-    private weak var buffer: SdkEventBuffer?
+    private var buffer: SdkEventBuffer?
     private var _isInitialized = false
     private var previousExceptionHandler: (@convention(c) (NSException) -> Void)?
     private var installedSignalHandlers = false

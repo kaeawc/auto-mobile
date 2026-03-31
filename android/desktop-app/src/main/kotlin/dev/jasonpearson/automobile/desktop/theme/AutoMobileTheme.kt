@@ -57,3 +57,19 @@ fun AutoMobileTheme(
     content = content,
   )
 }
+
+/**
+ * Overload that resolves a [themeMode] string ("dark", "light", "system") to a boolean.
+ */
+@Composable
+fun AutoMobileTheme(
+  themeMode: String,
+  content: @Composable () -> Unit,
+) {
+  val isDark = when (themeMode) {
+    "light" -> false
+    "system" -> isSystemInDarkTheme()
+    else -> true // "dark" or unknown
+  }
+  AutoMobileTheme(darkTheme = isDark, content = content)
+}

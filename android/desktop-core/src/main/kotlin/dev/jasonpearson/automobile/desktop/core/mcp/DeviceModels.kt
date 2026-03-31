@@ -36,6 +36,8 @@ data class BootedDeviceInfo(
     val isVirtual: Boolean,
     val status: String, // "booted"
     val serviceStatus: DeviceServiceStatus? = null,
+    val batteryLevel: Int? = null, // 0-100, null if unknown
+    val connectionType: String? = null, // "usb", "wifi", or null if unknown
 )
 
 @Serializable

@@ -5,6 +5,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * State holder for the Layout Inspector.
@@ -19,6 +24,15 @@ import androidx.compose.runtime.setValue
  * Phase 2: Will add WebSocket connection for live data
  */
 class LayoutInspectorState {
+    /** Debounce window for rapid hierarchy updates from the stream. */
+    companion object {
+        const val HIERARCHY_DEBOUNCE_MS = 100L
+    }
+
+    // Coroutine scope for debouncing hierarchy updates
+    private val debounceScope = CoroutineScope(Dispatchers.Main)
+    private var debounceJob: Job? = null
+
     // Connection state
     var connectionStatus by mutableStateOf(ConnectionStatus.Disconnected)
         private set
@@ -171,14 +185,31 @@ class LayoutInspectorState {
     fun updateHierarchy(newHierarchy: UIElementInfo, newRotation: Int = 0) {
         val parsed = buildParsedHierarchy(newHierarchy).copy(rotation = newRotation)
         val changedIds = computeChangedElements(currentElementMap, parsed.elementMap)
-        applyHierarchyUpdate(parsed, changedIds)
+        applyHierarchyUpdateImmediate(parsed, changedIds)
     }
 
     /**
      * Apply a pre-computed hierarchy update on the main thread.
      * Only performs fast state assignments — no tree traversals.
+     *
+     * When multiple updates arrive within [HIERARCHY_DEBOUNCE_MS], only the
+     * last one is applied. This prevents excessive recompositions during rapid
+     * streaming. Use [applyHierarchyUpdateImmediate] to bypass debouncing.
      */
     fun applyHierarchyUpdate(parsed: ParsedHierarchy, changedIds: Set<String>) {
+        debounceJob?.cancel()
+        debounceJob = debounceScope.launch {
+            delay(HIERARCHY_DEBOUNCE_MS)
+            applyHierarchyUpdateImmediate(parsed, changedIds)
+        }
+    }
+
+    /**
+     * Apply a hierarchy update immediately without debouncing.
+     * Used for programmatic updates (e.g. initial load, refresh) that should
+     * be visible right away.
+     */
+    fun applyHierarchyUpdateImmediate(parsed: ParsedHierarchy, changedIds: Set<String>) {
         changedElementIds = changedIds
         currentParsedHierarchy = parsed
         rotation = parsed.rotation
@@ -265,6 +296,7 @@ class LayoutInspectorState {
      * Disconnect from device. Clears all device-specific stale data.
      */
     fun disconnect() {
+        debounceJob?.cancel()
         connectionStatus = ConnectionStatus.Disconnected
         streamingMode = StreamingMode.Paused
         screenshotData = null

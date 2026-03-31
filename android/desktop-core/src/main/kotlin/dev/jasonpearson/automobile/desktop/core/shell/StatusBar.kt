@@ -16,6 +16,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.material3.Text
+import dev.jasonpearson.automobile.desktop.core.theme.DesktopTypography
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
 /**
@@ -76,7 +77,7 @@ fun StatusBar(
                 }
                 Text(
                     text = "${currentFps.toInt()} FPS",
-                    fontSize = 10.sp,
+                    style = DesktopTypography.label,
                     color = fpsColor,
                     lineHeight = 10.sp,
                 )
@@ -84,7 +85,7 @@ fun StatusBar(
             if (currentMemoryMb != null) {
                 Text(
                     text = "${"%.0f".format(currentMemoryMb)} MB",
-                    fontSize = 10.sp,
+                    style = DesktopTypography.label,
                     color = colors.text.normal.copy(alpha = 0.7f),
                     lineHeight = 10.sp,
                 )

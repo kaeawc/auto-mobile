@@ -122,24 +122,28 @@ class RealMcpProcessDetector(
         psProcesses.forEach { (pid, name, startTime, cmdLine) ->
             val uptimeMs = timeProvider.currentTimeMillis() - startTime
 
-            // Determine connection type based on what THIS specific process is actually doing
+            // Determine connection type: always prefer Unix socket if it exists
             val socketPath = if (socketFilesExist) isListeningOnSocket(pid) else null
+            // Fallback: if socket files exist but this PID isn't listening, still use Unix socket
+            // (the daemon PID in the PID file may differ from the detected process PID)
+            val fallbackSocketPath = if (socketPath == null && socketFilesExist) {
+                socketFileChecker.findDaemonSocketFiles().firstOrNull()
+            } else null
 
             val (connectionType, port, resolvedSocketPath) = when {
                 socketPath != null -> {
                     Triple(McpConnectionType.UnixSocket, null, socketPath)
                 }
-                // Check if THIS process is the daemon running in HTTP mode
-                // Only --daemon-mode is the actual daemon; --daemon start is just the manager
+                fallbackSocketPath != null && (cmdLine.contains("--daemon-mode") || cmdLine.contains("auto-mobile")) -> {
+                    Triple(McpConnectionType.UnixSocket, null, fallbackSocketPath)
+                }
                 cmdLine.contains("--daemon-mode") -> {
                     Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
                 }
-                // Check for explicit port indicators
                 cmdLine.contains("--port") || cmdLine.contains(":3000") || cmdLine.contains("http") -> {
                     Triple(McpConnectionType.StreamableHttp, extractPort(cmdLine) ?: 3000, null)
                 }
                 else -> {
-                    // Default to STDIO if nothing else matches
                     Triple(McpConnectionType.Stdio, null, null)
                 }
             }

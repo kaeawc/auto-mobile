@@ -213,7 +213,7 @@ class SlidesLogicTest {
           ),
           SlideContent.CodeSample(
               code =
-                  "@Test\nfun testExample() {\n    tapOn(text = \"Button\")\n    assertVisible(text = \"Success\")\n}",
+                  "@Test\nfun testExample() {\n    tapOn(text = \"Button\")\n    observe(waitFor = WaitFor(text = \"Success\"))\n}",
               language = "kotlin",
               title = "Simple Test",
           ),

@@ -61,7 +61,7 @@ object HighlightingExample {
                 tapOn(text = "Sign In")
 
                 // Verify success
-                assertVisible(text = "Welcome")
+                observe(waitFor = WaitFor(text = "Welcome"))
             }
 
             @Test
@@ -76,7 +76,7 @@ object HighlightingExample {
                 tapOn(text = "Confirm")
 
                 // Verify back to login screen
-                assertVisible(text = "Login")
+                observe(waitFor = WaitFor(text = "Login"))
             }
             """
                 .trimIndent(),
@@ -87,7 +87,7 @@ object HighlightingExample {
             tapOn(text = "Login")
             inputText("user@example.com")
             tapOn(text = "Sign In")
-            assertVisible(text = "Welcome")
+            observe(waitFor = WaitFor(text = "Welcome"))
             """
                 .trimIndent(),
     )
@@ -123,8 +123,8 @@ object HighlightingExample {
                 text: "Sign In"
                 description: "Submit credentials"
 
-              - action: "assertVisible"
-                selector:
+              - action: "observe"
+                waitFor:
                   text: "Welcome"
                 description: "Verify successful login"
             """
@@ -135,7 +135,7 @@ object HighlightingExample {
             """
             action: "tap"
             action: "inputText"
-            action: "assertVisible"
+            action: "observe"
             """
                 .trimIndent(),
     )

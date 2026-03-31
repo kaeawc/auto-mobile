@@ -27,6 +27,7 @@ internal class SdkEventBuffer(
   private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
     Thread(r, "SdkEventBuffer").apply { isDaemon = true }
   },
+  private val dropCounter: DropCounter? = null,
 ) {
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
@@ -50,7 +51,14 @@ internal class SdkEventBuffer(
 
   /** Add an event to the buffer. Flushes immediately if buffer is full. */
   fun add(event: SdkEvent) {
-    if (isShutdown || !isEnabled) return
+    if (isShutdown) {
+      dropCounter?.increment(DropReason.SHUTDOWN)
+      return
+    }
+    if (!isEnabled) {
+      dropCounter?.increment(DropReason.DISABLED)
+      return
+    }
 
     val shouldFlush: Boolean
     val snapshot: List<SdkEvent>
@@ -98,7 +106,7 @@ internal class SdkEventBuffer(
     try {
       onFlush(events)
     } catch (_: Exception) {
-      // Swallow exceptions to prevent caller disruption
+      dropCounter?.increment(DropReason.FLUSH_ERROR)
     }
   }
 }

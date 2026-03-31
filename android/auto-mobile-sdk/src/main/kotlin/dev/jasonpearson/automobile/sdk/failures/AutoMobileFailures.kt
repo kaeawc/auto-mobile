@@ -10,7 +10,6 @@ import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import java.io.PrintWriter
 import java.io.StringWriter
-import java.util.concurrent.CopyOnWriteArrayList
 
 /**
  * SDK API for reporting handled (non-fatal) exceptions.
@@ -55,7 +54,8 @@ object AutoMobileFailures {
     const val EXTRA_SDK_INT = "sdk_int"
 
     private var context: Context? = null
-    private val recentEvents = CopyOnWriteArrayList<HandledExceptionEvent>()
+    private val recentEvents = ArrayDeque<HandledExceptionEvent>(MAX_EVENTS + 1)
+    private val eventsLock = Any()
 
     /**
      * Initialize the failures API with application context.
@@ -119,19 +119,29 @@ object AutoMobileFailures {
      *
      * @return List of recent events (up to [MAX_EVENTS])
      */
-    fun getRecentEvents(): List<HandledExceptionEvent> = recentEvents.toList()
+    fun getRecentEvents(): List<HandledExceptionEvent> {
+        synchronized(eventsLock) {
+            return recentEvents.toList()
+        }
+    }
 
     /**
      * Clear all stored events from memory.
      */
     fun clearEvents() {
-        recentEvents.clear()
+        synchronized(eventsLock) {
+            recentEvents.clear()
+        }
     }
 
     /**
      * Get the current event count.
      */
-    fun getEventCount(): Int = recentEvents.size
+    fun getEventCount(): Int {
+        synchronized(eventsLock) {
+            return recentEvents.size
+        }
+    }
 
     private fun createEvent(
         context: Context,
@@ -161,11 +171,11 @@ object AutoMobileFailures {
     }
 
     private fun storeEvent(event: HandledExceptionEvent) {
-        recentEvents.add(event)
-
-        // Trim to max size if needed (remove oldest events)
-        while (recentEvents.size > MAX_EVENTS) {
-            recentEvents.removeAt(0)
+        synchronized(eventsLock) {
+            if (recentEvents.size >= MAX_EVENTS) {
+                recentEvents.removeFirst()
+            }
+            recentEvents.addLast(event)
         }
     }
 

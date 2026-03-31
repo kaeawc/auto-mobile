@@ -76,7 +76,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
             tracker?.onForeground()
         }
         let bgObserver = NotificationCenter.default.addObserver(
-            forName: UIApplication.willResignActiveNotification,
+            forName: UIApplication.didEnterBackgroundNotification,
             object: nil,
             queue: .main
         ) { [weak tracker] _ in

@@ -246,6 +246,7 @@ object AutoMobileSDK {
     if (ctx != null) {
       AutoMobileOsEvents.shutdown(ctx)
       AutoMobileBroadcastInterceptor.shutdown(ctx)
+      AutoMobileClickTracker.shutdown(ctx)
     }
 
     eventBuffer?.shutdown()

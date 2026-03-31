@@ -2,6 +2,7 @@ package dev.jasonpearson.automobile.sdk.interaction
 
 import android.app.Activity
 import android.app.Application
+import android.content.Context
 import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
@@ -47,12 +48,13 @@ object AutoMobileClickTracker {
     private val handler = Handler(Looper.getMainLooper())
     private val wrappedActivities = java.util.WeakHashMap<Activity, Boolean>()
     @Volatile private var lastTapProcessedAt = 0L
+    private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
 
     internal fun initialize(application: Application, appId: String?, buffer: SdkEventBuffer) {
         this.buffer = buffer
         this.applicationId = appId
 
-        application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+        val callbacks = object : Application.ActivityLifecycleCallbacks {
             override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
             override fun onActivityStarted(activity: Activity) {}
             override fun onActivityResumed(activity: Activity) {
@@ -69,7 +71,23 @@ object AutoMobileClickTracker {
             override fun onActivityDestroyed(activity: Activity) {
                 wrappedActivities.remove(activity)
             }
-        })
+        }
+        lifecycleCallbacks = callbacks
+        application.registerActivityLifecycleCallbacks(callbacks)
+    }
+
+    /**
+     * Unregisters the activity lifecycle callbacks and clears internal state.
+     * Safe to call even if [initialize] was never called.
+     */
+    fun shutdown(context: Context) {
+        val app = context.applicationContext as? Application ?: return
+        lifecycleCallbacks?.let { app.unregisterActivityLifecycleCallbacks(it) }
+        lifecycleCallbacks = null
+        wrappedActivities.clear()
+        buffer = null
+        applicationId = null
+        lastTapProcessedAt = 0L
     }
 
     private fun wrapWindowCallback(activity: Activity) {

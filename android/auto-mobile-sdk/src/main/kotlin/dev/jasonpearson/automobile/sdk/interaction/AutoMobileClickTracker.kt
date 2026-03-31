@@ -84,6 +84,19 @@ object AutoMobileClickTracker {
         val app = context.applicationContext as? Application ?: return
         lifecycleCallbacks?.let { app.unregisterActivityLifecycleCallbacks(it) }
         lifecycleCallbacks = null
+        // Restore original Window.Callback on all wrapped activities so
+        // tap dispatch no longer goes through SDK wrapper logic.
+        for (activity in wrappedActivities.keys.toList()) {
+            try {
+                val window = activity.window ?: continue
+                val current = window.callback
+                if (current is ClickTrackingCallback) {
+                    window.callback = current.delegate
+                }
+            } catch (_: Exception) {
+                // Activity may be finishing — ignore
+            }
+        }
         wrappedActivities.clear()
         buffer = null
         applicationId = null
@@ -105,7 +118,7 @@ object AutoMobileClickTracker {
      * All other callbacks delegate unchanged via Kotlin's `by delegate`.
      */
     private class ClickTrackingCallback(
-        private val delegate: Window.Callback,
+        val delegate: Window.Callback,
         private val window: Window,
     ) : Window.Callback by delegate {
 

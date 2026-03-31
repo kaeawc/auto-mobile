@@ -240,13 +240,20 @@ object AutoMobileSDK {
     mainHandler?.removeCallbacksAndMessages(null)
     mainHandler = null
 
-    // Tear down OS event hooks and broadcast interceptor to prevent
-    // duplicate registrations on a subsequent initialize() call.
+    // Tear down subsystem hooks. Lifecycle observer removal and click
+    // tracker unregistration must happen on the main thread.
     val ctx = context
     if (ctx != null) {
-      AutoMobileOsEvents.shutdown(ctx)
-      AutoMobileBroadcastInterceptor.shutdown(ctx)
-      AutoMobileClickTracker.shutdown(ctx)
+      val teardown = Runnable {
+        AutoMobileOsEvents.shutdown(ctx)
+        AutoMobileBroadcastInterceptor.shutdown(ctx)
+        AutoMobileClickTracker.shutdown(ctx)
+      }
+      if (Looper.myLooper() == Looper.getMainLooper()) {
+        teardown.run()
+      } else {
+        Handler(Looper.getMainLooper()).post(teardown)
+      }
     }
 
     eventBuffer?.shutdown()

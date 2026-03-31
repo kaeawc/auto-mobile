@@ -532,7 +532,7 @@
             "android",
             "ios"
           ],
-          "description": "Platform"
+          "description": "Target platform"
         },
         "sessionUuid": {
           "description": "Session UUID for parallel execution",
@@ -679,7 +679,8 @@
           "enum": [
             "android",
             "ios"
-          ]
+          ],
+          "description": "Target platform"
         },
         "deviceId": {
           "type": "string"
@@ -3980,6 +3981,81 @@
     }
   },
   {
+    "name": "recordSteps",
+    "description": "Record MCP tool calls as a replayable YAML test plan. Actions: 'begin' starts capturing plan-relevant tool calls, 'end' stops and exports the plan as YAML (both require the 'mcp-recording' feature flag), 'status' checks if a recording session is active (always available, even when the flag is off).",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "begin",
+            "end",
+            "status"
+          ],
+          "description": "begin: start capturing tool calls. end: stop and export the recorded plan as YAML. status: check if a recording session is active."
+        },
+        "planName": {
+          "description": "Name for the exported plan (kebab-case recommended, auto-generated if not specified). Only used with action 'end'.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "begin",
+            "end",
+            "status"
+          ]
+        },
+        "recording": {
+          "type": "boolean"
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "alreadyActive": {
+          "type": "boolean"
+        },
+        "currentStepCount": {
+          "type": "number"
+        },
+        "planName": {
+          "type": "string"
+        },
+        "planContent": {
+          "type": "string"
+        },
+        "stepCount": {
+          "type": "number"
+        },
+        "durationMs": {
+          "type": "number"
+        },
+        "error": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "rotate",
     "description": "Rotate device orientation",
     "inputSchema": {
@@ -5414,12 +5490,26 @@
         "deviceId": {
           "description": "Device identifier for targeting a specific device",
           "type": "string"
+        },
+        "tapClickableParent": {
+          "description": "Tap the nearest clickable parent that contains the text element. Useful for list items where the clickable row doesn't have a resource-id but contains children with text.",
+          "type": "boolean"
+        },
+        "clickable": {
+          "type": "boolean",
+          "const": true,
+          "description": "Select clickable elements. Use with selectionStrategy: 'first' to tap the first clickable item in a list without knowing its text or ID."
+        },
+        "scrollableContainer": {
+          "description": "Only search within scrollable containers (lists/RecyclerViews). Use this to avoid tapping search bars or other clickable UI elements when you want the first list item.",
+          "type": "boolean"
+        },
+        "siblingOfText": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Find a clickable element that is a sibling of an element containing this text. Useful for tapping checkboxes, icons, or buttons next to a specific text label."
         }
       },
-      "required": [
-        "action",
-        "platform"
-      ],
       "additionalProperties": false
     },
     "outputSchema": {

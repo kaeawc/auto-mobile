@@ -6,6 +6,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "./AdbClientFactory";
 import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -523,9 +524,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns Promise with array of running emulator info
    */
   async getBootedDevices(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
+    const perf = createGlobalPerformanceTracker();
     try {
       const adb = this.adbFactory.create(null);
+      perf.startOperation("adbDeviceScan");
       const devices = await adb.getBootedAndroidDevices();
+      perf.endOperation("adbDeviceScan");
       const runningDevices: BootedDevice[] = [];
       const externalMode = this.isExternalEmulatorMode();
 
@@ -534,6 +538,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const physicalDevices = devices.filter(device => !device.deviceId.startsWith("emulator-"));
 
       const infoTimeoutMs = 2000;
+      perf.startOperation("avdNameResolution");
       for (const device of emulatorDevices) {
         const deviceId = device.deviceId;
         try {
@@ -614,6 +619,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           source: "local"
         });
       }
+      perf.endOperation("avdNameResolution");
 
       return runningDevices;
     } catch (error) {
@@ -632,22 +638,30 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   ): Promise<ChildProcess> {
     logger.info(`Using local emulator for AVD: ${avdName}`);
     const externalMode = this.isExternalEmulatorMode();
+    const perf = createGlobalPerformanceTracker();
 
     // Check if the AVD exists
+    perf.startOperation("validateAvd");
     const availableAvds = await this.listAvds();
+    perf.endOperation("validateAvd");
     if (!availableAvds.find(emu => emu.name === avdName)) {
       throw new ActionableError(`AVD '${avdName}' not found. Available AVDs: ${availableAvds.join(", ")}`);
     }
 
     // Check if already running or starting
-    if (await this.isAvdRunning(avdName)) {
+    perf.startOperation("checkAlreadyRunning");
+    const alreadyRunning = await this.isAvdRunning(avdName);
+    const alreadyStarting = !alreadyRunning && await this.isAvdStarting(avdName);
+    perf.endOperation("checkAlreadyRunning");
+
+    if (alreadyRunning) {
       logger.info(`AVD '${avdName}' is already running - waiting for it to be ready`);
       // AVD is already running, return a mock ChildProcess since we didn't spawn it
       // The caller (waitForEmulatorReady) will wait for it to be ready
       return {} as ChildProcess;
     }
 
-    if (await this.isAvdStarting(avdName)) {
+    if (alreadyStarting) {
       logger.info(`AVD '${avdName}' is already starting - waiting for it to be ready`);
       // AVD is already starting, return a mock ChildProcess since we didn't spawn it
       // The caller (waitForEmulatorReady) will wait for it to be ready
@@ -660,7 +674,9 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     // Check architecture compatibility before attempting to start
+    perf.startOperation("architectureCheck");
     const compatibility = await this.checkArchitectureCompatibility(avdName);
+    perf.endOperation("architectureCheck");
     if (!compatibility.compatible && compatibility.reason) {
       logger.error(`Architecture compatibility check failed: ${compatibility.reason}`);
       throw new ActionableError(`Cannot start AVD '${avdName}': ${compatibility.reason}. On ${compatibility.hostArch} hosts, use AVDs with compatible architectures (e.g., arm64-v8a for Apple Silicon Macs).`);
@@ -679,13 +695,16 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     logger.debug(`Emulator command: ${this.emulatorPath} ${args.join(" ")}`);
 
     return new Promise((resolve, reject) => {
+      perf.startOperation("spawnEmulator");
       const child = this.spawnFn(this.emulatorPath, args);
+      perf.endOperation("spawnEmulator");
 
       // Buffer to collect initial output for PANIC detection
       let initialOutput = "";
       const outputBuffer: string[] = [];
       const maxBufferLines = 50; // Keep last 50 lines for error analysis
       let startupValidationComplete = false;
+      perf.startOperation("panicDetection");
 
       // Monitor emulator output for PANIC errors
       const monitorOutput = (data: any) => {
@@ -725,6 +744,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           // Reject the promise instead of just emitting error
           if (!startupValidationComplete) {
             startupValidationComplete = true;
+            perf.endOperation("panicDetection");
             reject(new ActionableError(errorMessage));
           }
           return;
@@ -737,6 +757,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           // Emulator has started successfully, resolve with the child process
           if (!startupValidationComplete) {
             startupValidationComplete = true;
+            perf.endOperation("panicDetection");
             resolve(child);
           }
         }
@@ -746,6 +767,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const startupTimeout = this.timer.setTimeout(() => {
         if (!startupValidationComplete) {
           startupValidationComplete = true;
+          perf.endOperation("panicDetection");
           // If no PANIC detected and no clear success indicators, assume success
           resolve(child);
         }
@@ -772,6 +794,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             logger.info(`AVD '${avdName}' is already starting/running - this is expected, will wait for it to be ready`);
             if (!startupValidationComplete) {
               startupValidationComplete = true;
+              perf.endOperation("panicDetection");
               // Return a mock ChildProcess - the caller will wait for the AVD to be ready
               resolve({} as ChildProcess);
             }
@@ -784,10 +807,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             logger.error(`Exit was due to PANIC: ${panicResult.message}`);
             if (!startupValidationComplete) {
               startupValidationComplete = true;
+              perf.endOperation("panicDetection");
               reject(new ActionableError(`Emulator failed to start: ${panicResult.message}`));
             }
           } else if (!startupValidationComplete) {
             startupValidationComplete = true;
+            perf.endOperation("panicDetection");
             reject(new ActionableError(`Emulator process exited with code: ${code}`));
           }
         } else {
@@ -799,6 +824,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         clearTimeout(startupTimeout);
         if (!startupValidationComplete) {
           startupValidationComplete = true;
+          perf.endOperation("panicDetection");
           reject(new ActionableError(`Emulator failed to start: ${error.message}`));
         }
       });
@@ -833,6 +859,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    */
   async waitForEmulatorReady(avdName: string, timeoutMs: number = 120000): Promise<BootedDevice> {
     const startTime = this.timer.now();
+    const perf = createGlobalPerformanceTracker();
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
     const pollingIntervalMs = Math.max(parseInt(process.env.EMULATOR_POLLING_INTERVAL_MS || "500", 10), 100);
@@ -842,6 +869,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     let pollingActive = true;
     let foundDeviceId: string | null = null;
 
+    perf.startOperation("devicePolling");
     const backgroundPoller = async () => {
       while (pollingActive && !foundDeviceId) {
         try {
@@ -877,10 +905,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               logger.debug(`[PARALLEL] Running device state and package manager checks for ${emulator.deviceId}...`);
               const adb = this.adbFactory.create(emulator);
               try {
+                perf.startOperation("adbParallelChecks");
                 const [deviceStateResult, packageManagerResult] = await Promise.allSettled([
                   adb.executeCommand("get-state"),
                   adb.executeCommand("shell pm list packages")
                 ]);
+                perf.endOperation("adbParallelChecks");
 
                 // Check device state result
                 if (deviceStateResult.status !== "fulfilled" || packageManagerResult.status !== "fulfilled") {
@@ -929,9 +959,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     while (this.timer.now() - startTime < timeoutMs) {
       if (foundDeviceId) {
         pollingActive = false;
+        perf.endOperation("devicePolling");
         logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
         const bootedDevice = { name: avdName, platform: "android", deviceId: foundDeviceId } as BootedDevice;
+        perf.startOperation("wakeAndUnlock");
         await this.wakeAndUnlock(bootedDevice);
+        perf.endOperation("wakeAndUnlock");
         return bootedDevice;
       }
 
@@ -942,11 +975,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     // Stop background polling
     pollingActive = false;
     await pollingPromise;
+    perf.endOperation("devicePolling");
 
     if (foundDeviceId) {
       logger.info(`Emulator '${avdName}' is ready! Device ID: ${foundDeviceId}`);
       const bootedDevice = { name: avdName, platform: "android", deviceId: foundDeviceId } as BootedDevice;
+      perf.startOperation("wakeAndUnlock");
       await this.wakeAndUnlock(bootedDevice);
+      perf.endOperation("wakeAndUnlock");
       return bootedDevice;
     }
 

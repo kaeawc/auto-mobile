@@ -544,7 +544,7 @@ export class Daemon {
       // Android: ensure accessibility service WebSocket is connected
       const androidDevices = allDevices.filter(d => d.platform === "android");
       for (const pooledDevice of androidDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) continue;
+        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
         try {
           const bootedDevice = {
             deviceId: pooledDevice.id,
@@ -570,7 +570,7 @@ export class Daemon {
       // iOS: ensure CtrlProxy is set up and connected
       const iosDevices = allDevices.filter(d => d.platform === "ios");
       for (const pooledDevice of iosDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) continue;
+        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
         try {
           const bootedDevice = {
             deviceId: pooledDevice.id,

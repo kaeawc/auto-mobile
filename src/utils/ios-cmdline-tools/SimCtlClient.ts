@@ -6,6 +6,7 @@ import { isRunningInDocker } from "../dockerEnv";
 import { isHostControlAvailable, runSimctlExec, shouldUseHostControl } from "../hostControlClient";
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
+import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 
 export interface AppleDevice {
   udid: string;
@@ -474,10 +475,15 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with simulator list data
    */
   private async listSimulators(): Promise<SimulatorList> {
+    const perf = createGlobalPerformanceTracker();
+    perf.startOperation("simctlListDevices");
     const result = await this.executeCommand("list devices --json");
+    perf.endOperation("simctlListDevices");
 
     try {
+      perf.startOperation("jsonParse");
       const simulatorData = JSON.parse(result.stdout);
+      perf.endOperation("jsonParse");
       return simulatorData as SimulatorList;
     } catch (error) {
       const stdoutSnippet = result.stdout.trim().slice(0, 300);
@@ -500,12 +506,19 @@ export class SimCtlClient implements SimCtl {
 
   async startSimulator(udid: string): Promise<ChildProcess> {
     logger.debug(`Starting iOS simulator ${udid}`);
+    const perf = createGlobalPerformanceTracker();
+
+    perf.startOperation("simctlBoot");
     await this.executeCommand(`boot ${udid}`);
+    perf.endOperation("simctlBoot");
 
     // Open Simulator.app focused on this specific device
     try {
+      perf.startOperation("openSimulatorApp");
       await this.openSimulatorApp(udid);
+      perf.endOperation("openSimulatorApp");
     } catch {
+      perf.endOperation("openSimulatorApp");
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
@@ -528,8 +541,11 @@ export class SimCtlClient implements SimCtl {
   }
 
   async waitForSimulatorReady(udid: string): Promise<BootedDevice> {
+    const perf = createGlobalPerformanceTracker();
+    perf.startOperation("deviceLookup");
     const simulator = (await this.listSimulatorImages())
       .find(device => device.deviceId === udid);
+    perf.endOperation("deviceLookup");
 
     if (!simulator) {
       throw new ActionableError(`Simulator with UDID ${udid} not found`);
@@ -664,13 +680,19 @@ export class SimCtlClient implements SimCtl {
    */
   async bootSimulator(udid: string): Promise<BootedDevice> {
     logger.debug(`Booting iOS simulator ${udid}`);
+    const perf = createGlobalPerformanceTracker();
+
+    perf.startOperation("simctlBoot");
     await this.executeCommand(`boot ${udid}`);
+    perf.endOperation("simctlBoot");
 
     // Wait a moment for the simulator to register as booted
     await this.timer.sleep(1000);
 
+    perf.startOperation("bootRegistration");
     const bootedSimulators = await this.getBootedSimulators();
     const bootedSimulator = bootedSimulators.find(device => device.deviceId === udid);
+    perf.endOperation("bootRegistration");
     if (!bootedSimulator) {
       throw new ActionableError(`Failed to boot iOS simulator ${udid}`);
     }

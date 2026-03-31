@@ -164,7 +164,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
         } else {
           // Even without a device filter, exclude failures with no device_id
           q = q.where("failure_occurrences.device_id", "is not", null)
-               .where("failure_occurrences.device_id", "!=", "");
+            .where("failure_occurrences.device_id", "!=", "");
         }
 
         const rows = await q.orderBy("failure_occurrences.timestamp", "desc").limit(limit).execute();

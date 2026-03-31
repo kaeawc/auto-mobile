@@ -1,6 +1,6 @@
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
-import { NoOpPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
+import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
 import { exec, type ChildProcess } from "child_process";
@@ -423,47 +423,62 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async startInternal(): Promise<void> {
     logger.info("[IOSCtrlProxy] Starting CtrlProxy");
     this.isStopping = false;
+    const perf = createGlobalPerformanceTracker();
 
     // Prefer process liveness check over health endpoint: a busy-but-alive CtrlProxy
     // would fail the HTTP health check and incorrectly trigger a restart.
-    if (await this.isCtrlProxyProcessAlive()) {
+    perf.startOperation("processAliveCheck");
+    const isAlive = await this.isCtrlProxyProcessAlive();
+    perf.endOperation("processAliveCheck");
+    if (isAlive) {
       logger.info("[IOSCtrlProxy] CtrlProxy process is alive, skipping start");
       // On physical devices the iproxy tunnel may have been stopped independently
       // (e.g. by a temporary disconnect) while the XCTest process kept running.
       // Re-establishing it here is a no-op when the tunnel is already up, and
       // self-heals the connection when it is not.
       if (!this.isSimulator()) {
+        perf.startOperation("iproxyTunnel");
         await this.startIproxyTunnel();
+        perf.endOperation("iproxyTunnel");
         this.startIproxyMonitoring();
       }
       return;
     }
 
-    if (await this.isRunning()) {
+    perf.startOperation("runningCheck");
+    const alreadyRunning = await this.isRunning();
+    perf.endOperation("runningCheck");
+    if (alreadyRunning) {
       logger.info("[IOSCtrlProxy] Service is already running");
       return;
     }
 
+    perf.startOperation("spawnRunner");
     if (this.isSimulator()) {
       await this.startOnSimulator();
     } else {
       await this.startOnDevice();
     }
+    perf.endOperation("spawnRunner");
 
     // Wait for HTTP health endpoint to be ready
     // XCUITest can take 10+ seconds to fully initialize after xcodebuild starts
     const maxAttempts = 30;
     const delayMs = 500;
 
+    perf.startOperation("healthPolling");
     for (let i = 0; i < maxAttempts; i++) {
       if (await this.checkHealthEndpoint()) {
+        perf.endOperation("healthPolling");
         logger.info("[IOSCtrlProxy] HTTP health endpoint is ready");
         this.clearCaches();
 
         // Wait additional time for WebSocket server to be ready
         // The HTTP server can respond before WebSocket is fully initialized
         logger.info("[IOSCtrlProxy] Waiting for WebSocket server initialization");
+        perf.startOperation("websocketInit");
         await this.timer.sleep(500);
+        perf.endOperation("websocketInit");
 
         if (!this.isSimulator()) {
           this.startIproxyMonitoring();
@@ -475,6 +490,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
       await this.timer.sleep(delayMs);
     }
+    perf.endOperation("healthPolling");
 
     throw new Error("CtrlProxy failed to start within timeout (15s)");
   }

@@ -16,9 +16,7 @@ class AutoMobileSDKTest {
 
   @After
   fun tearDown() {
-    // Clean up after each test
-    AutoMobileSDK.clearNavigationListeners()
-    AutoMobileSDK.setEnabled(true)
+    AutoMobileSDK.shutdown()
   }
 
   @Test
@@ -125,6 +123,27 @@ class AutoMobileSDKTest {
 
     // Working listener should still have been called
     assertEquals(1, successfulCallCount)
+  }
+
+  @Test
+  fun `shutdown should clear listeners and reset state`() {
+    AutoMobileSDK.addNavigationListener {}
+    AutoMobileSDK.addNavigationListener {}
+    AutoMobileSDK.setEnabled(false)
+
+    AutoMobileSDK.shutdown()
+
+    assertEquals(0, AutoMobileSDK.getListenerCount())
+    assertTrue(AutoMobileSDK.isEnabled())
+    assertNull(AutoMobileSDK.getEventBuffer())
+  }
+
+  @Test
+  fun `shutdown is safe to call multiple times`() {
+    AutoMobileSDK.shutdown()
+    AutoMobileSDK.shutdown()
+
+    assertEquals(0, AutoMobileSDK.getListenerCount())
   }
 
   @Test

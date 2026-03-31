@@ -225,4 +225,17 @@ object AutoMobileSDK {
 
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
+
+  /**
+   * Shuts down the SDK, releasing all resources. After calling this method, [initialize] may be
+   * called again to restart the SDK.
+   */
+  fun shutdown() {
+    eventBuffer?.shutdown()
+    eventBuffer = null
+    RecompositionTracker.reset()
+    listeners.clear()
+    isEnabled = true
+    context = null
+  }
 }

@@ -29,6 +29,20 @@ object RecompositionTracker {
     registerControlReceiver(context.applicationContext)
   }
 
+  /** Tears down tracker state so resources are released and [initialize] can be called again. */
+  fun reset() {
+    setEnabled(false)
+    val ctx = context
+    if (ctx != null) {
+      try {
+        ctx.unregisterReceiver(controlReceiver)
+      } catch (_: IllegalArgumentException) {
+        // Receiver was never registered or already unregistered — safe to ignore.
+      }
+    }
+    context = null
+  }
+
   fun recordRecomposition(
       id: String,
       composableName: String? = null,

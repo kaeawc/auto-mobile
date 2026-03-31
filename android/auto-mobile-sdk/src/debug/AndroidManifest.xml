@@ -3,7 +3,7 @@
   <application>
     <receiver
       android:name="dev.jasonpearson.automobile.sdk.notifications.AutoMobileNotificationReceiver"
-      android:exported="true">
+      android:exported="false">
       <intent-filter>
         <action android:name="dev.jasonpearson.automobile.sdk.NOTIFICATION_POST" />
       </intent-filter>
@@ -20,11 +20,11 @@
     <provider
       android:name="dev.jasonpearson.automobile.sdk.database.DatabaseInspectorProvider"
       android:authorities="${applicationId}.automobile.database"
-      android:exported="true" />
+      android:exported="false" />
 
     <provider
       android:name="dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspectorProvider"
       android:authorities="${applicationId}.automobile.sharedprefs"
-      android:exported="true" />
+      android:exported="false" />
   </application>
 </manifest>

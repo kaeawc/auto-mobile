@@ -90,9 +90,6 @@ const MAX_LOG_SIZE = 10 * 1024 * 1024;
 // Maximum number of log files to keep (including the active one)
 const MAX_LOG_FILES = 10;
 
-// Maximum number of log files to delete per prune pass
-const MAX_PRUNE_LOG_FILES = 10;
-
 // Remove oldest log files when the count exceeds MAX_LOG_FILES
 const pruneOldLogFiles = async (): Promise<void> => {
   const entries = await readdirAsync(logsDir);
@@ -102,7 +99,7 @@ const pruneOldLogFiles = async (): Promise<void> => {
 
   // Sort alphabetically — server.log sorts last, server-<timestamp>.log files
   // sort chronologically. Delete the oldest until we're at the limit.
-  const toDelete = logFiles.slice(0, logFiles.length - MAX_LOG_FILES).slice(0, MAX_PRUNE_LOG_FILES);
+  const toDelete = logFiles.slice(0, logFiles.length - MAX_LOG_FILES);
   for (const file of toDelete) {
     await unlinkAsync(path.join(logsDir, file));
   }

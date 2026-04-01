@@ -107,3 +107,18 @@ export function createInstantFailureWebSocketFactory(timer?: Timer): (url: strin
 export function createSuccessWebSocketFactory(timer?: Timer): (url: string) => FakeWebSocket {
   return (url: string) => new FakeWebSocket(url, "none", 0, timer);
 }
+
+/**
+ * Factory that fails the first N-1 attempts and succeeds on the Nth.
+ * Useful for testing recovery after cooldown.
+ */
+export function createNthAttemptSuccessWebSocketFactory(
+  successOnAttempt: number,
+  timer?: Timer
+): (url: string) => FakeWebSocket {
+  let attempt = 0;
+  return (url: string) => {
+    attempt++;
+    return new FakeWebSocket(url, attempt >= successOnAttempt ? "none" : "instant", 0, timer);
+  };
+}

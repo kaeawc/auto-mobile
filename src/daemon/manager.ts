@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import { readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync } from "node:fs";
+import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../utils/logger";
@@ -8,6 +8,7 @@ import { ActionableError } from "../models";
 import {
   PID_FILE_PATH,
   SOCKET_PATH,
+  LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
 } from "./constants";
@@ -57,15 +58,76 @@ export class DaemonManager {
   private readonly clientFactory: DaemonClientFactory;
   private readonly stateProvider: () => DaemonStateLike;
   private readonly timer: Timer;
+  private readonly lockFilePath: string;
 
   constructor(
     clientFactory: DaemonClientFactory = () => new DaemonClient(),
     stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    lockFilePath: string = LOCK_FILE_PATH
   ) {
     this.clientFactory = clientFactory;
     this.stateProvider = stateProvider;
     this.timer = timer;
+    this.lockFilePath = lockFilePath;
+  }
+
+  /**
+   * Acquire an exclusive file lock for daemon start/stop coordination.
+   * Uses O_CREAT | O_EXCL for atomic creation. Returns true if lock acquired.
+   * Cleans up stale locks from dead processes.
+   */
+  acquireLock(): boolean {
+    if (this.writeLockFile()) {
+      return true;
+    }
+    // Lock file exists — check if owning process is alive
+    try {
+      const content = readFileSync(this.lockFilePath, "utf-8").trim();
+      if (content.length === 0) {
+        // Empty file — another process just created it and hasn't written PID yet.
+        // Treat as actively held to avoid race condition.
+        return false;
+      }
+      const ownerPid = parseInt(content, 10);
+      if (isNaN(ownerPid)) {
+        // Unreadable PID — treat as actively held (writer may still be writing)
+        return false;
+      }
+      if (this.isProcessRunning(ownerPid)) {
+        return false;
+      }
+      // Owner is dead — stale lock, remove and retry once
+      unlinkSync(this.lockFilePath);
+      return this.writeLockFile();
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Atomically create the lock file with our PID. Returns true on success.
+   */
+  private writeLockFile(): boolean {
+    try {
+      const fd = openSync(this.lockFilePath, "wx", 0o600);
+      writeFileSync(fd, String(process.pid));
+      closeSync(fd);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  /**
+   * Release the file lock.
+   */
+  releaseLock(): void {
+    try {
+      unlinkSync(this.lockFilePath);
+    } catch {
+      // Best-effort cleanup
+    }
   }
 
   createClient(): DaemonClientLike {
@@ -108,9 +170,54 @@ export class DaemonManager {
   }
 
   /**
-   * Start the daemon in background (detached process)
+   * Start the daemon in background (detached process).
+   * Uses an atomic file lock to prevent thundering herd when multiple
+   * proxy processes try to start the daemon simultaneously.
    */
   async start(options: DaemonOptions = {}): Promise<void> {
+    const acquired = this.acquireLock();
+    if (!acquired) {
+      // Another process is starting the daemon — wait for it to become ready
+      stderrLog("Another process is starting the daemon, waiting...");
+      const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      if (ready) {
+        stderrLog("Daemon started by another process");
+        return;
+      }
+      // Lock holder may have crashed — retry lock acquisition once
+      const retryAcquired = this.acquireLock();
+      if (retryAcquired) {
+        stderrLog("Previous lock holder failed, taking over daemon start...");
+        try {
+          await this.startUnlocked(options);
+        } finally {
+          this.releaseLock();
+        }
+        return;
+      }
+      // Another process won the retry race — wait for it to finish
+      stderrLog("Another process is retrying daemon start, waiting...");
+      const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      if (retryReady) {
+        stderrLog("Daemon started by another process (retry)");
+        return;
+      }
+      throw new ActionableError(
+        "Another process is starting the daemon but it failed to become ready"
+      );
+    }
+
+    try {
+      await this.startUnlocked(options);
+    } finally {
+      this.releaseLock();
+    }
+  }
+
+  /**
+   * Internal start implementation (caller must hold lock).
+   */
+  private async startUnlocked(options: DaemonOptions): Promise<void> {
     // Check for any running daemon processes from ANY worktree
     const otherDaemons = this.findAllDaemonProcesses();
     if (otherDaemons.length > 0) {

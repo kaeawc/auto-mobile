@@ -49,6 +49,17 @@ export const PID_FILE_PATH =
   pidFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.pid`;
 
 /**
+ * Lock file path for coordinating concurrent daemon start operations.
+ * Prevents thundering herd when multiple proxy processes try to start
+ * the daemon simultaneously.
+ */
+const lockFilePathOverride =
+  process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ??
+  process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
+export const LOCK_FILE_PATH =
+  lockFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.lock`;
+
+/**
  * Connection timeout in milliseconds
  * How long to wait for daemon to respond to a request.
  * Set to 120s to accommodate long-running operations like device cold boot (26-60s+).

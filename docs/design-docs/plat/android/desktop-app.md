@@ -182,7 +182,7 @@ A generic TTL-based cache using `ConcurrentHashMap` for lock-free reads and per-
 
 ### DataSourceFactory / DataSourceMode
 
-`DataSourceFactory` creates the appropriate data source implementation based on `DataSourceMode` (`Live`, `Fake`, `Cached`), allowing the UI to switch between real server data and demo data.
+`DataSourceFactory` creates the appropriate data source implementation based on `DataSourceMode` (`Real`, `Fake`), allowing the UI to switch between real server data and demo data.
 
 ## Unified Result Type
 
@@ -211,18 +211,18 @@ Keyboard shortcuts: `Cmd+0` (left), `Cmd+Shift+0` (right), `Cmd+Shift+Y` (bottom
 
 ### Dashboard Tabs
 
-The center content area switches between dashboards via tab selection:
+The center content area uses a split layout. When the Navigation view is active, it fills the center. Otherwise, Telemetry is the primary center content with secondary dashboards available via bottom tabs:
 
-| Dashboard | Description |
-|-----------|-------------|
-| Navigation | Flow map with screen nodes and transitions, canvas view, detail panels |
-| Test | Test case browser, run history, recording, plan execution |
-| Performance | Real-time FPS/memory/CPU, anomaly detection, run comparison |
-| Layout | Device screen mirror, hierarchy tree, property inspector |
-| Storage | SharedPreferences/database inspector, key-value editor |
-| Failures | Grouped failure list, timeline chart, stack trace viewer |
-| Telemetry | Network request inspector, custom event renderer |
-| Diagnostics | System health, daemon status, MCP process list |
+| Dashboard | Position | Description |
+|-----------|----------|-------------|
+| Navigation | Primary (full center) | Flow map with screen nodes and transitions, canvas view, detail panels |
+| Telemetry | Primary (center top) | Network request inspector, custom event renderer |
+| Test | Secondary (bottom tab) | Test case browser, run history, recording, plan execution |
+| Storage | Secondary (bottom tab) | SharedPreferences/database inspector, key-value editor |
+| Diagnostics | Secondary (bottom tab) | System health, daemon status, MCP process list |
+| Performance | Inspector panel | Real-time FPS/memory/CPU, anomaly detection, run comparison |
+| Layout | Inspector panel | Device screen mirror, hierarchy tree, property inspector |
+| Failures | Inspector panel | Grouped failure list, timeline chart, stack trace viewer |
 
 ### ViewModels
 

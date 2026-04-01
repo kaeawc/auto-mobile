@@ -136,7 +136,7 @@ private fun FailureMetricItem(
 }
 
 private fun formatCompactNumber(value: Int): String = when {
-    value >= 1_000_000 -> String.format("%.1f", value / 1_000_000.0).removeSuffix(".0") + "m"
-    value >= 1_000 -> String.format("%.1f", value / 1_000.0).removeSuffix(".0") + "k"
+    value >= 1_000_000 -> String.format(java.util.Locale.US, "%.1f", value / 1_000_000.0).removeSuffix(".0") + "m"
+    value >= 1_000 -> String.format(java.util.Locale.US, "%.1f", value / 1_000.0).removeSuffix(".0") + "k"
     else -> value.toString()
 }

@@ -122,6 +122,7 @@ nav:
              - 'VoiceOver/TalkBack Parity': design-docs/mcp/a11y/voiceover-talkback-parity.md
           - 'Resources': design-docs/mcp/resources.md
           - 'Context Thresholds': design-docs/mcp/context-thresholds.md
+          - 'SDK Event Pipeline': design-docs/mcp/sdk-event-pipeline.md
           - 'Test Plan Validation': design-docs/mcp/test-plan-validation.md
       - 'Platform Specific':
           - 'Android':
@@ -140,6 +141,7 @@ nav:
               - 'Test Recording': design-docs/plat/android/ide-plugin/test-recording.md
               - 'Navigation Graph Render': design-docs/plat/android/ide-plugin/navigation-graph.md
               - 'Control Feature Flags': design-docs/plat/android/ide-plugin/feature-flags.md
+            - 'Desktop App': design-docs/plat/android/desktop-app.md
             - 'Work Profiles': design-docs/plat/android/work-profiles.md
             - 'Device Tools':
               - 'takeScreenshot fallback': design-docs/plat/android/take-screenshot.md
@@ -165,6 +167,7 @@ nav:
               - 'Project Setup': design-docs/plat/ios/xctestrunner/project-setup.md
               - 'Writing Tests': design-docs/plat/ios/xctestrunner/writing-tests.md
               - 'CI Integration': design-docs/plat/ios/xctestrunner/ci-integration.md
+            - 'AutoMobile SDK': design-docs/plat/ios/auto-mobile-sdk.md
             - 'testmanagerd': design-docs/plat/ios/testmanagerd.md
             - 'Xcode Integration':
               - 'Overview': design-docs/plat/ios/ide-plugin/overview.md

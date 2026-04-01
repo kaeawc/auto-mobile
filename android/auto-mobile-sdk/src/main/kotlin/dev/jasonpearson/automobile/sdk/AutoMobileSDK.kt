@@ -62,6 +62,7 @@ object AutoMobileSDK {
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
   private var isEnabled = true
   private var context: Context? = null
+  private var configuration: AutoMobileConfiguration? = null
   private var eventBuffer: SdkEventBuffer? = null
   private var mainHandler: Handler? = null
   private var sessionTracker: SessionTracker? = null
@@ -86,11 +87,25 @@ object AutoMobileSDK {
    */
   @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
   fun initialize(context: Context) {
+    initialize(context, AutoMobileConfiguration.Builder().build())
+  }
+
+  /**
+   * Initialize the SDK with application context and custom configuration.
+   *
+   * @param context Application context (use applicationContext, not activity context)
+   * @param configuration SDK configuration built via [AutoMobileConfiguration.Builder]
+   */
+  @RequiresPermission(android.Manifest.permission.ACCESS_NETWORK_STATE)
+  fun initialize(context: Context, configuration: AutoMobileConfiguration) {
     this.context = context.applicationContext
+    this.configuration = configuration
     val appContext = this.context!!
 
     // Create shared event buffer with broadcast flush callback
     val buffer = SdkEventBuffer(
+      maxBufferSize = configuration.bufferSize,
+      flushIntervalMs = configuration.flushIntervalMs,
       onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
     )
     buffer.isEnabled = isEnabled
@@ -320,6 +335,10 @@ object AutoMobileSDK {
     RecompositionTracker.reset()
     listeners.clear()
     isEnabled = true
+    configuration = null
     context = null
   }
+
+  /** Returns the current configuration, or null if not initialized. */
+  internal fun getConfiguration(): AutoMobileConfiguration? = configuration
 }

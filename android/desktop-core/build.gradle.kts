@@ -54,4 +54,6 @@ dependencies {
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation("junit:junit:4.13.2")
   testImplementation(libs.turbine)
+  testImplementation(compose.desktop.uiTestJUnit4)
+  testImplementation(compose.desktop.currentOs)
 }

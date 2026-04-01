@@ -3,6 +3,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")
   alias(libs.plugins.compose.multiplatform)
+  alias(libs.plugins.metro)
 }
 
 repositories {
@@ -41,6 +42,9 @@ dependencies {
   // YAML and JSON schema validation
   implementation(libs.snakeyaml)
   implementation(libs.json.schema.validator)
+
+  // Metro DI
+  implementation(libs.metro.runtime)
 
   // Test dependencies
   testImplementation(libs.kotlin.test)

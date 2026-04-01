@@ -7,6 +7,8 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
+import dev.zacsweers.metro.createGraphFactory
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
@@ -36,6 +38,11 @@ fun main() {
     System.err.println("AutoMobile Desktop is already running. Exiting.")
     return
   }
+
+  // Create the dependency graph via Metro-generated factory.
+  // TODO: Pass graph dependencies to AutoMobileDesktopApp once UI is wired to DI.
+  @Suppress("UNUSED_VARIABLE")
+  val graph = createGraphFactory<AutoMobileGraph.Factory>().create()
 
   // Force dark window decorations on macOS
   System.setProperty("apple.awt.application.appearance", "NSAppearanceNameDarkAqua")

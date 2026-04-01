@@ -21,7 +21,8 @@ const changeLocalizationBaseSchema = z.object({
   timeZone: z.string().min(1).optional().describe("Zone ID (e.g., America/Los_Angeles)"),
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
   timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
-  calendarSystem: z.string().min(1).optional().describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)")
+  calendarSystem: z.string().min(1).optional().describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
+  restartApp: z.string().min(1).optional().describe("Bundle ID of app to terminate and relaunch after locale change (iOS only). Running apps cache locale at launch, so restart is needed for the app to pick up new settings.")
 });
 
 export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocalizationBaseSchema).refine(values =>
@@ -42,6 +43,7 @@ export interface ChangeLocalizationArgs {
   textDirection?: "ltr" | "rtl";
   timeFormat?: "12" | "24";
   calendarSystem?: string;
+  restartApp?: string;
 }
 
 // Register tools
@@ -142,14 +144,21 @@ export function registerUtilityTools() {
 
     const success = errors.length === 0;
     let intentBroadcast = false;
-    if (Object.keys(changes).length > 0 && device.platform === "android") {
-      intentBroadcast = await manager.broadcastLocaleChange();
+    let liveChanges: { springBoardRestarted: boolean; notificationPosted: boolean; appRestarted?: boolean } | undefined;
+
+    if (Object.keys(changes).length > 0) {
+      if (device.platform === "android") {
+        intentBroadcast = await manager.broadcastLocaleChange();
+      } else if (device.platform === "ios") {
+        liveChanges = await manager.applyIosLiveChanges(args.restartApp);
+      }
     }
 
     return createJSONToolResponse({
       success,
       changes,
       intentBroadcast,
+      ...(liveChanges ? { iosLiveChanges: liveChanges } : {}),
       ...(success ? {} : { error: errors.join("; ") })
     });
   };

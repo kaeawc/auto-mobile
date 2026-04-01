@@ -3,6 +3,8 @@ import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/A
 import type { ProcessExecutor } from "../../utils/ProcessExecutor";
 import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
 import { logger } from "../../utils/logger";
+import type { Timer } from "../../utils/SystemTimer";
+import { defaultTimer } from "../../utils/SystemTimer";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -23,20 +25,32 @@ type CommandAttempt = {
 
 const IOS_PHYSICAL_DEVICE_ERROR = "Localization changes are only supported on iOS Simulator.";
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
+const SPRINGBOARD_POLL_INTERVAL_MS = 500;
+const SPRINGBOARD_MAX_RETRIES = 10;
+const BUNDLE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z][a-zA-Z0-9-]*)+$/;
+
+export interface ApplyLiveChangesResult {
+  springBoardRestarted: boolean;
+  notificationPosted: boolean;
+  appRestarted?: boolean;
+}
 
 export class SystemConfigurationManager {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private processExecutor: ProcessExecutor;
+  private timer: Timer;
 
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
-    processExecutor: ProcessExecutor = new DefaultProcessExecutor()
+    processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
+    timer: Timer = defaultTimer
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.processExecutor = processExecutor;
+    this.timer = timer;
   }
 
   async setLocale(languageTag: string, options: { broadcast?: boolean } = {}): Promise<SetLocaleResult> {
@@ -581,6 +595,99 @@ export class SystemConfigurationManager {
     return languageTag.replace(/-/g, "_");
   }
 
+  buildAppleLanguages(languageTag: string): string[] {
+    const languages: string[] = [languageTag];
+    const parts = languageTag.split("-");
+    for (let i = parts.length - 1; i >= 1; i--) {
+      const shorter = parts.slice(0, i).join("-");
+      if (!languages.includes(shorter)) {
+        languages.push(shorter);
+      }
+    }
+    return languages;
+  }
+
+  async restartSpringBoard(): Promise<boolean> {
+    if (!this.isSimulator()) {
+      return false;
+    }
+
+    try {
+      await this.processExecutor.exec(
+        this.iosSpawnCommand("launchctl stop com.apple.SpringBoard")
+      );
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
+      return false;
+    }
+
+    for (let i = 0; i < SPRINGBOARD_MAX_RETRIES; i++) {
+      await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
+      try {
+        const result = await this.processExecutor.exec(
+          this.iosSpawnCommand("launchctl list com.apple.SpringBoard")
+        );
+        if (result.stdout && result.stdout.includes("SpringBoard")) {
+          return true;
+        }
+      } catch {
+        // SpringBoard not yet restarted, continue polling
+      }
+    }
+
+    logger.warn("[SystemConfigurationManager] SpringBoard did not restart within timeout");
+    return false;
+  }
+
+  async postLocaleChangeNotification(): Promise<boolean> {
+    if (!this.isSimulator()) {
+      return false;
+    }
+
+    try {
+      await this.processExecutor.exec(
+        this.iosSpawnCommand("notifyutil -p com.apple.language.changed")
+      );
+      return true;
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to post locale notification: ${error}`);
+      return false;
+    }
+  }
+
+  async applyIosLiveChanges(restartAppBundleId?: string): Promise<ApplyLiveChangesResult> {
+    const springBoardRestarted = await this.restartSpringBoard();
+    const notificationPosted = await this.postLocaleChangeNotification();
+
+    const result: ApplyLiveChangesResult = {
+      springBoardRestarted,
+      notificationPosted
+    };
+
+    if (restartAppBundleId) {
+      if (!BUNDLE_ID_PATTERN.test(restartAppBundleId)) {
+        logger.warn(`[SystemConfigurationManager] Invalid bundle ID: ${restartAppBundleId}`);
+        result.appRestarted = false;
+      } else {
+        try {
+          await this.processExecutor.exec(
+            `xcrun simctl terminate ${this.device.deviceId} ${restartAppBundleId}`
+          );
+          await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
+          await this.processExecutor.exec(
+            `xcrun simctl launch ${this.device.deviceId} ${restartAppBundleId}`
+          );
+          result.appRestarted = true;
+        } catch (error) {
+          logger.warn(`[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`);
+          result.appRestarted = false;
+        }
+      }
+    }
+
+    return result;
+  }
+
   private async setLocaleIos(languageTag: string): Promise<SetLocaleResult> {
     if (!this.isSimulator()) {
       return { success: false, languageTag, error: IOS_PHYSICAL_DEVICE_ERROR };
@@ -590,11 +697,29 @@ export class SystemConfigurationManager {
       const previousLanguageTag = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
       const appleLocale = this.toAppleLocale(languageTag);
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleLocale", appleLocale);
+
+      const languages = this.buildAppleLanguages(languageTag);
+      const arrayArgs = languages.map(l => `"${l}"`).join(" ");
+      await this.processExecutor.exec(
+        this.iosSpawnCommand(`defaults write .GlobalPreferences AppleLanguages -array ${arrayArgs}`)
+      );
+
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
+      if (!readBack || readBack !== appleLocale) {
+        return {
+          success: false,
+          languageTag,
+          previousLanguageTag,
+          error: `Read-back verification failed: expected "${appleLocale}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         languageTag,
         previousLanguageTag,
-        method: "defaults write AppleLocale"
+        appliedLanguages: languages,
+        method: "defaults write AppleLocale + AppleLanguages"
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -622,6 +747,17 @@ export class SystemConfigurationManager {
       );
 
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", zoneId);
+
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
+      if (!readBack || readBack !== zoneId) {
+        return {
+          success: false,
+          zoneId,
+          previousZoneId,
+          error: `Read-back verification failed: expected "${zoneId}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         zoneId,
@@ -650,6 +786,18 @@ export class SystemConfigurationManager {
 
       const boolValue = enabled ? "-bool YES" : "-bool NO";
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleICUForce24HourTime", boolValue);
+
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
+      const expectedReadBack = enabled ? "1" : "0";
+      if (!readBack || readBack !== expectedReadBack) {
+        return {
+          success: false,
+          enabled,
+          previousFormat,
+          error: `Read-back verification failed: expected "${expectedReadBack}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         enabled,
@@ -743,6 +891,7 @@ export class SystemConfigurationManager {
     }
 
     const locale = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
+    const languages = await this.iosDefaultsRead(".GlobalPreferences", "AppleLanguages");
     const timeZone = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
     const timeFormatRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
     const timeFormat = this.normalizeTimeFormat(
@@ -753,6 +902,7 @@ export class SystemConfigurationManager {
     return {
       success: true,
       locale,
+      languages,
       timeZone,
       textDirection: null,
       timeFormat,

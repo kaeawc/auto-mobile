@@ -123,7 +123,6 @@ nav:
           - 'Resources': design-docs/mcp/resources.md
           - 'Context Thresholds': design-docs/mcp/context-thresholds.md
           - 'Test Plan Validation': design-docs/mcp/test-plan-validation.md
-          - 'SDK Event Pipeline': design-docs/mcp/sdk-event-pipeline.md
       - 'Platform Specific':
           - 'Android':
             - 'Overview': design-docs/plat/android/index.md
@@ -131,7 +130,6 @@ nav:
             - 'Screen Streaming': design-docs/plat/android/screen-streaming.md
             - 'CtrlProxy': design-docs/plat/android/control-proxy.md
             - 'AutoMobile SDK': design-docs/plat/android/auto-mobile-sdk.md
-            - 'Desktop App': design-docs/plat/android/desktop-app.md
             - 'JUnitRunner':
               - 'Overview': design-docs/plat/android/junit-runner/index.md
               - 'Project Setup': design-docs/plat/android/junit-runner/project-setup.md
@@ -168,7 +166,6 @@ nav:
               - 'Writing Tests': design-docs/plat/ios/xctestrunner/writing-tests.md
               - 'CI Integration': design-docs/plat/ios/xctestrunner/ci-integration.md
             - 'testmanagerd': design-docs/plat/ios/testmanagerd.md
-            - 'AutoMobile SDK': design-docs/plat/ios/auto-mobile-sdk.md
             - 'Xcode Integration':
               - 'Overview': design-docs/plat/ios/ide-plugin/overview.md
               - 'Test Recording': design-docs/plat/ios/ide-plugin/test-recording.md

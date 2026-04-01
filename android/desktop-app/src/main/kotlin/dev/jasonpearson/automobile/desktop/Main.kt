@@ -6,13 +6,17 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
 import java.io.IOException
@@ -22,6 +26,19 @@ import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
+
+/** True when running on macOS; used to pick Meta (Cmd) vs Ctrl for accelerators. */
+private val IS_MACOS: Boolean =
+    System.getProperty("os.name")?.lowercase()?.contains("mac") == true
+
+/**
+ * Creates a [KeyShortcut] that uses Meta (Cmd) on macOS and Ctrl on other platforms,
+ * matching the convention already used in [AutoMobileContent] keyboard handlers.
+ */
+private fun platformShortcut(
+    key: Key,
+    shift: Boolean = false,
+): KeyShortcut = KeyShortcut(key, meta = IS_MACOS, ctrl = !IS_MACOS, shift = shift)
 
 /** Lock file ensuring only one instance of the desktop app runs at a time. */
 private val LOCK_FILE: Path = Path.of(System.getProperty("java.io.tmpdir"), "automobile-desktop.lock")
@@ -94,13 +111,82 @@ fun main() {
       position = WindowPosition(Alignment.Center),
     )
 
+    // Shared callback bridge between the native MenuBar and the Compose UI tree.
+    // AutoMobileContent wires pane-visibility state and action callbacks into this
+    // object, so the menu items below toggle real UI state.
+    val menuBarActions = remember { MenuBarActions() }
+
     Window(
       onCloseRequest = { isWindowVisible = false },
       title = "AutoMobile",
       state = windowState,
       visible = isWindowVisible,
     ) {
-      AutoMobileDesktopApp()
+      MenuBar {
+        Menu("File", mnemonic = 'F') {
+          Item(
+            "Settings",
+            onClick = { menuBarActions.showSettings = true },
+            shortcut = platformShortcut(Key.Comma),
+          )
+          Separator()
+          Item(
+            "Quit",
+            onClick = { exitApplication() },
+            shortcut = platformShortcut(Key.Q),
+          )
+        }
+        Menu("View", mnemonic = 'V') {
+          Item(
+            "Toggle Left Pane",
+            onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
+            shortcut = platformShortcut(Key.Zero),
+          )
+          Item(
+            "Toggle Right Pane",
+            onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
+            shortcut = platformShortcut(Key.Zero, shift = true),
+          )
+          Item(
+            "Toggle Bottom Pane",
+            onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
+            shortcut = platformShortcut(Key.Y, shift = true),
+          )
+        }
+        Menu("Tools", mnemonic = 'T') {
+          Item(
+            "Command Palette",
+            onClick = { menuBarActions.showCommandPalette = true },
+            shortcut = platformShortcut(Key.P, shift = true),
+          )
+          Item(
+            "Global Search",
+            onClick = { menuBarActions.showGlobalSearch = true },
+            shortcut = platformShortcut(Key.F, shift = true),
+          )
+          Item(
+            "Quick Jump",
+            onClick = { menuBarActions.showQuickJump = true },
+            shortcut = platformShortcut(Key.K),
+          )
+          Separator()
+          Item(
+            "Take Screenshot",
+            onClick = { menuBarActions.onTakeScreenshot?.invoke() },
+            shortcut = platformShortcut(Key.S, shift = true),
+          )
+        }
+        Menu("Help", mnemonic = 'H') {
+          Item(
+            "Keyboard Shortcuts",
+            onClick = { menuBarActions.showCheatSheet = true },
+            shortcut = platformShortcut(Key.Slash),
+          )
+          Separator()
+          Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
+        }
+      }
+      AutoMobileDesktopApp(menuBarActions = menuBarActions)
     }
   }
 }

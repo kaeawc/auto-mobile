@@ -109,6 +109,8 @@ fun ThreePaneShell(
     onJumpToBottom: (() -> Unit)? = null,
     onFocusSearch: (() -> Unit)? = null,
     onQuickJump: ((Long) -> Unit)? = null,
+    // Menu bar bridge (optional — when provided, menu bar can trigger overlays)
+    menuBarActions: MenuBarActions? = null,
     // Vim mode
     vimModeEnabled: Boolean = false,
     // Pane content slots
@@ -139,6 +141,22 @@ fun ThreePaneShell(
     // Modal overlays
     var showCheatSheet by remember { mutableStateOf(false) }
     var showQuickJump by remember { mutableStateOf(false) }
+
+    // Observe menu bar triggers for overlays
+    if (menuBarActions != null) {
+        LaunchedEffect(menuBarActions.showQuickJump) {
+            if (menuBarActions.showQuickJump) {
+                showQuickJump = true
+                menuBarActions.showQuickJump = false
+            }
+        }
+        LaunchedEffect(menuBarActions.showCheatSheet) {
+            if (menuBarActions.showCheatSheet) {
+                showCheatSheet = true
+                menuBarActions.showCheatSheet = false
+            }
+        }
+    }
 
     // Focus requesters for panes
     val leftFocusRequester = remember { FocusRequester() }

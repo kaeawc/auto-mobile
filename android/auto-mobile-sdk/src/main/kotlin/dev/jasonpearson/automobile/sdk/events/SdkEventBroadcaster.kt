@@ -42,8 +42,11 @@ object SdkEventBroadcaster {
     if (events.isEmpty()) return
 
     val batches = splitIntoBatches(events, context.packageName)
-    for (json in batches) {
-      sendBatchIntent(context, json)
+    val eventCount = events.size
+    val perBatch = if (batches.size > 1) eventCount / batches.size else eventCount
+    for ((i, json) in batches.withIndex()) {
+      val count = if (i == batches.lastIndex) eventCount - perBatch * i else perBatch
+      sendBatchIntent(context, json, count)
     }
   }
 
@@ -89,7 +92,7 @@ object SdkEventBroadcaster {
 
   private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 
-  private fun sendBatchIntent(context: Context, batchJson: String, attempt: Int = 0) {
+  private fun sendBatchIntent(context: Context, batchJson: String, eventCount: Int = 1, attempt: Int = 0) {
     try {
       val intent = Intent(ACTION_SDK_EVENT_BATCH).apply {
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
@@ -100,9 +103,9 @@ object SdkEventBroadcaster {
     } catch (_: Exception) {
       if (attempt < retryPolicy.maxRetries) {
         val delayMs = retryPolicy.delayForAttempt(attempt)
-        retryHandler.postDelayed({ sendBatchIntent(context, batchJson, attempt + 1) }, delayMs)
+        retryHandler.postDelayed({ sendBatchIntent(context, batchJson, eventCount, attempt + 1) }, delayMs)
       } else {
-        dropCounter?.increment(DropReason.DELIVERY_FAILED)
+        dropCounter?.increment(DropReason.DELIVERY_FAILED, eventCount)
       }
     }
   }

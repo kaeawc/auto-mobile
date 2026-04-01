@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -53,10 +55,10 @@ class PerformancePushSocketClient {
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
 
-    private val _state = MutableStateFlow<PushConnectionState>(PushConnectionState.Disconnected(null))
-    val connectionState: StateFlow<PushConnectionState> = _state.asStateFlow()
+    private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
+    val connectionState: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _isConnected: Boolean get() = _state.value is PushConnectionState.Connected
+    private val _isConnected: Boolean get() = _state.value.isConnected
 
     // Flow for live performance data
     private val _performanceData = MutableSharedFlow<LivePerformanceData>(
@@ -80,13 +82,13 @@ class PerformancePushSocketClient {
         val socketPath = getSocketPath()
         log.info("Connecting to performance push at $socketPath")
 
-        _state.update { PushConnectionState.Connecting }
+        _state.update { ConnectionState.Connecting }
 
         try {
             val path = Path.of(socketPath)
             if (!Files.exists(path)) {
                 log.warn("Performance push socket not found at $socketPath")
-                _state.update { PushConnectionState.Disconnected("Socket not found") }
+                _state.update { ConnectionState.Disconnected("Socket not found") }
                 return
             }
 
@@ -99,7 +101,7 @@ class PerformancePushSocketClient {
                 OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
             )
 
-            _state.update { PushConnectionState.Connected(subscribed = false) }
+            _state.update { ConnectionState.Connected(subscribed = false) }
             log.info("Connected to performance push")
 
             // Send subscribe request
@@ -112,7 +114,7 @@ class PerformancePushSocketClient {
 
         } catch (e: Exception) {
             log.warn("Failed to connect to performance push: ${e.message}")
-            _state.update { PushConnectionState.Disconnected(e.message) }
+            _state.update { ConnectionState.Disconnected(e.message) }
         }
     }
 
@@ -121,7 +123,7 @@ class PerformancePushSocketClient {
 
         try {
             val currentState = _state.value
-            if (currentState is PushConnectionState.Connected && currentState.subscribed) {
+            if (currentState is ConnectionState.Connected && currentState.subscribed) {
                 val request = PushRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",
@@ -137,7 +139,7 @@ class PerformancePushSocketClient {
         channel = null
         reader = null
         writer = null
-        _state.update { PushConnectionState.Disconnected(null) }
+        _state.update { ConnectionState.Disconnected(null) }
     }
 
     fun isConnected(): Boolean = _isConnected
@@ -152,7 +154,7 @@ class PerformancePushSocketClient {
 
         if (sendRequest(request)) {
             _state.update { current ->
-                if (current is PushConnectionState.Connected) {
+                if (current is ConnectionState.Connected) {
                     current.copy(subscribed = true)
                 } else {
                     current
@@ -201,7 +203,7 @@ class PerformancePushSocketClient {
         channel = null
         reader = null
         writer = null
-        _state.update { PushConnectionState.Disconnected("Stream ended") }
+        _state.update { ConnectionState.Disconnected("Stream ended") }
         log.info("Performance push disconnected")
     }
 
@@ -301,9 +303,3 @@ data class PerformanceThresholds(
     val ttiWarning: Float,
     val ttiCritical: Float,
 )
-
-sealed class PushConnectionState {
-    data object Connecting : PushConnectionState()
-    data class Connected(val subscribed: Boolean = false) : PushConnectionState()
-    data class Disconnected(val reason: String?) : PushConnectionState()
-}

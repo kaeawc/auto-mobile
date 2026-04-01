@@ -1,13 +1,13 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
-import dev.jasonpearson.automobile.desktop.core.daemon.StreamConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * Mediates between raw [StreamConnectionState] events and UI status updates,
+ * Mediates between raw [ConnectionState] events and UI status updates,
  * absorbing brief disconnections during reconnection to prevent the UI from
  * flashing "Device Disconnected" on transient interruptions.
  *
@@ -28,21 +28,21 @@ class StreamConnectionGracePeriod(
     private var hasBeenConnected = false
     private var gracePeriodJob: Job? = null
 
-    fun onStreamStateChange(state: StreamConnectionState) {
+    fun onStreamStateChange(state: ConnectionState) {
         when (state) {
-            is StreamConnectionState.Connected -> {
+            is ConnectionState.Connected -> {
                 gracePeriodJob?.cancel()
                 gracePeriodJob = null
                 hasBeenConnected = true
                 onStatusChange(ConnectionStatus.Connected)
             }
-            is StreamConnectionState.Connecting -> {
+            is ConnectionState.Connecting, is ConnectionState.Reconnecting -> {
                 if (!hasBeenConnected) {
                     onStatusChange(ConnectionStatus.Connecting)
                 }
                 // If previously connected, suppress — keep showing Connected
             }
-            is StreamConnectionState.Disconnected -> {
+            is ConnectionState.Disconnected, is ConnectionState.Error -> {
                 if (!hasBeenConnected) {
                     onDisconnectConfirmed()
                     return

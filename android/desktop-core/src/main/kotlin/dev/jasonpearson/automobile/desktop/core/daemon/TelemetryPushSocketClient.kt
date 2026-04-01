@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
+import dev.jasonpearson.automobile.desktop.core.connection.shouldReconnect
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryPushRequest
@@ -62,16 +65,11 @@ class TelemetryPushSocketClient : TelemetryPushClient {
     private var writer: BufferedWriter? = null
     private var connectionJob: Job? = null
 
-    private val _state = MutableStateFlow<TelemetryConnectionState>(TelemetryConnectionState.Disconnected(null))
-    override val connectionState: SharedFlow<TelemetryConnectionState> = _state.asStateFlow()
+    private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
+    override val connectionState: SharedFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _isConnected: Boolean get() = _state.value is TelemetryConnectionState.Connected
-    private val _shouldReconnect: Boolean get() {
-        val current = _state.value
-        return current is TelemetryConnectionState.Connecting ||
-            current is TelemetryConnectionState.Connected ||
-            current is TelemetryConnectionState.Reconnecting
-    }
+    private val _isConnected: Boolean get() = _state.value.isConnected
+    private val _shouldReconnect: Boolean get() = _state.value.shouldReconnect
 
     // Retry configuration
     private val initialRetryDelayMs = 1000L
@@ -99,7 +97,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
         subscribedDeviceId = deviceId
         connectionJob?.cancel()
-        _state.update { TelemetryConnectionState.Connecting }
+        _state.update { ConnectionState.Connecting }
 
         connectionJob = scope.launch {
             connectWithRetry()
@@ -128,7 +126,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
                     OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
                 )
 
-                _state.update { TelemetryConnectionState.Connected(subscribed = false) }
+                _state.update { ConnectionState.Connected(subscribed = false) }
                 attempt = 0
                 log.info("Connected to telemetry push")
 
@@ -142,7 +140,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
                 if (_shouldReconnect) {
                     log.info("Telemetry push connection lost, will attempt to reconnect")
                     attempt++
-                    _state.update { TelemetryConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
+                    _state.update { ConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
                 }
 
             } catch (e: Exception) {
@@ -150,7 +148,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
                 if (!_shouldReconnect) {
                     log.info("Telemetry push reconnection disabled, stopping")
-                    _state.update { TelemetryConnectionState.Disconnected("Disconnected") }
+                    _state.update { ConnectionState.Disconnected("Disconnected") }
                     return
                 }
 
@@ -158,13 +156,13 @@ class TelemetryPushSocketClient : TelemetryPushClient {
                 val delayMs = calculateBackoff(attempt)
 
                 log.warn("Failed to connect to telemetry push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
-                _state.update { TelemetryConnectionState.Reconnecting(attempt, delayMs) }
+                _state.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
                 delay(delayMs)
             }
         }
 
-        _state.update { TelemetryConnectionState.Disconnected("Stopped") }
+        _state.update { ConnectionState.Disconnected("Stopped") }
     }
 
     private fun calculateBackoff(attempt: Int): Long {
@@ -178,12 +176,12 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
     override fun disconnect() {
         val previousState = _state.value
-        _state.update { TelemetryConnectionState.Disconnected(null) }
+        _state.update { ConnectionState.Disconnected(null) }
 
         connectionJob?.cancel()
         connectionJob = null
 
-        if (previousState !is TelemetryConnectionState.Connected) {
+        if (previousState !is ConnectionState.Connected) {
             return
         }
 
@@ -227,7 +225,7 @@ class TelemetryPushSocketClient : TelemetryPushClient {
 
         if (sendRequest(request)) {
             _state.update { current ->
-                if (current is TelemetryConnectionState.Connected) {
+                if (current is ConnectionState.Connected) {
                     current.copy(subscribed = true)
                 } else {
                     current
@@ -328,11 +326,4 @@ class TelemetryPushSocketClient : TelemetryPushClient {
         )
         sendRequest(request)
     }
-}
-
-sealed class TelemetryConnectionState {
-    data object Connecting : TelemetryConnectionState()
-    data class Connected(val subscribed: Boolean = false) : TelemetryConnectionState()
-    data class Reconnecting(val attempt: Int, val nextRetryMs: Long) : TelemetryConnectionState()
-    data class Disconnected(val reason: String?) : TelemetryConnectionState()
 }

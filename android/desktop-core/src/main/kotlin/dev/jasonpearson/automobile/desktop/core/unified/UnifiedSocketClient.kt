@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.unified
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
+import dev.jasonpearson.automobile.desktop.core.connection.shouldReconnect
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -43,7 +46,7 @@ import kotlinx.serialization.json.JsonPrimitive
  * Interface for the unified socket client.
  */
 interface UnifiedSocketClient {
-    val connectionState: StateFlow<UnifiedConnectionState>
+    val connectionState: StateFlow<ConnectionState>
 
     suspend fun connect()
     suspend fun disconnect()
@@ -104,16 +107,11 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private var connectionJob: Job? = null
     private var readJob: Job? = null
 
-    private val _connectionState = MutableStateFlow<UnifiedConnectionState>(UnifiedConnectionState.Disconnected)
-    override val connectionState: StateFlow<UnifiedConnectionState> = _connectionState.asStateFlow()
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private val isConnected: Boolean get() = _connectionState.value is UnifiedConnectionState.Connected
-    private val shouldReconnect: Boolean get() {
-        val current = _connectionState.value
-        return current is UnifiedConnectionState.Connecting ||
-            current is UnifiedConnectionState.Connected ||
-            current is UnifiedConnectionState.Reconnecting
-    }
+    private val isConnected: Boolean get() = _connectionState.value.isConnected
+    private val shouldReconnect: Boolean get() = _connectionState.value.shouldReconnect
 
     // Retry configuration
     private val initialRetryDelayMs = 1000L
@@ -144,7 +142,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         }
 
         connectionJob?.cancel()
-        _connectionState.update { UnifiedConnectionState.Connecting }
+        _connectionState.update { ConnectionState.Connecting }
 
         connectionJob = scope.launch {
             connectWithRetry()
@@ -173,7 +171,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
                     OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
                 )
 
-                _connectionState.update { UnifiedConnectionState.Connected }
+                _connectionState.update { ConnectionState.Connected() }
                 attempt = 0
                 log.info("Connected to unified socket")
 
@@ -189,7 +187,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
                     log.info("Connection lost, will attempt to reconnect")
                     attempt++
                     val delayMs = calculateBackoff(attempt)
-                    _connectionState.update { UnifiedConnectionState.Reconnecting(attempt, delayMs) }
+                    _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
                     failAllPendingRequests("Connection lost")
                 }
 
@@ -198,7 +196,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
                 if (!shouldReconnect) {
                     log.info("Reconnection disabled, stopping connection attempts")
-                    _connectionState.update { UnifiedConnectionState.Disconnected }
+                    _connectionState.update { ConnectionState.Disconnected() }
                     return
                 }
 
@@ -206,13 +204,13 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
                 val delayMs = calculateBackoff(attempt)
 
                 log.warn("Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
-                _connectionState.update { UnifiedConnectionState.Reconnecting(attempt, delayMs) }
+                _connectionState.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
                 delay(delayMs)
             }
         }
 
-        _connectionState.update { UnifiedConnectionState.Disconnected }
+        _connectionState.update { ConnectionState.Disconnected() }
     }
 
     private fun calculateBackoff(attempt: Int): Long {
@@ -225,7 +223,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     override suspend fun disconnect() {
-        _connectionState.update { UnifiedConnectionState.Disconnected }
+        _connectionState.update { ConnectionState.Disconnected() }
 
         connectionJob?.cancel()
         connectionJob = null

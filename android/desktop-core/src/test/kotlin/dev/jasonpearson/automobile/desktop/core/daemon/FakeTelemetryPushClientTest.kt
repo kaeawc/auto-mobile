@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,7 +22,7 @@ class FakeTelemetryPushClientTest {
 
         client.connect(null)
         assertTrue(client.isConnected())
-        assertEquals(TelemetryConnectionState.Connected(), client.connectionState.first())
+        assertEquals(ConnectionState.Connected(), client.connectionState.first())
     }
 
     @Test
@@ -33,7 +34,7 @@ class FakeTelemetryPushClientTest {
         client.disconnect()
         assertFalse(client.isConnected())
         assertEquals(
-            TelemetryConnectionState.Disconnected(null),
+            ConnectionState.Disconnected(null),
             client.connectionState.first(),
         )
     }
@@ -121,13 +122,13 @@ class FakeTelemetryPushClientTest {
     @Test
     fun `setConnectionState updates connection state flow`() = runBlocking {
         val client = FakeTelemetryPushClient()
-        val reconnecting = TelemetryConnectionState.Reconnecting(attempt = 3, nextRetryMs = 5000)
+        val reconnecting = ConnectionState.Reconnecting(attempt = 3, nextRetryMs = 5000)
 
         client.setConnectionState(reconnecting)
         assertFalse(client.isConnected())
         assertEquals(reconnecting, client.connectionState.first())
 
-        client.setConnectionState(TelemetryConnectionState.Connected())
+        client.setConnectionState(ConnectionState.Connected())
         assertTrue(client.isConnected())
     }
 

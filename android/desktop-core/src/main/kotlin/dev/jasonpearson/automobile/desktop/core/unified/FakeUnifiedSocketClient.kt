@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.unified
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.time.Duration
 import kotlinx.coroutines.flow.Flow
@@ -19,8 +20,8 @@ import kotlinx.serialization.json.JsonElement
  * - Call tracking for verification
  */
 class FakeUnifiedSocketClient : UnifiedSocketClient {
-    private val _connectionState = MutableStateFlow<UnifiedConnectionState>(UnifiedConnectionState.Disconnected)
-    override val connectionState: StateFlow<UnifiedConnectionState> = _connectionState.asStateFlow()
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
+    override val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     private val responses = ConcurrentHashMap<String, JsonElement>()
     private val errors = ConcurrentHashMap<String, ErrorPayload>()
@@ -103,16 +104,16 @@ class FakeUnifiedSocketClient : UnifiedSocketClient {
     /**
      * Set the connection state.
      */
-    fun setConnectionState(state: UnifiedConnectionState) {
+    fun setConnectionState(state: ConnectionState) {
         _connectionState.value = state
     }
 
     override suspend fun connect() {
-        _connectionState.value = UnifiedConnectionState.Connected
+        _connectionState.value = ConnectionState.Connected()
     }
 
     override suspend fun disconnect() {
-        _connectionState.value = UnifiedConnectionState.Disconnected
+        _connectionState.value = ConnectionState.Disconnected()
     }
 
     @Suppress("UNCHECKED_CAST")

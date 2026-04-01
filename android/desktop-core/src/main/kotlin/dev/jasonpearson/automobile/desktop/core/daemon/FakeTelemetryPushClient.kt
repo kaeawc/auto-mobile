@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -18,8 +19,8 @@ class FakeTelemetryPushClient : TelemetryPushClient {
     )
     override val telemetryEvents: SharedFlow<TelemetryDisplayEvent> = _telemetryEvents.asSharedFlow()
 
-    private val _connectionState = MutableSharedFlow<TelemetryConnectionState>(replay = 1)
-    override val connectionState: SharedFlow<TelemetryConnectionState> = _connectionState.asSharedFlow()
+    private val _connectionState = MutableSharedFlow<ConnectionState>(replay = 1)
+    override val connectionState: SharedFlow<ConnectionState> = _connectionState.asSharedFlow()
 
     private var connected = false
     private var connectCallCount = 0
@@ -30,13 +31,13 @@ class FakeTelemetryPushClient : TelemetryPushClient {
         connectCallCount++
         lastDeviceId = deviceId
         connected = true
-        _connectionState.tryEmit(TelemetryConnectionState.Connected())
+        _connectionState.tryEmit(ConnectionState.Connected())
     }
 
     override fun disconnect() {
         disconnectCallCount++
         connected = false
-        _connectionState.tryEmit(TelemetryConnectionState.Disconnected(null))
+        _connectionState.tryEmit(ConnectionState.Disconnected(null))
     }
 
     override fun isConnected(): Boolean = connected
@@ -51,8 +52,8 @@ class FakeTelemetryPushClient : TelemetryPushClient {
     fun emitEvent(event: TelemetryDisplayEvent): Boolean = _telemetryEvents.tryEmit(event)
 
     /** Set the connection state for testing. */
-    fun setConnectionState(state: TelemetryConnectionState) {
-        connected = state is TelemetryConnectionState.Connected
+    fun setConnectionState(state: ConnectionState) {
+        connected = state is ConnectionState.Connected
         _connectionState.tryEmit(state)
     }
 

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.telemetry.TelemetryDisplayEvent
 import kotlinx.coroutines.flow.SharedFlow
 
@@ -11,7 +12,7 @@ interface TelemetryPushClient {
     val telemetryEvents: SharedFlow<TelemetryDisplayEvent>
 
     /** Flow of connection state changes. */
-    val connectionState: SharedFlow<TelemetryConnectionState>
+    val connectionState: SharedFlow<ConnectionState>
 
     /**
      * Connect to the telemetry push socket and subscribe to events.

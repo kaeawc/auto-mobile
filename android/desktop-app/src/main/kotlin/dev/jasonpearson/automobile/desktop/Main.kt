@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop
 
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -11,8 +12,13 @@ import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
+import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
+import java.io.IOException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
 import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
@@ -44,8 +50,6 @@ fun main() {
   }
 
   // Create the dependency graph via Metro-generated factory.
-  // TODO: Pass graph dependencies to AutoMobileDesktopApp once UI is wired to DI.
-  @Suppress("UNUSED_VARIABLE")
   val graph = createGraphFactory<AutoMobileGraph.Factory>().create()
 
   // Force dark window decorations on macOS
@@ -59,8 +63,24 @@ fun main() {
 
   application {
     var isWindowVisible by remember { mutableStateOf(true) }
-    // TODO: Wire isDaemonConnected to real daemon connection state from the DI graph.
     var isDaemonConnected by remember { mutableStateOf(false) }
+
+    // Poll daemon connection state every 5 seconds using the DI graph's client.
+    LaunchedEffect(Unit) {
+      while (true) {
+        isDaemonConnected = try {
+          withContext(Dispatchers.IO) {
+            graph.autoMobileClient.getDaemonStatus()
+          }
+          true
+        } catch (_: IOException) {
+          false
+        } catch (_: McpConnectionException) {
+          false
+        }
+        delay(5_000L)
+      }
+    }
 
     AutoMobileSystemTray(
       isConnected = isDaemonConnected,

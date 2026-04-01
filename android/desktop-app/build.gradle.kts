@@ -5,6 +5,7 @@ plugins {
   alias(libs.plugins.kotlin.serialization)
   kotlin("plugin.compose")
   alias(libs.plugins.compose.multiplatform)
+  alias(libs.plugins.metro)
 }
 
 repositories {
@@ -32,6 +33,9 @@ dependencies {
   // Kotlin ecosystem
   implementation(libs.kotlinx.coroutines)
   implementation(libs.kotlinx.serialization)
+
+  // Metro DI
+  implementation(libs.metro.runtime)
 
   // Test dependencies
   testImplementation(libs.kotlin.test)

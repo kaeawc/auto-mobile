@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -12,14 +14,17 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -57,8 +62,6 @@ class ObservationStreamClient {
     private var channel: SocketChannel? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
-    private val connected = AtomicBoolean(false)
-    private val subscribed = AtomicBoolean(false)
 
     // Flow for hierarchy updates
     private val _hierarchyUpdates = MutableSharedFlow<HierarchyStreamUpdate>(replay = 1)
@@ -81,15 +84,15 @@ class ObservationStreamClient {
     val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
 
     // Flow for connection state
-    private val _connectionState = MutableSharedFlow<StreamConnectionState>(replay = 1)
-    val connectionState: SharedFlow<StreamConnectionState> = _connectionState.asSharedFlow()
+    private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
+    val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
     /**
      * Connect to the observation stream socket and subscribe to updates.
      * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
      */
     fun connect(deviceId: String? = null) {
-        if (connected.get()) {
+        if (_connectionState.value.isConnected) {
             log.info("Already connected to observation stream")
             return
         }
@@ -97,17 +100,13 @@ class ObservationStreamClient {
         val socketPath = getSocketPath()
         log.info("Connecting to observation stream at $socketPath")
 
-        scope.launch {
-            _connectionState.emit(StreamConnectionState.Connecting)
-        }
+        _connectionState.update { ConnectionState.Connecting }
 
         try {
             val path = Path.of(socketPath)
             if (!Files.exists(path)) {
                 log.warn("Observation stream socket not found at $socketPath")
-                scope.launch {
-                    _connectionState.emit(StreamConnectionState.Disconnected("Socket not found"))
-                }
+                _connectionState.update { ConnectionState.Disconnected("Socket not found") }
                 return
             }
 
@@ -120,7 +119,7 @@ class ObservationStreamClient {
                 OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
             )
 
-            connected.set(true)
+            _connectionState.update { ConnectionState.Connected() }
             log.info("Connected to observation stream")
 
             // Send subscribe request
@@ -133,18 +132,18 @@ class ObservationStreamClient {
 
         } catch (e: Exception) {
             log.warn("Failed to connect to observation stream: ${e.message}")
-            scope.launch {
-                _connectionState.emit(StreamConnectionState.Disconnected(e.message))
-            }
+            _connectionState.update { ConnectionState.Disconnected(e.message) }
         }
     }
 
     fun disconnect() {
-        if (!connected.get()) return
+        if (!_connectionState.value.isConnected) return
+
+        val previousState = _connectionState.value
 
         try {
             // Send unsubscribe request
-            if (subscribed.get()) {
+            if (previousState is ConnectionState.Connected && previousState.subscribed) {
                 val request = StreamRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",
@@ -160,15 +159,10 @@ class ObservationStreamClient {
         channel = null
         reader = null
         writer = null
-        connected.set(false)
-        subscribed.set(false)
-
-        scope.launch {
-            _connectionState.emit(StreamConnectionState.Disconnected(null))
-        }
+        _connectionState.update { ConnectionState.Disconnected() }
     }
 
-    fun isConnected(): Boolean = connected.get()
+    fun isConnected(): Boolean = _connectionState.value.isConnected
 
     /**
      * Disconnect and cancel the internal coroutine scope.
@@ -187,7 +181,13 @@ class ObservationStreamClient {
         )
 
         if (sendRequest(request)) {
-            subscribed.set(true)
+            _connectionState.update { current ->
+                if (current is ConnectionState.Connected) {
+                    current.copy(subscribed = true)
+                } else {
+                    current
+                }
+            }
             log.info("Subscribed to observation stream (device: ${deviceId ?: "all"})")
         }
     }
@@ -211,10 +211,9 @@ class ObservationStreamClient {
         val currentReader = reader ?: return
 
         try {
-            _connectionState.emit(StreamConnectionState.Connected)
             log.info("Starting message read loop")
 
-            while (connected.get()) {
+            while (_connectionState.value.isConnected) {
                 val line = currentReader.readLine() ?: break
                 if (line.isBlank()) continue
 
@@ -226,14 +225,12 @@ class ObservationStreamClient {
                     log.warn("Failed to parse observation stream message: ${e.message}", e)
                 }
             }
-            log.info("Read loop ended - connected=${connected.get()}")
+            log.info("Read loop ended - connected=${_connectionState.value.isConnected}")
         } catch (e: Exception) {
             log.warn("Error reading from observation stream: ${e.message}", e)
         }
 
-        connected.set(false)
-        subscribed.set(false)
-        _connectionState.emit(StreamConnectionState.Disconnected("Stream ended"))
+        _connectionState.update { ConnectionState.Disconnected("Stream ended") }
         log.info("Observation stream disconnected")
     }
 
@@ -339,7 +336,7 @@ class ObservationStreamClient {
      *              If null, the server returns the graph for the current foreground app.
      */
     fun requestNavigationGraph(appId: String? = null) {
-        if (!connected.get()) return
+        if (!_connectionState.value.isConnected) return
 
         val request = StreamRequest(
             id = UUID.randomUUID().toString(),
@@ -478,9 +475,3 @@ data class PerformanceStreamUpdate(
     val recompositionCount: Int?,
     val recompositionRate: Float?,
 )
-
-sealed class StreamConnectionState {
-    data object Connecting : StreamConnectionState()
-    data object Connected : StreamConnectionState()
-    data class Disconnected(val reason: String?) : StreamConnectionState()
-}

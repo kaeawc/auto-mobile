@@ -100,7 +100,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
-import dev.jasonpearson.automobile.desktop.core.daemon.StreamConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushSocketClient
@@ -735,7 +735,7 @@ fun AutoMobileContent(
   LaunchedEffect(observationStreamClient) {
       val client = observationStreamClient ?: return@LaunchedEffect
       client.connectionState.collect { connectionState ->
-          if (connectionState is StreamConnectionState.Disconnected) {
+          if (connectionState is ConnectionState.Disconnected) {
               currentFps = null
               currentFrameTimeMs = null
               currentJankFrames = null

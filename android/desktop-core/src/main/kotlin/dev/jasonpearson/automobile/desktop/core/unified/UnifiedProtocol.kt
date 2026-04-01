@@ -72,17 +72,6 @@ data class SubscriptionResult(
 )
 
 /**
- * Connection state for the unified socket client.
- */
-sealed class UnifiedConnectionState {
-    data object Disconnected : UnifiedConnectionState()
-    data object Connecting : UnifiedConnectionState()
-    data object Connected : UnifiedConnectionState()
-    data class Reconnecting(val attempt: Int, val nextRetryMs: Long) : UnifiedConnectionState()
-    data class Error(val message: String) : UnifiedConnectionState()
-}
-
-/**
  * Exception thrown when a request times out.
  */
 class RequestTimeoutException(message: String) : Exception(message)

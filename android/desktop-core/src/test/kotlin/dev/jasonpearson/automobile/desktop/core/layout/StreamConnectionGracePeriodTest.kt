@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.layout
 
-import dev.jasonpearson.automobile.desktop.core.daemon.StreamConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.runTest
 import kotlin.test.Test
@@ -20,7 +20,7 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnected = true },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
 
         assertEquals(listOf(ConnectionStatus.Connected), statuses)
         assertFalse(disconnected)
@@ -35,7 +35,7 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = {},
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connecting)
+        gp.onStreamStateChange(ConnectionState.Connecting)
 
         assertEquals(listOf(ConnectionStatus.Connecting), statuses)
     }
@@ -50,10 +50,10 @@ class StreamConnectionGracePeriodTest {
         )
 
         // First connect, then reconnect
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
         statuses.clear()
 
-        gp.onStreamStateChange(StreamConnectionState.Connecting)
+        gp.onStreamStateChange(ConnectionState.Connecting)
 
         assertTrue(statuses.isEmpty(), "Connecting should be suppressed after having been connected")
     }
@@ -69,8 +69,8 @@ class StreamConnectionGracePeriodTest {
         )
 
         // Connect first, then disconnect
-        gp.onStreamStateChange(StreamConnectionState.Connected)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "test"))
+        gp.onStreamStateChange(ConnectionState.Connected())
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "test"))
 
         // Not yet disconnected
         assertFalse(disconnected)
@@ -92,15 +92,15 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnected = true },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
         statuses.clear()
 
         // Disconnect starts grace period
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "test"))
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "test"))
 
         // Reconnect within grace period
         advanceTimeBy(5_000)
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
 
         // Grace period should be cancelled
         advanceTimeBy(30_000)
@@ -119,8 +119,8 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnected = true },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connected)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "gone"))
+        gp.onStreamStateChange(ConnectionState.Connected())
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "gone"))
 
         advanceTimeBy(30_001)
 
@@ -136,7 +136,7 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnected = true },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "never connected"))
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "never connected"))
 
         assertTrue(disconnected, "Disconnect should propagate immediately when never connected")
     }
@@ -153,15 +153,15 @@ class StreamConnectionGracePeriodTest {
         )
 
         // Cycle 1: connect -> disconnect -> reconnect (within grace)
-        gp.onStreamStateChange(StreamConnectionState.Connected)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "blip 1"))
+        gp.onStreamStateChange(ConnectionState.Connected())
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "blip 1"))
         advanceTimeBy(5_000)
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
 
         // Cycle 2: disconnect -> reconnect (within grace)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "blip 2"))
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "blip 2"))
         advanceTimeBy(10_000)
-        gp.onStreamStateChange(StreamConnectionState.Connected)
+        gp.onStreamStateChange(ConnectionState.Connected())
 
         // Let all timers expire
         advanceTimeBy(60_000)
@@ -187,8 +187,8 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnected = true },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connected)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "test"))
+        gp.onStreamStateChange(ConnectionState.Connected())
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "test"))
 
         gp.cancel()
 
@@ -207,10 +207,10 @@ class StreamConnectionGracePeriodTest {
             onDisconnectConfirmed = { disconnectCount++ },
         )
 
-        gp.onStreamStateChange(StreamConnectionState.Connected)
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "first"))
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "second"))
-        gp.onStreamStateChange(StreamConnectionState.Disconnected(reason = "third"))
+        gp.onStreamStateChange(ConnectionState.Connected())
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "first"))
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "second"))
+        gp.onStreamStateChange(ConnectionState.Disconnected(reason = "third"))
 
         advanceTimeBy(30_001)
 

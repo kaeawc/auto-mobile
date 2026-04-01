@@ -1,5 +1,8 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.isConnected
+import dev.jasonpearson.automobile.desktop.core.connection.shouldReconnect
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
@@ -57,16 +60,11 @@ class FailuresPushSocketClient {
     private var writer: BufferedWriter? = null
     private var connectionJob: Job? = null
 
-    private val _state = MutableStateFlow<FailuresPushConnectionState>(FailuresPushConnectionState.Disconnected(null))
-    val connectionState: StateFlow<FailuresPushConnectionState> = _state.asStateFlow()
+    private val _state = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected(null))
+    val connectionState: StateFlow<ConnectionState> = _state.asStateFlow()
 
-    private val _isConnected: Boolean get() = _state.value is FailuresPushConnectionState.Connected
-    private val _shouldReconnect: Boolean get() {
-        val current = _state.value
-        return current is FailuresPushConnectionState.Connecting ||
-            current is FailuresPushConnectionState.Connected ||
-            current is FailuresPushConnectionState.Reconnecting
-    }
+    private val _isConnected: Boolean get() = _state.value.isConnected
+    private val _shouldReconnect: Boolean get() = _state.value.shouldReconnect
 
     // Retry configuration
     private val initialRetryDelayMs = 1000L
@@ -94,7 +92,7 @@ class FailuresPushSocketClient {
 
         // Cancel any existing connection job
         connectionJob?.cancel()
-        _state.update { FailuresPushConnectionState.Connecting }
+        _state.update { ConnectionState.Connecting }
 
         connectionJob = scope.launch {
             connectWithRetry(type, severity)
@@ -123,7 +121,7 @@ class FailuresPushSocketClient {
                     OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
                 )
 
-                _state.update { FailuresPushConnectionState.Connected(subscribed = false) }
+                _state.update { ConnectionState.Connected(subscribed = false) }
                 attempt = 0
                 log.info("Connected to failures push")
 
@@ -137,7 +135,7 @@ class FailuresPushSocketClient {
                 if (_shouldReconnect) {
                     log.info("Connection lost, will attempt to reconnect")
                     attempt++
-                    _state.update { FailuresPushConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
+                    _state.update { ConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
                 }
 
             } catch (e: Exception) {
@@ -145,7 +143,7 @@ class FailuresPushSocketClient {
 
                 if (!_shouldReconnect) {
                     log.info("Reconnection disabled, stopping connection attempts")
-                    _state.update { FailuresPushConnectionState.Disconnected("Disconnected") }
+                    _state.update { ConnectionState.Disconnected("Disconnected") }
                     return
                 }
 
@@ -153,13 +151,13 @@ class FailuresPushSocketClient {
                 val delayMs = calculateBackoff(attempt)
 
                 log.warn("Failed to connect to failures push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
-                _state.update { FailuresPushConnectionState.Reconnecting(attempt, delayMs) }
+                _state.update { ConnectionState.Reconnecting(attempt, delayMs) }
 
                 delay(delayMs)
             }
         }
 
-        _state.update { FailuresPushConnectionState.Disconnected("Stopped") }
+        _state.update { ConnectionState.Disconnected("Stopped") }
     }
 
     private fun calculateBackoff(attempt: Int): Long {
@@ -176,12 +174,12 @@ class FailuresPushSocketClient {
     fun disconnect() {
         val previousState = _state.value
         // Stop reconnection attempts by moving to Disconnected
-        _state.update { FailuresPushConnectionState.Disconnected(null) }
+        _state.update { ConnectionState.Disconnected(null) }
 
         connectionJob?.cancel()
         connectionJob = null
 
-        if (previousState !is FailuresPushConnectionState.Connected) {
+        if (previousState !is ConnectionState.Connected) {
             return
         }
 
@@ -225,7 +223,7 @@ class FailuresPushSocketClient {
 
         if (sendRequest(request)) {
             _state.update { current ->
-                if (current is FailuresPushConnectionState.Connected) {
+                if (current is ConnectionState.Connected) {
                     current.copy(subscribed = true)
                 } else {
                     current
@@ -351,10 +349,3 @@ data class FailureNotification(
     val message: String,
     val timestamp: Long,
 )
-
-sealed class FailuresPushConnectionState {
-    data object Connecting : FailuresPushConnectionState()
-    data class Connected(val subscribed: Boolean = false) : FailuresPushConnectionState()
-    data class Reconnecting(val attempt: Int, val nextRetryMs: Long) : FailuresPushConnectionState()
-    data class Disconnected(val reason: String?) : FailuresPushConnectionState()
-}

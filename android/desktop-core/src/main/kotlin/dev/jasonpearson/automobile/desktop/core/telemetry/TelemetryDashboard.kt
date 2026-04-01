@@ -51,7 +51,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import dev.jasonpearson.automobile.desktop.core.components.SearchBar
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import kotlinx.coroutines.delay
-import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryConnectionState
+import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -196,7 +196,7 @@ fun TelemetryDashboard(
         previousDeviceId = activeDeviceId
     }
     var selectedFilter by remember { mutableStateOf(CategoryFilter.All) }
-    var connectionState by remember { mutableStateOf<TelemetryConnectionState?>(null) }
+    var connectionState by remember { mutableStateOf<ConnectionState?>(null) }
     val listState = rememberLazyListState()
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss.SSS", Locale.US) }
     var isPaused by remember { mutableStateOf(false) }
@@ -578,12 +578,13 @@ fun TelemetryDashboard(
 
         // Connection status bar (when disconnected)
         val state = connectionState
-        if (state != null && state !is TelemetryConnectionState.Connected) {
+        if (state != null && state !is ConnectionState.Connected) {
             val statusText = when (state) {
-                is TelemetryConnectionState.Connecting -> "Connecting..."
-                is TelemetryConnectionState.Reconnecting -> "Reconnecting (attempt ${state.attempt})..."
-                is TelemetryConnectionState.Disconnected -> "Disconnected${state.reason?.let { ": $it" } ?: ""}"
-                is TelemetryConnectionState.Connected -> ""
+                is ConnectionState.Connecting -> "Connecting..."
+                is ConnectionState.Reconnecting -> "Reconnecting (attempt ${state.attempt})..."
+                is ConnectionState.Disconnected -> "Disconnected${state.reason?.let { ": $it" } ?: ""}"
+                is ConnectionState.Error -> "Error: ${state.message}"
+                is ConnectionState.Connected -> ""
             }
             Box(
                 modifier = Modifier

@@ -69,8 +69,13 @@ internal class SdkEventBuffer(
 
     var current: SdkEvent = event
     for (processor in processors) {
-      current = processor.process(current) ?: run {
-        dropCounter?.increment(DropReason.FILTERED)
+      try {
+        current = processor.process(current) ?: run {
+          dropCounter?.increment(DropReason.FILTERED)
+          return
+        }
+      } catch (_: Exception) {
+        dropCounter?.increment(DropReason.PROCESSOR_ERROR)
         return
       }
     }

@@ -11,6 +11,7 @@ enum class DropReason {
   BUFFER_OVERFLOW,
   FILTERED,
   DELIVERY_FAILED,
+  PROCESSOR_ERROR,
 }
 
 /** Tracks counts of dropped events by reason. */

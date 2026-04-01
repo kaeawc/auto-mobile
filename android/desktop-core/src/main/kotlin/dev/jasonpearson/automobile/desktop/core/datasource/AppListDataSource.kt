@@ -53,7 +53,7 @@ class RealAppListDataSource(
 
     override suspend fun getInstalledApps(): Result<List<InstalledApp>> {
         val provider = clientProvider ?: return Result.Success(emptyList())
-        val device = deviceId ?: return Result.Error("No device ID provided")
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
 
         return try {
             val client = provider()
@@ -80,9 +80,9 @@ class RealAppListDataSource(
 
             Result.Success(apps)
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to load installed apps: ${e.message}")
+            Result.Error(e, "Failed to load installed apps: ${e.message}")
         }
     }
 }

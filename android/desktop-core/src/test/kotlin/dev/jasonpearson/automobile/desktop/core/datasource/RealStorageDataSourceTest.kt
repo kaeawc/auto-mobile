@@ -27,7 +27,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getKeyValueFiles()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Not connected"))
     }
 
     @Test
@@ -42,7 +42,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getKeyValueFiles()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("device"))
+        assertTrue((result as Result.Error).message!!.contains("device"))
     }
 
     @Test
@@ -57,7 +57,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getKeyValueFiles()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("package"))
+        assertTrue((result as Result.Error).message!!.contains("package"))
     }
 
     @Test
@@ -137,7 +137,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getKeyValueFiles()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("MCP server not available"))
+        assertTrue((result as Result.Error).message!!.contains("MCP server not available"))
     }
 
     @Test
@@ -161,7 +161,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getKeyValueFiles()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Device not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Device not connected"))
     }
 
     @Test
@@ -258,7 +258,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getDatabases()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Not connected"))
     }
 
     @Test
@@ -273,7 +273,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getDatabases()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("device"))
+        assertTrue((result as Result.Error).message!!.contains("device"))
     }
 
     @Test
@@ -288,7 +288,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.getDatabases()
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("package"))
+        assertTrue((result as Result.Error).message!!.contains("package"))
     }
 
     @Test
@@ -357,7 +357,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.setKeyValue("prefs", "key1", "value1", KeyValueType.String)
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Not connected"))
     }
 
     @Test
@@ -372,7 +372,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.setKeyValue("prefs", "key1", "value1", KeyValueType.String)
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("device"))
+        assertTrue((result as Result.Error).message!!.contains("device"))
     }
 
     @Test
@@ -387,7 +387,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.setKeyValue("prefs", "key1", "value1", KeyValueType.String)
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("package"))
+        assertTrue((result as Result.Error).message!!.contains("package"))
     }
 
     @Test
@@ -439,7 +439,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.setKeyValue("app_prefs", "key", "val", KeyValueType.String)
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Write failed"))
+        assertTrue((result as Result.Error).message!!.contains("Write failed"))
     }
 
     // --- removeKeyValue tests ---
@@ -451,7 +451,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.removeKeyValue("prefs", "key1")
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Not connected"))
     }
 
     @Test
@@ -486,7 +486,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.removeKeyValue("app_prefs", "missing_key")
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Key not found"))
+        assertTrue((result as Result.Error).message!!.contains("Key not found"))
     }
 
     // --- clearKeyValueFile tests ---
@@ -498,7 +498,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.clearKeyValueFile("prefs")
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Not connected"))
+        assertTrue((result as Result.Error).message!!.contains("Not connected"))
     }
 
     @Test
@@ -532,7 +532,7 @@ class RealStorageDataSourceTest {
         val result = dataSource.clearKeyValueFile("app_prefs")
 
         assertTrue(result is Result.Error)
-        assertTrue((result as Result.Error).message.contains("Permission denied"))
+        assertTrue((result as Result.Error).message!!.contains("Permission denied"))
     }
 }
 

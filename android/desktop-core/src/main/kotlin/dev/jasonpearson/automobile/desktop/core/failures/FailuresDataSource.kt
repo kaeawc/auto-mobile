@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.desktop.core.failures
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
 import dev.jasonpearson.automobile.desktop.core.daemon.decodeResourceResponse
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.serialization.Serializable
@@ -69,23 +70,15 @@ enum class TimeAggregation(val label: String, val durationMs: Long) {
 // DataSourceMode has been moved to dev.jasonpearson.automobile.desktop.core.datasource package
 
 /**
- * Result of a data source operation
- */
-sealed class DataSourceResult<out T> {
-    data class Success<T>(val data: T) : DataSourceResult<T>()
-    data class Error(val message: String, val exception: Exception? = null) : DataSourceResult<Nothing>()
-}
-
-/**
  * Interface for accessing failures data
  */
 interface FailuresDataSource {
-    suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>>
+    suspend fun getFailureGroups(): Result<List<FailureGroup>>
 
     suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData>
+    ): Result<TimelineData>
 }
 
 /**
@@ -94,15 +87,15 @@ interface FailuresDataSource {
 class MockFailuresDataSource(
     private val clock: Clock = SystemClock,
 ) : FailuresDataSource {
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
-        return DataSourceResult.Success(createMockFailureGroups(clock))
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
+        return Result.Success(createMockFailureGroups(clock))
     }
 
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
-        return DataSourceResult.Success(
+    ): Result<TimelineData> {
+        return Result.Success(
             TimelineData(
                 dataPoints = generateMockTimelineData(dateRange, aggregation, clock),
                 previousPeriodTotals = generateMockPreviousPeriodTotals(dateRange),
@@ -115,15 +108,15 @@ class MockFailuresDataSource(
  * Empty data source that returns empty results (for Real mode when MCP not available)
  */
 class EmptyFailuresDataSource : FailuresDataSource {
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
-        return DataSourceResult.Success(emptyList())
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
+        return Result.Success(emptyList())
     }
 
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
-        return DataSourceResult.Success(
+    ): Result<TimelineData> {
+        return Result.Success(
             TimelineData(
                 dataPoints = emptyList(),
                 previousPeriodTotals = PeriodTotals(0, 0, 0),
@@ -140,29 +133,29 @@ class McpFailuresDataSource(
 ) : FailuresDataSource {
     private val json = Json { ignoreUnknownKeys = true }
 
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
         return try {
             val client = clientProvider()
             val contents = client.readResource("automobile:failures")
             val response = decodeResourceResponse(json, contents, FailuresResponse.serializer())
-            DataSourceResult.Success(response.groups.map { it.toModel() })
+            Result.Success(response.groups.map { it.toModel() })
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("MCP server not available: ${e.message}", e)
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to load failures: ${e.message}", e)
+            Result.Error(e, "Failed to load failures: ${e.message}")
         }
     }
 
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
+    ): Result<TimelineData> {
         return try {
             val client = clientProvider()
             val uri = "automobile:failures/timeline?dateRange=${dateRange.toQueryParam()}&aggregation=${aggregation.toQueryParam()}"
             val contents = client.readResource(uri)
             val response = decodeResourceResponse(json, contents, TimelineResponse.serializer())
-            DataSourceResult.Success(
+            Result.Success(
                 TimelineData(
                     dataPoints = response.dataPoints.map {
                         TimelineDataPoint(it.label, it.crashes, it.anrs, it.toolFailures, it.nonfatals)
@@ -176,9 +169,9 @@ class McpFailuresDataSource(
                 )
             )
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("MCP server not available: ${e.message}", e)
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to load timeline: ${e.message}", e)
+            Result.Error(e, "Failed to load timeline: ${e.message}")
         }
     }
 }

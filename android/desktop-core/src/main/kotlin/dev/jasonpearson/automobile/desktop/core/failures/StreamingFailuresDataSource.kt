@@ -7,6 +7,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresStreamSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresTimelineRequest
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.flow
@@ -23,22 +24,22 @@ class StreamingFailuresDataSource(
     private var lastNotificationTimestamp: Long? = null
     private var lastNotificationId: Long? = null
 
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
         return try {
             val response = socketClient.pollGroups(FailuresGroupsRequest())
             val groups = response.groups?.map { it.toModel() } ?: emptyList()
-            DataSourceResult.Success(groups)
+            Result.Success(groups)
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("Failures stream socket not available: ${e.message}", e)
+            Result.Error(e, "Failures stream socket not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to load failures: ${e.message}", e)
+            Result.Error(e, "Failed to load failures: ${e.message}")
         }
     }
 
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
+    ): Result<TimelineData> {
         return try {
             val response = socketClient.pollTimeline(
                 FailuresTimelineRequest(
@@ -55,11 +56,11 @@ class StreamingFailuresDataSource(
                 PeriodTotals(it.crashes, it.anrs, it.toolFailures, it.nonfatals)
             } ?: PeriodTotals(0, 0, 0, 0)
 
-            DataSourceResult.Success(TimelineData(dataPoints, previousTotals))
+            Result.Success(TimelineData(dataPoints, previousTotals))
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("Failures stream socket not available: ${e.message}", e)
+            Result.Error(e, "Failures stream socket not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to load timeline: ${e.message}", e)
+            Result.Error(e, "Failed to load timeline: ${e.message}")
         }
     }
 
@@ -70,7 +71,7 @@ class StreamingFailuresDataSource(
         dateRange: DateRange? = null,
         type: FailureType? = null,
         severity: FailureSeverity? = null,
-    ): DataSourceResult<FailureGroupsWithTotals> {
+    ): Result<FailureGroupsWithTotals> {
         return try {
             val response = socketClient.pollGroups(
                 FailuresGroupsRequest(
@@ -85,11 +86,11 @@ class StreamingFailuresDataSource(
                 FailureTotals(it.crashes, it.anrs, it.toolFailures, it.nonfatals)
             } ?: FailureTotals(0, 0, 0, 0)
 
-            DataSourceResult.Success(FailureGroupsWithTotals(groups, totals))
+            Result.Success(FailureGroupsWithTotals(groups, totals))
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("Failures stream socket not available: ${e.message}", e)
+            Result.Error(e, "Failures stream socket not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to load failures: ${e.message}", e)
+            Result.Error(e, "Failed to load failures: ${e.message}")
         }
     }
 
@@ -100,7 +101,7 @@ class StreamingFailuresDataSource(
     suspend fun pollNewNotifications(
         type: FailureType? = null,
         limit: Int? = null,
-    ): DataSourceResult<List<FailureNotification>> {
+    ): Result<List<FailureNotification>> {
         return try {
             val response = socketClient.pollNotifications(
                 FailuresNotificationsRequest(
@@ -117,11 +118,11 @@ class StreamingFailuresDataSource(
             response.lastId?.let { lastNotificationId = it }
 
             val notifications = response.notifications?.map { it.toModel() } ?: emptyList()
-            DataSourceResult.Success(notifications)
+            Result.Success(notifications)
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("Failures stream socket not available: ${e.message}", e)
+            Result.Error(e, "Failures stream socket not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to poll notifications: ${e.message}", e)
+            Result.Error(e, "Failed to poll notifications: ${e.message}")
         }
     }
 
@@ -136,16 +137,16 @@ class StreamingFailuresDataSource(
     /**
      * Acknowledge notifications by their IDs
      */
-    suspend fun acknowledgeNotifications(ids: List<Int>): DataSourceResult<Int> {
-        if (ids.isEmpty()) return DataSourceResult.Success(0)
+    suspend fun acknowledgeNotifications(ids: List<Int>): Result<Int> {
+        if (ids.isEmpty()) return Result.Success(0)
 
         return try {
             val response = socketClient.acknowledge(ids)
-            DataSourceResult.Success(response.acknowledgedCount ?: 0)
+            Result.Success(response.acknowledgedCount ?: 0)
         } catch (e: McpConnectionException) {
-            DataSourceResult.Error("Failures stream socket not available: ${e.message}", e)
+            Result.Error(e, "Failures stream socket not available: ${e.message}")
         } catch (e: Exception) {
-            DataSourceResult.Error("Failed to acknowledge notifications: ${e.message}", e)
+            Result.Error(e, "Failed to acknowledge notifications: ${e.message}")
         }
     }
 
@@ -153,7 +154,7 @@ class StreamingFailuresDataSource(
      * Create a flow that polls for new notifications at regular intervals.
      * Implements [StreamingFailuresDataSourceInterface.notificationsFlow].
      */
-    override fun notificationsFlow(): Flow<DataSourceResult<List<FailureNotification>>> =
+    override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> =
         notificationsFlowWithParams()
 
     /**
@@ -162,7 +163,7 @@ class StreamingFailuresDataSource(
     fun notificationsFlowWithParams(
         pollIntervalMs: Long = 2000,
         type: FailureType? = null,
-    ): Flow<DataSourceResult<List<FailureNotification>>> = flow {
+    ): Flow<Result<List<FailureNotification>>> = flow {
         while (true) {
             val result = pollNewNotifications(type = type)
             emit(result)
@@ -174,7 +175,7 @@ class StreamingFailuresDataSource(
      * Create a flow that polls for updated failure groups at regular intervals.
      * Implements [StreamingFailuresDataSourceInterface.failureGroupsFlow].
      */
-    override fun failureGroupsFlow(): Flow<DataSourceResult<FailureGroupsWithTotals>> =
+    override fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>> =
         failureGroupsFlowWithParams()
 
     /**
@@ -184,7 +185,7 @@ class StreamingFailuresDataSource(
         pollIntervalMs: Long = 5000,
         dateRange: DateRange? = null,
         type: FailureType? = null,
-    ): Flow<DataSourceResult<FailureGroupsWithTotals>> = flow {
+    ): Flow<Result<FailureGroupsWithTotals>> = flow {
         while (true) {
             val result = getFailureGroups(dateRange, type)
             emit(result)

@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 
@@ -18,10 +19,10 @@ class CompositeFailuresDataSource(
      * Get failure groups via MCP for initial/complete data.
      * Falls back to streaming if MCP is not available and streaming implements FailuresDataSource.
      */
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
         // Prefer MCP for initial load (more complete data)
         mcpDataSource?.getFailureGroups()?.let { result ->
-            if (result is DataSourceResult.Success) {
+            if (result is Result.Success) {
                 return result
             }
         }
@@ -32,7 +33,7 @@ class CompositeFailuresDataSource(
         }
 
         // Return empty if neither is available
-        return DataSourceResult.Success(emptyList())
+        return Result.Success(emptyList())
     }
 
     /**
@@ -42,10 +43,10 @@ class CompositeFailuresDataSource(
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
+    ): Result<TimelineData> {
         // Prefer MCP for timeline data
         mcpDataSource?.getTimelineData(dateRange, aggregation)?.let { result ->
-            if (result is DataSourceResult.Success) {
+            if (result is Result.Success) {
                 return result
             }
         }
@@ -56,7 +57,7 @@ class CompositeFailuresDataSource(
         }
 
         // Return empty if neither is available
-        return DataSourceResult.Success(
+        return Result.Success(
             TimelineData(
                 dataPoints = emptyList(),
                 previousPeriodTotals = PeriodTotals(0, 0, 0),
@@ -68,7 +69,7 @@ class CompositeFailuresDataSource(
      * Real-time notification flow from Unix socket.
      * Returns empty flow if streaming is not available.
      */
-    override fun notificationsFlow(): Flow<DataSourceResult<List<FailureNotification>>> {
+    override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> {
         return streamingDataSource?.notificationsFlow() ?: emptyFlow()
     }
 
@@ -76,7 +77,7 @@ class CompositeFailuresDataSource(
      * Real-time failure groups updates from Unix socket.
      * Returns empty flow if streaming is not available.
      */
-    override fun failureGroupsFlow(): Flow<DataSourceResult<FailureGroupsWithTotals>> {
+    override fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>> {
         return streamingDataSource?.failureGroupsFlow() ?: emptyFlow()
     }
 

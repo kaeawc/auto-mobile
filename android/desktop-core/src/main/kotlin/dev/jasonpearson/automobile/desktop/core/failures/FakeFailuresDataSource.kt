@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.flow.Flow
@@ -19,8 +20,8 @@ class FakeFailuresDataSource(
     private var notificationIdCounter = 1
     private val random = Random(System.currentTimeMillis())
 
-    private val _notificationsFlow = MutableSharedFlow<DataSourceResult<List<FailureNotification>>>(replay = 0)
-    private val _failureGroupsFlow = MutableSharedFlow<DataSourceResult<FailureGroupsWithTotals>>(replay = 1)
+    private val _notificationsFlow = MutableSharedFlow<Result<List<FailureNotification>>>(replay = 0)
+    private val _failureGroupsFlow = MutableSharedFlow<Result<FailureGroupsWithTotals>>(replay = 1)
 
     // Track triggered failures for totals
     private var triggeredCrashes = 0
@@ -28,28 +29,28 @@ class FakeFailuresDataSource(
     private var triggeredToolFailures = 0
     private var triggeredNonfatals = 0
 
-    override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> {
+    override suspend fun getFailureGroups(): Result<List<FailureGroup>> {
         return mockDataSource.getFailureGroups()
     }
 
     override suspend fun getTimelineData(
         dateRange: DateRange,
         aggregation: TimeAggregation,
-    ): DataSourceResult<TimelineData> {
+    ): Result<TimelineData> {
         return mockDataSource.getTimelineData(dateRange, aggregation)
     }
 
     /**
      * Flow of new failure notifications (emitted when [triggerNewFailure] is called)
      */
-    override fun notificationsFlow(): Flow<DataSourceResult<List<FailureNotification>>> {
+    override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> {
         return _notificationsFlow.asSharedFlow()
     }
 
     /**
      * Flow of updated failure groups (emitted when [triggerNewFailure] is called)
      */
-    override fun failureGroupsFlow(): Flow<DataSourceResult<FailureGroupsWithTotals>> {
+    override fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>> {
         return _failureGroupsFlow.asSharedFlow()
     }
 
@@ -82,17 +83,17 @@ class FakeFailuresDataSource(
         )
 
         // Emit the notification
-        _notificationsFlow.emit(DataSourceResult.Success(listOf(notification)))
+        _notificationsFlow.emit(Result.Success(listOf(notification)))
 
         // Emit updated groups with totals
         val groupsResult = getFailureGroups()
-        if (groupsResult is DataSourceResult.Success) {
+        if (groupsResult is Result.Success) {
             val totals = FailureTotals(
                 crashes = groupsResult.data.count { it.type == FailureType.Crash } + triggeredCrashes,
                 anrs = groupsResult.data.count { it.type == FailureType.ANR } + triggeredAnrs,
                 toolFailures = groupsResult.data.count { it.type == FailureType.ToolCallFailure } + triggeredToolFailures,
             )
-            _failureGroupsFlow.emit(DataSourceResult.Success(FailureGroupsWithTotals(groupsResult.data, totals)))
+            _failureGroupsFlow.emit(Result.Success(FailureGroupsWithTotals(groupsResult.data, totals)))
         }
     }
 
@@ -128,6 +129,6 @@ class FakeFailuresDataSource(
  * Used by both [FakeFailuresDataSource] and [StreamingFailuresDataSource].
  */
 interface StreamingFailuresDataSourceInterface {
-    fun notificationsFlow(): Flow<DataSourceResult<List<FailureNotification>>>
-    fun failureGroupsFlow(): Flow<DataSourceResult<FailureGroupsWithTotals>>
+    fun notificationsFlow(): Flow<Result<List<FailureNotification>>>
+    fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>>
 }

@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
 import java.time.Instant
+import java.util.LinkedHashMap
 
 data class PerformanceAuditStreamCursor(
     val lastTimestamp: String? = null,
@@ -19,14 +20,20 @@ class PerformanceAuditStreamService(
     private val clock: PerformanceAuditClock = SystemPerformanceAuditClock(),
     private val defaultWindowMs: Long = PerformanceAuditStreamCache.DEFAULT_TTL_MS,
     private val defaultLimit: Int = 200,
+    private val maxCursors: Int = DEFAULT_MAX_CURSORS,
 ) {
+  companion object {
+    const val DEFAULT_MAX_CURSORS = 100
+  }
+
   private data class FilterKey(
       val deviceId: String?,
       val sessionId: String?,
       val packageName: String?,
   )
 
-  private val cursors = mutableMapOf<FilterKey, PerformanceAuditStreamCursor>()
+  private val cursors =
+      LinkedHashMap<FilterKey, PerformanceAuditStreamCursor>(16, 0.75f, true)
 
   fun poll(filter: PerformanceAuditStreamFilter = PerformanceAuditStreamFilter()):
       PerformanceAuditStreamSnapshot {
@@ -57,6 +64,7 @@ class PerformanceAuditStreamService(
             lastTimestamp = response.lastTimestamp ?: cursor.lastTimestamp,
             lastId = response.lastId ?: cursor.lastId,
         )
+    trimCursors()
 
     return PerformanceAuditStreamSnapshot(
         cache.snapshot(filter.copy(timeWindowMs = windowMs)),
@@ -71,6 +79,15 @@ class PerformanceAuditStreamService(
   fun resetCursor(filter: PerformanceAuditStreamFilter) {
     val key = FilterKey(filter.deviceId, filter.sessionId, filter.packageName)
     cursors.remove(key)
+  }
+
+  private fun trimCursors() {
+    if (cursors.size <= maxCursors) return
+    val iterator = cursors.entries.iterator()
+    while (cursors.size > maxCursors && iterator.hasNext()) {
+      iterator.next()
+      iterator.remove()
+    }
   }
 
   private fun formatTimestamp(epochMs: Long): String {

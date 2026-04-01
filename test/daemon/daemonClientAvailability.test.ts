@@ -50,9 +50,10 @@ describe("DaemonClient.isAvailable", () => {
     expect(result).toBe(false);
   });
 
-  test("returns false when socket file exists but no server", async () => {
+  // On Unix, a regular file at the socket path is detected as non-socket and rejected.
+  // On Windows, named pipes don't leave stale files, so this scenario doesn't apply.
+  (isWindows ? test.skip : test)("returns false when socket file exists but is not a socket", async () => {
     const socketPath = createTempSocketPath();
-    // Create a regular file at the socket path (not a real socket)
     const { writeFileSync } = require("node:fs");
     writeFileSync(socketPath, "not a socket");
 

@@ -1,6 +1,7 @@
 import { createConnection, Socket } from "node:net";
 import { randomUUID } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { platform } from "node:os";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonRequest, DaemonResponse } from "./types";
@@ -55,8 +56,18 @@ export class DaemonClient {
    * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
    */
   static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
-    if (!existsSync(socketPath)) {
-      return false;
+    // On Unix, verify the path exists and is a socket (not a stale regular file).
+    // On Windows, named pipes don't have filesystem entries — skip the stat check
+    // and let createConnection determine reachability.
+    if (platform() !== "win32") {
+      try {
+        const stats = statSync(socketPath);
+        if (!stats.isSocket()) {
+          return false;
+        }
+      } catch {
+        return false;
+      }
     }
 
     return new Promise<boolean>(resolve => {

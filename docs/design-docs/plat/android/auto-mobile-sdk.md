@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `android/auto-mobile-sdk/` is a published Android library providing navigation tracking (Navigation3, Circuit adapters), crash/ANR/handled-exception capture, Compose recomposition tracking, network interception with mock rules, log filtering, notification triggering, biometric stubbing, click tracking, OS event monitoring, SQLite database inspection, and SharedPreferences inspection. All subsystems are initialized through `AutoMobileSDK.initialize()` and communicate with the control-proxy accessibility service via scoped Intent broadcasts. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `android/auto-mobile-sdk/` is a published Android library providing navigation tracking (Navigation3, Circuit adapters), crash/ANR/handled-exception capture, Compose recomposition tracking, network interception with mock rules, log filtering, notification triggering, biometric stubbing, click tracking, OS event monitoring, SQLite database inspection, and SharedPreferences inspection. All subsystems are initialized through `AutoMobileSDK.initialize()`. Event-producing subsystems communicate with the control-proxy accessibility service via scoped `Intent` broadcasts, while storage inspection (database and SharedPreferences) uses debug-only `ContentProvider` entrypoints. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Architecture Overview
 
@@ -93,12 +93,12 @@ All builder parameters are validated with `require(value > 0)` at build time.
 1. **Immediate (any thread):** event buffer, disk persistence, SDK context, thread-safe subsystems (network, logging, crashes, failures, ANR, biometrics, database, SharedPreferences, breadcrumbs).
 2. **Main thread (posted via Handler):** lifecycle observers, activity callbacks, recomposition tracker, notifications, click tracker, OS events.
 
-Shutdown reverses all registrations, cancels pending main-thread work, flushes remaining events, and resets all state so `initialize()` can be called again.
+Shutdown cancels pending main-thread work, tears down OS events, broadcast interceptor, click tracker, session tracker, and event buffer. Note: the crash handler (`AutoMobileCrashes`) and biometric override are **not** uninstalled by `shutdown()` — they persist for the process lifetime.
 
 | Component | Description | Status |
 |-----------|-------------|--------|
 | `AutoMobileSDK.initialize()` | Two-phase init: immediate + main-thread posted | <kbd>✅ Implemented</kbd> |
-| `AutoMobileSDK.shutdown()` | Tears down all subsystems, restores handlers, clears state | <kbd>✅ Implemented</kbd> |
+| `AutoMobileSDK.shutdown()` | Tears down OS events, broadcast interceptor, click tracker, session tracker, and event buffer; does not uninstall the crash handler or biometric override | <kbd>✅ Implemented</kbd> |
 | `AutoMobileSDK.setEnabled()` | Global enable/disable toggle for event tracking | <kbd>✅ Implemented</kbd> |
 
 ## 3. Event Pipeline

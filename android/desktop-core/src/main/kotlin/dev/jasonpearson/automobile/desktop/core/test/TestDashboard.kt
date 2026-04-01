@@ -1620,7 +1620,8 @@ private fun TestRunDetailScreen(
       )
 
       // Error message if failed
-      if (testRun.errorMessage != null) {
+      val errorMsg = testRun.errorMessage
+      if (errorMsg != null) {
         Spacer(Modifier.height(12.dp))
         Box(
             modifier =
@@ -1629,7 +1630,7 @@ private fun TestRunDetailScreen(
                     .padding(12.dp),
         ) {
           Text(
-              testRun.errorMessage,
+              errorMsg,
               fontSize = 12.sp,
               color = Color(0xFFFF5722),
               fontFamily = FontFamily.Monospace,

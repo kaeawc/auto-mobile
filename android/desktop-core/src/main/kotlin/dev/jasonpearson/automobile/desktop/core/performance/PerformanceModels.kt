@@ -1,122 +1,15 @@
 package dev.jasonpearson.automobile.desktop.core.performance
 
-// Health status for metrics
-enum class HealthStatus { Healthy, Warning, Critical }
-
-// Types of performance metrics
-enum class MetricType {
-    TouchLatency,       // Time from touch to first frame response
-    TimeToFirstFrame,   // How quickly the first screen renders
-    TimeToInteractive,  // When the UI becomes responsive
-    Jank,               // Missed frames / UI stuttering
-    FPS,                // Frames per second time series
-    FrameTime,          // Time to render a single frame (ms)
-    Memory,             // Memory usage in MB
-    RecompositionCount, // Compose recompositions per second
-}
-
-data class PerformanceMetric(
-    val id: String,
-    val type: MetricType,
-    val name: String,
-    val currentValue: Float,
-    val unit: String,
-    val thresholdWarning: Float,
-    val thresholdCritical: Float,
-    val trend: MetricTrend,  // Up, Down, Stable
-    val history: List<MetricDataPoint>,
-)
-
-enum class MetricTrend { Up, Down, Stable }
-
-data class MetricDataPoint(
-    val timestamp: Long,
-    val value: Float,
-    val screenName: String? = null,  // Associated screen if applicable
-    val testStep: String? = null,  // Associated test step if applicable
-)
-
-data class PerformanceAnomaly(
-    val id: String,
-    val metricType: MetricType,
-    val severity: HealthStatus,
-    val message: String,
-    val timestamp: Long,
-    val screenName: String?,
-    val testName: String?,
-    val value: Float,
-    val threshold: Float,
-    val isPinned: Boolean = false,
-)
-
-data class PerformanceRun(
-    val id: String,
-    val name: String,
-    val timestamp: Long,
-    val durationMs: Int,
-    val deviceName: String,
-    val overallHealth: HealthStatus,
-    val metrics: List<PerformanceMetric>,
-    val anomalies: List<PerformanceAnomaly>,
-    val screensAnalyzed: List<String>,
-)
-
-// For compare runs feature
-data class RunComparison(
-    val baselineRun: PerformanceRun,
-    val compareRun: PerformanceRun,
-    val improvements: List<MetricChange>,
-    val regressions: List<MetricChange>,
-)
-
-data class MetricChange(
-    val metricType: MetricType,
-    val baselineValue: Float,
-    val compareValue: Float,
-    val percentChange: Float,
-)
-
-/**
- * Performance threshold constants for health status calculation.
- * These values match the server-side thresholds.
- */
-object PerformanceThresholds {
-    // FPS thresholds (lower is worse)
-    const val FPS_WARNING = 55f
-    const val FPS_CRITICAL = 45f
-
-    // Frame time thresholds in ms (higher is worse)
-    const val FRAME_TIME_WARNING_MS = 18f  // 16.67ms is 60fps, 18ms allows some margin
-    const val FRAME_TIME_CRITICAL_MS = 33f  // 33ms is 30fps
-
-    // Jank frame count thresholds (higher is worse)
-    const val JANK_WARNING_FRAMES = 5f
-    const val JANK_CRITICAL_FRAMES = 10f
-
-    // Touch latency thresholds in ms (higher is worse)
-    const val TOUCH_LATENCY_WARNING_MS = 100f
-    const val TOUCH_LATENCY_CRITICAL_MS = 200f
-
-    // Time to First Frame thresholds in ms (higher is worse)
-    const val TTFF_WARNING_MS = 500f
-    const val TTFF_CRITICAL_MS = 1000f
-
-    // Time to Interactive thresholds in ms (higher is worse)
-    const val TTI_WARNING_MS = 700f
-    const val TTI_CRITICAL_MS = 1500f
-
-    // Memory usage thresholds in MB (higher is worse)
-    const val MEMORY_WARNING_MB = 256f
-    const val MEMORY_CRITICAL_MB = 512f
-
-    // CPU usage thresholds in percent (higher is worse)
-    const val CPU_WARNING_PERCENT = 50f
-    const val CPU_CRITICAL_PERCENT = 80f
-
-    // Recomposition rate thresholds in recomp/s (higher is worse)
-    const val RECOMPOSITION_WARNING = 10f
-    const val RECOMPOSITION_CRITICAL = 50f
-}
+typealias HealthStatus = dev.jasonpearson.automobile.desktop.domain.HealthStatus
+typealias MetricType = dev.jasonpearson.automobile.desktop.domain.MetricType
+typealias PerformanceMetric = dev.jasonpearson.automobile.desktop.domain.PerformanceMetric
+typealias MetricTrend = dev.jasonpearson.automobile.desktop.domain.MetricTrend
+typealias MetricDataPoint = dev.jasonpearson.automobile.desktop.domain.MetricDataPoint
+typealias PerformanceAnomaly = dev.jasonpearson.automobile.desktop.domain.PerformanceAnomaly
+typealias PerformanceRun = dev.jasonpearson.automobile.desktop.domain.PerformanceRun
+typealias RunComparison = dev.jasonpearson.automobile.desktop.domain.RunComparison
+typealias MetricChange = dev.jasonpearson.automobile.desktop.domain.MetricChange
+typealias PerformanceThresholds = dev.jasonpearson.automobile.desktop.domain.PerformanceThresholds
 
 // Mock data for development
 object PerformanceMockData {

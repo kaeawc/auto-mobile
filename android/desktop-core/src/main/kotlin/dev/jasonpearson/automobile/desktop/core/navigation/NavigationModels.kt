@@ -1,25 +1,7 @@
 package dev.jasonpearson.automobile.desktop.core.navigation
 
-data class ScreenNode(
-    val id: String,
-    val name: String,
-    val type: String, // Activity, Fragment, Composable
-    val packageName: String,
-    val transitionCount: Int,
-    val discoveredAt: Long, // epoch millis - older = discovered earlier during exploration
-    val screenshotUri: String? = null, // MCP resource URI for screenshot thumbnail
-)
-
-data class ScreenTransition(
-    val id: String,
-    val fromScreen: String,
-    val toScreen: String,
-    val trigger: String, // "tap", "intent", "back", "swipe"
-    val element: String?, // UI element that triggers
-    val avgLatencyMs: Int,
-    val failureRate: Float,
-    val traversalCount: Int = 1, // Number of times this transition has been traversed
-)
+typealias ScreenNode = dev.jasonpearson.automobile.desktop.domain.ScreenNode
+typealias ScreenTransition = dev.jasonpearson.automobile.desktop.domain.ScreenTransition
 
 // Mock data for development - Messaging app (18 screens)
 // Timestamps simulate AutoMobile exploring the app starting from Splash

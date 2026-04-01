@@ -1,114 +1,16 @@
 package dev.jasonpearson.automobile.desktop.core.storage
 
-/**
- * Represents a database available on the device.
- */
-data class DatabaseInfo(
-    val name: String,
-    val path: String,
-    val sizeBytes: Long,
-    val tables: List<TableInfo>,
-)
-
-/**
- * Represents a table in a database.
- */
-data class TableInfo(
-    val name: String,
-    val rowCount: Long,
-    val columns: List<ColumnInfo>,
-)
-
-/**
- * Represents a column in a table.
- */
-data class ColumnInfo(
-    val name: String,
-    val type: String,
-    val isPrimaryKey: Boolean,
-    val isNullable: Boolean,
-    val defaultValue: String?,
-)
-
-/**
- * Result of a SQL query execution.
- */
-data class QueryResult(
-    val columns: List<String>,
-    val rows: List<List<Any?>>,
-    val rowCount: Int,
-    val executionTimeMs: Long,
-    val error: String? = null,
-)
-
-/**
- * A saved/favorite query.
- */
-data class SavedQuery(
-    val id: String,
-    val name: String,
-    val sql: String,
-    val databaseName: String,
-    val createdAt: Long,
-)
-
-/**
- * Query history entry.
- */
-data class QueryHistoryEntry(
-    val id: String,
-    val sql: String,
-    val databaseName: String,
-    val executedAt: Long,
-    val executionTimeMs: Long,
-    val rowsAffected: Int,
-    val success: Boolean,
-    val error: String? = null,
-)
-
-/**
- * Represents a key-value storage file (SharedPreferences on Android, UserDefaults on iOS).
- */
-data class KeyValueFile(
-    val name: String,
-    val path: String,
-    val platform: StoragePlatform,
-    val entries: List<KeyValueEntry>,
-)
-
-/**
- * A single key-value entry.
- */
-data class KeyValueEntry(
-    val key: String,
-    val value: Any?,
-    val type: KeyValueType,
-)
-
-enum class KeyValueType(val protocolName: kotlin.String) {
-    String("STRING"),
-    Int("INT"),
-    Long("LONG"),
-    Float("FLOAT"),
-    Boolean("BOOLEAN"),
-    StringSet("STRING_SET"),
-    Unknown("UNKNOWN"),
-}
-
-enum class StoragePlatform {
-    Android,
-    iOS,
-}
-
-/**
- * View modes for database inspector.
- */
-enum class DatabaseViewMode {
-    Data,
-    Structure,
-    SQL,
-    QueryHistory,
-}
+typealias DatabaseInfo = dev.jasonpearson.automobile.desktop.domain.DatabaseInfo
+typealias TableInfo = dev.jasonpearson.automobile.desktop.domain.TableInfo
+typealias ColumnInfo = dev.jasonpearson.automobile.desktop.domain.ColumnInfo
+typealias QueryResult = dev.jasonpearson.automobile.desktop.domain.QueryResult
+typealias SavedQuery = dev.jasonpearson.automobile.desktop.domain.SavedQuery
+typealias QueryHistoryEntry = dev.jasonpearson.automobile.desktop.domain.QueryHistoryEntry
+typealias KeyValueFile = dev.jasonpearson.automobile.desktop.domain.KeyValueFile
+typealias KeyValueEntry = dev.jasonpearson.automobile.desktop.domain.KeyValueEntry
+typealias KeyValueType = dev.jasonpearson.automobile.desktop.domain.KeyValueType
+typealias StoragePlatform = dev.jasonpearson.automobile.desktop.domain.StoragePlatform
+typealias DatabaseViewMode = dev.jasonpearson.automobile.desktop.domain.DatabaseViewMode
 
 // Mock data for development
 object StorageMockData {

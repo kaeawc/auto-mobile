@@ -132,7 +132,7 @@ fun PropertyInspectorPanel(
                                 .padding(8.dp),
                         ) {
                             Text(
-                                element.text,
+                                element.text!!,
                                 fontSize = 11.sp,
                                 color = colors.text.normal,
                             )

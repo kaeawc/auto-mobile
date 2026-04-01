@@ -42,6 +42,8 @@ include(":test-plan-validation")
 
 include(":video-server")
 
+include(":desktop-domain")
+
 include(":desktop-core")
 
 include(":ide-plugin")

@@ -1,83 +1,13 @@
 package dev.jasonpearson.automobile.desktop.core.test
 
-data class TestCase(
-    val id: String,
-    val name: String,
-    val className: String,
-    val packageName: String,
-    val filePath: String, // Path to the test file for opening in editor
-    val lastRunTime: Long?, // Epoch millis
-    val lastRunStatus: TestStatus?,
-    val runCount: Int, // For popularity sorting
-    val screensVisited: List<String>, // Screen names for nav graph integration
-    val avgDurationMs: Int,
-    val flakinessScore: Float, // 0.0 = stable, 1.0 = always flaky
-)
-
-enum class TestStatus {
-  Passed,
-  Failed,
-  Skipped,
-  Running,
-}
-
-enum class TestPlatform {
-  Android,
-  iOS,
-}
-
-data class TestRun(
-    val id: String,
-    val testId: String,
-    val testName: String,
-    val status: TestStatus,
-    val startTime: Long,
-    val durationMs: Int,
-    val steps: List<TestStep>,
-    val screensVisited: List<String>,
-    val errorMessage: String? = null,
-    val deviceId: String,
-    val deviceName: String,
-    val platform: TestPlatform, // Platform this test ran on
-    val videoPath: String? = null, // Path to screen recording video
-    val snapshotPath: String? = null, // Path to app snapshot (platform-specific)
-    val sampleSize: Int = 0, // Number of times this test has been run (from timing data)
-)
-
-data class TestStep(
-    val id: String,
-    val index: Int,
-    val action: String, // "tap", "input", "swipe", "assert", etc.
-    val target: String, // Element description
-    val screenshotPath: String?,
-    val screenName: String?,
-    val durationMs: Int,
-    val status: TestStatus,
-    val errorMessage: String? = null,
-)
-
-data class RecordedAction(
-    val timestamp: Long,
-    val toolName: String,
-    val parameters: Map<String, String>,
-    val result: String?,
-    val screenBefore: String?,
-    val screenAfter: String?,
-)
-
-data class GradleModule(
-    val name: String,
-    val path: String, // e.g., ":app", ":feature:auth"
-    val testSourcePath: String, // e.g., "src/androidTest/java"
-)
-
-data class ExportedPlan(
-    val recordingId: String,
-    val planName: String,
-    val planContent: String,
-    val stepCount: Int,
-    val durationMs: Long,
-)
+typealias TestCase = dev.jasonpearson.automobile.desktop.domain.TestCase
+typealias TestStatus = dev.jasonpearson.automobile.desktop.domain.TestStatus
+typealias TestPlatform = dev.jasonpearson.automobile.desktop.domain.TestPlatform
+typealias TestRun = dev.jasonpearson.automobile.desktop.domain.TestRun
+typealias TestStep = dev.jasonpearson.automobile.desktop.domain.TestStep
+typealias RecordedAction = dev.jasonpearson.automobile.desktop.domain.RecordedAction
+typealias GradleModule = dev.jasonpearson.automobile.desktop.domain.GradleModule
+typealias ExportedPlan = dev.jasonpearson.automobile.desktop.domain.ExportedPlan
 
 // Mock data for development
 object TestMockData {

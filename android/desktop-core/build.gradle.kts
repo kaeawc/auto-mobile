@@ -19,6 +19,9 @@ sourceSets {
 }
 
 dependencies {
+  // Domain module
+  api(project(":desktop-domain"))
+
   // Shared modules
   implementation(project(":protocol"))
   implementation(project(":test-plan-validation"))

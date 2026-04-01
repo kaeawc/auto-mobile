@@ -1267,10 +1267,11 @@ private fun FailureDetailView(
         }
 
         // Tool call info (for tool failures)
-        if (failure.toolCallInfo != null) {
+        val toolCallInfo = failure.toolCallInfo
+        if (toolCallInfo != null) {
             Spacer(Modifier.height(16.dp))
             SectionHeader("Tool Call Details")
-            ToolCallDetailsSection(toolCallInfo = failure.toolCallInfo)
+            ToolCallDetailsSection(toolCallInfo = toolCallInfo)
         }
 
         // Screen breakdown histogram
@@ -1485,16 +1486,17 @@ private fun ToolCallDetailsSection(toolCallInfo: AggregatedToolCallInfo) {
         }
 
         // Duration stats
-        if (toolCallInfo.durationStats != null) {
+        val stats = toolCallInfo.durationStats
+        if (stats != null) {
             Text("Duration:", fontSize = 11.sp, color = colors.text.normal.copy(alpha = 0.6f))
             Row(
                 horizontalArrangement = Arrangement.SpaceEvenly,
                 modifier = Modifier.fillMaxWidth(),
             ) {
-                DurationStat("Min", toolCallInfo.durationStats.minMs)
-                DurationStat("Avg", toolCallInfo.durationStats.avgMs)
-                DurationStat("P95", toolCallInfo.durationStats.p95Ms)
-                DurationStat("Max", toolCallInfo.durationStats.maxMs)
+                DurationStat("Min", stats.minMs)
+                DurationStat("Avg", stats.avgMs)
+                DurationStat("P95", stats.p95Ms)
+                DurationStat("Max", stats.maxMs)
             }
         }
 

@@ -434,5 +434,444 @@ describe("SystemConfigurationManager", () => {
       expect(fakeExec.getExecutedCommands()).toHaveLength(0);
       expect(fakeAdbClient.wasCommandExecuted("setprop persist.sys.timezone America/New_York")).toBe(true);
     });
+
+    test("reads previous timezone before setting", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/Los_Angeles");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTimeZone("Asia/Tokyo");
+
+      expect(result.success).toBe(true);
+      expect(result.previousZoneId).toBe("America/Los_Angeles");
+    });
+
+    test("returns error for empty zoneId", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTimeZone("  ");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("zoneId must be a non-empty string");
+    });
+
+    test("returns error when adb command fails", async () => {
+      fakeAdbClient.setCommandError("shell setprop persist.sys.timezone Bad/Zone", new Error("setprop failed"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTimeZone("Bad/Zone");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to set time zone");
+    });
+  });
+
+  // --- Android: set24HourFormat ---
+
+  describe("Android set24HourFormat", () => {
+    test("sets 24-hour mode", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.set24HourFormat(true);
+
+      expect(result.success).toBe(true);
+      expect(result.enabled).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("settings put system time_12_24 24")).toBe(true);
+    });
+
+    test("sets 12-hour mode", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.set24HourFormat(false);
+
+      expect(result.success).toBe(true);
+      expect(result.enabled).toBe(false);
+      expect(fakeAdbClient.wasCommandExecuted("settings put system time_12_24 12")).toBe(true);
+    });
+
+    test("reads previous format before writing", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system time_12_24", "24");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.set24HourFormat(false);
+
+      expect(result.success).toBe(true);
+      expect(result.previousFormat).toBe("24");
+    });
+
+    test("normalizes invalid previous format to null", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system time_12_24", "null");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.set24HourFormat(true);
+
+      expect(result.success).toBe(true);
+      expect(result.previousFormat).toBeNull();
+    });
+
+    test("returns error when adb command fails", async () => {
+      fakeAdbClient.setCommandError("shell settings put system time_12_24 24", new Error("permission denied"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.set24HourFormat(true);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to set 24-hour format");
+    });
+  });
+
+  // --- Android: setTextDirection ---
+
+  describe("Android setTextDirection", () => {
+    test("sets RTL on via debug.force_rtl when no previous setting exists", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true);
+
+      expect(result.success).toBe(true);
+      expect(result.rtl).toBe(true);
+      expect(result.settings).toContain("debug.force_rtl");
+      expect(fakeAdbClient.wasCommandExecuted("settings put global debug.force_rtl 1")).toBe(true);
+    });
+
+    test("sets LTR (RTL off) via debug.force_rtl", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(false);
+
+      expect(result.success).toBe(true);
+      expect(result.rtl).toBe(false);
+      expect(fakeAdbClient.wasCommandExecuted("settings put global debug.force_rtl 0")).toBe(true);
+    });
+
+    test("sets both debug.force_rtl and force_rtl when both exist", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "0");
+      fakeAdbClient.setCommandResult("shell settings get global force_rtl", "0");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true);
+
+      expect(result.success).toBe(true);
+      expect(result.settings).toContain("debug.force_rtl");
+      expect(result.settings).toContain("force_rtl");
+      expect(fakeAdbClient.wasCommandExecuted("settings put global debug.force_rtl 1")).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("settings put global force_rtl 1")).toBe(true);
+    });
+
+    test("sets only force_rtl when debug.force_rtl is absent", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "null");
+      fakeAdbClient.setCommandResult("shell settings get global force_rtl", "1");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(false);
+
+      expect(result.success).toBe(true);
+      expect(result.settings).toEqual(["force_rtl"]);
+      expect(fakeAdbClient.wasCommandExecuted("settings put global force_rtl 0")).toBe(true);
+    });
+
+    test("reads previous RTL state from debug.force_rtl", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "1");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(false);
+
+      expect(result.success).toBe(true);
+      expect(result.previousRtl).toBe(true);
+    });
+
+    test("falls back to force_rtl for previous state when debug.force_rtl is null", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "null");
+      fakeAdbClient.setCommandResult("shell settings get global force_rtl", "0");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true);
+
+      expect(result.success).toBe(true);
+      expect(result.previousRtl).toBe(false);
+    });
+
+    test("broadcasts locale change by default", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true);
+
+      expect(result.success).toBe(true);
+      expect(result.broadcasted).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("am broadcast -a android.intent.action.LOCALE_CHANGED")).toBe(true);
+    });
+
+    test("skips broadcast when broadcast option is false", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true, { broadcast: false });
+
+      expect(result.success).toBe(true);
+      expect(result.broadcasted).toBe(false);
+      expect(fakeAdbClient.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    test("returns error when all settings put commands fail", async () => {
+      fakeAdbClient.setCommandError("shell settings put global debug.force_rtl 1", new Error("fail"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setTextDirection(true);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Failed to update RTL settings");
+    });
+  });
+
+  // --- Android: broadcastLocaleChange ---
+
+  describe("Android broadcastLocaleChange", () => {
+    test("sends locale changed broadcast", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.broadcastLocaleChange();
+
+      expect(result).toBe(true);
+      expect(fakeAdbClient.wasCommandExecuted("am broadcast -a android.intent.action.LOCALE_CHANGED")).toBe(true);
+    });
+
+    test("returns false when broadcast fails", async () => {
+      fakeAdbClient.setCommandError("shell am broadcast -a android.intent.action.LOCALE_CHANGED", new Error("broadcast failed"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.broadcastLocaleChange();
+
+      expect(result).toBe(false);
+    });
+
+    test("returns false for non-android device", async () => {
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec);
+      const result = await mgr.broadcastLocaleChange();
+
+      expect(result).toBe(false);
+    });
+  });
+
+  // --- Android: setLocale fallback paths ---
+
+  describe("Android setLocale fallback", () => {
+    test("tries cmd locale first on API 31+", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "33");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("cmd locale set-locales");
+      expect(fakeAdbClient.wasCommandExecuted("cmd locale set-locales ja-JP")).toBe(true);
+    });
+
+    test("falls back to settings put when cmd locale fails on API 31+", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "33");
+      fakeAdbClient.setCommandError("shell cmd locale set-locales ja-JP", new Error("cmd not found"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("settings put system user_locale");
+      expect(fakeAdbClient.wasCommandExecuted("settings put system user_locale ja-JP")).toBe(true);
+    });
+
+    test("tries settings put first on API < 31", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "28");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("settings put system user_locale");
+    });
+
+    test("falls back to cmd locale when settings put fails on API < 31", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "28");
+      fakeAdbClient.setCommandError("shell settings put system user_locale ja-JP", new Error("settings fail"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("cmd locale set-locales");
+    });
+
+    test("returns error when both commands fail", async () => {
+      fakeAdbClient.setCommandResult("shell getprop ro.build.version.sdk", "33");
+      fakeAdbClient.setCommandError("shell cmd locale set-locales ja-JP", new Error("cmd fail"));
+      fakeAdbClient.setCommandError("shell settings put system user_locale ja-JP", new Error("settings fail"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to set locale");
+      expect(result.error).toContain("settings fail");
+    });
+
+    test("reads previous locale from system_locales", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system system_locales", "en-US,fr-FR");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(true);
+      expect(result.previousLanguageTag).toBe("en-US");
+    });
+
+    test("broadcasts locale change by default", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      await mgr.setLocale("ja-JP");
+
+      expect(fakeAdbClient.wasCommandExecuted("am broadcast -a android.intent.action.LOCALE_CHANGED")).toBe(true);
+    });
+
+    test("skips broadcast when option is false", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("ja-JP", { broadcast: false });
+
+      expect(result.success).toBe(true);
+      expect(result.broadcasted).toBe(false);
+      expect(fakeAdbClient.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    test("returns error for empty languageTag", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setLocale("  ");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("languageTag must be a non-empty string");
+    });
+  });
+
+  // --- Android: getLocalizationSettings ---
+
+  describe("Android getLocalizationSettings", () => {
+    test("reads all localization settings", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system system_locales", "en-US");
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.timezone", "America/New_York");
+      fakeAdbClient.setCommandResult("shell settings get system time_12_24", "24");
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "1");
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "gregory");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.success).toBe(true);
+      expect(result.locale).toBe("en-US");
+      expect(result.timeZone).toBe("America/New_York");
+      expect(result.timeFormat).toBe("24");
+      expect(result.textDirection).toBe("rtl");
+      expect(result.calendarSystem).toBe("gregory");
+    });
+
+    test("detects LTR from debug.force_rtl=0", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "0");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.textDirection).toBe("ltr");
+    });
+
+    test("falls back to force_rtl when debug.force_rtl is null", async () => {
+      fakeAdbClient.setCommandResult("shell settings get global debug.force_rtl", "null");
+      fakeAdbClient.setCommandResult("shell settings get global force_rtl", "1");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.textDirection).toBe("rtl");
+    });
+
+    test("returns null textDirection when neither RTL setting exists", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.textDirection).toBeNull();
+    });
+
+    test("reads locale from user_locale when system_locales is absent", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system user_locale", "fr-FR");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.locale).toBe("fr-FR");
+    });
+
+    test("reads locale from persist.sys.locale as last resort", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.locale", "de-DE");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.locale).toBe("de-DE");
+    });
+
+    test("constructs locale from language+country props", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.language", "pt");
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.country", "BR");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.locale).toBe("pt-BR");
+    });
+
+    test("returns language alone when country is absent", async () => {
+      fakeAdbClient.setCommandResult("shell getprop persist.sys.language", "pt");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.locale).toBe("pt");
+    });
+
+    test("handles all missing values gracefully", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getLocalizationSettings();
+
+      expect(result.success).toBe(true);
+      expect(result.locale).toBeNull();
+      expect(result.timeZone).toBeNull();
+      expect(result.timeFormat).toBeNull();
+      expect(result.textDirection).toBeNull();
+    });
+  });
+
+  // --- Android: getCalendarSystem ---
+
+  describe("Android getCalendarSystem", () => {
+    test("returns calendar from settings when available", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "japanese");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getCalendarSystem();
+
+      expect(result.success).toBe(true);
+      expect(result.calendarSystem).toBe("japanese");
+      expect(result.source).toBe("settings.calendar_type");
+    });
+
+    test("falls back to locale @calendar keyword", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "null");
+      fakeAdbClient.setCommandResult("shell settings get system system_locales", "fa-IR@calendar=persian");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getCalendarSystem();
+
+      expect(result.success).toBe(true);
+      expect(result.calendarSystem).toBe("persian");
+      expect(result.source).toBe("locale");
+    });
+
+    test("falls back to BCP-47 -u-ca- extension", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "null");
+      fakeAdbClient.setCommandResult("shell settings get system system_locales", "th-TH-u-ca-buddhist");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getCalendarSystem();
+
+      expect(result.success).toBe(true);
+      expect(result.calendarSystem).toBe("buddhist");
+      expect(result.source).toBe("locale");
+    });
+
+    test("falls back to default gregory when no calendar info found", async () => {
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getCalendarSystem();
+
+      expect(result.success).toBe(true);
+      expect(result.calendarSystem).toBe("gregory");
+      expect(result.source).toBe("default");
+    });
+
+    test("falls back to default when locale has no calendar extension", async () => {
+      fakeAdbClient.setCommandResult("shell settings get system calendar_type", "null");
+      fakeAdbClient.setCommandResult("shell settings get system system_locales", "en-US");
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.getCalendarSystem();
+
+      expect(result.success).toBe(true);
+      expect(result.calendarSystem).toBe("gregory");
+      expect(result.source).toBe("default");
+      expect(result.locale).toBe("en-US");
+    });
+
+    test("returns error when adb put command fails", async () => {
+      fakeAdbClient.setCommandError("shell settings put system calendar_type islamic", new Error("write denied"));
+      const mgr = new SystemConfigurationManager(ANDROID_DEVICE, fakeAdbFactory, fakeExec);
+      const result = await mgr.setCalendarSystem("islamic");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Failed to set calendar system");
+    });
   });
 });

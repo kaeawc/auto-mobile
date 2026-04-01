@@ -7,8 +7,8 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import androidx.annotation.RequiresApi
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
@@ -61,12 +61,12 @@ object AutoMobileAnr {
      */
     fun initialize(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) {
-            Log.d(TAG, "ANR detection requires Android 11+ (API 30)")
+            AutoMobileSDK.logger.d(TAG) { "ANR detection requires Android 11+ (API 30)" }
             return
         }
 
         this.context = context.applicationContext
-        Log.d(TAG, "AutoMobileAnr initialized, checking for previous ANRs...")
+        AutoMobileSDK.logger.d(TAG) { "AutoMobileAnr initialized, checking for previous ANRs..." }
         checkForPreviousAnrs()
     }
 
@@ -82,46 +82,46 @@ object AutoMobileAnr {
         try {
             val am = ctx.getSystemService(Context.ACTIVITY_SERVICE) as? ActivityManager
             if (am == null) {
-                Log.w(TAG, "ActivityManager not available")
+                AutoMobileSDK.logger.w(TAG) { "ActivityManager not available" }
                 return
             }
 
             // Get exit reasons for our own package (null = current package)
             val exitInfos = am.getHistoricalProcessExitReasons(null, 0, MAX_EXIT_REASONS)
-            Log.d(TAG, "Found ${exitInfos.size} historical exit reasons")
+            AutoMobileSDK.logger.d(TAG) { "Found ${exitInfos.size} historical exit reasons" }
 
             val lastReportedTimestamp = getLastReportedTimestamp(ctx)
-            Log.d(TAG, "Last reported ANR timestamp: $lastReportedTimestamp")
+            AutoMobileSDK.logger.d(TAG) { "Last reported ANR timestamp: $lastReportedTimestamp" }
             var newestReportedTimestamp = lastReportedTimestamp
             var anrCount = 0
 
             for (exitInfo in exitInfos) {
-                Log.d(TAG, "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}")
+                AutoMobileSDK.logger.d(TAG) { "Exit reason: ${exitInfo.reason} (ANR=${ApplicationExitInfo.REASON_ANR}), pid=${exitInfo.pid}, timestamp=${exitInfo.timestamp}" }
                 if (exitInfo.reason == ApplicationExitInfo.REASON_ANR) {
                     anrCount++
                     // Only report ANRs we haven't seen before
                     if (exitInfo.timestamp > lastReportedTimestamp) {
-                        Log.d(TAG, "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}")
+                        AutoMobileSDK.logger.d(TAG) { "Detected NEW previous ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}" }
                         broadcastAnr(ctx, exitInfo)
 
                         if (exitInfo.timestamp > newestReportedTimestamp) {
                             newestReportedTimestamp = exitInfo.timestamp
                         }
                     } else {
-                        Log.d(TAG, "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}")
+                        AutoMobileSDK.logger.d(TAG) { "Skipping already reported ANR: pid=${exitInfo.pid}, time=${exitInfo.timestamp}" }
                     }
                 }
             }
 
-            Log.d(TAG, "Found $anrCount ANR(s) in exit history")
+            AutoMobileSDK.logger.d(TAG) { "Found $anrCount ANR(s) in exit history" }
 
             // Update the last reported timestamp
             if (newestReportedTimestamp > lastReportedTimestamp) {
                 setLastReportedTimestamp(ctx, newestReportedTimestamp)
-                Log.d(TAG, "Updated last reported timestamp to $newestReportedTimestamp")
+                AutoMobileSDK.logger.d(TAG) { "Updated last reported timestamp to $newestReportedTimestamp" }
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error checking for previous ANRs", e)
+            AutoMobileSDK.logger.e(TAG, e) { "Error checking for previous ANRs" }
         }
     }
 
@@ -132,7 +132,7 @@ object AutoMobileAnr {
             val trace = try {
                 exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
             } catch (e: Exception) {
-                Log.w(TAG, "Failed to read ANR trace", e)
+                AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
                 null
             }
 
@@ -163,9 +163,9 @@ object AutoMobileAnr {
             }
 
             context.sendBroadcast(intent)
-            Log.i(TAG, "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}")
+            AutoMobileSDK.logger.i(TAG) { "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}" }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to broadcast ANR", e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast ANR" }
         }
     }
 
@@ -196,7 +196,7 @@ object AutoMobileAnr {
             }
             packageInfo.versionName
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get app version", e)
+            AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
             null
         }
     }

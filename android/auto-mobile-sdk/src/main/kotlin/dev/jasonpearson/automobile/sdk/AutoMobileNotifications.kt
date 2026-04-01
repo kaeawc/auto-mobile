@@ -9,7 +9,6 @@ import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.os.Build
 import android.util.Base64
-import android.util.Log
 import androidx.core.app.NotificationCompat
 import java.io.File
 import java.io.FileInputStream
@@ -76,10 +75,9 @@ object AutoMobileNotifications {
   ): Boolean {
     val ctx = context
     if (ctx == null) {
-      Log.w(
-          TAG,
-          "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize().",
-      )
+      AutoMobileSDK.logger.w(TAG) {
+          "AutoMobileNotifications not initialized; call AutoMobileSDK.initialize() or AutoMobileNotifications.initialize()."
+      }
       return false
     }
 
@@ -119,7 +117,7 @@ object AutoMobileNotifications {
                 .setStyle(NotificationCompat.BigPictureStyle().bigPicture(bitmap))
                 .setLargeIcon(bitmap)
           } else {
-            Log.w(TAG, "Big picture style requested but image could not be loaded.")
+            AutoMobileSDK.logger.w(TAG) { "Big picture style requested but image could not be loaded." }
             builder.setStyle(NotificationCompat.BigTextStyle().bigText(body))
           }
         }
@@ -139,7 +137,7 @@ object AutoMobileNotifications {
       notificationManager.notify(notificationId, builder.build())
       true
     } catch (e: Exception) {
-      Log.e(TAG, "Failed to post notification", e)
+      AutoMobileSDK.logger.e(TAG, e) { "Failed to post notification" }
       false
     }
   }
@@ -213,7 +211,7 @@ object AutoMobileNotifications {
             context.contentResolver.openInputStream(android.net.Uri.parse(trimmed))
         )
       } catch (e: Exception) {
-        Log.w(TAG, "Failed to open content URI for image", e)
+        AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
         null
       }
     }
@@ -236,7 +234,7 @@ object AutoMobileNotifications {
             return decodeBitmapFromStream(stream)
           }
         } catch (e: Exception) {
-          Log.w(TAG, "Failed to read image file at $path", e)
+          AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
         }
       }
     }
@@ -249,7 +247,7 @@ object AutoMobileNotifications {
       val bytes = Base64.decode(base64Data, Base64.DEFAULT)
       decodeBitmapFromBytes(bytes)
     } catch (e: Exception) {
-      Log.w(TAG, "Failed to decode base64 image", e)
+      AutoMobileSDK.logger.w(TAG, e) { "Failed to decode base64 image" }
       null
     }
   }

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.storage
 import android.content.Context
 import android.content.SharedPreferences
 import android.net.Uri
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicLong
@@ -182,7 +183,7 @@ class SharedPreferencesDriverImpl(
       context.contentResolver.notifyChange(uri, null)
     } catch (e: Exception) {
       // Log but don't fail if notification fails
-      android.util.Log.w("SharedPreferencesDriver", "Failed to notify change", e)
+      AutoMobileSDK.logger.w("SharedPreferencesDriver", e) { "Failed to notify change" }
     }
   }
 

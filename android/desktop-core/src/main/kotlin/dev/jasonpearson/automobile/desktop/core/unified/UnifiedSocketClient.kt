@@ -225,6 +225,8 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     override suspend fun disconnect() {
+        _connectionState.update { UnifiedConnectionState.Disconnected }
+
         connectionJob?.cancel()
         connectionJob = null
         readJob?.cancel()
@@ -233,8 +235,6 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         cleanupConnection()
         subscriptions.clear()
         failAllPendingRequests("Disconnected")
-
-        _connectionState.update { UnifiedConnectionState.Disconnected }
     }
 
     private fun cleanupConnection() {

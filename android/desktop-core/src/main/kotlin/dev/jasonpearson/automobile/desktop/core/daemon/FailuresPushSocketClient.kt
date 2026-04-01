@@ -175,13 +175,14 @@ class FailuresPushSocketClient {
 
     fun disconnect() {
         // Stop reconnection attempts by moving to Disconnected
+        _state.update { FailuresPushConnectionState.Disconnected(null) }
+
         connectionJob?.cancel()
         connectionJob = null
 
         val wasConnected = _isConnected
 
         if (!wasConnected) {
-            _state.update { FailuresPushConnectionState.Disconnected(null) }
             return
         }
 
@@ -203,7 +204,6 @@ class FailuresPushSocketClient {
         channel = null
         reader = null
         writer = null
-        _state.update { FailuresPushConnectionState.Disconnected(null) }
     }
 
     fun isConnected(): Boolean = _isConnected

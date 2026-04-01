@@ -2,12 +2,11 @@ package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
-import dev.jasonpearson.automobile.protocol.SdkLogEvent
-import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
@@ -19,14 +18,20 @@ class SdkEventBufferTest {
     name = "event-$i",
   )
 
+  /** Wait for any pending tasks on the executor to complete. */
+  private fun drainExecutor(executor: ScheduledExecutorService) {
+    executor.submit {}.get(1, TimeUnit.SECONDS)
+  }
+
   @Test
   fun `flush on capacity`() {
-    val flushed = mutableListOf<List<SdkEvent>>()
+    val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer = SdkEventBuffer(
       maxBufferSize = 3,
       flushIntervalMs = 60_000, // Very long so timer won't fire
       onFlush = { flushed.add(it) },
-      executor = Executors.newSingleThreadScheduledExecutor(),
+      executor = executor,
     )
 
     buffer.add(makeEvent(1))
@@ -34,6 +39,7 @@ class SdkEventBufferTest {
     assertEquals(0, flushed.size, "Should not flush before capacity")
 
     buffer.add(makeEvent(3))
+    drainExecutor(executor) // capacity flush is async
     assertEquals(1, flushed.size, "Should flush at capacity")
     assertEquals(3, flushed[0].size)
   }
@@ -108,11 +114,12 @@ class SdkEventBufferTest {
   @Test
   fun `thread safety - concurrent adds`() {
     val flushed = CopyOnWriteArrayList<List<SdkEvent>>()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer = SdkEventBuffer(
       maxBufferSize = 50,
       flushIntervalMs = 60_000,
       onFlush = { flushed.add(ArrayList(it)) },
-      executor = Executors.newSingleThreadScheduledExecutor(),
+      executor = executor,
     )
 
     val latch = CountDownLatch(1)
@@ -128,6 +135,7 @@ class SdkEventBufferTest {
     threads.forEach { it.start() }
     latch.countDown()
     threads.forEach { it.join(5000) }
+    drainExecutor(executor) // wait for any capacity flushes
     buffer.flush()
 
     val totalEvents = flushed.sumOf { it.size }
@@ -176,16 +184,18 @@ class SdkEventBufferTest {
   @Test
   fun `flush error counts each dropped event`() {
     val counter = DefaultDropCounter()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer = SdkEventBuffer(
       maxBufferSize = 5,
       flushIntervalMs = 60_000,
       onFlush = { throw RuntimeException("delivery failed") },
-      executor = Executors.newSingleThreadScheduledExecutor(),
+      executor = executor,
       dropCounter = counter,
     )
 
     // Add 5 events to trigger capacity flush
     repeat(5) { buffer.add(makeEvent(it)) }
+    drainExecutor(executor) // capacity flush is async
 
     val snapshot = counter.snapshot()
     assertEquals(5L, snapshot[DropReason.FLUSH_ERROR], "Each dropped event should be counted individually")
@@ -194,6 +204,7 @@ class SdkEventBufferTest {
   @Test
   fun `onFlush exceptions are swallowed`() {
     var callCount = 0
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer = SdkEventBuffer(
       maxBufferSize = 2,
       flushIntervalMs = 60_000,
@@ -201,16 +212,18 @@ class SdkEventBufferTest {
         callCount++
         if (callCount == 1) throw RuntimeException("test error")
       },
-      executor = Executors.newSingleThreadScheduledExecutor(),
+      executor = executor,
     )
 
     // First flush throws but doesn't crash
     buffer.add(makeEvent(1))
     buffer.add(makeEvent(2))
+    drainExecutor(executor) // capacity flush is async
 
     // Second flush succeeds
     buffer.add(makeEvent(3))
     buffer.add(makeEvent(4))
+    drainExecutor(executor) // capacity flush is async
 
     assertEquals(2, callCount)
   }

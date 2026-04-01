@@ -1,9 +1,22 @@
 package dev.jasonpearson.automobile.sdk.persistence
 
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
+import dev.jasonpearson.automobile.protocol.SdkAnrEvent
+import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
+import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEvent
+import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
+import dev.jasonpearson.automobile.protocol.SdkLogEvent
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
+import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
+import dev.jasonpearson.automobile.protocol.SdkNotificationActionEvent
+import dev.jasonpearson.automobile.protocol.SdkRecompositionSnapshotEvent
+import dev.jasonpearson.automobile.protocol.SdkWebSocketFrameEvent
+import dev.jasonpearson.automobile.protocol.WebSocketFrameDirection
+import dev.jasonpearson.automobile.protocol.WebSocketFrameType
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -89,7 +102,7 @@ class FileEventPersistence(
     val array = JSONArray()
     for (event in events) {
       val obj = JSONObject()
-      obj.put("type", event.javaClass.simpleName)
+      obj.put("type", eventTypeKey(event))
       obj.put("timestamp", event.timestamp)
       obj.put("applicationId", event.applicationId ?: "")
       when (event) {
@@ -103,11 +116,110 @@ class FileEventPersistence(
           obj.put("name", event.name)
           obj.put("properties", JSONObject(event.properties))
         }
+        is SdkHandledExceptionEvent -> {
+          obj.put("exceptionClass", event.exceptionClass)
+          obj.put("exceptionMessage", event.exceptionMessage ?: "")
+          obj.put("stackTrace", event.stackTrace)
+          event.customMessage?.let { obj.put("customMessage", it) }
+          event.currentScreen?.let { obj.put("currentScreen", it) }
+          event.appVersion?.let { obj.put("appVersion", it) }
+          event.deviceInfo?.let { obj.put("deviceInfo", serializeDeviceInfo(it)) }
+        }
+        is SdkNotificationActionEvent -> {
+          obj.put("notificationId", event.notificationId)
+          obj.put("actionId", event.actionId)
+          obj.put("actionLabel", event.actionLabel)
+        }
+        is SdkRecompositionSnapshotEvent -> {
+          obj.put("snapshotJson", event.snapshotJson)
+        }
+        is SdkCrashEvent -> {
+          obj.put("exceptionClass", event.exceptionClass)
+          obj.put("exceptionMessage", event.exceptionMessage ?: "")
+          obj.put("stackTrace", event.stackTrace)
+          obj.put("threadName", event.threadName)
+          event.currentScreen?.let { obj.put("currentScreen", it) }
+          event.appVersion?.let { obj.put("appVersion", it) }
+          event.deviceInfo?.let { obj.put("deviceInfo", serializeDeviceInfo(it)) }
+        }
+        is SdkAnrEvent -> {
+          obj.put("pid", event.pid)
+          obj.put("processName", event.processName)
+          obj.put("importance", event.importance)
+          event.trace?.let { obj.put("trace", it) }
+          obj.put("reason", event.reason)
+          event.appVersion?.let { obj.put("appVersion", it) }
+          event.deviceInfo?.let { obj.put("deviceInfo", serializeDeviceInfo(it)) }
+        }
+        is SdkNetworkRequestEvent -> {
+          obj.put("url", event.url)
+          obj.put("method", event.method)
+          obj.put("statusCode", event.statusCode)
+          obj.put("durationMs", event.durationMs)
+          obj.put("requestBodySize", event.requestBodySize)
+          obj.put("responseBodySize", event.responseBodySize)
+          event.protocol?.let { obj.put("protocol", it) }
+          event.host?.let { obj.put("host", it) }
+          event.path?.let { obj.put("path", it) }
+          event.error?.let { obj.put("error", it) }
+          event.requestHeaders?.let { obj.put("requestHeaders", JSONObject(it)) }
+          event.responseHeaders?.let { obj.put("responseHeaders", JSONObject(it)) }
+          event.requestBody?.let { obj.put("requestBody", it) }
+          event.responseBody?.let { obj.put("responseBody", it) }
+          event.contentType?.let { obj.put("contentType", it) }
+        }
+        is SdkWebSocketFrameEvent -> {
+          obj.put("connectionId", event.connectionId)
+          obj.put("url", event.url)
+          obj.put("direction", event.direction.name)
+          obj.put("frameType", event.frameType.name)
+          obj.put("payloadSize", event.payloadSize)
+        }
+        is SdkLogEvent -> {
+          obj.put("level", event.level)
+          obj.put("tag", event.tag)
+          obj.put("message", event.message)
+          obj.put("filterName", event.filterName)
+        }
+        is SdkBroadcastEvent -> {
+          obj.put("action", event.action)
+          event.categories?.let { obj.put("categories", JSONArray(it)) }
+          event.extraKeys?.let { obj.put("extraKeys", JSONObject(it)) }
+        }
+        is SdkLifecycleEvent -> {
+          obj.put("kind", event.kind)
+          event.details?.let { obj.put("details", JSONObject(it)) }
+        }
         else -> obj.put("data", event.toString())
       }
       array.put(obj)
     }
     return array.toString()
+  }
+
+  private fun eventTypeKey(event: SdkEvent): String = when (event) {
+    is SdkCustomEvent -> "custom"
+    is SdkNavigationEvent -> "navigation"
+    is SdkHandledExceptionEvent -> "handled_exception"
+    is SdkNotificationActionEvent -> "notification_action"
+    is SdkRecompositionSnapshotEvent -> "recomposition_snapshot"
+    is SdkCrashEvent -> "crash"
+    is SdkAnrEvent -> "anr"
+    is SdkNetworkRequestEvent -> "network_request"
+    is SdkWebSocketFrameEvent -> "websocket_frame"
+    is SdkLogEvent -> "log"
+    is SdkBroadcastEvent -> "broadcast"
+    is SdkLifecycleEvent -> "lifecycle"
+    else -> "unknown"
+  }
+
+  private fun serializeDeviceInfo(info: SdkDeviceInfo): JSONObject {
+    val obj = JSONObject()
+    obj.put("model", info.model)
+    obj.put("manufacturer", info.manufacturer)
+    obj.put("osVersion", info.osVersion)
+    obj.put("sdkInt", info.sdkInt)
+    return obj
   }
 
   internal fun deserializeEvents(json: String): List<SdkEvent> {
@@ -118,38 +230,163 @@ class FileEventPersistence(
       val type = obj.optString("type")
       val timestamp = obj.optLong("timestamp")
       val appId = obj.optString("applicationId").ifEmpty { null }
-      when (type) {
-        "SdkCustomEvent" -> events.add(
-          SdkCustomEvent(
-            timestamp = timestamp,
-            applicationId = appId,
-            name = obj.optString("name"),
-            properties = jsonObjectToMap(obj.optJSONObject("properties")),
-          ),
-        )
-        "SdkNavigationEvent" -> {
-          val sourceName = obj.optString("source")
-          val source = try {
-            NavigationSourceType.valueOf(sourceName)
-          } catch (_: Exception) {
-            NavigationSourceType.CUSTOM
-          }
-          events.add(
-            SdkNavigationEvent(
-              timestamp = timestamp,
-              applicationId = appId,
-              destination = obj.optString("destination"),
-              source = source,
-              arguments = obj.optJSONObject("arguments")?.let { jsonObjectToMap(it) },
-              metadata = obj.optJSONObject("metadata")?.let { jsonObjectToMap(it) },
-            ),
-          )
-        }
-        // Other event types are silently skipped on deserialization.
-        // They were still persisted (best-effort) and will be cleaned up on expiry.
-      }
+      val event = deserializeEvent(type, obj, timestamp, appId)
+      if (event != null) events.add(event)
     }
     return events
+  }
+
+  @Suppress("CyclomaticComplexMethod")
+  private fun deserializeEvent(
+    type: String,
+    obj: JSONObject,
+    timestamp: Long,
+    appId: String?,
+  ): SdkEvent? = when (type) {
+    "custom" -> SdkCustomEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      name = obj.optString("name"),
+      properties = jsonObjectToMap(obj.optJSONObject("properties")),
+    )
+    "navigation" -> {
+      val sourceName = obj.optString("source")
+      val source = try {
+        NavigationSourceType.valueOf(sourceName)
+      } catch (_: Exception) {
+        NavigationSourceType.CUSTOM
+      }
+      SdkNavigationEvent(
+        timestamp = timestamp,
+        applicationId = appId,
+        destination = obj.optString("destination"),
+        source = source,
+        arguments = obj.optJSONObject("arguments")?.let { jsonObjectToMap(it) },
+        metadata = obj.optJSONObject("metadata")?.let { jsonObjectToMap(it) },
+      )
+    }
+    "handled_exception" -> SdkHandledExceptionEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      exceptionClass = obj.optString("exceptionClass"),
+      exceptionMessage = obj.optString("exceptionMessage").ifEmpty { null },
+      stackTrace = obj.optString("stackTrace"),
+      customMessage = obj.optString("customMessage").ifEmpty { null },
+      currentScreen = obj.optString("currentScreen").ifEmpty { null },
+      appVersion = obj.optString("appVersion").ifEmpty { null },
+      deviceInfo = deserializeDeviceInfo(obj.optJSONObject("deviceInfo")),
+    )
+    "notification_action" -> SdkNotificationActionEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      notificationId = obj.optString("notificationId"),
+      actionId = obj.optString("actionId"),
+      actionLabel = obj.optString("actionLabel"),
+    )
+    "recomposition_snapshot" -> SdkRecompositionSnapshotEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      snapshotJson = obj.optString("snapshotJson"),
+    )
+    "crash" -> SdkCrashEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      exceptionClass = obj.optString("exceptionClass"),
+      exceptionMessage = obj.optString("exceptionMessage").ifEmpty { null },
+      stackTrace = obj.optString("stackTrace"),
+      threadName = obj.optString("threadName"),
+      currentScreen = obj.optString("currentScreen").ifEmpty { null },
+      appVersion = obj.optString("appVersion").ifEmpty { null },
+      deviceInfo = deserializeDeviceInfo(obj.optJSONObject("deviceInfo")),
+    )
+    "anr" -> SdkAnrEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      pid = obj.optInt("pid"),
+      processName = obj.optString("processName"),
+      importance = obj.optString("importance"),
+      trace = obj.optString("trace").ifEmpty { null },
+      reason = obj.optString("reason"),
+      appVersion = obj.optString("appVersion").ifEmpty { null },
+      deviceInfo = deserializeDeviceInfo(obj.optJSONObject("deviceInfo")),
+    )
+    "network_request" -> SdkNetworkRequestEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      url = obj.optString("url"),
+      method = obj.optString("method"),
+      statusCode = obj.optInt("statusCode"),
+      durationMs = obj.optLong("durationMs"),
+      requestBodySize = obj.optLong("requestBodySize", -1),
+      responseBodySize = obj.optLong("responseBodySize", -1),
+      protocol = obj.optString("protocol").ifEmpty { null },
+      host = obj.optString("host").ifEmpty { null },
+      path = obj.optString("path").ifEmpty { null },
+      error = obj.optString("error").ifEmpty { null },
+      requestHeaders = obj.optJSONObject("requestHeaders")?.let { jsonObjectToMap(it) },
+      responseHeaders = obj.optJSONObject("responseHeaders")?.let { jsonObjectToMap(it) },
+      requestBody = obj.optString("requestBody").ifEmpty { null },
+      responseBody = obj.optString("responseBody").ifEmpty { null },
+      contentType = obj.optString("contentType").ifEmpty { null },
+    )
+    "websocket_frame" -> {
+      val direction = try {
+        WebSocketFrameDirection.valueOf(obj.optString("direction"))
+      } catch (_: Exception) {
+        WebSocketFrameDirection.RECEIVED
+      }
+      val frameType = try {
+        WebSocketFrameType.valueOf(obj.optString("frameType"))
+      } catch (_: Exception) {
+        WebSocketFrameType.TEXT
+      }
+      SdkWebSocketFrameEvent(
+        timestamp = timestamp,
+        applicationId = appId,
+        connectionId = obj.optString("connectionId"),
+        url = obj.optString("url"),
+        direction = direction,
+        frameType = frameType,
+        payloadSize = obj.optLong("payloadSize"),
+      )
+    }
+    "log" -> SdkLogEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      level = obj.optInt("level"),
+      tag = obj.optString("tag"),
+      message = obj.optString("message"),
+      filterName = obj.optString("filterName"),
+    )
+    "broadcast" -> {
+      val categories = obj.optJSONArray("categories")?.let { arr ->
+        (0 until arr.length()).map { arr.optString(it) }
+      }
+      SdkBroadcastEvent(
+        timestamp = timestamp,
+        applicationId = appId,
+        action = obj.optString("action"),
+        categories = categories,
+        extraKeys = obj.optJSONObject("extraKeys")?.let { jsonObjectToMap(it) },
+      )
+    }
+    "lifecycle" -> SdkLifecycleEvent(
+      timestamp = timestamp,
+      applicationId = appId,
+      kind = obj.optString("kind"),
+      details = obj.optJSONObject("details")?.let { jsonObjectToMap(it) },
+    )
+    else -> null // Unknown type, skip gracefully
+  }
+
+  private fun deserializeDeviceInfo(obj: JSONObject?): SdkDeviceInfo? {
+    if (obj == null) return null
+    return SdkDeviceInfo(
+      model = obj.optString("model"),
+      manufacturer = obj.optString("manufacturer"),
+      osVersion = obj.optString("osVersion"),
+      sdkInt = obj.optInt("sdkInt"),
+    )
   }
 
   private fun jsonObjectToMap(obj: JSONObject?): Map<String, String> {

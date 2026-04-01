@@ -4,6 +4,8 @@ import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 import org.junit.Test
@@ -108,16 +110,18 @@ class DropCounterTest {
   @Test
   fun `buffer counts drops on flush error`() {
     val counter = DefaultDropCounter()
+    val executor = Executors.newSingleThreadScheduledExecutor()
     val buffer = SdkEventBuffer(
       maxBufferSize = 2,
       flushIntervalMs = 60_000,
       onFlush = { throw RuntimeException("boom") },
-      executor = Executors.newSingleThreadScheduledExecutor(),
+      executor = executor,
       dropCounter = counter,
     )
 
     buffer.add(makeEvent(1))
     buffer.add(makeEvent(2)) // triggers capacity flush which throws
+    executor.submit {}.get(1, TimeUnit.SECONDS) // wait for async capacity flush
 
     assertEquals(2L, counter.snapshot()[DropReason.FLUSH_ERROR], "Each dropped event should be counted")
   }

@@ -79,7 +79,7 @@ internal class SdkEventBuffer(
     }
 
     if (shouldFlush) {
-      deliverBatch(snapshot)
+      executor.execute { deliverBatch(snapshot) }
     }
   }
 

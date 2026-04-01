@@ -200,7 +200,6 @@ extension AutoMobileCrashes {
     func checkPreviousSignalCrash() {
         guard AutoMobileSDK.shared.isEnabled else { return }
         guard let path = signalCrashFilePath else { return }
-        let filePath = String(cString: path)
 
         let fd = open(path, O_RDONLY)
         guard fd >= 0 else { return }
@@ -241,6 +240,6 @@ extension AutoMobileCrashes {
         currentBuffer?.add(event)
 
         // Log for debugging
-        NSLog("[AutoMobile] Previous session crashed with %@", filePath)
+        InternalLogger.error("Previous session crashed with \(signalName)")
     }
 }

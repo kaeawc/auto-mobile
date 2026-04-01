@@ -47,11 +47,10 @@ export class DeviceSessionManagerFactory {
    */
   public static getInstance(): DeviceSessionManager {
     if (!DeviceSessionManagerFactory.instance) {
-      // Use injected dependencies or create defaults
       const adbFactory = DeviceSessionManagerFactory.injectedAdbFactory ?? defaultAdbClientFactory;
       const adb = adbFactory.create();
       const deviceUtils = DeviceSessionManagerFactory.injectedDeviceUtils ||
-        new MultiPlatformDeviceManager(adb as any, null, null);
+        new MultiPlatformDeviceManager(adb);
 
       DeviceSessionManagerFactory.instance = DeviceSessionManager.createInstance(adb, deviceUtils);
       logger.debug("DeviceSessionManager: Created new instance with " +

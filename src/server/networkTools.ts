@@ -126,7 +126,7 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
       contentType: r.contentType,
     }));
     const msg = JSON.stringify({ type: "set_network_mock_rules", rules });
-    const sent = (client as any).sendMessage(msg);
+    const sent = client.sendMessage(msg);
     logger.info(`[networkTools] syncMockRules: ${rules.length} rules, sent=${sent}`);
   } catch (e) {
     logger.info(`[networkTools] Failed to sync mock rules to device: ${e}`);

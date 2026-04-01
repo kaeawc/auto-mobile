@@ -403,7 +403,7 @@ export class WcagAudit {
   }
 
   private resolveRootNode(hierarchy: ViewHierarchyNode): ViewHierarchyNode {
-    const node = (hierarchy as any).node;
+    const node = hierarchy.node;
     if (Array.isArray(node) && node.length > 0) {
       return node[node.length - 1] as ViewHierarchyNode;
     }

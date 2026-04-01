@@ -67,7 +67,7 @@ export interface DeviceAllocationRequest {
  */
 export class DevicePool {
   private static instanceCounter = 0;
-  private readonly instanceId: number;
+  readonly instanceId: number;
   private devices: Map<string, PooledDevice> = new Map();
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;

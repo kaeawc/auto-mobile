@@ -790,7 +790,7 @@ export class RealObserveScreen implements ObserveScreen {
     }
 
     // iOS format: hierarchy is the root XCTestNode with bounds as {left, top, right, bottom}
-    const iosHierarchy = viewHierarchy?.hierarchy as any;
+    const iosHierarchy = viewHierarchy?.hierarchy;
     if (iosHierarchy?.bounds && typeof iosHierarchy.bounds === "object" && !Array.isArray(iosHierarchy.bounds)) {
       const { left, top, right, bottom } = iosHierarchy.bounds;
       if (typeof right === "number" && typeof bottom === "number") {

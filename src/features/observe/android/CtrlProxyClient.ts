@@ -79,6 +79,7 @@ import type {
   CertificatesDelegateContext,
   AccessibilityHierarchy,
   AccessibilityHierarchyResponse,
+  AccessibilityNode,
   CachedHierarchy,
   ScreenshotResult,
   A11ySwipeResult,
@@ -183,16 +184,107 @@ interface AnrEvent {
 }
 
 /**
- * Interface for WebSocket message from accessibility service
+ * Base fields shared by most WebSocket messages from the accessibility service.
  */
-interface WebSocketMessage {
-  type: string;
+interface WsMessageBase {
   timestamp?: number;
-  requestId?: string;
-  data?: AccessibilityHierarchy;
+  error?: string;
+}
+
+/**
+ * Base fields for request/response messages that carry a requestId.
+ */
+interface WsRequestBase extends WsMessageBase {
+  requestId: string;
+  success: boolean;
+  totalTimeMs: number;
+  perfTiming?: AndroidPerfTiming[];
+}
+
+// ---------------------------------------------------------------------------
+// Individual message types (discriminated on `type`)
+// ---------------------------------------------------------------------------
+
+interface WsConnectedMessage extends WsMessageBase {
+  type: "connected";
+}
+
+interface WsHierarchyUpdateMessage extends WsMessageBase {
+  type: "hierarchy_update";
+  data: AccessibilityHierarchy;
+  perfTiming?: AndroidPerfTiming[];
+}
+
+interface WsScreenshotMessage extends WsMessageBase {
+  type: "screenshot";
+  requestId: string;
+  data: string;
   format?: string;
-  success?: boolean;
-  totalTimeMs?: number;
+}
+
+interface WsScreenshotErrorMessage extends WsMessageBase {
+  type: "screenshot_error";
+  requestId: string;
+}
+
+interface WsSwipeResultMessage extends WsRequestBase {
+  type: "swipe_result";
+  gestureTimeMs?: number;
+}
+
+interface WsTapCoordinatesResultMessage extends WsRequestBase {
+  type: "tap_coordinates_result";
+}
+
+interface WsDragResultMessage extends WsRequestBase {
+  type: "drag_result";
+  gestureTimeMs?: number;
+}
+
+interface WsPinchResultMessage extends WsRequestBase {
+  type: "pinch_result";
+  gestureTimeMs?: number;
+}
+
+interface WsSetTextResultMessage extends WsRequestBase {
+  type: "set_text_result";
+}
+
+interface WsImeActionResultMessage extends WsRequestBase {
+  type: "ime_action_result";
+  action: string;
+}
+
+interface WsSelectAllResultMessage extends WsRequestBase {
+  type: "select_all_result";
+}
+
+interface WsActionResultMessage extends WsRequestBase {
+  type: "action_result";
+  action: string;
+}
+
+interface WsClipboardResultMessage extends WsRequestBase {
+  type: "clipboard_result";
+  action: "copy" | "paste" | "clear" | "get";
+  text?: string;
+}
+
+interface WsCaCertResultMessage extends WsRequestBase {
+  type: "ca_cert_result";
+  action: "install" | "remove";
+  alias?: string;
+}
+
+interface WsDeviceOwnerStatusResultMessage extends WsRequestBase {
+  type: "device_owner_status_result";
+  isDeviceOwner?: boolean;
+  isAdminActive?: boolean;
+  packageName?: string;
+}
+
+interface WsPermissionResultMessage extends WsRequestBase {
+  type: "permission_result";
   permission?: string;
   granted?: boolean;
   requestLaunched?: boolean;
@@ -200,10 +292,278 @@ interface WebSocketMessage {
   requiresSettings?: boolean;
   instructions?: string;
   adbCommand?: string;
-  error?: string;
-  event?: InteractionEvent | NavigationEvent | PackageEvent;
-  highlights?: any[];
 }
+
+interface WsCurrentFocusResultMessage extends WsMessageBase {
+  type: "current_focus_result";
+  requestId: string;
+  totalTimeMs?: number;
+  focusedElement?: AccessibilityNode | null;
+}
+
+interface WsTraversalOrderResultMessage extends WsMessageBase {
+  type: "traversal_order_result";
+  requestId: string;
+  totalTimeMs?: number;
+  result?: {
+    elements: AccessibilityNode[];
+    focusedIndex: number | null;
+    totalCount: number;
+  };
+}
+
+interface WsHighlightResponseMessage extends WsMessageBase {
+  type: "highlight_response";
+  requestId: string;
+  success?: boolean;
+}
+
+interface WsGlobalActionResultMessage extends WsMessageBase {
+  type: "global_action_result";
+  requestId: string;
+  success?: boolean;
+  action?: string;
+  totalTimeMs?: number;
+}
+
+interface WsDeviceInfoResultMessage extends WsMessageBase {
+  type: "device_info_result";
+  requestId: string;
+  success?: boolean;
+  screenWidth?: number;
+  screenHeight?: number;
+  density?: number;
+  rotation?: number;
+  sdkInt?: number;
+  deviceModel?: string;
+  isEmulator?: boolean;
+  wakefulness?: string;
+  foregroundActivity?: string;
+  totalTimeMs?: number;
+}
+
+interface WsPreferenceFilesMessage extends WsMessageBase {
+  type: "preference_files";
+  requestId: string;
+  success?: boolean;
+  files?: PreferenceFile[];
+  totalTimeMs?: number;
+}
+
+interface WsPreferencesMessage extends WsMessageBase {
+  type: "preferences";
+  requestId: string;
+  success?: boolean;
+  entries?: KeyValueEntry[];
+  totalTimeMs?: number;
+}
+
+interface WsSubscribeStorageResultMessage extends WsMessageBase {
+  type: "subscribe_storage_result";
+  requestId: string;
+  success?: boolean;
+  subscription?: StorageSubscription;
+  totalTimeMs?: number;
+}
+
+interface WsUnsubscribeStorageResultMessage extends WsMessageBase {
+  type: "unsubscribe_storage_result";
+  requestId: string;
+  success?: boolean;
+  totalTimeMs?: number;
+}
+
+interface WsGetPreferenceResultMessage extends WsMessageBase {
+  type: "get_preference_result";
+  requestId: string;
+  success?: boolean;
+  found?: boolean;
+  key?: string;
+  value?: string;
+  totalTimeMs?: number;
+}
+
+interface WsSetPreferenceResultMessage extends WsMessageBase {
+  type: "set_preference_result";
+  requestId: string;
+  success?: boolean;
+  totalTimeMs?: number;
+}
+
+interface WsRemovePreferenceResultMessage extends WsMessageBase {
+  type: "remove_preference_result";
+  requestId: string;
+  success?: boolean;
+  totalTimeMs?: number;
+}
+
+interface WsClearPreferencesResultMessage extends WsMessageBase {
+  type: "clear_preferences_result";
+  requestId: string;
+  success?: boolean;
+  totalTimeMs?: number;
+}
+
+interface WsNavigationEventMessage extends WsMessageBase {
+  type: "navigation_event";
+  event?: NavigationEvent;
+}
+
+interface WsPackageEventMessage extends WsMessageBase {
+  type: "package_event";
+  event?: PackageEvent;
+}
+
+interface WsInteractionEventMessage extends WsMessageBase {
+  type: "interaction_event";
+  event?: InteractionEvent;
+}
+
+interface WsHandledExceptionEventMessage extends WsMessageBase {
+  type: "handled_exception_event";
+  event?: HandledExceptionEvent;
+}
+
+interface WsCrashEventMessage extends WsMessageBase {
+  type: "crash_event";
+  event?: CrashEvent;
+}
+
+interface WsAnrEventMessage extends WsMessageBase {
+  type: "anr_event";
+  event?: AnrEvent;
+}
+
+interface WsNetworkEventMessage extends WsMessageBase {
+  type: "network_event";
+  event?: {
+    applicationId?: string;
+    url: string;
+    method: string;
+    statusCode?: number;
+    durationMs?: number;
+    requestBodySize?: number;
+    responseBodySize?: number;
+    protocol?: string;
+    host?: string;
+    path?: string;
+    error?: string;
+    requestHeaders?: Record<string, string>;
+    responseHeaders?: Record<string, string>;
+    requestBody?: string;
+    responseBody?: string;
+    contentType?: string;
+  };
+}
+
+interface WsWebSocketFrameEventMessage extends WsMessageBase {
+  type: "websocket_frame_event";
+  event?: {
+    applicationId?: string;
+    frameType?: string;
+    connectionId?: string;
+    url?: string;
+    direction?: string;
+    payloadSize?: number;
+  };
+}
+
+interface WsLogEventMessage extends WsMessageBase {
+  type: "log_event";
+  event?: {
+    applicationId?: string;
+    level?: number;
+    tag?: string;
+    message?: string;
+    filterName?: string;
+  };
+}
+
+interface WsBroadcastEventMessage extends WsMessageBase {
+  type: "broadcast_event";
+  event?: {
+    applicationId?: string;
+    action?: string;
+    extraKeys?: Record<string, string>;
+  };
+}
+
+interface WsLifecycleEventMessage extends WsMessageBase {
+  type: "lifecycle_event";
+  event?: {
+    applicationId?: string;
+    kind?: string;
+    details?: Record<string, string>;
+  };
+}
+
+interface WsCustomEventMessage extends WsMessageBase {
+  type: "custom_event";
+  event?: {
+    applicationId?: string;
+    name?: string;
+    properties?: Record<string, unknown>;
+  };
+}
+
+interface WsStorageChangedMessage extends WsMessageBase {
+  type: "storage_changed";
+  packageName?: string;
+  fileName?: string;
+  key?: string | null;
+  value?: string | null;
+  valueType?: KeyValueType;
+  sequenceNumber?: number;
+  changeType?: string;
+}
+
+/**
+ * Discriminated union of all WebSocket messages from the accessibility service.
+ * The `type` field is the discriminant.
+ */
+type WebSocketMessage =
+  | WsConnectedMessage
+  | WsHierarchyUpdateMessage
+  | WsScreenshotMessage
+  | WsScreenshotErrorMessage
+  | WsSwipeResultMessage
+  | WsTapCoordinatesResultMessage
+  | WsDragResultMessage
+  | WsPinchResultMessage
+  | WsSetTextResultMessage
+  | WsImeActionResultMessage
+  | WsSelectAllResultMessage
+  | WsActionResultMessage
+  | WsClipboardResultMessage
+  | WsCaCertResultMessage
+  | WsDeviceOwnerStatusResultMessage
+  | WsPermissionResultMessage
+  | WsCurrentFocusResultMessage
+  | WsTraversalOrderResultMessage
+  | WsHighlightResponseMessage
+  | WsGlobalActionResultMessage
+  | WsDeviceInfoResultMessage
+  | WsPreferenceFilesMessage
+  | WsPreferencesMessage
+  | WsSubscribeStorageResultMessage
+  | WsUnsubscribeStorageResultMessage
+  | WsGetPreferenceResultMessage
+  | WsSetPreferenceResultMessage
+  | WsRemovePreferenceResultMessage
+  | WsClearPreferencesResultMessage
+  | WsNavigationEventMessage
+  | WsPackageEventMessage
+  | WsInteractionEventMessage
+  | WsHandledExceptionEventMessage
+  | WsCrashEventMessage
+  | WsAnrEventMessage
+  | WsNetworkEventMessage
+  | WsWebSocketFrameEventMessage
+  | WsLogEventMessage
+  | WsBroadcastEventMessage
+  | WsLifecycleEventMessage
+  | WsCustomEventMessage
+  | WsStorageChangedMessage;
 
 /**
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
@@ -1250,15 +1610,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "hierarchy_update" && message.data) {
-        this.handleHierarchyUpdate(message.data, (message as any).perfTiming);
+        this.handleHierarchyUpdate(message.data, message.perfTiming);
       }
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
-        const base64Data = (message as any).data as string;
-        this.pushScreenshotToObservationStream(base64Data);
+        this.pushScreenshotToObservationStream(message.data);
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
-          success: true, data: base64Data, format: message.format || "jpeg", timestamp: message.timestamp
+          success: true, data: message.data, format: message.format || "jpeg", timestamp: message.timestamp
         });
       }
 
@@ -1270,14 +1629,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle swipe result
       if (message.type === "swipe_result") {
-        const swipeMessage = message as any;
-        const perfTiming = swipeMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        logger.debug(`[CTRL_PROXY] Swipe result (requestId: ${swipeMessage.requestId}, success: ${swipeMessage.success})`);
+        logger.debug(`[CTRL_PROXY] Swipe result (requestId: ${message.requestId}, success: ${message.success})`);
 
-        if (swipeMessage.requestId) {
-          this.requestManager.resolve<A11ySwipeResult>(swipeMessage.requestId, {
-            success: swipeMessage.success, totalTimeMs: swipeMessage.totalTimeMs,
-            gestureTimeMs: swipeMessage.gestureTimeMs, error: swipeMessage.error, perfTiming
+        if (message.requestId) {
+          this.requestManager.resolve<A11ySwipeResult>(message.requestId, {
+            success: message.success, totalTimeMs: message.totalTimeMs,
+            gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
           });
         }
 
@@ -1285,13 +1642,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle tap coordinates result
       if (message.type === "tap_coordinates_result") {
-        const tapMessage = message as any;
-        const perfTiming = tapMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        logger.info(`[CTRL_PROXY] Tap coordinates result (requestId: ${tapMessage.requestId}, success: ${tapMessage.success})`);
+        logger.info(`[CTRL_PROXY] Tap coordinates result (requestId: ${message.requestId}, success: ${message.success})`);
 
-        if (tapMessage.requestId) {
-          this.requestManager.resolve<A11yTapCoordinatesResult>(tapMessage.requestId, {
-            success: tapMessage.success, totalTimeMs: tapMessage.totalTimeMs, error: tapMessage.error, perfTiming
+        if (message.requestId) {
+          this.requestManager.resolve<A11yTapCoordinatesResult>(message.requestId, {
+            success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
           });
         }
 
@@ -1299,265 +1654,230 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle drag result
       if (message.type === "drag_result" && message.requestId) {
-        const dragMessage = message as any;
-        const perfTiming = dragMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yDragResult>(dragMessage.requestId, {
-          success: dragMessage.success, totalTimeMs: dragMessage.totalTimeMs,
-          gestureTimeMs: dragMessage.gestureTimeMs, error: dragMessage.error, perfTiming
+        this.requestManager.resolve<A11yDragResult>(message.requestId, {
+          success: message.success, totalTimeMs: message.totalTimeMs,
+          gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle pinch result
       if (message.type === "pinch_result" && message.requestId) {
-        const pinchMessage = message as any;
-        const perfTiming = pinchMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yPinchResult>(pinchMessage.requestId, {
-          success: pinchMessage.success, totalTimeMs: pinchMessage.totalTimeMs,
-          gestureTimeMs: pinchMessage.gestureTimeMs, error: pinchMessage.error, perfTiming
+        this.requestManager.resolve<A11yPinchResult>(message.requestId, {
+          success: message.success, totalTimeMs: message.totalTimeMs,
+          gestureTimeMs: message.gestureTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle set text result
       if (message.type === "set_text_result" && message.requestId) {
-        const setTextMessage = message as any;
-        const perfTiming = setTextMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11ySetTextResult>(setTextMessage.requestId, {
-          success: setTextMessage.success, totalTimeMs: setTextMessage.totalTimeMs, error: setTextMessage.error, perfTiming
+        this.requestManager.resolve<A11ySetTextResult>(message.requestId, {
+          success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle IME action result
       if (message.type === "ime_action_result" && message.requestId) {
-        const imeActionMessage = message as any;
-        const perfTiming = imeActionMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yImeActionResult>(imeActionMessage.requestId, {
-          success: imeActionMessage.success, action: imeActionMessage.action,
-          totalTimeMs: imeActionMessage.totalTimeMs, error: imeActionMessage.error, perfTiming
+        this.requestManager.resolve<A11yImeActionResult>(message.requestId, {
+          success: message.success, action: message.action,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle select all result
       if (message.type === "select_all_result" && message.requestId) {
-        const selectAllMessage = message as any;
-        const perfTiming = selectAllMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11ySelectAllResult>(selectAllMessage.requestId, {
-          success: selectAllMessage.success, totalTimeMs: selectAllMessage.totalTimeMs, error: selectAllMessage.error, perfTiming
+        this.requestManager.resolve<A11ySelectAllResult>(message.requestId, {
+          success: message.success, totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle action result
       if (message.type === "action_result" && message.requestId) {
-        const actionMessage = message as any;
-        const perfTiming = actionMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yActionResult>(actionMessage.requestId, {
-          success: actionMessage.success, action: actionMessage.action,
-          totalTimeMs: actionMessage.totalTimeMs, error: actionMessage.error, perfTiming
+        this.requestManager.resolve<A11yActionResult>(message.requestId, {
+          success: message.success, action: message.action,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
       }
 
       // Handle clipboard result
       if (message.type === "clipboard_result" && message.requestId) {
-        const clipboardMessage = message as any;
-        const perfTiming = clipboardMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yClipboardResult>(clipboardMessage.requestId, {
-          success: clipboardMessage.success, action: clipboardMessage.action, text: clipboardMessage.text,
-          totalTimeMs: clipboardMessage.totalTimeMs, error: clipboardMessage.error, perfTiming
+        this.requestManager.resolve<A11yClipboardResult>(message.requestId, {
+          success: message.success, action: message.action, text: message.text,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
       }
 
       // Handle CA certificate result
       if (message.type === "ca_cert_result" && message.requestId) {
-        const caCertMessage = message as any;
-        const perfTiming = caCertMessage.perfTiming as AndroidPerfTiming[] | undefined;
-
         // Try delegate handler first (for remove)
         if (!this.certificates.handleCaCertRemovalResult(message.requestId, {
-          success: caCertMessage.success, action: caCertMessage.action, alias: caCertMessage.alias,
-          totalTimeMs: caCertMessage.totalTimeMs, error: caCertMessage.error, perfTiming
+          success: message.success, action: message.action, alias: message.alias,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         })) {
           // Fall back to RequestManager (for install)
           this.requestManager.resolve<A11yCaCertResult>(message.requestId, {
-            success: caCertMessage.success, action: caCertMessage.action, alias: caCertMessage.alias,
-            totalTimeMs: caCertMessage.totalTimeMs, error: caCertMessage.error, perfTiming
+            success: message.success, action: message.action, alias: message.alias,
+            totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
           });
         }
       }
 
       // Handle device owner status result
       if (message.type === "device_owner_status_result" && message.requestId) {
-        const statusMessage = message as any;
-        const perfTiming = statusMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yDeviceOwnerStatusResult>(statusMessage.requestId, {
-          success: statusMessage.success, isDeviceOwner: statusMessage.isDeviceOwner ?? false,
-          isAdminActive: statusMessage.isAdminActive ?? false, packageName: statusMessage.packageName,
-          totalTimeMs: statusMessage.totalTimeMs, error: statusMessage.error, perfTiming
+        this.requestManager.resolve<A11yDeviceOwnerStatusResult>(message.requestId, {
+          success: message.success, isDeviceOwner: message.isDeviceOwner ?? false,
+          isAdminActive: message.isAdminActive ?? false, packageName: message.packageName,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
       }
 
       // Handle permission result
       if (message.type === "permission_result" && message.requestId) {
-        const permissionMessage = message as any;
-        const perfTiming = permissionMessage.perfTiming as AndroidPerfTiming[] | undefined;
-        this.requestManager.resolve<A11yPermissionResult>(permissionMessage.requestId, {
-          success: permissionMessage.success ?? false, permission: permissionMessage.permission ?? "unknown",
-          granted: permissionMessage.granted ?? false, totalTimeMs: permissionMessage.totalTimeMs ?? 0,
-          requestLaunched: permissionMessage.requestLaunched ?? false, canRequest: permissionMessage.canRequest ?? false,
-          requiresSettings: permissionMessage.requiresSettings ?? false, instructions: permissionMessage.instructions,
-          adbCommand: permissionMessage.adbCommand, error: permissionMessage.error, perfTiming
+        this.requestManager.resolve<A11yPermissionResult>(message.requestId, {
+          success: message.success ?? false, permission: message.permission ?? "unknown",
+          granted: message.granted ?? false, totalTimeMs: message.totalTimeMs ?? 0,
+          requestLaunched: message.requestLaunched ?? false, canRequest: message.canRequest ?? false,
+          requiresSettings: message.requiresSettings ?? false, instructions: message.instructions,
+          adbCommand: message.adbCommand, error: message.error, perfTiming: message.perfTiming
         });
       }
 
       // Handle current focus result
       if (message.type === "current_focus_result" && message.requestId) {
-        const focusMessage = message as any;
-        const focusedElement = focusMessage.focusedElement
-          ? this.focus.convertAccessibilityNodeToElement(focusMessage.focusedElement)
+        const focusedElement = message.focusedElement
+          ? this.focus.convertAccessibilityNodeToElement(message.focusedElement)
           : null;
 
-        this.requestManager.resolve<CurrentFocusResult>(focusMessage.requestId, {
-          focusedElement, totalTimeMs: focusMessage.totalTimeMs,
-          requestId: focusMessage.requestId, error: focusMessage.error
+        this.requestManager.resolve<CurrentFocusResult>(message.requestId, {
+          focusedElement, totalTimeMs: message.totalTimeMs,
+          requestId: message.requestId, error: message.error
         });
       }
 
       // Handle traversal order result
       if (message.type === "traversal_order_result" && message.requestId) {
-        const traversalMessage = message as any;
-        const result = traversalMessage.result;
+        const result = message.result;
 
         if (result && result.elements) {
-          const elements = result.elements.map((node: any) =>
+          const elements = result.elements.map((node: AccessibilityNode) =>
             this.focus.convertAccessibilityNodeToElement(node)
           );
 
-          this.requestManager.resolve<TraversalOrderResult>(traversalMessage.requestId, {
+          this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
             elements, focusedIndex: result.focusedIndex, totalCount: result.totalCount,
-            totalTimeMs: traversalMessage.totalTimeMs, requestId: traversalMessage.requestId, error: traversalMessage.error
+            totalTimeMs: message.totalTimeMs, requestId: message.requestId, error: message.error
           });
         } else {
-          this.requestManager.resolve<TraversalOrderResult>(traversalMessage.requestId, {
+          this.requestManager.resolve<TraversalOrderResult>(message.requestId, {
             elements: [], focusedIndex: null, totalCount: 0,
-            totalTimeMs: traversalMessage.totalTimeMs, requestId: traversalMessage.requestId, error: traversalMessage.error || "No result data"
+            totalTimeMs: message.totalTimeMs, requestId: message.requestId, error: message.error || "No result data"
           });
         }
       }
 
       // Handle highlight response
       if (message.type === "highlight_response" && message.requestId) {
-        const highlightMessage = message as any;
-        this.requestManager.resolve<HighlightOperationResult>(highlightMessage.requestId, {
-          success: highlightMessage.success ?? false, error: highlightMessage.error,
-          requestId: highlightMessage.requestId, timestamp: highlightMessage.timestamp
+        this.requestManager.resolve<HighlightOperationResult>(message.requestId, {
+          success: message.success ?? false, error: message.error,
+          requestId: message.requestId, timestamp: message.timestamp
         });
       }
 
       // Handle global action result
       if (message.type === "global_action_result" && message.requestId) {
-        const actionMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: actionMessage.success ?? false, action: actionMessage.action,
-          totalTimeMs: actionMessage.totalTimeMs ?? 0, error: actionMessage.error
+          success: message.success ?? false, action: message.action,
+          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       // Handle device info result
       if (message.type === "device_info_result" && message.requestId) {
-        const infoMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: infoMessage.success ?? false,
-          screenWidth: infoMessage.screenWidth, screenHeight: infoMessage.screenHeight,
-          density: infoMessage.density, rotation: infoMessage.rotation,
-          sdkInt: infoMessage.sdkInt, deviceModel: infoMessage.deviceModel,
-          isEmulator: infoMessage.isEmulator, wakefulness: infoMessage.wakefulness,
-          foregroundActivity: infoMessage.foregroundActivity,
-          totalTimeMs: infoMessage.totalTimeMs ?? 0, error: infoMessage.error
+          success: message.success ?? false,
+          screenWidth: message.screenWidth, screenHeight: message.screenHeight,
+          density: message.density, rotation: message.rotation,
+          sdkInt: message.sdkInt, deviceModel: message.deviceModel,
+          isEmulator: message.isEmulator, wakefulness: message.wakefulness,
+          foregroundActivity: message.foregroundActivity,
+          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       // Handle storage result messages
       // Note: Android sends "preference_files" but we register with "list_preference_files"
       if (message.type === "preference_files" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, files: storageMessage.files || [],
-          totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, files: message.files || [],
+          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       // Note: Android sends "preferences" but we register with "get_preferences"
       if (message.type === "preferences" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, entries: storageMessage.entries || [],
-          totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, entries: message.entries || [],
+          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "subscribe_storage_result" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, subscription: storageMessage.subscription,
-          totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, subscription: message.subscription,
+          totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "unsubscribe_storage_result" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "get_preference_result" && message.requestId) {
-        const storageMessage = message as any;
         // Build entry from key/value/type fields (Android sends flat structure, not nested entry)
-        const entry = storageMessage.found && storageMessage.key ? {
-          key: storageMessage.key,
-          value: storageMessage.value,
-          type: storageMessage.type
+        const entry = message.found && message.key ? {
+          key: message.key,
+          value: message.value,
+          type: message.type
         } : undefined;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, found: storageMessage.found ?? false,
-          entry, totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, found: message.found ?? false,
+          entry, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "set_preference_result" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "remove_preference_result" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       if (message.type === "clear_preferences_result" && message.requestId) {
-        const storageMessage = message as any;
         this.requestManager.resolve(message.requestId, {
-          success: storageMessage.success ?? false, totalTimeMs: storageMessage.totalTimeMs ?? 0, error: storageMessage.error
+          success: message.success ?? false, totalTimeMs: message.totalTimeMs ?? 0, error: message.error
         });
       }
 
       // Handle navigation event
       if (message.type === "navigation_event") {
-        const navMessage = message as any;
-        const event = navMessage.event as NavigationEvent;
+        const event = message.event;
         if (event) {
           // The WebSocket protocol puts timestamp on the outer message, not inside event.
           // Ensure the event has a timestamp for the navigation graph manager.
-          if (event.timestamp === undefined && navMessage.timestamp !== undefined) {
-            event.timestamp = navMessage.timestamp;
+          if (event.timestamp === undefined && message.timestamp !== undefined) {
+            event.timestamp = message.timestamp;
           }
           if (event.applicationId) {
             this.sdkNavigationAppIds.add(event.applicationId);
@@ -1590,16 +1910,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "package_event") {
-        const packageMessage = message as any;
-        const event = packageMessage.event as PackageEvent | undefined;
+        const event = message.event;
         if (event) {
           await this.handlePackageEvent(event, message.timestamp);
         }
       }
 
       if (message.type === "interaction_event") {
-        const interactionMessage = message as any;
-        const interaction = interactionMessage.event as InteractionEvent | undefined;
+        const interaction = message.event;
         if (interaction) {
           this.lastInteraction = {
             type: interaction.type,
@@ -1612,24 +1930,21 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "handled_exception_event") {
-        const exceptionMessage = message as any;
-        const event = exceptionMessage.event as HandledExceptionEvent | undefined;
+        const event = message.event;
         if (event) {
           await this.handleHandledExceptionEvent(event);
         }
       }
 
       if (message.type === "crash_event") {
-        const crashMessage = message as any;
-        const event = crashMessage.event as CrashEvent | undefined;
+        const event = message.event;
         if (event) {
           await this.handleCrashEvent(event);
         }
       }
 
       if (message.type === "anr_event") {
-        const anrMessage = message as any;
-        const event = anrMessage.event as AnrEvent | undefined;
+        const event = message.event;
         if (event) {
           await this.handleAnrEvent(event);
         }
@@ -1637,13 +1952,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle telemetry events from SDK event batch
       if (message.type === "network_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
           await recorder.recordNetworkEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             url: event.url,
             method: event.method,
@@ -1665,13 +1979,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "websocket_frame_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
           await recorder.recordOsEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             category: "websocket_frame",
             kind: event.frameType ?? "unknown",
@@ -1686,13 +1999,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "log_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
           await recorder.recordLogEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             level: event.level ?? 0,
             tag: event.tag ?? "",
@@ -1703,13 +2015,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "broadcast_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
           await recorder.recordOsEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             category: "broadcast",
             kind: event.action ?? "unknown",
@@ -1719,13 +2030,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "lifecycle_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
           await recorder.recordOsEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             category: "lifecycle",
             kind: event.kind ?? "unknown",
@@ -1735,14 +2045,13 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       if (message.type === "custom_event") {
-        const msg = message as any;
-        const event = msg.event;
+        const event = message.event;
         if (event) {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
 
           await recorder.recordCustomEvent({
-            timestamp: msg.timestamp,
+            timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
             name: event.name ?? "",
             properties: event.properties ?? {},
@@ -1752,33 +2061,32 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle storage_changed push event
       if (message.type === "storage_changed") {
-        const storageMessage = message as any;
-        const event: StorageChangedEvent = {
-          packageName: storageMessage.packageName, fileName: storageMessage.fileName,
-          key: storageMessage.key ?? null, value: storageMessage.value ?? null,
-          valueType: storageMessage.valueType ?? "STRING", timestamp: storageMessage.timestamp ?? this.timer.now(),
-          sequenceNumber: storageMessage.sequenceNumber ?? 0,
+        const storageEvent: StorageChangedEvent = {
+          packageName: message.packageName ?? "", fileName: message.fileName ?? "",
+          key: message.key ?? null, value: message.value ?? null,
+          valueType: message.valueType ?? "STRING", timestamp: message.timestamp ?? this.timer.now(),
+          sequenceNumber: message.sequenceNumber ?? 0,
         };
-        logger.debug(`[CTRL_PROXY] Storage changed: ${event.packageName}/${event.fileName} key=${event.key}`);
+        logger.debug(`[CTRL_PROXY] Storage changed: ${storageEvent.packageName}/${storageEvent.fileName} key=${storageEvent.key}`);
 
-        this.storage.notifyStorageChangeListeners(event);
+        this.storage.notifyStorageChangeListeners(storageEvent);
 
         const server = getDeviceDataStreamServer();
         if (server) {
-          server.pushStorageUpdate(this.device.deviceId, event);
+          server.pushStorageUpdate(this.device.deviceId, storageEvent);
         }
 
         // Record to telemetry timeline
         const recorder = TelemetryRecorder.getInstance();
         recorder.setContext(this.device.deviceId, null);
         recorder.recordStorageEvent({
-          timestamp: event.timestamp,
-          applicationId: storageMessage.packageName ?? null,
-          fileName: event.fileName,
-          key: event.key,
-          value: event.value,
-          valueType: event.valueType,
-          changeType: storageMessage.changeType ?? "modify",
+          timestamp: storageEvent.timestamp,
+          applicationId: message.packageName ?? null,
+          fileName: storageEvent.fileName,
+          key: storageEvent.key,
+          value: storageEvent.value,
+          valueType: storageEvent.valueType,
+          changeType: message.changeType ?? "modify",
         });
       }
     } catch (error) {

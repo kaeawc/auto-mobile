@@ -226,7 +226,9 @@ export class BugReport {
 
       // Get raw XML
       try {
-        const rawXml = await (this.viewHierarchy as any).executeUiAutomatorDump();
+        const rawXml = this.viewHierarchy.executeUiAutomatorDump
+          ? await this.viewHierarchy.executeUiAutomatorDump()
+          : undefined;
         result.viewHierarchy.rawXml = rawXml;
       } catch (error) {
         result.errors?.push(`Failed to get raw hierarchy XML: ${error}`);

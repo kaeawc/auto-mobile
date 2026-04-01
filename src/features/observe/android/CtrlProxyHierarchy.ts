@@ -7,7 +7,7 @@
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
-import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
@@ -275,7 +275,7 @@ export class CtrlProxyHierarchy {
 
       // Merge Android-side performance timing
       if (androidPerfTiming && androidPerfTiming.length > 0) {
-        perf.addExternalTiming("androidPerf", androidPerfTiming as any);
+        perf.addExternalTiming("androidPerf", androidPerfTiming as TimingEntry[]);
       }
 
       perf.end();

@@ -237,7 +237,7 @@ const traverseForSystemTray = (node: any): boolean => {
 };
 
 const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
-  if (!viewHierarchy?.hierarchy || (viewHierarchy.hierarchy as any).error) {
+  if (!viewHierarchy?.hierarchy || viewHierarchy.hierarchy.error) {
     return [];
   }
 

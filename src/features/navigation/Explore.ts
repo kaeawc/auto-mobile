@@ -1,4 +1,4 @@
-import { ActionableError, BootedDevice, Element, ObserveResult } from "../../models";
+import { ActionableError, BootedDevice, Element, isTruthy, ObserveResult } from "../../models";
 import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
@@ -710,7 +710,7 @@ export class Explore extends BaseVisualChange {
       this.exploredElements.set(elementKey, tracked);
 
       // Check if element is scrollable - perform swipe instead of tap
-      const isScrollable = element.scrollable === true || (element.scrollable as any) === "true";
+      const isScrollable = isTruthy(element.scrollable);
 
       if (isScrollable) {
         // Perform swipe on scrollable container

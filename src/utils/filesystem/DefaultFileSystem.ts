@@ -21,7 +21,7 @@ export interface FileSystem {
    * @param encoding - File encoding (default: "utf8")
    * @returns Promise resolving to file contents
    */
-  readFile(filePath: string, encoding?: string): Promise<string>;
+  readFile(filePath: string, encoding?: BufferEncoding): Promise<string>;
 
   /**
    * Read file contents asynchronously as a Buffer
@@ -65,7 +65,7 @@ export interface FileSystem {
    * @param encoding - File encoding (default: "utf8")
    * @returns Promise that resolves when write is complete
    */
-  writeFile(filePath: string, content: string, encoding?: string): Promise<void>;
+  writeFile(filePath: string, content: string, encoding?: BufferEncoding): Promise<void>;
 
   /**
    * Write binary content to a file asynchronously
@@ -109,9 +109,9 @@ export interface FileSystem {
  * Default file system implementation
  */
 export class DefaultFileSystem implements FileSystem {
-  async readFile(filePath: string, encoding: string = "utf8"): Promise<string> {
-    const result = await readFileAsync(filePath, { encoding } as any);
-    return typeof result === "string" ? result : result.toString(encoding as any);
+  async readFile(filePath: string, encoding: BufferEncoding = "utf8"): Promise<string> {
+    const result = await readFileAsync(filePath, { encoding });
+    return typeof result === "string" ? result : result.toString(encoding);
   }
 
   async readFileBuffer(filePath: string): Promise<Buffer> {
@@ -135,8 +135,8 @@ export class DefaultFileSystem implements FileSystem {
     return { size: stats.size, mtimeMs: stats.mtimeMs };
   }
 
-  async writeFile(filePath: string, content: string, encoding: string = "utf8"): Promise<void> {
-    await fsPromises.writeFile(filePath, content, { encoding } as any);
+  async writeFile(filePath: string, content: string, encoding: BufferEncoding = "utf8"): Promise<void> {
+    await fsPromises.writeFile(filePath, content, { encoding });
   }
 
   async writeFileBuffer(filePath: string, data: Buffer): Promise<void> {

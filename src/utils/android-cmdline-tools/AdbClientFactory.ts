@@ -22,7 +22,10 @@ export interface AdbClientFactory {
  */
 class DefaultAdbClientFactory implements AdbClientFactory {
   create(device?: BootedDevice | null, retryExecutor?: RetryExecutor): AdbExecutor {
-    return new AdbClient(device ?? null, null, null, retryExecutor);
+    if (retryExecutor) {
+      return new AdbClient(device ?? null, null, null, retryExecutor);
+    }
+    return new AdbClient(device ?? null);
   }
 }
 

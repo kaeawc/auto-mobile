@@ -10,15 +10,35 @@ export interface Element {
   "resource-id"?: string;
   "class"?: string;
   "package"?: string;
-  checkable?: boolean;
-  checked?: boolean;
-  clickable?: boolean;
-  enabled?: boolean;
-  focusable?: boolean;
-  focused?: boolean;
-  "accessibility-focused"?: boolean;
-  scrollable?: boolean;
+  checkable?: boolean | string;
+  checked?: boolean | string;
+  clickable?: boolean | string;
+  enabled?: boolean | string;
+  focusable?: boolean | string;
+  focused?: boolean | string;
+  "accessibility-focused"?: boolean | string;
+  scrollable?: boolean | string;
   orientation?: string;
-  selected?: boolean;
+  selected?: boolean | string;
+  /** Hierarchy depth injected during exploration element extraction */
+  hierarchyDepth?: number;
+  /** Child nodes from XML parsing (e.g., Compose UI elements) */
+  node?: Record<string, unknown> | Record<string, unknown>[];
   [key: string]: any;
+}
+
+/**
+ * Check if a boolean-or-string value is truthy.
+ * Handles both native booleans and string values from XML parsing.
+ */
+export function isTruthy(value: boolean | string | undefined): boolean {
+  return value === true || value === "true";
+}
+
+/**
+ * Check if a boolean-or-string value is falsy (explicitly false).
+ * Returns true only when the value is explicitly false or "false".
+ */
+export function isFalsy(value: boolean | string | undefined): boolean {
+  return value === false || value === "false";
 }

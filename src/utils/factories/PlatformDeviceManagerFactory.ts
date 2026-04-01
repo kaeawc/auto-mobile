@@ -1,5 +1,5 @@
 import { MultiPlatformDeviceManager } from "../deviceUtils";
-import { AdbClientFactory, defaultAdbClientFactory } from "../android-cmdline-tools/AdbClientFactory";
+import { AdbClientFactory } from "../android-cmdline-tools/AdbClientFactory";
 import { PlatformDeviceManager } from "../interfaces/DeviceUtils";
 import { logger } from "../logger";
 
@@ -47,13 +47,13 @@ export class PlatformDeviceManagerFactory {
       if (PlatformDeviceManagerFactory.injectedManager) {
         PlatformDeviceManagerFactory.instance = PlatformDeviceManagerFactory.injectedManager;
         logger.debug("PlatformDeviceManagerFactory: Using injected instance");
+      } else if (PlatformDeviceManagerFactory.injectedAdbFactory) {
+        const adb = PlatformDeviceManagerFactory.injectedAdbFactory.create();
+        PlatformDeviceManagerFactory.instance = new MultiPlatformDeviceManager(adb);
+        logger.debug("PlatformDeviceManagerFactory: Created new instance with injected AdbClientFactory");
       } else {
-        // Create default with injected or default AdbClientFactory
-        const adbFactory = PlatformDeviceManagerFactory.injectedAdbFactory ?? defaultAdbClientFactory;
-        const adb = adbFactory.create();
-        PlatformDeviceManagerFactory.instance = new MultiPlatformDeviceManager(adb as any, null, null);
-        logger.debug("PlatformDeviceManagerFactory: Created new instance with " +
-          (PlatformDeviceManagerFactory.injectedAdbFactory ? "injected" : "default") + " AdbClientFactory");
+        PlatformDeviceManagerFactory.instance = new MultiPlatformDeviceManager();
+        logger.debug("PlatformDeviceManagerFactory: Created new instance with defaults");
       }
     }
     return PlatformDeviceManagerFactory.instance;

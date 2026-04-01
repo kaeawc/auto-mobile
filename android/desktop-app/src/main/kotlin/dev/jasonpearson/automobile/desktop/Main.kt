@@ -16,6 +16,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
 import java.io.IOException
@@ -97,6 +98,11 @@ fun main() {
       position = WindowPosition(Alignment.Center),
     )
 
+    // Shared callback bridge between the native MenuBar and the Compose UI tree.
+    // AutoMobileContent wires pane-visibility state and action callbacks into this
+    // object, so the menu items below toggle real UI state.
+    val menuBarActions = remember { MenuBarActions() }
+
     Window(
       onCloseRequest = { isWindowVisible = false },
       title = "AutoMobile",
@@ -107,7 +113,7 @@ fun main() {
         Menu("File", mnemonic = 'F') {
           Item(
             "Settings",
-            onClick = { /* TODO: open settings dialog */ },
+            onClick = { menuBarActions.showSettings = true },
             shortcut = KeyShortcut(Key.Comma, meta = true),
           )
           Separator()
@@ -120,54 +126,54 @@ fun main() {
         Menu("View", mnemonic = 'V') {
           Item(
             "Toggle Left Pane",
-            onClick = { /* TODO: toggle left pane visibility */ },
+            onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
             shortcut = KeyShortcut(Key.Zero, meta = true),
           )
           Item(
             "Toggle Right Pane",
-            onClick = { /* TODO: toggle right pane visibility */ },
+            onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
             shortcut = KeyShortcut(Key.Zero, meta = true, shift = true),
           )
           Item(
             "Toggle Bottom Pane",
-            onClick = { /* TODO: toggle bottom pane visibility */ },
+            onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
             shortcut = KeyShortcut(Key.Y, meta = true, shift = true),
           )
         }
         Menu("Tools", mnemonic = 'T') {
           Item(
             "Command Palette",
-            onClick = { /* TODO: open command palette */ },
+            onClick = { menuBarActions.showCommandPalette = true },
             shortcut = KeyShortcut(Key.P, meta = true, shift = true),
           )
           Item(
             "Global Search",
-            onClick = { /* TODO: open global search */ },
+            onClick = { menuBarActions.showGlobalSearch = true },
             shortcut = KeyShortcut(Key.F, meta = true, shift = true),
           )
           Item(
             "Quick Jump",
-            onClick = { /* TODO: open quick jump dialog */ },
+            onClick = { menuBarActions.showCommandPalette = true },
             shortcut = KeyShortcut(Key.K, meta = true),
           )
           Separator()
           Item(
             "Take Screenshot",
-            onClick = { /* TODO: trigger screenshot capture */ },
+            onClick = { menuBarActions.onTakeScreenshot?.invoke() },
             shortcut = KeyShortcut(Key.S, meta = true, shift = true),
           )
         }
         Menu("Help", mnemonic = 'H') {
           Item(
             "Keyboard Shortcuts",
-            onClick = { /* TODO: show shortcut cheat sheet */ },
+            onClick = { menuBarActions.showCheatSheet = true },
             shortcut = KeyShortcut(Key.Slash, meta = true),
           )
           Separator()
           Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
         }
       }
-      AutoMobileDesktopApp()
+      AutoMobileDesktopApp(menuBarActions = menuBarActions)
     }
   }
 }

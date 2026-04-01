@@ -21,6 +21,8 @@ import kotlin.concurrent.withLock
  * @param onFlush Callback invoked with the batch of events to send
  * @param persistence Optional disk persistence — events are written before broadcast and removed on success
  * @param executor Optional executor for periodic flush scheduling (for testing)
+ * @param processors Event processors invoked in order before buffering; returning null drops the event
+ * @param maxPendingEvents Hard cap on buffered events; oldest events are evicted when exceeded
  */
 internal class SdkEventBuffer(
   private val maxBufferSize: Int = 50,
@@ -31,6 +33,8 @@ internal class SdkEventBuffer(
     Thread(r, "SdkEventBuffer").apply { isDaemon = true }
   },
   private val dropCounter: DropCounter? = null,
+  private val processors: List<EventProcessor> = emptyList(),
+  private val maxPendingEvents: Int = 500,
 ) {
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
@@ -63,11 +67,29 @@ internal class SdkEventBuffer(
       return
     }
 
+    var current: SdkEvent = event
+    for (processor in processors) {
+      try {
+        current = processor.process(current) ?: run {
+          dropCounter?.increment(DropReason.FILTERED)
+          return
+        }
+      } catch (_: Exception) {
+        dropCounter?.increment(DropReason.PROCESSOR_ERROR)
+        return
+      }
+    }
+
     val shouldFlush: Boolean
     val snapshot: List<SdkEvent>
 
     lock.withLock {
-      buffer.add(event)
+      if (buffer.size >= maxPendingEvents) {
+        buffer.removeFirst()
+        dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
+      }
+
+      buffer.add(current)
       if (buffer.size >= maxBufferSize) {
         snapshot = ArrayList(buffer)
         buffer.clear()

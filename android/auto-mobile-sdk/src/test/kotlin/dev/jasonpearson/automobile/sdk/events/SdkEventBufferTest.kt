@@ -227,4 +227,53 @@ class SdkEventBufferTest {
 
     assertEquals(2, callCount)
   }
+
+  @Test
+  fun `throwing processor drops event and counts PROCESSOR_ERROR`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val counter = DefaultDropCounter()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      dropCounter = counter,
+      processors = listOf(
+        EventProcessor { throw RuntimeException("processor failed") },
+      ),
+    )
+
+    buffer.add(makeEvent(1))
+    buffer.flush()
+
+    assertEquals(0, flushed.size, "Event should not be buffered when processor throws")
+    val snapshot = counter.snapshot()
+    assertEquals(1L, snapshot[DropReason.PROCESSOR_ERROR], "PROCESSOR_ERROR should be counted")
+  }
+
+  @Test
+  fun `throwing processor does not prevent subsequent events`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    var shouldThrow = true
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      processors = listOf(
+        EventProcessor { event ->
+          if (shouldThrow) throw RuntimeException("fail")
+          event
+        },
+      ),
+    )
+
+    buffer.add(makeEvent(1)) // dropped due to processor error
+    shouldThrow = false
+    buffer.add(makeEvent(2)) // should succeed
+    buffer.flush()
+
+    assertEquals(1, flushed.size, "Second event should be buffered after first processor failure")
+    assertEquals(1, flushed[0].size)
+  }
 }

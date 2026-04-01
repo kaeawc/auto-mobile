@@ -41,7 +41,7 @@ class NavigationViewModelTest {
 
     @Test
     fun `transitions to Error state on data source error`() = testScope.runTest {
-        val dataSource = FakeNavigationDataSourceImpl(Result.Error(Exception("Network error")))
+        val dataSource = FakeNavigationDataSourceImpl(Result.Error(RuntimeException("Network error")))
         val vm = NavigationViewModel(dataSource, this)
 
         val state = vm.state.value
@@ -145,7 +145,7 @@ class NavigationViewModelTest {
 
     @Test
     fun `UpdateGraph sets Content from non-Content state`() = testScope.runTest {
-        val dataSource = FakeNavigationDataSourceImpl(Result.Error(Exception("initial error")))
+        val dataSource = FakeNavigationDataSourceImpl(Result.Error(RuntimeException("initial error")))
         val vm = NavigationViewModel(dataSource, this)
         assertTrue(vm.state.value is NavigationUiState.Error)
 

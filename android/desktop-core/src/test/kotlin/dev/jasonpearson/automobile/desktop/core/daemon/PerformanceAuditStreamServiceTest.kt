@@ -275,12 +275,59 @@ class PerformanceAuditStreamServiceTest {
     assertTrue(snapshot.results.any { it.id == 2L })
   }
 
+  @Test
+  fun `cursors evict least recently used entry when maxCursors exceeded`() {
+    val clock = FakePerformanceAuditClock(10_000L)
+    val cache = PerformanceAuditStreamCache(clock, maxEntries = 10, ttlMs = 300_000L)
+    val client = FakePerformanceAuditStreamClient(
+        listOf(
+            PerformanceAuditStreamResponse(
+                success = true,
+                results = emptyList(),
+                lastTimestamp = "2024-01-01T00:00:10Z",
+                lastId = 10L,
+            ),
+        )
+    )
+    val service = createService(client, cache, clock, maxCursors = 3)
+
+    // Add cursors for devices a, b, c (fills to capacity)
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-b"))
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-c"))
+
+    // Access device-a again so it becomes recently used
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
+
+    // Adding device-d should evict device-b (least recently used)
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-d"))
+
+    // Now poll device-b again - it should have no cursor (was evicted)
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-b"))
+    val deviceBRequest = client.requests.last()
+    assertNull(deviceBRequest.sinceTimestamp)
+    assertNull(deviceBRequest.sinceId)
+
+    // Poll device-a - cursor should still be present (was recently used)
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-a"))
+    val deviceARequest = client.requests.last()
+    assertEquals("2024-01-01T00:00:10Z", deviceARequest.sinceTimestamp)
+    assertEquals(10L, deviceARequest.sinceId)
+
+    // Poll device-d - cursor should still be present
+    service.poll(PerformanceAuditStreamFilter(deviceId = "device-d"))
+    val deviceDRequest = client.requests.last()
+    assertEquals("2024-01-01T00:00:10Z", deviceDRequest.sinceTimestamp)
+    assertEquals(10L, deviceDRequest.sinceId)
+  }
+
   private fun createService(
       client: FakePerformanceAuditStreamClient,
       cache: PerformanceAuditStreamCache,
       clock: FakePerformanceAuditClock,
       defaultWindowMs: Long = 300_000L,
       defaultLimit: Int = 10,
+      maxCursors: Int = PerformanceAuditStreamService.DEFAULT_MAX_CURSORS,
   ): PerformanceAuditStreamService {
     return PerformanceAuditStreamService(
         socketClient = client,
@@ -288,6 +335,7 @@ class PerformanceAuditStreamServiceTest {
         clock = clock,
         defaultWindowMs = defaultWindowMs,
         defaultLimit = defaultLimit,
+        maxCursors = maxCursors,
     )
   }
 

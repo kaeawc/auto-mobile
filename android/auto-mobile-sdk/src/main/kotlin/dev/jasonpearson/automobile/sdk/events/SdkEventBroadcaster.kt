@@ -2,6 +2,8 @@ package dev.jasonpearson.automobile.sdk.events
 
 import android.content.Context
 import android.content.Intent
+import android.os.Handler
+import android.os.Looper
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
@@ -17,6 +19,18 @@ object SdkEventBroadcaster {
 
   const val ACTION_SDK_EVENT_BATCH = "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
   internal const val MAX_BATCH_BYTES = 100_000 // 100KB per Intent — lower to avoid TransactionTooLargeException
+
+  internal var retryPolicy: RetryPolicy = RetryPolicy()
+  internal var retryHandler: Handler = Handler(Looper.getMainLooper())
+  internal var dropCounter: DropCounter? = null
+
+  /** Reset mutable state. Called by [AutoMobileSDK.shutdown]. */
+  internal fun reset() {
+    retryHandler.removeCallbacksAndMessages(null)
+    retryPolicy = RetryPolicy()
+    retryHandler = Handler(Looper.getMainLooper())
+    dropCounter = null
+  }
 
   /**
    * Broadcast a batch of events. Called by [SdkEventBuffer] on flush.
@@ -75,7 +89,7 @@ object SdkEventBroadcaster {
 
   private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
 
-  private fun sendBatchIntent(context: Context, batchJson: String) {
+  private fun sendBatchIntent(context: Context, batchJson: String, attempt: Int = 0) {
     try {
       val intent = Intent(ACTION_SDK_EVENT_BATCH).apply {
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
@@ -84,7 +98,12 @@ object SdkEventBroadcaster {
       }
       context.sendBroadcast(intent)
     } catch (_: Exception) {
-      // Swallow — broadcasting is best-effort
+      if (attempt < retryPolicy.maxRetries) {
+        val delayMs = retryPolicy.delayForAttempt(attempt)
+        retryHandler.postDelayed({ sendBatchIntent(context, batchJson, attempt + 1) }, delayMs)
+      } else {
+        dropCounter?.increment(DropReason.DELIVERY_FAILED)
+      }
     }
   }
 }

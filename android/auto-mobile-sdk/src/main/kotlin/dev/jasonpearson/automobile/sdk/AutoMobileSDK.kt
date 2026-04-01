@@ -15,6 +15,9 @@ import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
+import dev.jasonpearson.automobile.sdk.events.DefaultDropCounter
+import dev.jasonpearson.automobile.sdk.events.DropCounter
+import dev.jasonpearson.automobile.sdk.events.DropReason
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
@@ -76,6 +79,7 @@ object AutoMobileSDK {
   private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
   private var sdkContext: SdkContext? = null
   private var breadcrumbTrail: BreadcrumbTrail? = null
+  private var dropCounter: DropCounter? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -116,12 +120,20 @@ object AutoMobileSDK {
     )
     persistence = eventPersistence
 
+    // Create drop counter for tracking event drops across the pipeline
+    val counter = DefaultDropCounter()
+    dropCounter = counter
+    SdkEventBroadcaster.dropCounter = counter
+
     // Create shared event buffer with broadcast flush callback and disk persistence
     val buffer = SdkEventBuffer(
       maxBufferSize = configuration.bufferSize,
       flushIntervalMs = configuration.flushIntervalMs,
       onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
       persistence = eventPersistence,
+      dropCounter = counter,
+      processors = configuration.eventProcessors,
+      maxPendingEvents = configuration.maxPendingEvents,
     )
     buffer.isEnabled = isEnabled
     buffer.start()
@@ -330,6 +342,13 @@ object AutoMobileSDK {
     )
   }
 
+  /**
+   * Returns a snapshot of drop counts by reason.
+   *
+   * Useful for diagnostics — the map is empty when no events have been dropped.
+   */
+  fun getDropReport(): Map<DropReason, Long> = dropCounter?.snapshot() ?: emptyMap()
+
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
 
@@ -401,6 +420,8 @@ object AutoMobileSDK {
     sdkContext = null
     breadcrumbTrail?.clear()
     breadcrumbTrail = null
+    dropCounter = null
+    SdkEventBroadcaster.reset()
     persistence = null
     RecompositionTracker.reset()
     listeners.clear()

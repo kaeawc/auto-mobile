@@ -1,5 +1,7 @@
 package dev.jasonpearson.automobile.sdk
 
+import dev.jasonpearson.automobile.sdk.events.EventProcessor
+
 /**
  * Configuration for the AutoMobile SDK.
  *
@@ -19,6 +21,10 @@ data class AutoMobileConfiguration internal constructor(
   val maxBreadcrumbs: Int,
   /** Background inactivity timeout before a session is rotated, in milliseconds. Consumed by the session tracker (#1695). */
   val sessionTimeoutMs: Long,
+  /** Event processors invoked in order before an event is buffered. Returning null drops the event. */
+  val eventProcessors: List<EventProcessor> = emptyList(),
+  /** Hard cap on pending events in the buffer. Oldest events are evicted when exceeded. */
+  val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
 ) {
 
   class Builder {
@@ -26,6 +32,8 @@ data class AutoMobileConfiguration internal constructor(
     private var flushIntervalMs: Long = DEFAULT_FLUSH_INTERVAL_MS
     private var maxBreadcrumbs: Int = DEFAULT_MAX_BREADCRUMBS
     private var sessionTimeoutMs: Long = DEFAULT_SESSION_TIMEOUT_MS
+    private var eventProcessors: List<EventProcessor> = emptyList()
+    private var maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS
 
     /** Maximum events before forced flush. Must be > 0. */
     fun bufferSize(value: Int) = apply { this.bufferSize = value }
@@ -39,17 +47,26 @@ data class AutoMobileConfiguration internal constructor(
     /** Session background timeout in milliseconds. Must be > 0. */
     fun sessionTimeoutMs(value: Long) = apply { this.sessionTimeoutMs = value }
 
+    /** Event processors invoked before buffering. */
+    fun eventProcessors(value: List<EventProcessor>) = apply { this.eventProcessors = value }
+
+    /** Hard cap on pending events in the buffer. Must be > 0. */
+    fun maxPendingEvents(value: Int) = apply { this.maxPendingEvents = value }
+
     fun build(): AutoMobileConfiguration {
       require(bufferSize > 0) { "bufferSize must be > 0, was $bufferSize" }
       require(flushIntervalMs > 0) { "flushIntervalMs must be > 0, was $flushIntervalMs" }
       require(maxBreadcrumbs > 0) { "maxBreadcrumbs must be > 0, was $maxBreadcrumbs" }
       require(sessionTimeoutMs > 0) { "sessionTimeoutMs must be > 0, was $sessionTimeoutMs" }
+      require(maxPendingEvents > 0) { "maxPendingEvents must be > 0, was $maxPendingEvents" }
 
       return AutoMobileConfiguration(
         bufferSize = bufferSize,
         flushIntervalMs = flushIntervalMs,
         maxBreadcrumbs = maxBreadcrumbs,
         sessionTimeoutMs = sessionTimeoutMs,
+        eventProcessors = eventProcessors,
+        maxPendingEvents = maxPendingEvents,
       )
     }
   }
@@ -59,5 +76,6 @@ data class AutoMobileConfiguration internal constructor(
     const val DEFAULT_FLUSH_INTERVAL_MS = 500L
     const val DEFAULT_MAX_BREADCRUMBS = 100
     const val DEFAULT_SESSION_TIMEOUT_MS = 30_000L
+    const val DEFAULT_MAX_PENDING_EVENTS = 500
   }
 }

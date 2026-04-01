@@ -8,6 +8,9 @@ enum class DropReason {
   DISABLED,
   SHUTDOWN,
   FLUSH_ERROR,
+  BUFFER_OVERFLOW,
+  FILTERED,
+  DELIVERY_FAILED,
 }
 
 /** Tracks counts of dropped events by reason. */

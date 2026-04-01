@@ -255,7 +255,7 @@ private enum class TestFilter {
 }
 
 @Composable
-private fun TestDashboardHome(
+internal fun TestDashboardHome(
     testRuns: List<TestRun>,
     isLoading: Boolean = false,
     error: String? = null,

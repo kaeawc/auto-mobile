@@ -59,7 +59,7 @@ export class DaemonState implements DaemonStateLike {
       throw new Error("DaemonState not initialized");
     }
     const stats = this.devicePool.getStats();
-    const poolInstanceId = (this.devicePool as any).instanceId;
+    const poolInstanceId = this.devicePool.instanceId;
     logger.info(`[DAEMON-STATE-DEBUG] getDevicePool returning pool instance #${poolInstanceId} with ${stats.total} devices`);
     return this.devicePool;
   }

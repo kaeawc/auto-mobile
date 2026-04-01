@@ -1,4 +1,5 @@
 import type { Element } from "../../models";
+import { isTruthy } from "../../models";
 import type { NavigationEdge } from "./NavigationGraphManager";
 import type {
   ElementSelectionStats,
@@ -15,10 +16,8 @@ import { getElementKey } from "./ExploreElementExtraction";
 export function calculateNavigationScore(element: Element): number {
   let score = 0;
 
-  const clickable =
-    element.clickable === true || (element.clickable as any) === "true";
-  const scrollable =
-    element.scrollable === true || (element.scrollable as any) === "true";
+  const clickable = isTruthy(element.clickable);
+  const scrollable = isTruthy(element.scrollable);
 
   // Clickable bonus - clickable elements are more likely to be interactive
   if (clickable) {
@@ -33,7 +32,7 @@ export function calculateNavigationScore(element: Element): number {
   // Hierarchy depth bonus - linear function where closer to root = higher score
   // Formula: max(0, 25 - depth * 2)
   // depth 0: +25, depth 3: +19, depth 6: +13, depth 10: +5, depth 12+: 0
-  const depth = (element as any).hierarchyDepth ?? 99;
+  const depth = element.hierarchyDepth ?? 99;
   const depthBonus = Math.max(0, 25 - depth * 2);
   score += depthBonus;
 
@@ -205,8 +204,7 @@ export function rankElementsForDryRun(
     const navScore = calculateNavigationScore(element);
     const novelty = calculateNoveltyScore(element, exploredElements);
     const coverage = estimateCoverageGain(element);
-    const isScrollable =
-      element.scrollable === true || (element.scrollable as any) === "true";
+    const isScrollable = isTruthy(element.scrollable);
 
     let score = navScore;
     let reason = `Navigation score ${navScore.toFixed(1)}`;

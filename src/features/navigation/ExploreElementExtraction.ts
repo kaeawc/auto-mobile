@@ -1,4 +1,5 @@
 import type { Element } from "../../models";
+import { isTruthy, isFalsy } from "../../models";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TrackedElement } from "./ExploreTypes";
 
@@ -24,7 +25,7 @@ export function extractNavigationElements(
       const enrichedElement = enrichElementWithChildProperties(element);
 
       // Store depth information for scoring
-      (enrichedElement as any).hierarchyDepth = depth;
+      enrichedElement.hierarchyDepth = depth;
 
       navigationElements.push(enrichedElement);
     }
@@ -40,10 +41,10 @@ export function enrichElementWithChildProperties(element: Element): Element {
   const enriched = { ...element };
 
   // For Compose elements, text and className might be on child nodes
-  if ((element as any).node) {
-    const children = Array.isArray((element as any).node)
-      ? (element as any).node
-      : [(element as any).node];
+  if (element.node) {
+    const children = Array.isArray(element.node)
+      ? element.node
+      : [element.node];
 
     for (const child of children) {
       // Extract text from first child with text
@@ -79,8 +80,7 @@ export function extractScrollableContainers(
 
   for (const { element, depth } of flatElements) {
     // Must be scrollable
-    const isScrollable =
-      element.scrollable === true || (element.scrollable as any) === "true";
+    const isScrollable = isTruthy(element.scrollable);
     if (!isScrollable) {
       continue;
     }
@@ -100,7 +100,7 @@ export function extractScrollableContainers(
     }
 
     // Store depth information for scoring
-    (element as any).hierarchyDepth = depth;
+    element.hierarchyDepth = depth;
 
     scrollableContainers.push(element);
   }
@@ -113,15 +113,12 @@ export function extractScrollableContainers(
  */
 export function isNavigationCandidate(element: Element): boolean {
   // Must be clickable (handle both boolean and string values from XML parsing)
-  const isClickable =
-    element.clickable === true || (element.clickable as any) === "true";
-  if (!isClickable) {
+  if (!isTruthy(element.clickable)) {
     return false;
   }
 
   // Must be enabled (handle both boolean and string values from XML parsing)
-  const isEnabled =
-    element.enabled !== false && (element.enabled as any) !== "false";
+  const isEnabled = !isFalsy(element.enabled);
   if (!isEnabled) {
     return false;
   }

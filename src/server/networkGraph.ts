@@ -177,11 +177,11 @@ function mergeLeafStats(
 
 function stripDurations(node: Record<string, GraphNode>): void {
   for (const key of Object.keys(node)) {
-    const val = node[key] as any;
+    const val = node[key] as GraphNode & { _durations?: number[] };
     if (val._durations) {
       delete val._durations;
     }
-    if (val.paths) {
+    if ("paths" in val && val.paths) {
       stripDurations(val.paths);
     }
   }
@@ -216,14 +216,15 @@ function insertIntoTree(
       // Merge stats with percentile recomputation (parameterized path collapse)
       mergeLeafStats(existing as GraphLeaf & { _durations?: number[] }, leaf);
     } else if (existing && "paths" in existing) {
-      // Existing branch — add stats to branch node
-      mergeLeafStats(existing as any, leaf);
-      (existing as any).method = leaf.method;
-      (existing as any).type = leaf.type;
+      // Existing branch — add stats to branch node (becomes a combined leaf+branch)
+      const combined = existing as GraphLeaf & GraphBranch & { _durations?: number[] };
+      mergeLeafStats(combined, leaf);
+      combined.method = leaf.method;
+      combined.type = leaf.type;
     } else {
       node[leafKey] = leaf;
       if (isParam) {
-        (node[leafKey] as any).parameterized = true;
+        (node[leafKey] as GraphLeaf & { parameterized?: boolean }).parameterized = true;
       }
     }
   } else {
@@ -236,7 +237,7 @@ function insertIntoTree(
     }
     const branch = node[key] as GraphBranch;
     if (!branch.paths) {
-      (branch as any).paths = {};
+      branch.paths = {};
     }
     insertIntoTree(branch.paths, segments, index + 1, leaf);
   }

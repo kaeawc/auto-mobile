@@ -529,17 +529,16 @@ export class SimCtlClient implements SimCtl {
       logger.debug("Could not open Simulator.app (non-fatal)");
     }
 
-    // simctl boot is synchronous, so we return a mock ChildProcess
-    const mockProcess = {
+    // simctl boot is synchronous, so we return a mock process handle
+    // with the minimal subset of ChildProcess fields used by callers
+    return {
       pid: this.timer.now(), // Use timestamp as mock PID
       kill: () => false,
       killed: false,
       connected: false,
       exitCode: 0,
       signalCode: null
-    } as any as ChildProcess;
-
-    return mockProcess;
+    } as Pick<ChildProcess, "pid" | "kill" | "killed" | "connected" | "exitCode" | "signalCode"> as ChildProcess;
   }
 
   async killSimulator(device: BootedDevice): Promise<void> {

@@ -456,7 +456,7 @@ export abstract class DeviceServiceClient {
    * Send a message via WebSocket.
    * Returns true if sent, false if not connected.
    */
-  protected sendMessage(message: string): boolean {
+  sendMessage(message: string): boolean {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
       logger.warn(`[${this.logTag}] Cannot send message: WebSocket not connected`);
       return false;

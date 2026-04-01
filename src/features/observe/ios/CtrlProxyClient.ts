@@ -633,7 +633,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
                   try {
                     const { getDatabase } = await import("../../../db");
                     const db = getDatabase();
-                    const node = await (db as any)
+                    const node = await db
                       .selectFrom("navigation_nodes")
                       .select(["id"])
                       .where("app_id", "=", applicationId)

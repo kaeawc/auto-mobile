@@ -60,6 +60,8 @@ export interface ViewHierarchyResult {
 export interface Hierarchy {
   error?: string;
   node?: ViewHierarchyNode;
+  /** iOS root XCTestNode bounds (points): {left, top, right, bottom} */
+  bounds?: { left?: number; top?: number; right: number; bottom: number };
 }
 
 export interface ViewHierarchyWindowInfo {

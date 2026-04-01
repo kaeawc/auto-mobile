@@ -58,4 +58,11 @@ export interface ViewHierarchy {
     screenHeight: number,
     margin?: number
   ): any;
+
+  /**
+   * Execute raw uiautomator dump to get XML hierarchy (Android only).
+   * Optional — not all implementations support this.
+   * @returns Promise with raw XML string
+   */
+  executeUiAutomatorDump?(): Promise<string>;
 }

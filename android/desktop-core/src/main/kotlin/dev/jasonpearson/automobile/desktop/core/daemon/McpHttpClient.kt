@@ -1,10 +1,12 @@
 package dev.jasonpearson.automobile.desktop.core.daemon
 
+import java.net.ConnectException
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.util.UUID
+import kotlin.coroutines.cancellation.CancellationException
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
@@ -21,6 +23,7 @@ import kotlinx.serialization.json.put
 class McpHttpClient(
     private val endpoint: String,
     private val json: Json = Json { ignoreUnknownKeys = true },
+    private val retryPolicy: RetryPolicy = RetryPolicy(),
 ) : AutoMobileClient {
   override val transportName: String = "MCP HTTP"
   override val connectionDescription: String = endpoint
@@ -178,6 +181,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, StartDeviceResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       StartDeviceResult(success = false, message = e.message ?: "Failed to start device")
     }
   }
@@ -194,6 +198,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, SetActiveDeviceResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       SetActiveDeviceResult(success = false, message = e.message ?: "Failed to set active device")
     }
   }
@@ -209,6 +214,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, ObserveResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       ObserveResult()
     }
   }
@@ -231,6 +237,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, KillDeviceResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       KillDeviceResult(success = false, message = e.message ?: "Failed to kill device")
     }
   }
@@ -249,6 +256,7 @@ class McpHttpClient(
           dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse.serializer(),
       )
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse()
     }
   }
@@ -277,6 +285,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, SetKeyValueResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       SetKeyValueResult(success = false, message = e.message ?: "Failed to set key value")
     }
   }
@@ -301,6 +310,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, RemoveKeyValueResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       RemoveKeyValueResult(success = false, message = e.message ?: "Failed to remove key value")
     }
   }
@@ -323,6 +333,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, ClearKeyValueResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       ClearKeyValueResult(success = false, message = e.message ?: "Failed to clear key value file")
     }
   }
@@ -339,6 +350,7 @@ class McpHttpClient(
     return try {
       decodeToolResponse(json, response, UpdateServiceResult.serializer())
     } catch (e: Exception) {
+      if (e is CancellationException) throw e
       UpdateServiceResult(success = false, message = e.message ?: "Failed to update service")
     }
   }
@@ -429,36 +441,47 @@ class McpHttpClient(
       builder.header("mcp-protocol-version", protocolVersion!!)
     }
 
-    val response =
-        httpClient.send(
-            builder.POST(HttpRequest.BodyPublishers.ofString(requestBody)).build(),
-            HttpResponse.BodyHandlers.ofString(),
-        )
+    val httpRequest = builder.POST(HttpRequest.BodyPublishers.ofString(requestBody)).build()
+    return retryWithBackoffBlocking(retryPolicy, isRetryable = ::isRetryableError) {
+      val response = httpClient.send(httpRequest, HttpResponse.BodyHandlers.ofString())
 
-    response.headers().firstValue("mcp-session-id").ifPresent { header ->
-      if (header.isNotBlank()) {
-        sessionId = header
+      response.headers().firstValue("mcp-session-id").ifPresent { header ->
+        if (header.isNotBlank()) {
+          sessionId = header
+        }
       }
-    }
 
-    if (!expectResponse) {
-      return JsonRpcResponse(jsonrpc = "2.0")
-    }
+      val statusCode = response.statusCode()
+      if (statusCode >= 500) {
+        throw McpConnectionException("MCP HTTP server error $statusCode")
+      }
 
-    val body = response.body().trim()
-    if (body.isEmpty()) {
-      throw McpConnectionException("MCP HTTP response was empty")
-    }
+      if (!expectResponse) {
+        return@retryWithBackoffBlocking JsonRpcResponse(jsonrpc = "2.0")
+      }
 
-    val rpcResponse = json.decodeFromString(JsonRpcResponse.serializer(), body)
-    if (rpcResponse.error != null) {
-      throw McpConnectionException(
-          "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
-      )
+      val body = response.body().trim()
+      if (body.isEmpty()) {
+        throw McpConnectionException("MCP HTTP response was empty")
+      }
+
+      val rpcResponse = json.decodeFromString(JsonRpcResponse.serializer(), body)
+      if (rpcResponse.error != null) {
+        throw McpConnectionException(
+            "MCP HTTP error ${rpcResponse.error.code}: ${rpcResponse.error.message}"
+        )
+      }
+      if (rpcResponse.result == null) {
+        throw McpConnectionException("MCP HTTP response missing result")
+      }
+      rpcResponse
     }
-    if (rpcResponse.result == null) {
-      throw McpConnectionException("MCP HTTP response missing result")
-    }
-    return rpcResponse
+  }
+
+  companion object {
+    internal fun isRetryableError(e: Exception): Boolean =
+        e is ConnectException ||
+            e is java.net.http.HttpTimeoutException ||
+            (e is McpConnectionException && e.message?.contains("server error") == true)
   }
 }

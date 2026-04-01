@@ -13,6 +13,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var events: [HandledExceptionEvent] = []
     private let maxEvents = 100
+    private var cachedDeviceInfo: SdkDeviceInfo?
 
     private init() {}
 
@@ -20,6 +21,14 @@ public final class AutoMobileFailures: @unchecked Sendable {
         lock.lock()
         self.bundleId = bundleId
         self.buffer = buffer
+        lock.unlock()
+    }
+
+    /// Cache device info from the main thread during SDK initialization.
+    /// This avoids accessing UIDevice.current from background threads.
+    func cacheDeviceInfo() {
+        lock.lock()
+        cachedDeviceInfo = Self.currentDeviceInfo()
         lock.unlock()
     }
 
@@ -31,6 +40,12 @@ public final class AutoMobileFailures: @unchecked Sendable {
     ) {
         guard AutoMobileSDK.shared.isEnabled else { return }
         let nsError = error as NSError
+
+        lock.lock()
+        let deviceInfo = cachedDeviceInfo ?? Self.currentDeviceInfo()
+        let currentBundleId = bundleId ?? Bundle.main.bundleIdentifier ?? ""
+        lock.unlock()
+
         let event = HandledExceptionEvent(
             timestamp: Int64(Date().timeIntervalSince1970 * 1000),
             errorDomain: nsError.domain,
@@ -38,9 +53,9 @@ public final class AutoMobileFailures: @unchecked Sendable {
             stackTrace: Thread.callStackSymbols.joined(separator: "\n"),
             customMessage: message,
             currentScreen: currentScreen,
-            bundleId: bundleId ?? Bundle.main.bundleIdentifier ?? "",
+            bundleId: currentBundleId,
             appVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String,
-            deviceInfo: Self.currentDeviceInfo()
+            deviceInfo: deviceInfo
         )
 
         lock.lock()
@@ -51,7 +66,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         let currentBuffer = buffer
         lock.unlock()
 
-        NSLog("[AutoMobileSDK] recordHandledException: domain=\(nsError.domain), buffer=\(currentBuffer != nil ? "exists" : "nil")")
+        InternalLogger.debug("recordHandledException: domain=\(nsError.domain), buffer=\(currentBuffer != nil ? "exists" : "nil")")
         let sdkEvent = SdkHandledExceptionEvent(
             timestamp: event.timestamp,
             errorDomain: event.errorDomain,
@@ -120,6 +135,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
         bundleId = nil
         buffer = nil
         events.removeAll()
+        cachedDeviceInfo = nil
         lock.unlock()
     }
 }

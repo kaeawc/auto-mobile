@@ -65,6 +65,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         self.eventPersistence = persistence
         SdkEventBroadcaster.shared.persistence = persistence
 
+        // Cache device info while on main thread
+        AutoMobileFailures.shared.cacheDeviceInfo()
+
         let buffer = SdkEventBuffer(
             maxBufferSize: configuration.bufferSize,
             flushIntervalMs: configuration.flushIntervalMs,
@@ -199,10 +202,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
     /// Track a custom event with optional properties.
     public func trackEvent(name: String, properties: [String: String] = [:]) {
         guard isEnabled else {
-            NSLog("[AutoMobileSDK] trackEvent(\(name)) skipped: SDK disabled")
+            InternalLogger.debug("trackEvent(\(name)) skipped: SDK disabled")
             return
         }
-        NSLog("[AutoMobileSDK] trackEvent(\(name)), buffer=\(eventBuffer != nil ? "exists" : "nil")")
+        InternalLogger.debug("trackEvent(\(name)), buffer=\(eventBuffer != nil ? "exists" : "nil")")
         let event = SdkCustomEvent(name: name, properties: properties)
         eventBuffer?.add(event)
     }

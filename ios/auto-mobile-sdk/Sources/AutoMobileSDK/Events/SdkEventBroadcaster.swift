@@ -54,9 +54,7 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     public func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
-        #if DEBUG
-        NSLog("[AutoMobileSDK] broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
-        #endif
+        InternalLogger.debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
 
         // Persist to disk first for crash resilience
         let batchId = persistence?.persist(events)
@@ -115,16 +113,16 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
         request.httpMethod = "POST"
         request.httpBody = data
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        NSLog("[AutoMobileSDK] Posting \(data.count) bytes to \(url.absoluteString) (attempt \(attempt))")
+        InternalLogger.debug("Posting \(data.count) bytes to \(url.absoluteString) (attempt \(attempt))")
         urlSession.dataTask(with: request) { [weak self] _, response, error in
             guard let self = self else { return }
             let statusCode: Int
             if let httpResponse = response as? HTTPURLResponse {
                 statusCode = httpResponse.statusCode
-                NSLog("[AutoMobileSDK] SDK event POST: \(statusCode), \(data.count) bytes")
+                InternalLogger.debug("SDK event POST: \(statusCode), \(data.count) bytes")
             } else if let error = error {
                 statusCode = 0
-                NSLog("[AutoMobileSDK] SDK event POST failed: \(error.localizedDescription)")
+                InternalLogger.debug("SDK event POST failed: \(error.localizedDescription)")
             } else {
                 statusCode = 0
             }

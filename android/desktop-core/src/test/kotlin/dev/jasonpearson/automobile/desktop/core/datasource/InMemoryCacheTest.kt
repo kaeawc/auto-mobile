@@ -130,6 +130,28 @@ class InMemoryCacheTest {
     }
 
     @Test
+    fun `timestamp is recorded after fetch completes`() = runBlocking {
+        var now = 0L
+        var fetchCount = 0
+        val cache = InMemoryCache<String, Int>(ttlMs = 100L, clock = { now })
+
+        // First fetch: clock is at 0, but fetch advances clock to 200 (simulating slow fetch)
+        cache.get("a") {
+            fetchCount++
+            now = 200L // simulate slow fetch
+            1
+        }
+
+        // Advance clock to 250 — only 50ms after the fetch completed at 200
+        now = 250L
+        val second = cache.get("a") { fetchCount++; 2 }
+
+        // Entry should still be fresh (250 - 200 = 50ms < 100ms TTL)
+        assertEquals(1, fetchCount)
+        assertEquals(1, second)
+    }
+
+    @Test
     fun `concurrent access for different keys fetches independently`() = runBlocking {
         var fetchCount = 0
         val cache = InMemoryCache<String, Int>(ttlMs = 10_000L)

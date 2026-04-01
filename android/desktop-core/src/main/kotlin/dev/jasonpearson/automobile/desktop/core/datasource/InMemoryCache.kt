@@ -43,7 +43,7 @@ class InMemoryCache<K, V>(
                 return@withLock entry.value
             }
             val result = fetch()
-            cache[key] = Entry(result, now)
+            cache[key] = Entry(result, clock())
             result
         }
     }

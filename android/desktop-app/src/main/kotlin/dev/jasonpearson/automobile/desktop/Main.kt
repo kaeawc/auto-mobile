@@ -6,8 +6,11 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyShortcut
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.MenuBar
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
@@ -100,6 +103,70 @@ fun main() {
       state = windowState,
       visible = isWindowVisible,
     ) {
+      MenuBar {
+        Menu("File", mnemonic = 'F') {
+          Item(
+            "Settings",
+            onClick = { /* TODO: open settings dialog */ },
+            shortcut = KeyShortcut(Key.Comma, meta = true),
+          )
+          Separator()
+          Item(
+            "Quit",
+            onClick = { exitApplication() },
+            shortcut = KeyShortcut(Key.Q, meta = true),
+          )
+        }
+        Menu("View", mnemonic = 'V') {
+          Item(
+            "Toggle Left Pane",
+            onClick = { /* TODO: toggle left pane visibility */ },
+            shortcut = KeyShortcut(Key.Zero, meta = true),
+          )
+          Item(
+            "Toggle Right Pane",
+            onClick = { /* TODO: toggle right pane visibility */ },
+            shortcut = KeyShortcut(Key.Zero, meta = true, shift = true),
+          )
+          Item(
+            "Toggle Bottom Pane",
+            onClick = { /* TODO: toggle bottom pane visibility */ },
+            shortcut = KeyShortcut(Key.Y, meta = true, shift = true),
+          )
+        }
+        Menu("Tools", mnemonic = 'T') {
+          Item(
+            "Command Palette",
+            onClick = { /* TODO: open command palette */ },
+            shortcut = KeyShortcut(Key.P, meta = true, shift = true),
+          )
+          Item(
+            "Global Search",
+            onClick = { /* TODO: open global search */ },
+            shortcut = KeyShortcut(Key.F, meta = true, shift = true),
+          )
+          Item(
+            "Quick Jump",
+            onClick = { /* TODO: open quick jump dialog */ },
+            shortcut = KeyShortcut(Key.K, meta = true),
+          )
+          Separator()
+          Item(
+            "Take Screenshot",
+            onClick = { /* TODO: trigger screenshot capture */ },
+            shortcut = KeyShortcut(Key.S, meta = true, shift = true),
+          )
+        }
+        Menu("Help", mnemonic = 'H') {
+          Item(
+            "Keyboard Shortcuts",
+            onClick = { /* TODO: show shortcut cheat sheet */ },
+            shortcut = KeyShortcut(Key.Slash, meta = true),
+          )
+          Separator()
+          Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
+        }
+      }
       AutoMobileDesktopApp()
     }
   }

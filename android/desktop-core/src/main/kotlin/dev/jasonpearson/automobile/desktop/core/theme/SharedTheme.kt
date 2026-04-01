@@ -19,6 +19,7 @@ data class SharedTextColors(
     val info: Color,
     val error: Color,
     val warning: Color,
+    val success: Color,
 )
 
 data class SharedOutlineColors(
@@ -54,6 +55,7 @@ object SharedTheme {
                     info = MaterialTheme.colorScheme.primary,
                     error = MaterialTheme.colorScheme.error,
                     warning = MaterialTheme.colorScheme.tertiary,
+                    success = Color(0xFF4CAF50),
                 ),
             outlines =
                 SharedOutlineColors(

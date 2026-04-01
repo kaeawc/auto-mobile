@@ -12,8 +12,6 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -21,8 +19,12 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -53,16 +55,22 @@ class FailuresPushSocketClient {
     private var channel: SocketChannel? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
-    private val connected = AtomicBoolean(false)
-    private val subscribed = AtomicBoolean(false)
-    private val shouldReconnect = AtomicBoolean(false)
-    private val reconnectAttempt = AtomicInteger(0)
     private var connectionJob: Job? = null
+
+    private val _state = MutableStateFlow<FailuresPushConnectionState>(FailuresPushConnectionState.Disconnected(null))
+    val connectionState: StateFlow<FailuresPushConnectionState> = _state.asStateFlow()
+
+    private val _isConnected: Boolean get() = _state.value is FailuresPushConnectionState.Connected
+    private val _shouldReconnect: Boolean get() {
+        val current = _state.value
+        return current is FailuresPushConnectionState.Connecting ||
+            current is FailuresPushConnectionState.Connected ||
+            current is FailuresPushConnectionState.Reconnecting
+    }
 
     // Retry configuration
     private val initialRetryDelayMs = 1000L
     private val maxRetryDelayMs = 30000L
-    private val maxReconnectAttempts = Int.MAX_VALUE // Keep trying indefinitely
 
     // Flow for live failure notifications
     private val _failureNotifications = MutableSharedFlow<FailureNotification>(
@@ -72,10 +80,6 @@ class FailuresPushSocketClient {
     )
     val failureNotifications: SharedFlow<FailureNotification> = _failureNotifications.asSharedFlow()
 
-    // Flow for connection state
-    private val _connectionState = MutableSharedFlow<FailuresPushConnectionState>(replay = 1)
-    val connectionState: SharedFlow<FailuresPushConnectionState> = _connectionState.asSharedFlow()
-
     /**
      * Connect to the failures push socket and subscribe to updates.
      * Will retry with exponential backoff if the socket is not available.
@@ -83,15 +87,14 @@ class FailuresPushSocketClient {
      * @param severity Optional severity to filter by (low, medium, high, critical). Null = all severities.
      */
     fun connect(type: String? = null, severity: String? = null) {
-        if (connected.get()) {
+        if (_isConnected) {
             log.info("Already connected to failures push")
             return
         }
 
         // Cancel any existing connection job
         connectionJob?.cancel()
-        shouldReconnect.set(true)
-        reconnectAttempt.set(0)
+        _state.update { FailuresPushConnectionState.Connecting }
 
         connectionJob = scope.launch {
             connectWithRetry(type, severity)
@@ -100,14 +103,9 @@ class FailuresPushSocketClient {
 
     private suspend fun connectWithRetry(type: String?, severity: String?) {
         val socketPath = getSocketPath()
+        var attempt = 0
 
-        while (shouldReconnect.get()) {
-            val attempt = reconnectAttempt.get()
-
-            if (attempt == 0) {
-                _connectionState.emit(FailuresPushConnectionState.Connecting)
-            }
-
+        while (_shouldReconnect) {
             log.info("Connecting to failures push at $socketPath (attempt ${attempt + 1})")
 
             try {
@@ -125,8 +123,8 @@ class FailuresPushSocketClient {
                     OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
                 )
 
-                connected.set(true)
-                reconnectAttempt.set(0) // Reset on successful connection
+                _state.update { FailuresPushConnectionState.Connected(subscribed = false) }
+                attempt = 0
                 log.info("Connected to failures push")
 
                 // Send subscribe request
@@ -136,35 +134,32 @@ class FailuresPushSocketClient {
                 readMessages()
 
                 // If we get here, connection was lost
-                if (shouldReconnect.get()) {
+                if (_shouldReconnect) {
                     log.info("Connection lost, will attempt to reconnect")
-                    reconnectAttempt.incrementAndGet()
+                    attempt++
+                    _state.update { FailuresPushConnectionState.Reconnecting(attempt, calculateBackoff(attempt)) }
                 }
 
             } catch (e: Exception) {
-                connected.set(false)
-                channel?.close()
-                channel = null
-                reader = null
-                writer = null
+                cleanupConnection()
 
-                if (!shouldReconnect.get()) {
+                if (!_shouldReconnect) {
                     log.info("Reconnection disabled, stopping connection attempts")
-                    _connectionState.emit(FailuresPushConnectionState.Disconnected("Disconnected"))
+                    _state.update { FailuresPushConnectionState.Disconnected("Disconnected") }
                     return
                 }
 
-                val currentAttempt = reconnectAttempt.incrementAndGet()
-                val delayMs = calculateBackoff(currentAttempt)
+                attempt++
+                val delayMs = calculateBackoff(attempt)
 
-                log.warn("Failed to connect to failures push (attempt $currentAttempt): ${e.message}. Retrying in ${delayMs}ms")
-                _connectionState.emit(FailuresPushConnectionState.Reconnecting(currentAttempt, delayMs))
+                log.warn("Failed to connect to failures push (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
+                _state.update { FailuresPushConnectionState.Reconnecting(attempt, delayMs) }
 
                 delay(delayMs)
             }
         }
 
-        _connectionState.emit(FailuresPushConnectionState.Disconnected("Stopped"))
+        _state.update { FailuresPushConnectionState.Disconnected("Stopped") }
     }
 
     private fun calculateBackoff(attempt: Int): Long {
@@ -179,20 +174,19 @@ class FailuresPushSocketClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     fun disconnect() {
-        // Stop reconnection attempts
-        shouldReconnect.set(false)
+        val previousState = _state.value
+        // Stop reconnection attempts by moving to Disconnected
+        _state.update { FailuresPushConnectionState.Disconnected(null) }
+
         connectionJob?.cancel()
         connectionJob = null
 
-        if (!connected.get()) {
-            scope.launch {
-                _connectionState.emit(FailuresPushConnectionState.Disconnected(null))
-            }
+        if (previousState !is FailuresPushConnectionState.Connected) {
             return
         }
 
         try {
-            if (subscribed.get()) {
+            if (previousState.subscribed) {
                 val request = FailuresPushRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",
@@ -208,16 +202,9 @@ class FailuresPushSocketClient {
         channel = null
         reader = null
         writer = null
-        connected.set(false)
-        subscribed.set(false)
-        reconnectAttempt.set(0)
-
-        scope.launch {
-            _connectionState.emit(FailuresPushConnectionState.Disconnected(null))
-        }
     }
 
-    fun isConnected(): Boolean = connected.get()
+    fun isConnected(): Boolean = _isConnected
 
     /**
      * Disconnect and cancel the internal coroutine scope.
@@ -237,7 +224,13 @@ class FailuresPushSocketClient {
         )
 
         if (sendRequest(request)) {
-            subscribed.set(true)
+            _state.update { current ->
+                if (current is FailuresPushConnectionState.Connected) {
+                    current.copy(subscribed = true)
+                } else {
+                    current
+                }
+            }
             log.info("Subscribed to failures push (type: ${type ?: "all"}, severity: ${severity ?: "all"})")
         }
     }
@@ -261,10 +254,9 @@ class FailuresPushSocketClient {
         val currentReader = reader ?: return
 
         try {
-            _connectionState.emit(FailuresPushConnectionState.Connected)
             log.info("Starting failures push message read loop")
 
-            while (connected.get()) {
+            while (_isConnected) {
                 val line = currentReader.readLine() ?: break
                 if (line.isBlank()) continue
 
@@ -279,13 +271,17 @@ class FailuresPushSocketClient {
         }
 
         // Clean up connection state - reconnection is handled by connectWithRetry
-        connected.set(false)
-        subscribed.set(false)
-        channel?.close()
+        cleanupConnection()
+        log.info("Failures push read loop ended")
+    }
+
+    private fun cleanupConnection() {
+        try {
+            channel?.close()
+        } catch (_: Exception) {}
         channel = null
         reader = null
         writer = null
-        log.info("Failures push read loop ended")
     }
 
     private suspend fun handleMessage(message: String) {
@@ -358,7 +354,7 @@ data class FailureNotification(
 
 sealed class FailuresPushConnectionState {
     data object Connecting : FailuresPushConnectionState()
-    data object Connected : FailuresPushConnectionState()
+    data class Connected(val subscribed: Boolean = false) : FailuresPushConnectionState()
     data class Reconnecting(val attempt: Int, val nextRetryMs: Long) : FailuresPushConnectionState()
     data class Disconnected(val reason: String?) : FailuresPushConnectionState()
 }

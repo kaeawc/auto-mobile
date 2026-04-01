@@ -30,7 +30,7 @@ class FakeTelemetryPushClient : TelemetryPushClient {
         connectCallCount++
         lastDeviceId = deviceId
         connected = true
-        _connectionState.tryEmit(TelemetryConnectionState.Connected)
+        _connectionState.tryEmit(TelemetryConnectionState.Connected())
     }
 
     override fun disconnect() {

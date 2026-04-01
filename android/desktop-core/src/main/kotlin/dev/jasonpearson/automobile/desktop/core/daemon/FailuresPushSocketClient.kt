@@ -174,21 +174,19 @@ class FailuresPushSocketClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     fun disconnect() {
+        val previousState = _state.value
         // Stop reconnection attempts by moving to Disconnected
         _state.update { FailuresPushConnectionState.Disconnected(null) }
 
         connectionJob?.cancel()
         connectionJob = null
 
-        val wasConnected = _isConnected
-
-        if (!wasConnected) {
+        if (previousState !is FailuresPushConnectionState.Connected) {
             return
         }
 
         try {
-            val currentState = _state.value
-            if (currentState is FailuresPushConnectionState.Connected && currentState.subscribed) {
+            if (previousState.subscribed) {
                 val request = FailuresPushRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",

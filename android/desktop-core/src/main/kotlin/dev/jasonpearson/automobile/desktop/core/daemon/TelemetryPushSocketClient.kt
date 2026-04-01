@@ -177,20 +177,18 @@ class TelemetryPushSocketClient : TelemetryPushClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     override fun disconnect() {
+        val previousState = _state.value
         _state.update { TelemetryConnectionState.Disconnected(null) }
 
         connectionJob?.cancel()
         connectionJob = null
 
-        val wasConnected = _isConnected
-
-        if (!wasConnected) {
+        if (previousState !is TelemetryConnectionState.Connected) {
             return
         }
 
         try {
-            val currentState = _state.value
-            if (currentState is TelemetryConnectionState.Connected && currentState.subscribed) {
+            if (previousState.subscribed) {
                 val request = TelemetryPushRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",

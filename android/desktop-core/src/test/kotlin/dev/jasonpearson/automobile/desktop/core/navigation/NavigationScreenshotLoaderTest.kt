@@ -219,6 +219,58 @@ class NavigationScreenshotLoaderTest {
     assertEquals(4, client.readResourceCallCount) // 2 original + 2 after clear
   }
 
+  @Test
+  fun `load does not cache bitmap larger than maxCacheBytes`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponse("uri1", SMALL_PNG_BASE64)
+
+    // 200x200x4 = 160,000 bytes per image; set limit below that
+    val decoder = FakeImageDecoder(bitmapWidth = 200, bitmapHeight = 200)
+    val loader = NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 100_000L, // Less than a single 200x200 image
+        imageDecoder = decoder
+    )
+
+    // Load should succeed (returns bitmap) but not cache it
+    val result = loader.load("uri1")
+    assertNotNull(result)
+    assertEquals(0, loader.cacheSize())
+
+    // Second load should fetch again since nothing was cached
+    loader.load("uri1")
+    assertEquals(2, client.readResourceCallCount)
+  }
+
+  @Test
+  fun `duplicate URI load does not inflate byte tracking`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponse("uri1", SMALL_PNG_BASE64)
+    client.setResourceResponse("uri2", SMALL_PNG_BASE64_ALT)
+
+    // Each 100x100 image = 40,000 bytes; limit fits exactly 2
+    val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
+    val loader = NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 80_000L,
+        imageDecoder = decoder
+    )
+
+    loader.load("uri1")
+    assertEquals(1, loader.cacheSize())
+
+    // Invalidate so uri1 is not in cache, then reload to trigger addToCache again
+    loader.invalidate("uri1")
+    loader.load("uri1")
+    assertEquals(1, loader.cacheSize())
+
+    // If byte tracking is correct, uri2 should still fit (40k + 40k = 80k <= 80k)
+    loader.load("uri2")
+    assertEquals(2, loader.cacheSize())
+  }
+
   companion object {
     // Minimal valid PNG base64 - only used to simulate blob content
     private const val SMALL_PNG_BASE64 =

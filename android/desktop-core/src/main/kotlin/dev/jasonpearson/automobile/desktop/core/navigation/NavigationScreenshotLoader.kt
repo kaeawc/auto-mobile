@@ -131,7 +131,19 @@ class NavigationScreenshotLoader(
 
     private fun addToCache(uri: String, bitmap: ImageBitmap) {
         val estimatedBytes = bitmap.width.toLong() * bitmap.height.toLong() * 4L
+
+        // Skip caching if a single image exceeds the byte limit
+        if (estimatedBytes > maxCacheBytes) return
+
         synchronized(accessOrder) {
+            // If URI already exists (race condition), remove old entry first
+            val oldSize = entrySizes.remove(uri)
+            if (oldSize != null) {
+                totalBytes -= oldSize
+                accessOrder.remove(uri)
+                cache.remove(uri)
+            }
+
             // Evict oldest entries if count limit or byte limit exceeded
             while (accessOrder.size >= maxCacheSize ||
                 (accessOrder.isNotEmpty() && totalBytes + estimatedBytes > maxCacheBytes)

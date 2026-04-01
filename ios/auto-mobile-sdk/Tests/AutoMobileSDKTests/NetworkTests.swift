@@ -1,6 +1,13 @@
 import XCTest
 @testable import AutoMobileSDK
 
+private final class EventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [any SdkEvent] = []
+    var events: [any SdkEvent] { lock.lock(); defer { lock.unlock() }; return _events }
+    func collect(_ events: [any SdkEvent]) { lock.lock(); _events = events; lock.unlock() }
+}
+
 final class AutoMobileNetworkTests: XCTestCase {
     override func tearDown() {
         AutoMobileNetwork.shared.reset()
@@ -8,9 +15,9 @@ final class AutoMobileNetworkTests: XCTestCase {
     }
 
     func testRecordRequestManually() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            flushedEvents = events
+            collector.collect(events)
         }
 
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
@@ -28,8 +35,8 @@ final class AutoMobileNetworkTests: XCTestCase {
 
         buffer.flush()
 
-        XCTAssertEqual(flushedEvents.count, 1)
-        let event = flushedEvents.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(collector.events.count, 1)
+        let event = collector.events.first as? SdkNetworkRequestEvent
         XCTAssertEqual(event?.url, "https://api.example.com/users")
         XCTAssertEqual(event?.method, "GET")
         XCTAssertEqual(event?.statusCode, 200)
@@ -38,9 +45,9 @@ final class AutoMobileNetworkTests: XCTestCase {
     }
 
     func testHeadersNotCapturedByDefault() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            flushedEvents = events
+            collector.collect(events)
         }
 
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
@@ -54,14 +61,14 @@ final class AutoMobileNetworkTests: XCTestCase {
 
         buffer.flush()
 
-        let event = flushedEvents.first as? SdkNetworkRequestEvent
+        let event = collector.events.first as? SdkNetworkRequestEvent
         XCTAssertNil(event?.requestHeaders)
     }
 
     func testRecordWebSocketFrame() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            flushedEvents = events
+            collector.collect(events)
         }
 
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
@@ -75,7 +82,7 @@ final class AutoMobileNetworkTests: XCTestCase {
 
         buffer.flush()
 
-        let event = flushedEvents.first as? SdkWebSocketFrameEvent
+        let event = collector.events.first as? SdkWebSocketFrameEvent
         XCTAssertEqual(event?.url, "wss://ws.example.com")
         XCTAssertEqual(event?.direction, .received)
         XCTAssertEqual(event?.frameType, .text)

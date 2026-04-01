@@ -40,18 +40,25 @@ final class NavigationSourceTests: XCTestCase {
     }
 }
 
+private final class NavEventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [NavigationEvent] = []
+    var events: [NavigationEvent] { lock.lock(); defer { lock.unlock() }; return _events }
+    func append(_ event: NavigationEvent) { lock.lock(); _events.append(event); lock.unlock() }
+}
+
 final class NavigationListenerTests: XCTestCase {
     func testBlockNavigationListenerReceivesEvents() {
-        var receivedEvents: [NavigationEvent] = []
+        let collector = NavEventCollector()
         let listener = BlockNavigationListener { event in
-            receivedEvents.append(event)
+            collector.append(event)
         }
 
         let event = NavigationEvent(destination: "Test", source: .custom)
         listener.onNavigationEvent(event)
 
-        XCTAssertEqual(receivedEvents.count, 1)
-        XCTAssertEqual(receivedEvents.first?.destination, "Test")
+        XCTAssertEqual(collector.events.count, 1)
+        XCTAssertEqual(collector.events.first?.destination, "Test")
     }
 }
 

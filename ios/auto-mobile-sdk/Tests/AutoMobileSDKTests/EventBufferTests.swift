@@ -1,29 +1,43 @@
 import XCTest
 @testable import AutoMobileSDK
 
+private final class EventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [any SdkEvent] = []
+    var events: [any SdkEvent] { lock.lock(); defer { lock.unlock() }; return _events }
+    func collect(_ events: [any SdkEvent]) { lock.lock(); _events = events; lock.unlock() }
+}
+
+private final class FlushCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _count = 0
+    var count: Int { lock.lock(); defer { lock.unlock() }; return _count }
+    func increment() { lock.lock(); _count += 1; lock.unlock() }
+}
+
 final class SdkEventBufferTests: XCTestCase {
     func testFlushOnCapacity() {
         let expectation = XCTestExpectation(description: "flush called")
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
 
         let buffer = SdkEventBuffer(maxBufferSize: 3, flushIntervalMs: 60000) { events in
-            flushedEvents = events
+            collector.collect(events)
             expectation.fulfill()
         }
 
         buffer.add(SdkCustomEvent(name: "e1"))
         buffer.add(SdkCustomEvent(name: "e2"))
-        XCTAssertTrue(flushedEvents.isEmpty)
+        XCTAssertTrue(collector.events.isEmpty)
 
         buffer.add(SdkCustomEvent(name: "e3"))
         wait(for: [expectation], timeout: 1.0)
 
-        XCTAssertEqual(flushedEvents.count, 3)
+        XCTAssertEqual(collector.events.count, 3)
     }
 
     func testFlushOnTimer() {
         let expectation = XCTestExpectation(description: "timer flush")
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
 
         let fakeTimer = FakeTimer()
         let buffer = SdkEventBuffer(
@@ -31,7 +45,7 @@ final class SdkEventBufferTests: XCTestCase {
             flushIntervalMs: 500,
             timerFactory: { fakeTimer }
         ) { events in
-            flushedEvents = events
+            collector.collect(events)
             expectation.fulfill()
         }
 
@@ -43,32 +57,32 @@ final class SdkEventBufferTests: XCTestCase {
         fakeTimer.fire()
         wait(for: [expectation], timeout: 1.0)
 
-        XCTAssertEqual(flushedEvents.count, 2)
+        XCTAssertEqual(collector.events.count, 2)
     }
 
     func testShutdownFlushesRemaining() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
 
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
-            flushedEvents = events
+            collector.collect(events)
         }
 
         buffer.add(SdkCustomEvent(name: "e1"))
         buffer.add(SdkCustomEvent(name: "e2"))
         buffer.shutdown()
 
-        XCTAssertEqual(flushedEvents.count, 2)
+        XCTAssertEqual(collector.events.count, 2)
     }
 
     func testEmptyFlushDoesNothing() {
-        var flushCount = 0
+        let counter = FlushCounter()
 
         let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { _ in
-            flushCount += 1
+            counter.increment()
         }
 
         buffer.flush()
-        XCTAssertEqual(flushCount, 0)
+        XCTAssertEqual(counter.count, 0)
     }
 
     func testTimerScheduledOnStart() {

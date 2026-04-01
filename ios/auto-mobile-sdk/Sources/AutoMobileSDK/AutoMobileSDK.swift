@@ -15,6 +15,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var _isInitialized = false
     private var _bundleId: String?
     private var _sdkContext: SdkContext?
+    private var _configuration: AutoMobileConfiguration?
     private var eventBuffer: SdkEventBuffer?
     private var _dropCounter: DefaultDropCounter?
     private var eventPersistence: (any EventPersisting)?
@@ -25,9 +26,15 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     // MARK: - Initialization
 
-    /// Initialize the SDK with all subsystems.
+    /// Initialize the SDK with all subsystems using default configuration.
     /// Call this early in your app lifecycle (e.g., in your App init or AppDelegate).
     public func initialize(bundleId: String? = nil) {
+        initialize(bundleId: bundleId, configuration: .default)
+    }
+
+    /// Initialize the SDK with all subsystems using a custom configuration.
+    /// Call this early in your app lifecycle (e.g., in your App init or AppDelegate).
+    public func initialize(bundleId: String? = nil, configuration: AutoMobileConfiguration) {
         lock.lock()
         guard !_isInitialized else {
             lock.unlock()
@@ -41,6 +48,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         let resolvedBundleId = bundleId ?? Bundle.main.bundleIdentifier
         _bundleId = resolvedBundleId
+        _configuration = configuration
 
         let counter = DefaultDropCounter()
         _dropCounter = counter
@@ -57,7 +65,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
         self.eventPersistence = persistence
         SdkEventBroadcaster.shared.persistence = persistence
 
-        let buffer = SdkEventBuffer(dropCounter: counter) { [weak self] events in
+        let buffer = SdkEventBuffer(
+            maxBufferSize: configuration.bufferSize,
+            flushIntervalMs: configuration.flushIntervalMs,
+            dropCounter: counter
+        ) { [weak self] events in
             let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)
         }
@@ -227,6 +239,13 @@ public final class AutoMobileSDK: @unchecked Sendable {
         return _isInitialized
     }
 
+    /// The current SDK configuration, or nil if not yet initialized.
+    public var configuration: AutoMobileConfiguration? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _configuration
+    }
+
     /// The app's bundle ID.
     public var bundleId: String? {
         lock.lock()
@@ -314,6 +333,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _isEnabled = true
         _isInitialized = false
         _bundleId = nil
+        _configuration = nil
         lock.unlock()
 
         bufferToShutdown?.shutdown()

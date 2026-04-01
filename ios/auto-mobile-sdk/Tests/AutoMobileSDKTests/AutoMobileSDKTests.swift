@@ -1,6 +1,13 @@
 import XCTest
 @testable import AutoMobileSDK
 
+private final class NavEventHolder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _event: NavigationEvent?
+    var event: NavigationEvent? { lock.lock(); defer { lock.unlock() }; return _event }
+    func set(_ event: NavigationEvent) { lock.lock(); _event = event; lock.unlock() }
+}
+
 final class AutoMobileSDKTests: XCTestCase {
     override func tearDown() {
         AutoMobileSDK.shared.reset()
@@ -75,16 +82,16 @@ final class AutoMobileSDKTests: XCTestCase {
 
     func testClosureBasedListener() {
         AutoMobileSDK.shared.initialize(bundleId: "com.test.app")
-        var received: NavigationEvent?
+        let holder = NavEventHolder()
 
         AutoMobileSDK.shared.addNavigationListener { event in
-            received = event
+            holder.set(event)
         }
 
         let event = NavigationEvent(destination: "Profile", source: .deepLink)
         AutoMobileSDK.shared.notifyNavigationEvent(event)
 
-        XCTAssertEqual(received?.destination, "Profile")
+        XCTAssertEqual(holder.event?.destination, "Profile")
     }
 
     func testSetEnabledToggle() {

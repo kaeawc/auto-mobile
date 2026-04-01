@@ -14,6 +14,7 @@ import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
 import dev.jasonpearson.automobile.desktop.core.platform.SourceFileOpener
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
+import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
 
 /**
@@ -30,7 +31,7 @@ private class ObservableSettingsProvider(
 }
 
 @Composable
-fun AutoMobileDesktopApp() {
+fun AutoMobileDesktopApp(menuBarActions: MenuBarActions = remember { MenuBarActions() }) {
   val settings = remember { ObservableSettingsProvider(FakeSettingsProvider()) }
 
   AutoMobileTheme(themeMode = settings.themeMode) {
@@ -44,6 +45,7 @@ fun AutoMobileDesktopApp() {
           onOpenSource = { fileName, lineNumber, className ->
             SourceFileOpener.open(fileName, lineNumber, className, settings.androidIde, settings.iosIde)
           },
+          menuBarActions = menuBarActions,
       )
     }
   }

@@ -115,6 +115,7 @@ import dev.jasonpearson.automobile.desktop.core.shell.GlobalSearchOverlay
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResult
 import dev.jasonpearson.automobile.desktop.core.shell.SearchResultProvider
 import dev.jasonpearson.automobile.desktop.core.shell.buildDefaultCommands
+import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.core.shell.ThreePaneShell
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -249,8 +250,14 @@ fun AutoMobileContent(
     settingsProvider: SettingsProvider = FakeSettingsProvider(),
     notificationHandler: NotificationHandler = NoOpNotificationHandler,
     onOpenSource: ((String, Int, String) -> Unit)? = null,
+    menuBarActions: MenuBarActions? = null,
 ) {
-  var showSettings by remember { mutableStateOf(false) }
+  // When a MenuBarActions bridge is supplied (from Main.kt's MenuBar), delegate
+  // pane-visibility and overlay state to it so the native menu items and the
+  // Compose keyboard shortcuts share the same mutable state.
+  val actions = menuBarActions ?: remember { MenuBarActions() }
+
+  var showSettings by actions::showSettings
   var selectedIndex by remember { mutableIntStateOf(0) }
   val dashboardOrder = remember { mutableStateListOf(*Dashboard.entries.toTypedArray()) }
   var draggedIndex by remember { mutableStateOf<Int?>(null) }
@@ -262,17 +269,17 @@ fun AutoMobileContent(
   var failuresPanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
   var performancePanelWidthPx by remember { mutableFloatStateOf(450f) }  // 300 * 1.5
 
-  // Three-pane shell visibility state
-  var showLeftPane by remember { mutableStateOf(true) }
-  var showRightPane by remember { mutableStateOf(true) }
-  var showBottomPane by remember { mutableStateOf(false) }  // collapsed by default
+  // Three-pane shell visibility state (delegated to MenuBarActions)
+  var showLeftPane by actions::showLeftPane
+  var showRightPane by actions::showRightPane
+  var showBottomPane by actions::showBottomPane
   var selectedTelemetryEvent by remember { mutableStateOf<TelemetryDisplayEvent?>(null) }
   var isLiveLayoutMode by remember { mutableStateOf(false) }
   val layoutInspectorState = rememberLayoutInspectorState()
 
-  // Command palette & global search state
-  var showCommandPalette by remember { mutableStateOf(false) }
-  var showGlobalSearch by remember { mutableStateOf(false) }
+  // Command palette & global search state (delegated to MenuBarActions)
+  var showCommandPalette by actions::showCommandPalette
+  var showGlobalSearch by actions::showGlobalSearch
 
   // Theme state toggled via command palette
   var isDarkMode by remember { mutableStateOf(true) }
@@ -410,6 +417,21 @@ fun AutoMobileContent(
               }
           }
       }
+  }
+
+  // Register the screenshot callback on the shared MenuBarActions bridge so the
+  // native menu bar "Take Screenshot" item can trigger it.
+  DisposableEffect(clientProvider) {
+      actions.onTakeScreenshot = {
+          val provider = clientProvider
+          if (provider != null) {
+              kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                  val client = provider()
+                  try { client.callTool("screenshot", buildJsonObject {}) } catch (_: Exception) {} finally { client.close() }
+              }
+          }
+      }
+      onDispose { actions.onTakeScreenshot = null }
   }
 
   // After MCP auto-connect, fetch booted devices and populate realDevice for the sidebar

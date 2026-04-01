@@ -1,0 +1,268 @@
+# Desktop Compose UI App
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
+
+> **Current state:** The desktop app is a standalone Compose Desktop application that provides a multi-dashboard UI for device observation, navigation mapping, failure analysis, performance monitoring, layout inspection, storage editing, telemetry, test management, and diagnostics. It communicates with the AutoMobile MCP server via three transport strategies (Streamable HTTP, Unix socket, STDIO). See the [Status Glossary](../../status-glossary.md) for chip definitions.
+
+## Three-Module Architecture
+
+The desktop app is split into three Gradle modules under `android/`:
+
+```mermaid
+graph TD
+    A["desktop-app<br/>(entry point)"] --> B["desktop-core<br/>(business logic + UI)"]
+    B --> C["desktop-domain<br/>(pure Kotlin interfaces)"]
+
+    classDef app fill:#CC2200,stroke-width:0px,color:white;
+    classDef core fill:#525FE1,stroke-width:0px,color:white;
+    classDef domain fill:#007A3D,stroke-width:0px,color:white;
+    class A app;
+    class B core;
+    class C domain;
+```
+
+| Module | Purpose | Key Contents |
+|--------|---------|--------------|
+| `desktop-domain` | Pure Kotlin data models with no framework dependencies | `NavigationModels`, `FailureModels`, `PerformanceModels`, `LayoutModels`, `StorageModels`, `TestModels` |
+| `desktop-core` | Business logic, daemon clients, data sources, ViewModels, and all Compose UI | `daemon/`, `datasource/`, `failures/`, `navigation/`, `performance/`, `layout/`, `storage/`, `telemetry/`, `test/`, `shell/`, `settings/`, `testing/` |
+| `desktop-app` | Thin entry point: window creation, Metro DI bootstrap, single-instance lock | `Main.kt`, `AutoMobileDesktopApp.kt`, `AutoMobileGraph.kt`, `AutoMobileTheme.kt` |
+
+### desktop-domain
+
+Contains six model files that define the domain vocabulary. All types are plain `data class` or `enum class` with no serialization annotations, keeping this module dependency-free. Highlights:
+
+- `NavigationGraph`, `ScreenNode`, `ScreenTransition` -- graph-based navigation model
+- `FailureGroup`, `FailureOccurrence`, `FailureType`, `FailureSeverity` -- failure aggregation
+- `PerformanceMetric`, `PerformanceAnomaly`, `PerformanceRun`, `PerformanceThresholds` -- metrics and thresholds
+- `UIElementInfo`, `ParsedHierarchy`, `ObservationData`, `ConnectionStatus` -- layout inspection
+- `DatabaseInfo`, `KeyValueFile`, `KeyValueEntry` -- on-device storage inspection
+- `TestCase`, `TestRun`, `TestStep`, `RecordedAction` -- test management
+
+### desktop-app
+
+The entry point module is intentionally small:
+
+1. **`Main.kt`** -- acquires a file-lock (`automobile-desktop.lock`) to enforce single-instance, creates the Metro `AutoMobileGraph`, sets macOS native transparent title bar properties, and launches a 1440x900 Compose window.
+2. **`AutoMobileDesktopApp.kt`** -- wraps `AutoMobileContent` (from desktop-core) with an `AutoMobileTheme` and an `ObservableSettingsProvider` that bridges `SettingsProvider` changes into Compose snapshot state.
+3. **`AutoMobileTheme.kt`** -- Material 3 color scheme with light and dark variants. Resolves `themeMode` strings (`"dark"`, `"light"`, `"system"`) to the appropriate scheme. Defaults to dark to match the IDE plugin.
+
+## DI System
+
+The app uses [Metro](https://github.com/ZacSweers/metro) for compile-time dependency injection.
+
+```
+@DependencyGraph(scope = AppScope::class)
+interface AutoMobileGraph {
+    val autoMobileClient: AutoMobileClient
+    val settingsProvider: SettingsProvider
+
+    @DependencyGraph.Factory
+    fun interface Factory { fun create(): AutoMobileGraph }
+}
+```
+
+`ApplicationModule` contributes bindings to `AppScope`:
+
+| Binding | Provider |
+|---------|----------|
+| `AutoMobileClient` | `McpClientFactory.createPreferred(null)` -- selects the best available transport |
+| `SettingsProvider` | `FakeSettingsProvider()` (placeholder until persistent settings are wired) |
+
+Scope annotations `@SingleIn(AppScope::class)` ensure singletons live for the app lifecycle.
+
+## Daemon Communication
+
+The desktop app communicates with the AutoMobile MCP server through the `AutoMobileClient` interface, which exposes JSON-RPC methods for MCP resources, tools, device management, observation, and storage operations.
+
+```mermaid
+graph LR
+    UI["Desktop UI"] --> AC["AutoMobileClient"]
+    AC --> HTTP["McpHttpClient<br/>Streamable HTTP"]
+    AC --> UNIX["McpDaemonClient<br/>Unix Socket"]
+    AC --> STDIO["McpStdioClient<br/>STDIO Process"]
+    HTTP --> D["MCP Server"]
+    UNIX --> D
+    STDIO --> D
+
+    classDef client fill:#CC2200,stroke-width:0px,color:white;
+    classDef core fill:#525FE1,stroke-width:0px,color:white;
+    classDef ext fill:#007A3D,stroke-width:0px,color:white;
+    class UI client;
+    class AC,HTTP,UNIX,STDIO core;
+    class D ext;
+```
+
+### Transport Implementations
+
+| Client | Transport | Session Management | Retry |
+|--------|-----------|-------------------|-------|
+| `McpHttpClient` | HTTP POST to `/auto-mobile/streamable` | `mcp-session-id` header | `RetryPolicy` with exponential backoff, jitter, retryable error classification |
+| `McpDaemonClient` | Unix domain socket at `/tmp/auto-mobile-daemon-{uid}.sock` | Per-request connection | None (single-shot) |
+| `McpStdioClient` | stdin/stdout of a spawned child process | Persistent process | None |
+
+### McpClientFactory
+
+`McpClientFactory` selects the transport automatically:
+
+1. If an `McpHttpServer` is provided (from discovery), use `McpHttpClient`.
+2. If `AUTOMOBILE_MCP_HTTP_URL` env var or system property is set, use `McpHttpClient`.
+3. If `AUTOMOBILE_MCP_STDIO_COMMAND` env var or system property is set, use `McpStdioClient`.
+4. Fall back to `McpDaemonClient` (Unix socket).
+
+`createFromProcess(McpProcess)` binds a client to a detected running process by its connection type.
+
+### RetryPolicy
+
+`McpHttpClient` uses a configurable `RetryPolicy` for transient failures:
+
+- Max retries: 3
+- Initial delay: 1000ms, backoff multiplier: 2x, max delay: 30s
+- Jitter fraction: 10%
+- Retryable errors: `ConnectException`, `HttpTimeoutException`, HTTP 5xx
+
+### McpHttpDiscovery
+
+Discovers running MCP servers by scanning listening TCP ports and probing `/health` endpoints:
+
+1. `DefaultPortScanner` -- runs `lsof`/`netstat`/`ss` to find listening ports
+2. `HttpHealthProbe` -- sends GET to `/health` and `/auto-mobile/health` with 800ms timeout
+3. Matches discovered servers against `GitWorktreeLister` output (maps branches to worktrees)
+4. Returns `McpDiscoverySnapshot` with `McpServerOption` entries combining server + worktree info
+
+### McpProcessDetector
+
+Detects running AutoMobile processes via `ps` and classifies their connection type (Streamable HTTP, Unix Socket, STDIO) by inspecting command-line arguments and `lsof` output. Uses injectable `ProcessRunner`, `SocketFileChecker`, and `TimeProvider` interfaces for testability.
+
+## Stream Clients
+
+Real-time data flows over Unix domain sockets, separate from the request/response MCP channel:
+
+| Client | Socket Path | Data |
+|--------|-------------|------|
+| `ObservationStreamClient` | `~/.auto-mobile/observation-stream.sock` | Hierarchy updates, screenshot updates, navigation graph updates, performance metrics |
+| `FailuresStreamSocketClient` | Failures socket | Failure notifications, groups, timeline data |
+| `PerformanceAuditStreamSocketClient` | Performance socket | Performance audit poll results |
+| `TelemetryPushSocketClient` | Telemetry socket | Custom telemetry events |
+
+### ObservationStreamClient
+
+Maintains a persistent connection with subscribe/unsubscribe semantics. Exposes Kotlin `SharedFlow` instances:
+
+- `hierarchyUpdates: SharedFlow<HierarchyStreamUpdate>`
+- `screenshotUpdates: SharedFlow<ScreenshotStreamUpdate>`
+- `navigationUpdates: SharedFlow<NavigationGraphStreamUpdate>`
+- `performanceUpdates: SharedFlow<PerformanceStreamUpdate>`
+- `connectionState: SharedFlow<StreamConnectionState>`
+
+Connection state is modeled as a sealed class: `Connecting`, `Connected`, `Disconnected(reason)`.
+
+## Data Source Layer
+
+Each data domain follows a two-part pattern (interface with Real and Fake implementations). Navigation and AppList additionally use a cached wrapper:
+
+```
+Interface  -->  RealXxxDataSource (calls AutoMobileClient)
+           -->  FakeXxxDataSource (returns canned data)
+           -->  CachedXxxDataSource (wraps delegate with InMemoryCache)  [Navigation, AppList only]
+```
+
+| DataSource | Domain | Cache TTL |
+|------------|--------|-----------|
+| `NavigationDataSource` | `NavigationGraph` | 30s (via `CachedNavigationDataSource`) |
+| `AppListDataSource` | `List<InstalledApp>` | 30s (via `CachedAppListDataSource`) |
+| `LayoutDataSource` | Layout/observation data | -- |
+| `PerformanceDataSource` | Performance metrics | -- |
+| `StorageDataSource` | Key-value files, databases | -- |
+| `TestDataSource` | Test cases and runs | -- |
+| `FailuresDataSource` | Failure groups | -- |
+
+### InMemoryCache
+
+A generic TTL-based cache using `ConcurrentHashMap` for lock-free reads and per-key `Mutex` for coalesced fetches. Injectable `clock` lambda enables deterministic testing.
+
+### DataSourceFactory / DataSourceMode
+
+`DataSourceFactory` creates the appropriate data source implementation based on `DataSourceMode` (`Real`, `Fake`), allowing the UI to switch between real server data and demo data.
+
+## Unified Result Type
+
+```kotlin
+sealed interface Result<out T> {
+    data class Success<T>(val data: T) : Result<T>
+    data class Error(val exception: Throwable, val message: String?) : Result<Nothing>
+    data object Loading : Result<Nothing>
+}
+```
+
+The `asResult()` Flow extension wraps any `Flow<T>` into `Flow<Result<T>>`, emitting `Loading` on start and catching exceptions as `Error` (while re-throwing `CancellationException`).
+
+## Dashboard UI
+
+### ThreePaneShell Layout
+
+The top-level layout is an Xcode-inspired three-pane shell with resizable, collapsible panels:
+
+- **Left sidebar** (220dp default) -- device list, app filter, daemon status, MCP connection
+- **Center canvas** (flex) -- the active dashboard content, with a status bar at the bottom
+- **Right inspector** (300dp default) -- context-sensitive detail panel
+- **Bottom timeline** (120dp default) -- collapsible event timeline
+
+Keyboard shortcuts: `Cmd+0` (left), `Cmd+Shift+0` (right), `Cmd+Shift+Y` (bottom), `Tab`/`Shift+Tab` (cycle focus), `Cmd+/` (cheat sheet), `Cmd+K` (quick jump). Optional Vim mode (j/k/g/G//).
+
+### Dashboard Tabs
+
+The center content area uses a split layout. When the Navigation view is active, it fills the center. Otherwise, Telemetry is the primary center content with secondary dashboards available via bottom tabs:
+
+| Dashboard | Position | Description |
+|-----------|----------|-------------|
+| Navigation | Primary (full center) | Flow map with screen nodes and transitions, canvas view, detail panels |
+| Telemetry | Primary (center top) | Network request inspector, custom event renderer |
+| Test | Secondary (bottom tab) | Test case browser, run history, recording, plan execution |
+| Storage | Secondary (bottom tab) | SharedPreferences/database inspector, key-value editor |
+| Diagnostics | Secondary (bottom tab) | System health, daemon status, MCP process list |
+| Performance | Inspector panel | Real-time FPS/memory/CPU, anomaly detection, run comparison |
+| Layout | Inspector panel | Device screen mirror, hierarchy tree, property inspector |
+| Failures | Inspector panel | Grouped failure list, timeline chart, stack trace viewer |
+
+### ViewModels
+
+Navigation and Failures each have a dedicated ViewModel that manages UI state via `StateFlow` and dispatches one-shot effects via `Channel`. Other dashboards do not yet have standalone ViewModels:
+
+**NavigationViewModel**
+- State: `Loading | Content(graph, selectedScreenId, currentSection) | Error(message)`
+- Actions: `Refresh`, `SelectScreen`, `SelectScreenByName`, `BackToFlowMap`, `UpdateGraph`
+- Effects: `OpenSource(fileName, lineNumber)`
+
+**FailuresViewModel**
+- State: `Loading | Content(failureGroups, selectedFailure, filterType) | Error(message)`
+- Actions: `Refresh`, `SelectFailure`, `ClearSelection`, `FilterByType`, `SelectFailureById`, `UpdateGroups`
+- Effects: `OpenStackTrace`, `NavigateToScreen`, `NavigateToTest`
+
+Both follow the same pattern: sealed `UiState`, sealed `Action`, sealed `Effect`, with the ViewModel accepting a `DataSource` and `CoroutineScope` via constructor injection.
+
+## Testing Strategy
+
+### FakeAutoMobileClient
+
+A reusable fake that records all method calls in a `calls: MutableList<String>` and returns configurable values for every `AutoMobileClient` method. Supports per-URI resource responses via `setResourceResponseWithText()`. Write calls (`setKeyValue`, `removeKeyValue`, `clearKeyValueFile`) are additionally captured in typed call lists for assertion.
+
+### Test Structure
+
+Tests live under `android/desktop-core/src/test/kotlin/` and cover:
+
+| Area | Test Files | Techniques |
+|------|-----------|------------|
+| Daemon clients | `McpHttpClientCancellationTest`, `McpHttpDiscoveryTest`, `RetryPolicyTest`, `SocketConnectionStateTest` | Fake HTTP responses, port scanner mocks |
+| Data sources | `CachedAppListDataSourceTest`, `CachedNavigationDataSourceTest`, `InMemoryCacheTest`, `ResultExtensionsTest`, `RealStorageDataSourceTest` | Injectable clock, Turbine Flow testing |
+| ViewModels | `NavigationViewModelTest`, `FailuresViewModelTest` | Turbine `test {}`, fake data sources |
+| UI composables | `FailuresBadgeUiTest`, `FailuresCollapsedContentUiTest`, `ConnectionStatusIndicatorUiTest`, `StatusBarBadgeUiTest` | Compose Desktop test rule |
+| Process detection | `McpProcessDetectorTest`, `DefaultPortScannerTest` | Fake `ProcessRunner`, `SocketFileChecker`, `TimeProvider` |
+| Other | `HierarchyPerformanceTest`, `NavigationGraphLayoutTest`, `TelemetryModelsTest`, `NetworkBodyRendererTest` | -- |
+
+All fakes and test utilities follow the interface + fake pattern mandated by the project, with injectable time/clock for deterministic behavior.
+
+## See Also
+
+- [Android Overview](index.md)
+- [Observe](observe.md) -- observation pipeline that feeds the Layout dashboard
+- [IDE Plugin](ide-plugin/) -- IntelliJ plugin that shares `desktop-core`

@@ -65,10 +65,10 @@ public final class AutoMobileSDK: @unchecked Sendable {
         self.eventPersistence = persistence
         SdkEventBroadcaster.shared.persistence = persistence
 
-        let buffer = SdkEventBuffer(dropCounter: counter) { [weak self] events in
         let buffer = SdkEventBuffer(
             maxBufferSize: configuration.bufferSize,
-            flushIntervalMs: configuration.flushIntervalMs
+            flushIntervalMs: configuration.flushIntervalMs,
+            dropCounter: counter
         ) { [weak self] events in
             let bundleId = self?.bundleId
             SdkEventBroadcaster.shared.broadcastBatch(bundleId: bundleId, events: events)

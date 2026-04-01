@@ -100,6 +100,19 @@ class BreadcrumbTrailTest {
     }
 
     @Test
+    fun `metadata is defensively copied on add`() {
+        val mutableMeta = mutableMapOf("key" to "original")
+        trail.add(Breadcrumb(1L, BreadcrumbCategory.CUSTOM, "msg", mutableMeta))
+
+        // Mutate the caller's map after adding
+        mutableMeta["key"] = "mutated"
+        mutableMeta["extra"] = "added"
+
+        val snapshot = trail.snapshot()
+        assertEquals(mapOf("key" to "original"), snapshot[0].metadata)
+    }
+
+    @Test
     fun `default maxSize is 100`() {
         val defaultTrail = BreadcrumbTrail()
         for (i in 1..150) {

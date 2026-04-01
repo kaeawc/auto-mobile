@@ -33,7 +33,7 @@ class BreadcrumbTrail(private val maxSize: Int = 100) : BreadcrumbTracking {
             if (deque.size >= maxSize) {
                 deque.removeFirst()
             }
-            deque.addLast(breadcrumb)
+            deque.addLast(breadcrumb.copy(metadata = breadcrumb.metadata.toMap()))
         }
     }
 

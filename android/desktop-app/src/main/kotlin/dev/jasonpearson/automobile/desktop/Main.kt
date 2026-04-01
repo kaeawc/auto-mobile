@@ -1,5 +1,9 @@
 package dev.jasonpearson.automobile.desktop
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.dp
@@ -54,15 +58,27 @@ fun main() {
   }
 
   application {
+    var isWindowVisible by remember { mutableStateOf(true) }
+    // TODO: Wire isDaemonConnected to real daemon connection state from the DI graph.
+    var isDaemonConnected by remember { mutableStateOf(false) }
+
+    AutoMobileSystemTray(
+      isConnected = isDaemonConnected,
+      isWindowVisible = isWindowVisible,
+      onToggleWindow = { isWindowVisible = !isWindowVisible },
+      onQuit = ::exitApplication,
+    )
+
     val windowState = rememberWindowState(
       size = DpSize(1440.dp, 900.dp),
       position = WindowPosition(Alignment.Center),
     )
 
     Window(
-      onCloseRequest = ::exitApplication,
+      onCloseRequest = { isWindowVisible = false },
       title = "AutoMobile",
       state = windowState,
+      visible = isWindowVisible,
     ) {
       AutoMobileDesktopApp()
     }

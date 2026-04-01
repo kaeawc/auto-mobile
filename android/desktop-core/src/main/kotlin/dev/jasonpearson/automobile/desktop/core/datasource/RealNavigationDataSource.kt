@@ -78,9 +78,9 @@ class RealNavigationDataSource(
 
             Result.Success(NavigationGraph(screens = screens, transitions = transitions))
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to load navigation graph: ${e.message}")
+            Result.Error(e, "Failed to load navigation graph: ${e.message}")
         }
     }
 

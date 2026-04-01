@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 import kotlinx.coroutines.flow.flowOf
@@ -18,17 +19,17 @@ class CompositeFailuresDataSourceTest {
         val streamingGroups = listOf(createTestFailureGroup("streaming-1"))
 
         val mcpDataSource = FakeFailuresDataSourceImpl(
-            getFailureGroupsResult = DataSourceResult.Success(mcpGroups)
+            getFailureGroupsResult = Result.Success(mcpGroups)
         )
         val streamingDataSource = FakeStreamingFailuresDataSource(
-            getFailureGroupsResult = DataSourceResult.Success(streamingGroups)
+            getFailureGroupsResult = Result.Success(streamingGroups)
         )
 
         val composite = CompositeFailuresDataSource(mcpDataSource, streamingDataSource)
         val result = composite.getFailureGroups()
 
-        assertTrue(result is DataSourceResult.Success)
-        assertEquals(mcpGroups, (result as DataSourceResult.Success).data)
+        assertTrue(result is Result.Success)
+        assertEquals(mcpGroups, (result as Result.Success).data)
     }
 
     @Test
@@ -36,17 +37,17 @@ class CompositeFailuresDataSourceTest {
         val streamingGroups = listOf(createTestFailureGroup("streaming-1"))
 
         val mcpDataSource = FakeFailuresDataSourceImpl(
-            getFailureGroupsResult = DataSourceResult.Error("MCP unavailable")
+            getFailureGroupsResult = Result.Error(RuntimeException("MCP unavailable"))
         )
         val streamingDataSource = FakeStreamingFailuresDataSource(
-            getFailureGroupsResult = DataSourceResult.Success(streamingGroups)
+            getFailureGroupsResult = Result.Success(streamingGroups)
         )
 
         val composite = CompositeFailuresDataSource(mcpDataSource, streamingDataSource)
         val result = composite.getFailureGroups()
 
-        assertTrue(result is DataSourceResult.Success)
-        assertEquals(streamingGroups, (result as DataSourceResult.Success).data)
+        assertTrue(result is Result.Success)
+        assertEquals(streamingGroups, (result as Result.Success).data)
     }
 
     @Test
@@ -54,8 +55,8 @@ class CompositeFailuresDataSourceTest {
         val composite = CompositeFailuresDataSource(null, null)
         val result = composite.getFailureGroups()
 
-        assertTrue(result is DataSourceResult.Success)
-        assertTrue((result as DataSourceResult.Success).data.isEmpty())
+        assertTrue(result is Result.Success)
+        assertTrue((result as Result.Success).data.isEmpty())
     }
 
     @Test
@@ -66,14 +67,14 @@ class CompositeFailuresDataSourceTest {
         )
 
         val mcpDataSource = FakeFailuresDataSourceImpl(
-            getTimelineDataResult = DataSourceResult.Success(mcpTimeline)
+            getTimelineDataResult = Result.Success(mcpTimeline)
         )
 
         val composite = CompositeFailuresDataSource(mcpDataSource, null)
         val result = composite.getTimelineData(DateRange.OneHour, TimeAggregation.Minute)
 
-        assertTrue(result is DataSourceResult.Success)
-        assertEquals(mcpTimeline, (result as DataSourceResult.Success).data)
+        assertTrue(result is Result.Success)
+        assertEquals(mcpTimeline, (result as Result.Success).data)
     }
 
     @Test
@@ -81,8 +82,8 @@ class CompositeFailuresDataSourceTest {
         val composite = CompositeFailuresDataSource(null, null)
         val result = composite.getTimelineData(DateRange.OneHour, TimeAggregation.Minute)
 
-        assertTrue(result is DataSourceResult.Success)
-        val data = (result as DataSourceResult.Success).data
+        assertTrue(result is Result.Success)
+        val data = (result as Result.Success).data
         assertTrue(data.dataPoints.isEmpty())
         assertEquals(0, data.previousPeriodTotals.crashes)
     }
@@ -91,15 +92,15 @@ class CompositeFailuresDataSourceTest {
     fun `notificationsFlow returns streaming flow when available`() = runBlocking {
         val notification = createTestNotification(1)
         val streamingDataSource = FakeStreamingFailuresDataSource(
-            notificationsFlowResult = flowOf(DataSourceResult.Success(listOf(notification)))
+            notificationsFlowResult = flowOf(Result.Success(listOf(notification)))
         )
 
         val composite = CompositeFailuresDataSource(null, streamingDataSource)
         val results = composite.notificationsFlow().toList()
 
         assertEquals(1, results.size)
-        assertTrue(results[0] is DataSourceResult.Success)
-        assertEquals(listOf(notification), (results[0] as DataSourceResult.Success).data)
+        assertTrue(results[0] is Result.Success)
+        assertEquals(listOf(notification), (results[0] as Result.Success).data)
     }
 
     @Test
@@ -115,15 +116,15 @@ class CompositeFailuresDataSourceTest {
         val groups = listOf(createTestFailureGroup("test-1"))
         val totals = FailureTotals(crashes = 1, anrs = 0, toolFailures = 0, nonfatals = 0)
         val streamingDataSource = FakeStreamingFailuresDataSource(
-            failureGroupsFlowResult = flowOf(DataSourceResult.Success(FailureGroupsWithTotals(groups, totals)))
+            failureGroupsFlowResult = flowOf(Result.Success(FailureGroupsWithTotals(groups, totals)))
         )
 
         val composite = CompositeFailuresDataSource(null, streamingDataSource)
         val results = composite.failureGroupsFlow().toList()
 
         assertEquals(1, results.size)
-        assertTrue(results[0] is DataSourceResult.Success)
-        assertEquals(groups, (results[0] as DataSourceResult.Success).data.groups)
+        assertTrue(results[0] is Result.Success)
+        assertEquals(groups, (results[0] as Result.Success).data.groups)
     }
 
     @Test
@@ -141,34 +142,34 @@ class CompositeFailuresDataSourceTest {
     // Helper classes
 
     private class FakeFailuresDataSourceImpl(
-        private val getFailureGroupsResult: DataSourceResult<List<FailureGroup>> = DataSourceResult.Success(emptyList()),
-        private val getTimelineDataResult: DataSourceResult<TimelineData> = DataSourceResult.Success(
+        private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
+        private val getTimelineDataResult: Result<TimelineData> = Result.Success(
             TimelineData(emptyList(), PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0))
         ),
     ) : FailuresDataSource {
-        override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> = getFailureGroupsResult
+        override suspend fun getFailureGroups(): Result<List<FailureGroup>> = getFailureGroupsResult
         override suspend fun getTimelineData(
             dateRange: DateRange,
             aggregation: TimeAggregation,
-        ): DataSourceResult<TimelineData> = getTimelineDataResult
+        ): Result<TimelineData> = getTimelineDataResult
     }
 
     private class FakeStreamingFailuresDataSource(
-        private val getFailureGroupsResult: DataSourceResult<List<FailureGroup>> = DataSourceResult.Success(emptyList()),
-        private val getTimelineDataResult: DataSourceResult<TimelineData> = DataSourceResult.Success(
+        private val getFailureGroupsResult: Result<List<FailureGroup>> = Result.Success(emptyList()),
+        private val getTimelineDataResult: Result<TimelineData> = Result.Success(
             TimelineData(emptyList(), PeriodTotals(crashes = 0, anrs = 0, toolFailures = 0, nonfatals = 0))
         ),
-        private val notificationsFlowResult: Flow<DataSourceResult<List<FailureNotification>>> = emptyFlow(),
-        private val failureGroupsFlowResult: Flow<DataSourceResult<FailureGroupsWithTotals>> = emptyFlow(),
+        private val notificationsFlowResult: Flow<Result<List<FailureNotification>>> = emptyFlow(),
+        private val failureGroupsFlowResult: Flow<Result<FailureGroupsWithTotals>> = emptyFlow(),
     ) : FailuresDataSource, StreamingFailuresDataSourceInterface {
 
-        override suspend fun getFailureGroups(): DataSourceResult<List<FailureGroup>> = getFailureGroupsResult
+        override suspend fun getFailureGroups(): Result<List<FailureGroup>> = getFailureGroupsResult
         override suspend fun getTimelineData(
             dateRange: DateRange,
             aggregation: TimeAggregation,
-        ): DataSourceResult<TimelineData> = getTimelineDataResult
-        override fun notificationsFlow(): Flow<DataSourceResult<List<FailureNotification>>> = notificationsFlowResult
-        override fun failureGroupsFlow(): Flow<DataSourceResult<FailureGroupsWithTotals>> = failureGroupsFlowResult
+        ): Result<TimelineData> = getTimelineDataResult
+        override fun notificationsFlow(): Flow<Result<List<FailureNotification>>> = notificationsFlowResult
+        override fun failureGroupsFlow(): Flow<Result<FailureGroupsWithTotals>> = failureGroupsFlowResult
     }
 
     private fun createTestFailureGroup(id: String) = FailureGroup(

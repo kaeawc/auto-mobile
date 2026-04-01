@@ -46,15 +46,15 @@ class RealStorageDataSource(
 
         val provider = clientProvider ?: run {
             LOG.warn("getDatabases: No clientProvider")
-            return Result.Error("Not connected to MCP server. Please select a device first.")
+            return Result.Error(IllegalStateException("Not connected to MCP server. Please select a device first."))
         }
         val device = deviceId ?: run {
             LOG.warn("getDatabases: No deviceId provided")
-            return Result.Error("No device ID provided")
+            return Result.Error(IllegalStateException("No device ID provided"))
         }
         val pkg = packageName ?: run {
             LOG.warn("getDatabases: No packageName provided")
-            return Result.Error("No package name provided")
+            return Result.Error(IllegalStateException("No package name provided"))
         }
 
         return try {
@@ -69,7 +69,7 @@ class RealStorageDataSource(
 
             if (dbsResponse.error != null) {
                 LOG.warn("getDatabases: Response error: ${dbsResponse.error}")
-                return Result.Error(dbsResponse.error)
+                return Result.Error(RuntimeException(dbsResponse.error))
             }
 
             LOG.info("getDatabases: Found ${dbsResponse.databases.size} databases")
@@ -123,10 +123,10 @@ class RealStorageDataSource(
             Result.Success(databases)
         } catch (e: McpConnectionException) {
             LOG.warn("getDatabases: MCP connection error: ${e.message}", e)
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
             LOG.warn("getDatabases: Exception: ${e.message}", e)
-            Result.Error("Failed to load databases: ${e.message}")
+            Result.Error(e, "Failed to load databases: ${e.message}")
         }
     }
 
@@ -138,9 +138,9 @@ class RealStorageDataSource(
     ): Result<QueryResult> {
         LOG.info("getTableData: databasePath=$databasePath, table=$table, limit=$limit, offset=$offset")
 
-        val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
-        val device = deviceId ?: return Result.Error("No device ID provided")
-        val pkg = packageName ?: return Result.Error("No package name provided")
+        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
         return try {
             val client = provider()
@@ -153,7 +153,7 @@ class RealStorageDataSource(
             val response = json.decodeFromString(McpTableDataResponse.serializer(), text)
 
             if (response.error != null) {
-                return Result.Error(response.error)
+                return Result.Error(RuntimeException(response.error))
             }
 
             val rows = response.rows.map { row -> row.map { jsonElementToAny(it) } }
@@ -167,19 +167,19 @@ class RealStorageDataSource(
             )
         } catch (e: McpConnectionException) {
             LOG.warn("getTableData: MCP connection error: ${e.message}", e)
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
             LOG.warn("getTableData: Exception: ${e.message}", e)
-            Result.Error("Failed to load table data: ${e.message}")
+            Result.Error(e, "Failed to load table data: ${e.message}")
         }
     }
 
     override suspend fun executeSQL(databasePath: String, query: String): Result<QueryResult> {
         LOG.info("executeSQL: databasePath=$databasePath, query=$query")
 
-        val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
-        val device = deviceId ?: return Result.Error("No device ID provided")
-        val pkg = packageName ?: return Result.Error("No package name provided")
+        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
         return try {
             val client = provider()
@@ -218,10 +218,10 @@ class RealStorageDataSource(
             Result.Success(queryResult)
         } catch (e: McpConnectionException) {
             LOG.warn("executeSQL: MCP connection error: ${e.message}", e)
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
             LOG.warn("executeSQL: Exception: ${e.message}", e)
-            Result.Error("Failed to execute SQL: ${e.message}")
+            Result.Error(e, "Failed to execute SQL: ${e.message}")
         }
     }
 
@@ -230,15 +230,15 @@ class RealStorageDataSource(
 
         val provider = clientProvider ?: run {
             LOG.warn("getKeyValueFiles: No clientProvider")
-            return Result.Error("Not connected to MCP server. Please select a device first.")
+            return Result.Error(IllegalStateException("Not connected to MCP server. Please select a device first."))
         }
         val device = deviceId ?: run {
             LOG.warn("getKeyValueFiles: No deviceId provided")
-            return Result.Error("No device ID provided")
+            return Result.Error(IllegalStateException("No device ID provided"))
         }
         val pkg = packageName ?: run {
             LOG.warn("getKeyValueFiles: No packageName provided")
-            return Result.Error("No package name provided")
+            return Result.Error(IllegalStateException("No package name provided"))
         }
 
         return try {
@@ -263,7 +263,7 @@ class RealStorageDataSource(
             // Check for error in response
             if (filesResponse.error != null) {
                 LOG.warn("getKeyValueFiles: Response contains error: ${filesResponse.error}")
-                return Result.Error(filesResponse.error)
+                return Result.Error(RuntimeException(filesResponse.error))
             }
 
             // For each file, fetch its entries
@@ -303,10 +303,10 @@ class RealStorageDataSource(
             Result.Success(keyValueFiles)
         } catch (e: McpConnectionException) {
             LOG.warn("getKeyValueFiles: MCP connection error: ${e.message}", e)
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
             LOG.warn("getKeyValueFiles: Exception during fetch: ${e.message}", e)
-            Result.Error("Failed to load storage data: ${e.message}")
+            Result.Error(e, "Failed to load storage data: ${e.message}")
         }
     }
 
@@ -316,59 +316,59 @@ class RealStorageDataSource(
         value: String?,
         type: KeyValueType,
     ): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
-        val device = deviceId ?: return Result.Error("No device ID provided")
-        val pkg = packageName ?: return Result.Error("No package name provided")
+        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
         return try {
             val client = provider()
             withContext(Dispatchers.IO) {
                 val result = client.setKeyValue(device, pkg, fileName, key, value, type.protocolName)
                 if (result.success) Result.Success(Unit)
-                else Result.Error(result.message ?: "Failed to set key value")
+                else Result.Error(RuntimeException(result.message ?: "Failed to set key value"))
             }
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to set key value: ${e.message}")
+            Result.Error(e, "Failed to set key value: ${e.message}")
         }
     }
 
     override suspend fun removeKeyValue(fileName: String, key: String): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
-        val device = deviceId ?: return Result.Error("No device ID provided")
-        val pkg = packageName ?: return Result.Error("No package name provided")
+        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
         return try {
             val client = provider()
             withContext(Dispatchers.IO) {
                 val result = client.removeKeyValue(device, pkg, fileName, key)
                 if (result.success) Result.Success(Unit)
-                else Result.Error(result.message ?: "Failed to remove key value")
+                else Result.Error(RuntimeException(result.message ?: "Failed to remove key value"))
             }
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to remove key value: ${e.message}")
+            Result.Error(e, "Failed to remove key value: ${e.message}")
         }
     }
 
     override suspend fun clearKeyValueFile(fileName: String): Result<Unit> {
-        val provider = clientProvider ?: return Result.Error("Not connected to MCP server.")
-        val device = deviceId ?: return Result.Error("No device ID provided")
-        val pkg = packageName ?: return Result.Error("No package name provided")
+        val provider = clientProvider ?: return Result.Error(IllegalStateException("Not connected to MCP server."))
+        val device = deviceId ?: return Result.Error(IllegalStateException("No device ID provided"))
+        val pkg = packageName ?: return Result.Error(IllegalStateException("No package name provided"))
 
         return try {
             val client = provider()
             withContext(Dispatchers.IO) {
                 val result = client.clearKeyValueFile(device, pkg, fileName)
                 if (result.success) Result.Success(Unit)
-                else Result.Error(result.message ?: "Failed to clear key value file")
+                else Result.Error(RuntimeException(result.message ?: "Failed to clear key value file"))
             }
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to clear key value file: ${e.message}")
+            Result.Error(e, "Failed to clear key value file: ${e.message}")
         }
     }
 

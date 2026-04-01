@@ -23,7 +23,7 @@ class RealLayoutDataSource(
     override suspend fun getViewHierarchy(): Result<UIElementInfo> {
         return when (val result = getObservation()) {
             is Result.Success -> Result.Success(result.data.hierarchy)
-            is Result.Error -> Result.Error(result.message)
+            is Result.Error -> result
             is Result.Loading -> Result.Loading
         }
     }
@@ -78,9 +78,9 @@ class RealLayoutDataSource(
                 )
             )
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to load observation: ${e.message}")
+            Result.Error(e, "Failed to load observation: ${e.message}")
         }
     }
 

@@ -166,9 +166,9 @@ class RealPerformanceDataSource(
                 )
             )
         } catch (e: McpConnectionException) {
-            Result.Error("MCP server not available: ${e.message}")
+            Result.Error(e, "MCP server not available: ${e.message}")
         } catch (e: Exception) {
-            Result.Error("Failed to load performance data: ${e.message}")
+            Result.Error(e, "Failed to load performance data: ${e.message}")
         }
     }
 

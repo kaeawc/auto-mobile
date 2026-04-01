@@ -78,7 +78,6 @@ import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
-import dev.jasonpearson.automobile.desktop.core.failures.DataSourceResult
 import dev.jasonpearson.automobile.desktop.core.failures.FailureNotification
 import dev.jasonpearson.automobile.desktop.core.failures.FailuresDashboard
 import dev.jasonpearson.automobile.desktop.core.failures.FailureSeverity
@@ -589,16 +588,17 @@ fun AutoMobileContent(
             DateRange.ThirtyDays -> TimeAggregation.Day
           }
           when (val result = dataSource.getTimelineData(failuresDateRange, aggregation)) {
-            is DataSourceResult.Success -> {
+            is Result.Success -> {
               val data = result.data
               crashCount = data.dataPoints.sumOf { it.crashes }
               anrCount = data.dataPoints.sumOf { it.anrs }
               toolFailureCount = data.dataPoints.sumOf { it.toolFailures }
               nonFatalCount = data.dataPoints.sumOf { it.nonfatals }
             }
-            is DataSourceResult.Error -> {
+            is Result.Error -> {
               // Keep zeros on error
             }
+            is Result.Loading -> { /* waiting for data */ }
           }
         }
       } catch (e: Exception) {

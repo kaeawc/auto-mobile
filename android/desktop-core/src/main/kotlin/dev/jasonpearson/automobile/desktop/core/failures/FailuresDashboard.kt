@@ -43,6 +43,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushConnectionState
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.time.Clock
 import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.coroutines.delay
@@ -125,14 +126,15 @@ fun FailuresDashboard(
         isLoading = true
         errorMessage = null
         when (val result = currentDataSource.getFailureGroups()) {
-            is DataSourceResult.Success -> {
+            is Result.Success -> {
                 failureGroups = result.data
                 isLoading = false
             }
-            is DataSourceResult.Error -> {
+            is Result.Error -> {
                 errorMessage = result.message
                 isLoading = false
             }
+            is Result.Loading -> { /* keep loading state */ }
         }
     }
 
@@ -157,7 +159,7 @@ fun FailuresDashboard(
             streamingError = null
             activeStreamingSource.notificationsFlow().collect { result ->
                 when (result) {
-                    is DataSourceResult.Success -> {
+                    is Result.Success -> {
                         // Reset reconnect attempt on success
                         reconnectAttempt = 0
                         streamingError = null
@@ -168,9 +170,10 @@ fun FailuresDashboard(
                             onNewFailureNotification?.invoke(mostRecent)
                         }
                     }
-                    is DataSourceResult.Error -> {
+                    is Result.Error -> {
                         streamingError = result.message
                     }
+                    is Result.Loading -> { /* waiting for data */ }
                 }
             }
         } catch (e: Exception) {
@@ -188,12 +191,13 @@ fun FailuresDashboard(
 
         activeStreamingSource.failureGroupsFlow().collect { result ->
             when (result) {
-                is DataSourceResult.Success -> {
+                is Result.Success -> {
                     failureGroups = result.data.groups
                 }
-                is DataSourceResult.Error -> {
+                is Result.Error -> {
                     // Don't override main error, streaming updates are supplementary
                 }
+                is Result.Loading -> { /* waiting for data */ }
             }
         }
     }
@@ -215,12 +219,13 @@ fun FailuresDashboard(
             pushClient.failureNotifications.collectLatest {
                 // Refresh failure groups when we receive a push notification
                 when (val result = currentDataSource.getFailureGroups()) {
-                    is DataSourceResult.Success -> {
+                    is Result.Success -> {
                         failureGroups = result.data
                     }
-                    is DataSourceResult.Error -> {
+                    is Result.Error -> {
                         // Don't overwrite error message on refresh failures
                     }
+                    is Result.Loading -> { /* keep current state */ }
                 }
             }
         }
@@ -357,7 +362,7 @@ private fun FailureListView(
     LaunchedEffect(dataSource, dateRange, timeAggregation) {
         timelineLoading = true
         when (val result = dataSource.getTimelineData(dateRange, timeAggregation)) {
-            is DataSourceResult.Success -> {
+            is Result.Success -> {
                 timelineData = result.data
                 timelineLoading = false
                 // Report failure counts to parent
@@ -368,10 +373,11 @@ private fun FailureListView(
                 val nonFatalCount = data.dataPoints.sumOf { it.nonfatals }
                 onFailureCountsChanged?.invoke(crashCount, anrCount, toolFailureCount, nonFatalCount)
             }
-            is DataSourceResult.Error -> {
+            is Result.Error -> {
                 timelineData = null
                 timelineLoading = false
             }
+            is Result.Loading -> { /* keep loading state */ }
         }
     }
 
@@ -381,7 +387,7 @@ private fun FailureListView(
             pushClient.failureNotifications.collectLatest {
                 // Refresh timeline when we receive a push notification
                 when (val result = dataSource.getTimelineData(dateRange, timeAggregation)) {
-                    is DataSourceResult.Success -> {
+                    is Result.Success -> {
                         timelineData = result.data
                         // Report updated failure counts to parent
                         val data = result.data
@@ -391,9 +397,10 @@ private fun FailureListView(
                         val nonFatalCount = data.dataPoints.sumOf { it.nonfatals }
                         onFailureCountsChanged?.invoke(crashCount, anrCount, toolFailureCount, nonFatalCount)
                     }
-                    is DataSourceResult.Error -> {
+                    is Result.Error -> {
                         // Don't clear timeline on refresh failures
                     }
+                    is Result.Loading -> { /* keep current state */ }
                 }
             }
         }

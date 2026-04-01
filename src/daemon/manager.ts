@@ -100,7 +100,7 @@ export class DaemonManager {
    */
   private writeLockFile(): boolean {
     try {
-      const fd = openSync(this.lockFilePath, "wx");
+      const fd = openSync(this.lockFilePath, "wx", 0o600);
       writeFileSync(fd, String(process.pid));
       closeSync(fd);
       return true;
@@ -172,6 +172,17 @@ export class DaemonManager {
       const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
       if (ready) {
         stderrLog("Daemon started by another process");
+        return;
+      }
+      // Lock holder may have crashed — retry lock acquisition once
+      const retryAcquired = this.acquireLock();
+      if (retryAcquired) {
+        stderrLog("Previous lock holder failed, taking over daemon start...");
+        try {
+          await this.startUnlocked(options);
+        } finally {
+          this.releaseLock();
+        }
         return;
       }
       throw new ActionableError(

@@ -653,12 +653,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
       }
 
       if (skipCtrlProxyIOSSetup) {
-        logger.info(`[DeviceSessionManager] Skipping CtrlProxy iOS setup for ${deviceId}`);
-        perf.end();
-        return;
+        // Even when skipping download, attempt to start from cached artifacts if installed
+        const isInstalled = await manager.isInstalled();
+        if (isInstalled) {
+          logger.info(`[DeviceSessionManager] CtrlProxy iOS installed (cached), starting without download for ${deviceId}`);
+        } else {
+          logger.info(`[DeviceSessionManager] Skipping CtrlProxy iOS setup for ${deviceId} (not installed, download disabled)`);
+          perf.end();
+          return;
+        }
       }
 
-      // Setup the service (will start if not running)
+      // Setup the service (will start if not running, will skip download if already installed)
       logger.info(`[DeviceSessionManager] Setting up CtrlProxy iOS for ${deviceId}`);
       const setupResult = await manager.setup(false, perf);
       didSetup = true;

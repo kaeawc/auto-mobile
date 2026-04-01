@@ -1,15 +1,21 @@
 import { describe, expect, test, afterEach } from "bun:test";
 import { createServer, type Server } from "node:net";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { tmpdir, platform } from "node:os";
 import { mkdtempSync } from "node:fs";
 import { DaemonClient } from "../../src/daemon/client";
+
+const isWindows = platform() === "win32";
 
 describe("DaemonClient.isAvailable", () => {
   let server: Server | null = null;
   const tempDirs: string[] = [];
 
   function createTempSocketPath(): string {
+    if (isWindows) {
+      // Windows uses named pipes instead of Unix domain sockets
+      return `\\\\.\\pipe\\daemon-avail-test-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    }
     const dir = mkdtempSync(join(tmpdir(), "daemon-avail-test-"));
     tempDirs.push(dir);
     return join(dir, "test.sock");

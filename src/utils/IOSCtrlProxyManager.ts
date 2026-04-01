@@ -659,6 +659,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             logger.info("[IOSCtrlProxy] Downloading CtrlProxy bundle");
             buildResult = await perf.track("build", () => this.builder.build(this.isSimulator() ? "simulator" : "device", perf));
             if (!buildResult.success) {
+              this.attemptedSetup = false; // Allow retry on next call
               perf.end();
               return {
                 success: false,
@@ -683,6 +684,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         perfTiming: perf.getTimings()
       };
     } catch (error) {
+      this.attemptedSetup = false; // Allow retry on next call
       const errorMsg = error instanceof Error ? error.message : String(error);
       perf.end();
       return {

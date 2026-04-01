@@ -69,7 +69,7 @@ describe("CtrlProxyClient restart threshold", () => {
     expect(fakeManager.forceRestartCount).toBe(1);
   });
 
-  test("failures beyond threshold do not trigger additional restarts", async () => {
+  test("restart re-triggers every N failures via modulo", async () => {
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
 
@@ -84,15 +84,23 @@ describe("CtrlProxyClient restart threshold", () => {
       serviceManagerFactory,
     );
 
-    // Trigger 10 failures (well beyond threshold of 3)
-    for (let i = 0; i < 10; i++) {
-      await client.ensureConnected();
-    }
-
+    // Trigger 6 connection failures — restart should fire at failure #3 and #6
+    // DeviceServiceClient cooldown is 3 attempts with 10s reset, so we advance time
+    // between batches to allow more connection attempts
+    await client.ensureConnected(); // 1
+    await client.ensureConnected(); // 2
+    await client.ensureConnected(); // 3 → restart
     await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
-
-    // Still only 1 restart call — the === check prevents re-triggering at 4, 5, ..., 10
     expect(fakeManager.forceRestartCount).toBe(1);
+
+    // Advance past cooldown to allow more attempts
+    fakeTimer.advanceTime(11000);
+
+    await client.ensureConnected(); // 4
+    await client.ensureConnected(); // 5
+    await client.ensureConnected(); // 6 → restart again
+    await new Promise(resolve => fakeTimer.setTimeout(resolve, 10));
+    expect(fakeManager.forceRestartCount).toBe(2);
   });
 
   test("restart counter resets after successful connection allows re-triggering", async () => {

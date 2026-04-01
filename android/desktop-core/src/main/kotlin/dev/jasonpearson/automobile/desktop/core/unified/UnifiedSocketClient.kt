@@ -13,8 +13,6 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 import kotlin.time.Duration
 import kotlin.time.Duration.Companion.seconds
@@ -30,8 +28,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filter
-import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -39,11 +36,8 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonNull
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
-import kotlinx.serialization.json.decodeFromJsonElement
-import kotlinx.serialization.json.encodeToJsonElement
 
 /**
  * Interface for the unified socket client.
@@ -107,19 +101,23 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
     private val writeMutex = Mutex()
-    private val connected = AtomicBoolean(false)
-    private val shouldReconnect = AtomicBoolean(false)
-    private val reconnectAttempt = AtomicInteger(0)
     private var connectionJob: Job? = null
     private var readJob: Job? = null
+
+    private val _connectionState = MutableStateFlow<UnifiedConnectionState>(UnifiedConnectionState.Disconnected)
+    override val connectionState: StateFlow<UnifiedConnectionState> = _connectionState.asStateFlow()
+
+    private val isConnected: Boolean get() = _connectionState.value is UnifiedConnectionState.Connected
+    private val shouldReconnect: Boolean get() {
+        val current = _connectionState.value
+        return current is UnifiedConnectionState.Connecting ||
+            current is UnifiedConnectionState.Connected ||
+            current is UnifiedConnectionState.Reconnecting
+    }
 
     // Retry configuration
     private val initialRetryDelayMs = 1000L
     private val maxRetryDelayMs = 30000L
-
-    // Connection state
-    private val _connectionState = MutableStateFlow<UnifiedConnectionState>(UnifiedConnectionState.Disconnected)
-    override val connectionState: StateFlow<UnifiedConnectionState> = _connectionState.asStateFlow()
 
     // Pending request correlation
     private val pendingRequests = ConcurrentHashMap<String, CompletableDeferred<UnifiedMessage>>()
@@ -140,14 +138,13 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     )
 
     override suspend fun connect() {
-        if (connected.get()) {
+        if (isConnected) {
             log.info("Already connected to unified socket")
             return
         }
 
         connectionJob?.cancel()
-        shouldReconnect.set(true)
-        reconnectAttempt.set(0)
+        _connectionState.update { UnifiedConnectionState.Connecting }
 
         connectionJob = scope.launch {
             connectWithRetry()
@@ -156,14 +153,9 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
 
     private suspend fun connectWithRetry() {
         val socketPath = getSocketPath()
+        var attempt = 0
 
-        while (shouldReconnect.get()) {
-            val attempt = reconnectAttempt.get()
-
-            if (attempt == 0) {
-                _connectionState.value = UnifiedConnectionState.Connecting
-            }
-
+        while (shouldReconnect) {
             log.info("Connecting to unified socket at $socketPath (attempt ${attempt + 1})")
 
             try {
@@ -181,12 +173,11 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
                     OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
                 )
 
-                connected.set(true)
-                reconnectAttempt.set(0)
-                _connectionState.value = UnifiedConnectionState.Connected
+                _connectionState.update { UnifiedConnectionState.Connected }
+                attempt = 0
                 log.info("Connected to unified socket")
 
-                // Resubscribe to active subscriptions
+                // Resubscribe to active subscriptions (snapshot to avoid ConcurrentModificationException)
                 resubscribeAll()
 
                 // Start reading messages
@@ -194,32 +185,34 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
                 readJob?.join()
 
                 // If we get here, connection was lost
-                if (shouldReconnect.get()) {
+                if (shouldReconnect) {
                     log.info("Connection lost, will attempt to reconnect")
-                    reconnectAttempt.incrementAndGet()
+                    attempt++
+                    val delayMs = calculateBackoff(attempt)
+                    _connectionState.update { UnifiedConnectionState.Reconnecting(attempt, delayMs) }
                     failAllPendingRequests("Connection lost")
                 }
 
             } catch (e: Exception) {
                 cleanupConnection()
 
-                if (!shouldReconnect.get()) {
+                if (!shouldReconnect) {
                     log.info("Reconnection disabled, stopping connection attempts")
-                    _connectionState.value = UnifiedConnectionState.Disconnected
+                    _connectionState.update { UnifiedConnectionState.Disconnected }
                     return
                 }
 
-                val currentAttempt = reconnectAttempt.incrementAndGet()
-                val delayMs = calculateBackoff(currentAttempt)
+                attempt++
+                val delayMs = calculateBackoff(attempt)
 
-                log.warn("Failed to connect to unified socket (attempt $currentAttempt): ${e.message}. Retrying in ${delayMs}ms")
-                _connectionState.value = UnifiedConnectionState.Reconnecting(currentAttempt, delayMs)
+                log.warn("Failed to connect to unified socket (attempt $attempt): ${e.message}. Retrying in ${delayMs}ms")
+                _connectionState.update { UnifiedConnectionState.Reconnecting(attempt, delayMs) }
 
                 delay(delayMs)
             }
         }
 
-        _connectionState.value = UnifiedConnectionState.Disconnected
+        _connectionState.update { UnifiedConnectionState.Disconnected }
     }
 
     private fun calculateBackoff(attempt: Int): Long {
@@ -232,7 +225,6 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private class SocketNotFoundError(message: String) : Exception(message)
 
     override suspend fun disconnect() {
-        shouldReconnect.set(false)
         connectionJob?.cancel()
         connectionJob = null
         readJob?.cancel()
@@ -242,11 +234,10 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         subscriptions.clear()
         failAllPendingRequests("Disconnected")
 
-        _connectionState.value = UnifiedConnectionState.Disconnected
+        _connectionState.update { UnifiedConnectionState.Disconnected }
     }
 
     private fun cleanupConnection() {
-        connected.set(false)
         try {
             channel?.close()
         } catch (e: Exception) {
@@ -266,7 +257,9 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     }
 
     private suspend fun resubscribeAll() {
-        for ((subscriptionId, subscription) in subscriptions) {
+        // Snapshot entries before mutation to avoid ConcurrentModificationException
+        val snapshot = subscriptions.entries.toList()
+        for ((subscriptionId, subscription) in snapshot) {
             try {
                 val newSubId = sendSubscribe(subscription.domain, subscription.event, subscription.params)
                 // Update the subscription map with the new ID
@@ -283,7 +276,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         val currentReader = reader ?: return
 
         try {
-            while (connected.get()) {
+            while (isConnected) {
                 val line = currentReader.readLine() ?: break
                 if (line.isBlank()) continue
 
@@ -335,8 +328,9 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     private suspend fun handlePush(message: UnifiedMessage) {
         _pushMessages.emit(message)
 
-        // Route to subscription-specific flows
-        for ((subId, subscription) in subscriptions) {
+        // Route to subscription-specific flows (snapshot to avoid ConcurrentModificationException)
+        val snapshot = subscriptions.entries.toList()
+        for ((subId, subscription) in snapshot) {
             if (subscription.domain == message.domain) {
                 if (subscription.event == null || subscription.event == message.event) {
                     subscription.flow.tryEmit(message)
@@ -377,7 +371,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
         params: JsonElement?,
         timeout: Duration,
     ): T {
-        if (!connected.get()) {
+        if (!isConnected) {
             throw NotConnectedException()
         }
 
@@ -491,7 +485,7 @@ class UnifiedSocketClientImpl : UnifiedSocketClient {
     override suspend fun unsubscribe(subscriptionId: String) {
         val subscription = subscriptions.remove(subscriptionId)
 
-        if (!connected.get()) {
+        if (!isConnected) {
             return
         }
 

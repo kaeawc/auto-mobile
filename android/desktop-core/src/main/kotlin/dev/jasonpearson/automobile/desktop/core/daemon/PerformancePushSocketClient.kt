@@ -12,13 +12,16 @@ import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.UUID
-import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
@@ -49,8 +52,11 @@ class PerformancePushSocketClient {
     private var channel: SocketChannel? = null
     private var reader: BufferedReader? = null
     private var writer: BufferedWriter? = null
-    private val connected = AtomicBoolean(false)
-    private val subscribed = AtomicBoolean(false)
+
+    private val _state = MutableStateFlow<PushConnectionState>(PushConnectionState.Disconnected(null))
+    val connectionState: StateFlow<PushConnectionState> = _state.asStateFlow()
+
+    private val _isConnected: Boolean get() = _state.value is PushConnectionState.Connected
 
     // Flow for live performance data
     private val _performanceData = MutableSharedFlow<LivePerformanceData>(
@@ -60,17 +66,13 @@ class PerformancePushSocketClient {
     )
     val performanceData: SharedFlow<LivePerformanceData> = _performanceData.asSharedFlow()
 
-    // Flow for connection state
-    private val _connectionState = MutableSharedFlow<PushConnectionState>(replay = 1)
-    val connectionState: SharedFlow<PushConnectionState> = _connectionState.asSharedFlow()
-
     /**
      * Connect to the performance push socket and subscribe to updates.
      * @param deviceId Optional device ID to subscribe to. If null, subscribes to all devices.
      * @param packageName Optional package name to subscribe to. If null, subscribes to all packages.
      */
     fun connect(deviceId: String? = null, packageName: String? = null) {
-        if (connected.get()) {
+        if (_isConnected) {
             log.info("Already connected to performance push")
             return
         }
@@ -78,17 +80,13 @@ class PerformancePushSocketClient {
         val socketPath = getSocketPath()
         log.info("Connecting to performance push at $socketPath")
 
-        scope.launch {
-            _connectionState.emit(PushConnectionState.Connecting)
-        }
+        _state.update { PushConnectionState.Connecting }
 
         try {
             val path = Path.of(socketPath)
             if (!Files.exists(path)) {
                 log.warn("Performance push socket not found at $socketPath")
-                scope.launch {
-                    _connectionState.emit(PushConnectionState.Disconnected("Socket not found"))
-                }
+                _state.update { PushConnectionState.Disconnected("Socket not found") }
                 return
             }
 
@@ -101,7 +99,7 @@ class PerformancePushSocketClient {
                 OutputStreamWriter(Channels.newOutputStream(channel!!), StandardCharsets.UTF_8)
             )
 
-            connected.set(true)
+            _state.update { PushConnectionState.Connected(subscribed = false) }
             log.info("Connected to performance push")
 
             // Send subscribe request
@@ -114,17 +112,16 @@ class PerformancePushSocketClient {
 
         } catch (e: Exception) {
             log.warn("Failed to connect to performance push: ${e.message}")
-            scope.launch {
-                _connectionState.emit(PushConnectionState.Disconnected(e.message))
-            }
+            _state.update { PushConnectionState.Disconnected(e.message) }
         }
     }
 
     fun disconnect() {
-        if (!connected.get()) return
+        if (!_isConnected) return
 
         try {
-            if (subscribed.get()) {
+            val currentState = _state.value
+            if (currentState is PushConnectionState.Connected && currentState.subscribed) {
                 val request = PushRequest(
                     id = UUID.randomUUID().toString(),
                     command = "unsubscribe",
@@ -140,15 +137,10 @@ class PerformancePushSocketClient {
         channel = null
         reader = null
         writer = null
-        connected.set(false)
-        subscribed.set(false)
-
-        scope.launch {
-            _connectionState.emit(PushConnectionState.Disconnected(null))
-        }
+        _state.update { PushConnectionState.Disconnected(null) }
     }
 
-    fun isConnected(): Boolean = connected.get()
+    fun isConnected(): Boolean = _isConnected
 
     private fun subscribe(deviceId: String?, packageName: String?) {
         val request = PushRequest(
@@ -159,7 +151,13 @@ class PerformancePushSocketClient {
         )
 
         if (sendRequest(request)) {
-            subscribed.set(true)
+            _state.update { current ->
+                if (current is PushConnectionState.Connected) {
+                    current.copy(subscribed = true)
+                } else {
+                    current
+                }
+            }
             log.info("Subscribed to performance push (device: ${deviceId ?: "all"}, package: ${packageName ?: "all"})")
         }
     }
@@ -183,10 +181,9 @@ class PerformancePushSocketClient {
         val currentReader = reader ?: return
 
         try {
-            _connectionState.emit(PushConnectionState.Connected)
             log.info("Starting performance push message read loop")
 
-            while (connected.get()) {
+            while (_isConnected) {
                 val line = currentReader.readLine() ?: break
                 if (line.isBlank()) continue
 
@@ -200,9 +197,11 @@ class PerformancePushSocketClient {
             log.warn("Error reading from performance push: ${e.message}", e)
         }
 
-        connected.set(false)
-        subscribed.set(false)
-        _connectionState.emit(PushConnectionState.Disconnected("Stream ended"))
+        channel?.close()
+        channel = null
+        reader = null
+        writer = null
+        _state.update { PushConnectionState.Disconnected("Stream ended") }
         log.info("Performance push disconnected")
     }
 
@@ -305,6 +304,6 @@ data class PerformanceThresholds(
 
 sealed class PushConnectionState {
     data object Connecting : PushConnectionState()
-    data object Connected : PushConnectionState()
+    data class Connected(val subscribed: Boolean = false) : PushConnectionState()
     data class Disconnected(val reason: String?) : PushConnectionState()
 }

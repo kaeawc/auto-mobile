@@ -21,7 +21,7 @@ class FakeTelemetryPushClientTest {
 
         client.connect(null)
         assertTrue(client.isConnected())
-        assertEquals(TelemetryConnectionState.Connected, client.connectionState.first())
+        assertEquals(TelemetryConnectionState.Connected(), client.connectionState.first())
     }
 
     @Test
@@ -127,7 +127,7 @@ class FakeTelemetryPushClientTest {
         assertFalse(client.isConnected())
         assertEquals(reconnecting, client.connectionState.first())
 
-        client.setConnectionState(TelemetryConnectionState.Connected)
+        client.setConnectionState(TelemetryConnectionState.Connected())
         assertTrue(client.isConnected())
     }
 

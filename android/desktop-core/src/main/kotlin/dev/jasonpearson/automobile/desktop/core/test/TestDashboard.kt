@@ -49,6 +49,7 @@ import dev.jasonpearson.automobile.desktop.core.daemon.ScreenshotStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.TestRecordingClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -83,6 +84,7 @@ fun TestDashboard(
     fileSaver: dev.jasonpearson.automobile.desktop.core.platform.FileSaver =
         dev.jasonpearson.automobile.desktop.core.platform.SwingFileSaver,
 ) {
+  val graph = LocalAutoMobileGraph.current
   var currentScreen by remember { mutableStateOf(TestScreen.Dashboard) }
   var selectedTestRun by remember { mutableStateOf<TestRun?>(null) }
   var recordedActions by remember { mutableStateOf<List<RecordedAction>>(emptyList()) }
@@ -166,7 +168,7 @@ fun TestDashboard(
     error = null
     kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
       try {
-        val dataSource = DataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
+        val dataSource = graph.dataSourceFactory.createTestDataSource(dataSourceMode, clientProvider)
         when (val result = dataSource.getTestRuns()) {
           is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
             testRuns = result.data

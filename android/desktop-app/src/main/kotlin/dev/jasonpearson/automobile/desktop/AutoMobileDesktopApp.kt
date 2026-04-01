@@ -10,9 +10,9 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import dev.jasonpearson.automobile.desktop.core.AutoMobileContent
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.platform.NoOpNotificationHandler
 import dev.jasonpearson.automobile.desktop.core.platform.SourceFileOpener
-import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
@@ -22,7 +22,7 @@ import dev.jasonpearson.automobile.desktop.theme.AutoMobileTheme
  * enabling recomposition when the user changes the theme in settings.
  */
 private class ObservableSettingsProvider(
-    private val delegate: FakeSettingsProvider,
+    private val delegate: SettingsProvider,
 ) : SettingsProvider by delegate {
   private var _themeMode by mutableStateOf(delegate.themeMode)
   override var themeMode: String
@@ -32,7 +32,8 @@ private class ObservableSettingsProvider(
 
 @Composable
 fun AutoMobileDesktopApp(menuBarActions: MenuBarActions = remember { MenuBarActions() }) {
-  val settings = remember { ObservableSettingsProvider(FakeSettingsProvider()) }
+  val graphSettings = LocalAutoMobileGraph.current.settingsProvider
+  val settings = remember(graphSettings) { ObservableSettingsProvider(graphSettings) }
 
   AutoMobileTheme(themeMode = settings.themeMode) {
     Surface(

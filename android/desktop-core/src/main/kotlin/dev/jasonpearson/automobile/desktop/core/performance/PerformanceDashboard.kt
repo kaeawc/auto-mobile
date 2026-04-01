@@ -38,6 +38,7 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import androidx.compose.material3.MaterialTheme
 import dev.jasonpearson.automobile.desktop.core.components.Link
 import androidx.compose.material3.Text
@@ -65,6 +66,7 @@ fun PerformanceDashboard(
     initialTouchLatencyMs: Float? = null,
     initialRecompositionRate: Float? = null,
 ) {
+    val graph = LocalAutoMobileGraph.current
     var currentScreen by remember { mutableStateOf(PerformanceScreen.Overview) }
     var selectedMetric by remember { mutableStateOf<PerformanceMetric?>(null) }
 
@@ -435,7 +437,7 @@ fun PerformanceDashboard(
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
+                val dataSource = graph.dataSourceFactory.createPerformanceDataSource(dataSourceMode, clientProvider)
                 when (val result = dataSource.getPerformanceRun()) {
                     is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
                         // Only update if we still don't have data (stream might have pushed by now)

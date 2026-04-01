@@ -13,8 +13,8 @@ import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.NavigationGraphStreamUpdate
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
-import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.datasource.NavigationGraph
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.jasonpearson.automobile.desktop.core.settings.FakeSettingsProvider
@@ -37,6 +37,7 @@ fun NavigationDashboard(
     screenshotLoader: ScreenshotLoader? = null,  // Screenshot loader (hoisted to parent so cache persists across toggles)
     settingsProvider: SettingsProvider = FakeSettingsProvider(),  // Settings provider (caller injects real impl)
 ) {
+    val graph = LocalAutoMobileGraph.current
     var currentSection by remember { mutableStateOf(NavigationSection.FlowMap) }
     var selectedScreenId by remember { mutableStateOf<String?>(null) }
     var selectedTransitionId by remember { mutableStateOf<String?>(null) }
@@ -66,7 +67,7 @@ fun NavigationDashboard(
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = DataSourceFactory.createNavigationDataSource(
+                val dataSource = graph.dataSourceFactory.createNavigationDataSource(
                     dataSourceMode,
                     clientProvider,
                     selectedAppId

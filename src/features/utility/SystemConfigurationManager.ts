@@ -699,6 +699,16 @@ export class SystemConfigurationManager {
         this.iosSpawnCommand(`defaults write .GlobalPreferences AppleLanguages -array ${arrayArgs}`)
       );
 
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
+      if (!readBack || readBack !== appleLocale) {
+        return {
+          success: false,
+          languageTag,
+          previousLanguageTag,
+          error: `Read-back verification failed: expected "${appleLocale}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         languageTag,
@@ -732,6 +742,17 @@ export class SystemConfigurationManager {
       );
 
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleTimeZone", zoneId);
+
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
+      if (!readBack || readBack !== zoneId) {
+        return {
+          success: false,
+          zoneId,
+          previousZoneId,
+          error: `Read-back verification failed: expected "${zoneId}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         zoneId,
@@ -760,6 +781,18 @@ export class SystemConfigurationManager {
 
       const boolValue = enabled ? "-bool YES" : "-bool NO";
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleICUForce24HourTime", boolValue);
+
+      const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
+      const expectedReadBack = enabled ? "1" : "0";
+      if (!readBack || readBack !== expectedReadBack) {
+        return {
+          success: false,
+          enabled,
+          previousFormat,
+          error: `Read-back verification failed: expected "${expectedReadBack}" but got "${readBack ?? "null"}"`
+        };
+      }
+
       return {
         success: true,
         enabled,

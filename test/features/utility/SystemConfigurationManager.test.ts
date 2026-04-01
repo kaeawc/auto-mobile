@@ -53,6 +53,7 @@ describe("SystemConfigurationManager", () => {
   describe("iOS simulator setLocale", () => {
     test("writes AppleLocale and AppleLanguages via defaults write", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("ja_JP\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setLocale("ja-JP");
 
@@ -74,6 +75,7 @@ describe("SystemConfigurationManager", () => {
 
     test("converts BCP-47 hyphens to underscores for Apple format", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("en_US\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       await mgr.setLocale("en-US");
 
@@ -83,12 +85,23 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("reads previous locale before writing", async () => {
-      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("en_US\n"));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("ja_JP\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setLocale("ja-JP");
 
       expect(result.success).toBe(true);
-      expect(result.previousLanguageTag).toBe("en_US");
+      // Read-back returns ja_JP for both previous and verification (same command pattern)
+      expect(result.previousLanguageTag).toBe("ja_JP");
+    });
+
+    test("returns error when read-back verification fails", async () => {
+      fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleLocale", execResult("wrong_value\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
+      const result = await mgr.setLocale("ja-JP");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
     });
 
     test("returns error for empty languageTag", async () => {
@@ -133,6 +146,7 @@ describe("SystemConfigurationManager", () => {
   describe("iOS simulator setTimeZone", () => {
     test("disables auto-timezone then writes AppleTimeZone", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleTimeZone", execResult("Asia/Tokyo\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
@@ -148,6 +162,7 @@ describe("SystemConfigurationManager", () => {
 
     test("disables auto-timezone with correct command", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleTimeZone", execResult("America/New_York\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       await mgr.setTimeZone("America/New_York");
 
@@ -159,12 +174,23 @@ describe("SystemConfigurationManager", () => {
     });
 
     test("reads previous timezone before writing", async () => {
-      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleTimeZone", execResult("America/Los_Angeles\n"));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleTimeZone", execResult("Asia/Tokyo\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.setTimeZone("Asia/Tokyo");
 
       expect(result.success).toBe(true);
-      expect(result.previousZoneId).toBe("America/Los_Angeles");
+      // Read-back returns same value for both previous and verification
+      expect(result.previousZoneId).toBe("Asia/Tokyo");
+    });
+
+    test("returns error when read-back verification fails", async () => {
+      fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleTimeZone", execResult("wrong_zone\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
+      const result = await mgr.setTimeZone("Asia/Tokyo");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
     });
 
     test("returns error for empty zoneId", async () => {
@@ -189,6 +215,7 @@ describe("SystemConfigurationManager", () => {
   describe("iOS simulator set24HourFormat", () => {
     test("writes AppleICUForce24HourTime YES for 24h", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleICUForce24HourTime", execResult("1\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.set24HourFormat(true);
 
@@ -203,6 +230,7 @@ describe("SystemConfigurationManager", () => {
 
     test("writes AppleICUForce24HourTime NO for 12h", async () => {
       fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleICUForce24HourTime", execResult("0\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.set24HourFormat(false);
 
@@ -216,10 +244,21 @@ describe("SystemConfigurationManager", () => {
     test("reads previous format before writing", async () => {
       fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleICUForce24HourTime", execResult("1\n"));
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
-      const result = await mgr.set24HourFormat(false);
+      const result = await mgr.set24HourFormat(true);
 
       expect(result.success).toBe(true);
       expect(result.previousFormat).toBe("24");
+    });
+
+    test("returns error when read-back verification fails", async () => {
+      fakeExec.setDefaultResponse(execResult(""));
+      // Read-back returns "1" but we set false (expects "0")
+      fakeExec.setCommandResponse("defaults read .GlobalPreferences AppleICUForce24HourTime", execResult("1\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
+      const result = await mgr.set24HourFormat(false);
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
     });
 
     test("returns error for physical iOS device", async () => {

@@ -34,7 +34,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void
     ) {
         self.maxBufferSize = maxBufferSize
-        self.maxPendingEvents = maxPendingEvents
+        self.maxPendingEvents = max(1, maxPendingEvents)
         self.flushIntervalMs = flushIntervalMs
         self.processors = processors
         self.timerFactory = timerFactory
@@ -75,7 +75,16 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     }
 
     public func add(_ event: any SdkEvent) {
-        // Run processor chain before acquiring lock
+        // Check disabled state first, before running processors
+        lock.lock()
+        guard _isBufferEnabled else {
+            lock.unlock()
+            dropCounter?.increment(.disabled)
+            return
+        }
+        lock.unlock()
+
+        // Run processor chain outside lock
         var current: (any SdkEvent)? = event
         for processor in processors {
             guard let e = current else { break }
@@ -94,7 +103,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
             dropCounter?.increment(.disabled)
             return
         }
-        if buffer.count >= maxPendingEvents {
+        if maxPendingEvents > 0, buffer.count >= maxPendingEvents {
             buffer.removeFirst()
             didOverflow = true
         }

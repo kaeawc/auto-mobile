@@ -58,26 +58,30 @@ describe("DaemonManager file lock", () => {
       manager.releaseLock();
     });
 
-    test("fails when lock file contains invalid content", () => {
+    test("treats invalid PID content as actively held (not stale)", () => {
       const lockPath = createTempLockPath();
       writeFileSync(lockPath, "not-a-pid");
 
       const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
-      // NaN PID → treated as stale → cleaned up → re-acquired
-      expect(manager.acquireLock()).toBe(true);
+      // NaN PID → treated as actively held to avoid race with concurrent writer
+      expect(manager.acquireLock()).toBe(false);
 
-      manager.releaseLock();
+      // Clean up
+      const { unlinkSync } = require("node:fs");
+      unlinkSync(lockPath);
     });
 
-    test("fails when lock file is empty", () => {
+    test("treats empty lock file as actively held (writer still writing)", () => {
       const lockPath = createTempLockPath();
       writeFileSync(lockPath, "");
 
       const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
-      // Empty → parseInt returns NaN → treated as stale → re-acquired
-      expect(manager.acquireLock()).toBe(true);
+      // Empty → writer just created the file, hasn't written PID yet
+      expect(manager.acquireLock()).toBe(false);
 
-      manager.releaseLock();
+      // Clean up
+      const { unlinkSync } = require("node:fs");
+      unlinkSync(lockPath);
     });
   });
 

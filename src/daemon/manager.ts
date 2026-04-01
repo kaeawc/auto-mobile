@@ -83,11 +83,21 @@ export class DaemonManager {
     }
     // Lock file exists — check if owning process is alive
     try {
-      const ownerPid = parseInt(readFileSync(this.lockFilePath, "utf-8").trim(), 10);
-      if (!isNaN(ownerPid) && this.isProcessRunning(ownerPid)) {
+      const content = readFileSync(this.lockFilePath, "utf-8").trim();
+      if (content.length === 0) {
+        // Empty file — another process just created it and hasn't written PID yet.
+        // Treat as actively held to avoid race condition.
         return false;
       }
-      // Owner is dead or PID unreadable — stale lock, remove and retry once
+      const ownerPid = parseInt(content, 10);
+      if (isNaN(ownerPid)) {
+        // Unreadable PID — treat as actively held (writer may still be writing)
+        return false;
+      }
+      if (this.isProcessRunning(ownerPid)) {
+        return false;
+      }
+      // Owner is dead — stale lock, remove and retry once
       unlinkSync(this.lockFilePath);
       return this.writeLockFile();
     } catch {
@@ -183,6 +193,13 @@ export class DaemonManager {
         } finally {
           this.releaseLock();
         }
+        return;
+      }
+      // Another process won the retry race — wait for it to finish
+      stderrLog("Another process is retrying daemon start, waiting...");
+      const retryReady = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+      if (retryReady) {
+        stderrLog("Daemon started by another process (retry)");
         return;
       }
       throw new ActionableError(

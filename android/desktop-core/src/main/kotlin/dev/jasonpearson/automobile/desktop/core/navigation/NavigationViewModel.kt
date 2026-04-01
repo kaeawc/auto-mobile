@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 private val LOG = LoggerFactory.getLogger("NavigationViewModel")
@@ -98,44 +99,48 @@ class NavigationViewModel(
     }
 
     private fun selectScreen(screenId: String) {
-        val current = _state.value
-        if (current is NavigationUiState.Content) {
-            _state.value = current.copy(
+        _state.update { current ->
+            (current as? NavigationUiState.Content)?.copy(
                 selectedScreenId = screenId,
                 currentSection = NavigationSection.ScreenDetail,
-            )
+            ) ?: current
         }
     }
 
     private fun selectScreenByName(screenName: String) {
-        val current = _state.value
-        if (current is NavigationUiState.Content) {
-            val screen = current.graph.screens.find { it.name == screenName }
-            if (screen != null) {
-                _state.value = current.copy(
-                    selectedScreenId = screen.id,
-                    currentSection = NavigationSection.ScreenDetail,
-                )
+        _state.update { current ->
+            if (current is NavigationUiState.Content) {
+                val screen = current.graph.screens.find { it.name == screenName }
+                if (screen != null) {
+                    current.copy(
+                        selectedScreenId = screen.id,
+                        currentSection = NavigationSection.ScreenDetail,
+                    )
+                } else {
+                    current
+                }
+            } else {
+                current
             }
         }
     }
 
     private fun backToFlowMap() {
-        val current = _state.value
-        if (current is NavigationUiState.Content) {
-            _state.value = current.copy(
+        _state.update { current ->
+            (current as? NavigationUiState.Content)?.copy(
                 selectedScreenId = null,
                 currentSection = NavigationSection.FlowMap,
-            )
+            ) ?: current
         }
     }
 
     private fun updateGraph(graph: NavigationGraph) {
-        val current = _state.value
-        if (current is NavigationUiState.Content) {
-            _state.value = current.copy(graph = graph)
-        } else {
-            _state.value = NavigationUiState.Content(graph = graph)
+        _state.update { current ->
+            if (current is NavigationUiState.Content) {
+                current.copy(graph = graph)
+            } else {
+                NavigationUiState.Content(graph = graph)
+            }
         }
     }
 }

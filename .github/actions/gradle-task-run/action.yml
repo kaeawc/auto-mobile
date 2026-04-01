@@ -258,6 +258,6 @@ runs:
       uses: actions/upload-artifact@v4.4.0
       if: success()
       with:
-        name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}
+        name: config-cache-report-${{ steps.sanitize-name.outputs.sanitized_name }}-${{ runner.os }}
         path: |
           ${{ inputs.gradle-project-directory }}/build/reports/config-cache-report.html

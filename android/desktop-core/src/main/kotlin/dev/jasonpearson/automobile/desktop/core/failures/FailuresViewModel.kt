@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.receiveAsFlow
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 
 private val LOG = LoggerFactory.getLogger("FailuresViewModel")
@@ -100,42 +101,41 @@ class FailuresViewModel(
     }
 
     private fun selectFailure(failure: FailureGroup) {
-        val current = _state.value
-        if (current is FailuresUiState.Content) {
-            _state.value = current.copy(selectedFailure = failure)
+        _state.update { current ->
+            (current as? FailuresUiState.Content)?.copy(selectedFailure = failure) ?: current
         }
     }
 
     private fun clearSelection() {
-        val current = _state.value
-        if (current is FailuresUiState.Content) {
-            _state.value = current.copy(selectedFailure = null)
+        _state.update { current ->
+            (current as? FailuresUiState.Content)?.copy(selectedFailure = null) ?: current
         }
     }
 
     private fun filterByType(type: FailureType?) {
-        val current = _state.value
-        if (current is FailuresUiState.Content) {
-            _state.value = current.copy(filterType = type)
+        _state.update { current ->
+            (current as? FailuresUiState.Content)?.copy(filterType = type) ?: current
         }
     }
 
     private fun selectFailureById(failureId: String) {
-        val current = _state.value
-        if (current is FailuresUiState.Content) {
-            val target = current.failureGroups.find { it.id == failureId }
-            if (target != null) {
-                _state.value = current.copy(selectedFailure = target)
+        _state.update { current ->
+            if (current is FailuresUiState.Content) {
+                val target = current.failureGroups.find { it.id == failureId }
+                if (target != null) current.copy(selectedFailure = target) else current
+            } else {
+                current
             }
         }
     }
 
     private fun updateGroups(groups: List<FailureGroup>) {
-        val current = _state.value
-        if (current is FailuresUiState.Content) {
-            _state.value = current.copy(failureGroups = groups)
-        } else {
-            _state.value = FailuresUiState.Content(failureGroups = groups)
+        _state.update { current ->
+            if (current is FailuresUiState.Content) {
+                current.copy(failureGroups = groups)
+            } else {
+                FailuresUiState.Content(failureGroups = groups)
+            }
         }
     }
 }

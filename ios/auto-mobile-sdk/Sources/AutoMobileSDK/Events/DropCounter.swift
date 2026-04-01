@@ -5,6 +5,9 @@ public enum DropReason: String, Codable, Sendable, CaseIterable {
     case disabled
     case shutdown
     case flushError
+    case bufferOverflow
+    case filtered
+    case deliveryFailed
 }
 
 /// Tracks dropped event counts by reason.

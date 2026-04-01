@@ -68,6 +68,8 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let buffer = SdkEventBuffer(
             maxBufferSize: configuration.bufferSize,
             flushIntervalMs: configuration.flushIntervalMs,
+            maxPendingEvents: configuration.maxPendingEvents,
+            processors: configuration.eventProcessors,
             dropCounter: counter
         ) { [weak self] events in
             let bundleId = self?.bundleId
@@ -286,6 +288,14 @@ public final class AutoMobileSDK: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         return _dropCounter
+    }
+
+    /// Returns a snapshot of drop counts by reason.
+    public var dropReport: [DropReason: Int] {
+        lock.lock()
+        let counter = _dropCounter
+        lock.unlock()
+        return counter?.snapshot() ?? [:]
     }
 
     // MARK: - Testing Support

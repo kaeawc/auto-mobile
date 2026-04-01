@@ -101,3 +101,138 @@ final class SdkEventBufferTests: XCTestCase {
         XCTAssertTrue(fakeTimer.isCancelled)
     }
 }
+
+// MARK: - Event Processor Tests
+
+final class EventProcessorTests: XCTestCase {
+    func testProcessorDropsEventsWithSpecificName() {
+        let collector = EventCollector()
+        let dropProcessor = FakeEventProcessor { event in
+            if let custom = event as? SdkCustomEvent, custom.name == "drop_me" {
+                return nil
+            }
+            return event
+        }
+        let dropCounter = FakeDropCounter()
+
+        let buffer = SdkEventBuffer(
+            maxBufferSize: 100,
+            flushIntervalMs: 60000,
+            processors: [dropProcessor],
+            dropCounter: dropCounter
+        ) { events in
+            collector.collect(events)
+        }
+
+        buffer.add(SdkCustomEvent(name: "keep_me"))
+        buffer.add(SdkCustomEvent(name: "drop_me"))
+        buffer.add(SdkCustomEvent(name: "also_keep"))
+        buffer.flush()
+
+        XCTAssertEqual(collector.events.count, 2)
+        let names = collector.events.compactMap { ($0 as? SdkCustomEvent)?.name }
+        XCTAssertEqual(names, ["keep_me", "also_keep"])
+        XCTAssertEqual(dropCounter.snapshot()[.filtered], 1)
+    }
+
+    func testProcessorEnrichesEvents() {
+        let collector = EventCollector()
+        let enrichProcessor = FakeEventProcessor { event in
+            if let custom = event as? SdkCustomEvent {
+                var props = custom.properties
+                props["enriched"] = "true"
+                return SdkCustomEvent(
+                    timestamp: custom.timestamp,
+                    name: custom.name,
+                    properties: props
+                )
+            }
+            return event
+        }
+
+        let buffer = SdkEventBuffer(
+            maxBufferSize: 100,
+            flushIntervalMs: 60000,
+            processors: [enrichProcessor]
+        ) { events in
+            collector.collect(events)
+        }
+
+        buffer.add(SdkCustomEvent(name: "test"))
+        buffer.flush()
+
+        XCTAssertEqual(collector.events.count, 1)
+        let custom = collector.events.first as? SdkCustomEvent
+        XCTAssertEqual(custom?.properties["enriched"], "true")
+    }
+
+    func testProcessorChainingEnrichThenFilter() {
+        let collector = EventCollector()
+
+        let enrichProcessor = FakeEventProcessor { event in
+            if let custom = event as? SdkCustomEvent {
+                var props = custom.properties
+                props["level"] = "high"
+                return SdkCustomEvent(
+                    timestamp: custom.timestamp,
+                    name: custom.name,
+                    properties: props
+                )
+            }
+            return event
+        }
+
+        let filterProcessor = FakeEventProcessor { event in
+            if let custom = event as? SdkCustomEvent, custom.name == "secret" {
+                return nil
+            }
+            return event
+        }
+
+        let dropCounter = FakeDropCounter()
+        let buffer = SdkEventBuffer(
+            maxBufferSize: 100,
+            flushIntervalMs: 60000,
+            processors: [enrichProcessor, filterProcessor],
+            dropCounter: dropCounter
+        ) { events in
+            collector.collect(events)
+        }
+
+        buffer.add(SdkCustomEvent(name: "visible"))
+        buffer.add(SdkCustomEvent(name: "secret"))
+        buffer.flush()
+
+        XCTAssertEqual(collector.events.count, 1)
+        let custom = collector.events.first as? SdkCustomEvent
+        XCTAssertEqual(custom?.name, "visible")
+        XCTAssertEqual(custom?.properties["level"], "high")
+        XCTAssertEqual(dropCounter.snapshot()[.filtered], 1)
+    }
+
+    func testBufferOverflowDropsOldestEvent() {
+        let collector = EventCollector()
+        let dropCounter = FakeDropCounter()
+
+        let buffer = SdkEventBuffer(
+            maxBufferSize: 100,
+            flushIntervalMs: 60000,
+            maxPendingEvents: 3,
+            dropCounter: dropCounter
+        ) { events in
+            collector.collect(events)
+        }
+
+        buffer.add(SdkCustomEvent(name: "e1"))
+        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkCustomEvent(name: "e3"))
+        // Buffer is now full (3/3). Next add should drop oldest.
+        buffer.add(SdkCustomEvent(name: "e4"))
+        buffer.add(SdkCustomEvent(name: "e5"))
+        buffer.flush()
+
+        let names = collector.events.compactMap { ($0 as? SdkCustomEvent)?.name }
+        XCTAssertEqual(names, ["e3", "e4", "e5"])
+        XCTAssertEqual(dropCounter.snapshot()[.bufferOverflow], 2)
+    }
+}

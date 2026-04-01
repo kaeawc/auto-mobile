@@ -238,7 +238,7 @@ object AutoMobileSDK {
         listener.onNavigationEvent(event)
       } catch (e: Exception) {
         // Catch exceptions to prevent one listener from breaking others
-        logger.e(TAG, { "Listener threw" }, e)
+        logger.e(TAG, e) { "Listener threw" }
       }
     }
 

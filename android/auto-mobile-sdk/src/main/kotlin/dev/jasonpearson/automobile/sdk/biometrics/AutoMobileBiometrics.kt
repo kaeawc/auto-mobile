@@ -181,7 +181,7 @@ object AutoMobileBiometrics {
             receiverRegistered = true
             AutoMobileSDK.logger.d(TAG) { "Biometric override broadcast receiver registered" }
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Failed to register biometric override receiver" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to register biometric override receiver" }
         }
     }
 

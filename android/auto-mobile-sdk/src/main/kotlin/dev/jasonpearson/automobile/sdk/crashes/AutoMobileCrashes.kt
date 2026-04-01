@@ -122,7 +122,7 @@ object AutoMobileCrashes {
                 // Broadcast the crash before the app terminates
                 broadcastCrash(thread, throwable)
             } catch (e: Exception) {
-                AutoMobileSDK.logger.e(TAG, { "Failed to broadcast crash" }, e)
+                AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
             }
 
             // Call the original handler to preserve default crash behavior
@@ -235,7 +235,7 @@ object AutoMobileCrashes {
 
             AutoMobileSDK.logger.i(TAG) { "Broadcasted crash: ${throwable.javaClass.name} on thread ${thread.name}" }
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Failed to broadcast crash" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast crash" }
         }
     }
 
@@ -297,7 +297,7 @@ object AutoMobileCrashes {
             }
             packageInfo.versionName
         } catch (e: Exception) {
-            AutoMobileSDK.logger.w(TAG, { "Failed to get app version" }, e)
+            AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
             null
         }
     }

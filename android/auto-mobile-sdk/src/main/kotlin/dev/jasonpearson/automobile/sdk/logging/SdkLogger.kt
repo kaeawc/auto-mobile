@@ -12,8 +12,8 @@ import android.util.Log
 internal interface SdkLogger {
     fun d(tag: String, msg: () -> String)
     fun i(tag: String, msg: () -> String)
-    fun w(tag: String, msg: () -> String, tr: Throwable? = null)
-    fun e(tag: String, msg: () -> String, tr: Throwable? = null)
+    fun w(tag: String, tr: Throwable? = null, msg: () -> String)
+    fun e(tag: String, tr: Throwable? = null, msg: () -> String)
 }
 
 /** Default implementation that delegates to [android.util.Log]. */
@@ -26,11 +26,11 @@ internal class DefaultSdkLogger : SdkLogger {
         Log.i(tag, msg())
     }
 
-    override fun w(tag: String, msg: () -> String, tr: Throwable?) {
+    override fun w(tag: String, tr: Throwable?, msg: () -> String) {
         if (tr != null) Log.w(tag, msg(), tr) else Log.w(tag, msg())
     }
 
-    override fun e(tag: String, msg: () -> String, tr: Throwable?) {
+    override fun e(tag: String, tr: Throwable?, msg: () -> String) {
         if (tr != null) Log.e(tag, msg(), tr) else Log.e(tag, msg())
     }
 }
@@ -39,6 +39,6 @@ internal class DefaultSdkLogger : SdkLogger {
 internal object NoOpSdkLogger : SdkLogger {
     override fun d(tag: String, msg: () -> String) = Unit
     override fun i(tag: String, msg: () -> String) = Unit
-    override fun w(tag: String, msg: () -> String, tr: Throwable?) = Unit
-    override fun e(tag: String, msg: () -> String, tr: Throwable?) = Unit
+    override fun w(tag: String, tr: Throwable?, msg: () -> String) = Unit
+    override fun e(tag: String, tr: Throwable?, msg: () -> String) = Unit
 }

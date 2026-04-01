@@ -121,7 +121,7 @@ object AutoMobileAnr {
                 AutoMobileSDK.logger.d(TAG) { "Updated last reported timestamp to $newestReportedTimestamp" }
             }
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Error checking for previous ANRs" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Error checking for previous ANRs" }
         }
     }
 
@@ -132,7 +132,7 @@ object AutoMobileAnr {
             val trace = try {
                 exitInfo.traceInputStream?.bufferedReader()?.use { it.readText() }
             } catch (e: Exception) {
-                AutoMobileSDK.logger.w(TAG, { "Failed to read ANR trace" }, e)
+                AutoMobileSDK.logger.w(TAG, e) { "Failed to read ANR trace" }
                 null
             }
 
@@ -165,7 +165,7 @@ object AutoMobileAnr {
             context.sendBroadcast(intent)
             AutoMobileSDK.logger.i(TAG) { "Broadcasted ANR: pid=${exitInfo.pid}, process=${exitInfo.processName}" }
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Failed to broadcast ANR" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast ANR" }
         }
     }
 
@@ -196,7 +196,7 @@ object AutoMobileAnr {
             }
             packageInfo.versionName
         } catch (e: Exception) {
-            AutoMobileSDK.logger.w(TAG, { "Failed to get app version" }, e)
+            AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
             null
         }
     }

@@ -26,11 +26,11 @@ internal class FakeSdkLogger : SdkLogger {
         _entries.add(LogEntry("I", tag, msg()))
     }
 
-    override fun w(tag: String, msg: () -> String, tr: Throwable?) {
+    override fun w(tag: String, tr: Throwable?, msg: () -> String) {
         _entries.add(LogEntry("W", tag, msg(), tr))
     }
 
-    override fun e(tag: String, msg: () -> String, tr: Throwable?) {
+    override fun e(tag: String, tr: Throwable?, msg: () -> String) {
         _entries.add(LogEntry("E", tag, msg(), tr))
     }
 

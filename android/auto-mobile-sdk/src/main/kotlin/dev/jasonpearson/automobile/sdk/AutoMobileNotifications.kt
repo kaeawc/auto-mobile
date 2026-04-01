@@ -137,7 +137,7 @@ object AutoMobileNotifications {
       notificationManager.notify(notificationId, builder.build())
       true
     } catch (e: Exception) {
-      AutoMobileSDK.logger.e(TAG, { "Failed to post notification" }, e)
+      AutoMobileSDK.logger.e(TAG, e) { "Failed to post notification" }
       false
     }
   }
@@ -211,7 +211,7 @@ object AutoMobileNotifications {
             context.contentResolver.openInputStream(android.net.Uri.parse(trimmed))
         )
       } catch (e: Exception) {
-        AutoMobileSDK.logger.w(TAG, { "Failed to open content URI for image" }, e)
+        AutoMobileSDK.logger.w(TAG, e) { "Failed to open content URI for image" }
         null
       }
     }
@@ -234,7 +234,7 @@ object AutoMobileNotifications {
             return decodeBitmapFromStream(stream)
           }
         } catch (e: Exception) {
-          AutoMobileSDK.logger.w(TAG, { "Failed to read image file at $path" }, e)
+          AutoMobileSDK.logger.w(TAG, e) { "Failed to read image file at $path" }
         }
       }
     }
@@ -247,7 +247,7 @@ object AutoMobileNotifications {
       val bytes = Base64.decode(base64Data, Base64.DEFAULT)
       decodeBitmapFromBytes(bytes)
     } catch (e: Exception) {
-      AutoMobileSDK.logger.w(TAG, { "Failed to decode base64 image" }, e)
+      AutoMobileSDK.logger.w(TAG, e) { "Failed to decode base64 image" }
       null
     }
   }

@@ -183,7 +183,7 @@ class SharedPreferencesDriverImpl(
       context.contentResolver.notifyChange(uri, null)
     } catch (e: Exception) {
       // Log but don't fail if notification fails
-      AutoMobileSDK.logger.w("SharedPreferencesDriver", { "Failed to notify change" }, e)
+      AutoMobileSDK.logger.w("SharedPreferencesDriver", e) { "Failed to notify change" }
     }
   }
 

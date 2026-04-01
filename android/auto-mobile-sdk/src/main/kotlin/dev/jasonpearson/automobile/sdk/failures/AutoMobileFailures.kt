@@ -109,7 +109,7 @@ object AutoMobileFailures {
             storeEvent(event)
             broadcastEvent(ctx, event)
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Failed to record handled exception" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to record handled exception" }
         }
     }
 
@@ -228,7 +228,7 @@ object AutoMobileFailures {
             context.sendBroadcast(intent)
             AutoMobileSDK.logger.d(TAG) { "Broadcasted handled exception: ${event.exceptionClass}" }
         } catch (e: Exception) {
-            AutoMobileSDK.logger.e(TAG, { "Failed to broadcast handled exception" }, e)
+            AutoMobileSDK.logger.e(TAG, e) { "Failed to broadcast handled exception" }
         }
     }
 
@@ -246,7 +246,7 @@ object AutoMobileFailures {
                 }
             packageInfo.versionName
         } catch (e: Exception) {
-            AutoMobileSDK.logger.w(TAG, { "Failed to get app version" }, e)
+            AutoMobileSDK.logger.w(TAG, e) { "Failed to get app version" }
             null
         }
     }

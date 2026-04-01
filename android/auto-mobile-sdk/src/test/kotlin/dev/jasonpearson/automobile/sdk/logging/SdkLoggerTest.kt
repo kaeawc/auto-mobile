@@ -30,7 +30,7 @@ class SdkLoggerTest {
     fun `FakeSdkLogger records warning with throwable`() {
         val logger = FakeSdkLogger()
         val ex = RuntimeException("boom")
-        logger.w("Tag", { "warn" }, ex)
+        logger.w("Tag", ex) { "warn" }
         val entry = logger.entries.first()
         assertEquals("W", entry.level)
         assertEquals("warn", entry.message)
@@ -50,7 +50,7 @@ class SdkLoggerTest {
     fun `FakeSdkLogger records error with throwable`() {
         val logger = FakeSdkLogger()
         val ex = IllegalStateException("bad")
-        logger.e("Tag", { "error" }, ex)
+        logger.e("Tag", ex) { "error" }
         val entry = logger.entries.first()
         assertEquals("E", entry.level)
         assertEquals(ex, entry.throwable)
@@ -76,14 +76,14 @@ class SdkLoggerTest {
     @Test
     fun `NoOpSdkLogger warning does not evaluate message lambda`() {
         var evaluated = false
-        NoOpSdkLogger.w("Tag", { evaluated = true; "msg" }, RuntimeException())
+        NoOpSdkLogger.w("Tag", RuntimeException()) { evaluated = true; "msg" }
         assertTrue(!evaluated)
     }
 
     @Test
     fun `NoOpSdkLogger error does not evaluate message lambda`() {
         var evaluated = false
-        NoOpSdkLogger.e("Tag", { evaluated = true; "msg" }, RuntimeException())
+        NoOpSdkLogger.e("Tag", RuntimeException()) { evaluated = true; "msg" }
         assertTrue(!evaluated)
     }
 

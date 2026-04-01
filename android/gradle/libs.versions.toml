@@ -46,6 +46,7 @@ robolectric = "4.16.1"
 snakeyaml = "2.6"
 json-schema-validator = "3.0.1"
 test-junit = "4.13.2"
+turbine = "1.2.0"
 test-androidx-junit = "1.3.0"
 test-androidx-espresso = "3.7.0"
 
@@ -97,6 +98,7 @@ navigation3-runtime = { module = "androidx.navigation3:navigation3-runtime", ver
 navigation3-ui = { module = "androidx.navigation3:navigation3-ui", version.ref = "navigation3" }
 
 robolectric = { module = "org.robolectric:robolectric", version.ref = "robolectric" }
+turbine = { module = "app.cash.turbine:turbine", version.ref = "turbine" }
 snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 json-schema-validator = { module = "com.networknt:json-schema-validator", version.ref = "json-schema-validator" }
 

@@ -1,18 +1,13 @@
 package dev.jasonpearson.automobile.desktop.core.datasource
 
-import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ClearKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
-import dev.jasonpearson.automobile.desktop.core.daemon.McpResourceContent
 import dev.jasonpearson.automobile.desktop.core.daemon.RemoveKeyValueResult
 import dev.jasonpearson.automobile.desktop.core.daemon.SetKeyValueResult
-import dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery
-import dev.jasonpearson.automobile.desktop.core.daemon.TestTimingQuery
 import dev.jasonpearson.automobile.desktop.core.storage.KeyValueType
 import dev.jasonpearson.automobile.desktop.core.storage.StoragePlatform
+import dev.jasonpearson.automobile.desktop.core.testing.FakeAutoMobileClient
 import kotlinx.coroutines.runBlocking
-import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.JsonObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -32,7 +27,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles returns error when no deviceId`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = null,
@@ -47,7 +42,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles returns error when no packageName`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -62,7 +57,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles successfully parses MCP files response`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
 
         // Set up files response
         val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
@@ -125,7 +120,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles handles MCP connection error`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         client.throwOnReadResource = McpConnectionException("Connection failed")
 
         val dataSource = RealStorageDataSource(
@@ -142,7 +137,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles handles error in MCP response`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
 
         val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
         val filesResponse = """
@@ -166,7 +161,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles returns empty list when no files`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
 
         val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
         val filesResponse = """
@@ -194,7 +189,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getKeyValueFiles parses all value types correctly`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
 
         val filesUri = "automobile:devices/emulator-5554/storage/com.example.app/files"
         val filesResponse = """
@@ -263,7 +258,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getDatabases returns error when no deviceId`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = null,
@@ -278,7 +273,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getDatabases returns error when no packageName`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -293,7 +288,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `getDatabases successfully parses MCP databases response`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
 
         val dbsUri = "automobile:devices/emulator-5554/databases?appId=com.example.app"
         client.setResourceResponseWithText(dbsUri, """
@@ -362,7 +357,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `setKeyValue returns error when no deviceId`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = null,
@@ -377,7 +372,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `setKeyValue returns error when no packageName`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -392,7 +387,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `setKeyValue succeeds and passes correct arguments`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -413,7 +408,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `setKeyValue passes null value correctly`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -428,7 +423,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `setKeyValue returns error when client reports failure`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         client.setKeyValueResult = SetKeyValueResult(success = false, message = "Write failed")
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
@@ -456,7 +451,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `removeKeyValue succeeds and passes correct arguments`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -475,7 +470,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `removeKeyValue returns error when client reports failure`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         client.removeKeyValueResult = RemoveKeyValueResult(success = false, message = "Key not found")
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
@@ -503,7 +498,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `clearKeyValueFile succeeds and passes correct arguments`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
             deviceId = "emulator-5554",
@@ -521,7 +516,7 @@ class RealStorageDataSourceTest {
 
     @Test
     fun `clearKeyValueFile returns error when client reports failure`() = runBlocking {
-        val client = FakeStorageAutoMobileClient()
+        val client = FakeAutoMobileClient()
         client.clearKeyValueFileResult = ClearKeyValueResult(success = false, message = "Permission denied")
         val dataSource = RealStorageDataSource(
             clientProvider = { client },
@@ -534,85 +529,4 @@ class RealStorageDataSourceTest {
         assertTrue(result is Result.Error)
         assertTrue((result as Result.Error).message.contains("Permission denied"))
     }
-}
-
-/**
- * Fake AutoMobileClient for storage tests.
- */
-class FakeStorageAutoMobileClient : AutoMobileClient {
-    private val resourceResponses = mutableMapOf<String, McpResourceContent>()
-    var throwOnReadResource: McpConnectionException? = null
-    var readResourceCallCount = 0
-        private set
-
-    // Write operation results (configurable per test)
-    var setKeyValueResult = SetKeyValueResult(success = true)
-    var removeKeyValueResult = RemoveKeyValueResult(success = true)
-    var clearKeyValueFileResult = ClearKeyValueResult(success = true)
-
-    // Recorded write calls for assertion
-    data class SetKeyValueCall(val deviceId: String, val appId: String, val fileName: String, val key: String, val value: String?, val type: String)
-    data class RemoveKeyValueCall(val deviceId: String, val appId: String, val fileName: String, val key: String)
-    data class ClearKeyValueFileCall(val deviceId: String, val appId: String, val fileName: String)
-
-    val setKeyValueCalls = mutableListOf<SetKeyValueCall>()
-    val removeKeyValueCalls = mutableListOf<RemoveKeyValueCall>()
-    val clearKeyValueFileCalls = mutableListOf<ClearKeyValueFileCall>()
-
-    override val transportName: String = "fake"
-    override val connectionDescription: String = "Fake client for storage testing"
-
-    fun setResourceResponseWithText(uri: String, text: String) {
-        resourceResponses[uri] = McpResourceContent(
-            uri = uri,
-            mimeType = "application/json",
-            text = text
-        )
-    }
-
-    override fun readResource(uri: String): List<McpResourceContent> {
-        readResourceCallCount++
-        throwOnReadResource?.let { throw it }
-        return listOfNotNull(resourceResponses[uri])
-    }
-
-    override fun setKeyValue(deviceId: String, appId: String, fileName: String, key: String, value: String?, type: String): SetKeyValueResult {
-        setKeyValueCalls.add(SetKeyValueCall(deviceId, appId, fileName, key, value, type))
-        return setKeyValueResult
-    }
-
-    override fun removeKeyValue(deviceId: String, appId: String, fileName: String, key: String): RemoveKeyValueResult {
-        removeKeyValueCalls.add(RemoveKeyValueCall(deviceId, appId, fileName, key))
-        return removeKeyValueResult
-    }
-
-    override fun clearKeyValueFile(deviceId: String, appId: String, fileName: String): ClearKeyValueResult {
-        clearKeyValueFileCalls.add(ClearKeyValueFileCall(deviceId, appId, fileName))
-        return clearKeyValueFileResult
-    }
-
-    // Unused methods - throw to ensure they're not called unexpectedly
-    override fun ping() = notImplemented()
-    override fun listResources() = notImplemented()
-    override fun listResourceTemplates() = notImplemented()
-    override fun listTools() = notImplemented()
-    override fun getNavigationGraph(platform: String) = notImplemented()
-    override fun listFeatureFlags() = notImplemented()
-    override fun setFeatureFlag(key: String, enabled: Boolean, config: JsonObject?) = notImplemented()
-    override fun listPerformanceAuditResults(startTime: String?, endTime: String?, limit: Int?, offset: Int?) = notImplemented()
-    override fun getTestTimings(query: TestTimingQuery) = notImplemented()
-    override fun startTestRecording(platform: String) = notImplemented()
-    override fun stopTestRecording(recordingId: String?, planName: String?) = notImplemented()
-    override fun executePlan(planContent: String, platform: String, startStep: Int?, sessionUuid: String?) = notImplemented()
-    override fun startDevice(name: String, platform: String, deviceId: String?) = notImplemented()
-    override fun setActiveDevice(deviceId: String, platform: String) = notImplemented()
-    override fun getTestRuns(query: dev.jasonpearson.automobile.desktop.core.daemon.TestRunQuery) = notImplemented()
-    override fun observe(platform: String) = notImplemented()
-    override fun killDevice(name: String, deviceId: String, platform: String) = notImplemented()
-    override fun getDaemonStatus() = notImplemented()
-    override fun updateService(deviceId: String, platform: String) = notImplemented()
-    override fun callTool(name: String, arguments: JsonObject): JsonElement = notImplemented()
-
-    private fun notImplemented(): Nothing =
-        throw NotImplementedError("FakeStorageAutoMobileClient: method not implemented for testing")
 }

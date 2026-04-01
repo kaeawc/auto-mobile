@@ -46,4 +46,5 @@ dependencies {
   testImplementation(libs.kotlin.test)
   testImplementation(libs.kotlinx.coroutines.test)
   testImplementation("junit:junit:4.13.2")
+  testImplementation(libs.turbine)
 }

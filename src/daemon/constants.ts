@@ -50,10 +50,20 @@ export const PID_FILE_PATH =
 
 /**
  * Connection timeout in milliseconds
- * How long to wait for daemon to respond
- * Increased to 30s to accommodate parallel test execution where tests may wait for device availability
+ * How long to wait for daemon to respond to a request.
+ * Set to 120s to accommodate long-running operations like device cold boot (26-60s+).
+ * Configurable via AUTOMOBILE_DAEMON_TIMEOUT_MS environment variable.
  */
-export const CONNECTION_TIMEOUT_MS = 30000;
+const connectionTimeoutOverride =
+  process.env.AUTOMOBILE_DAEMON_TIMEOUT_MS ??
+  process.env.AUTO_MOBILE_DAEMON_TIMEOUT_MS;
+const parsedConnectionTimeout = connectionTimeoutOverride
+  ? Number.parseInt(connectionTimeoutOverride, 10)
+  : NaN;
+export const CONNECTION_TIMEOUT_MS =
+  Number.isFinite(parsedConnectionTimeout) && parsedConnectionTimeout > 0
+    ? parsedConnectionTimeout
+    : 120000;
 
 /**
  * Health check interval in milliseconds

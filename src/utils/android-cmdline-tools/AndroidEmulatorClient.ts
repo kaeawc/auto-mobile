@@ -65,9 +65,10 @@ interface AndroidEmulator {
    * Wait for the emulator to be ready for use
    * @param avdName - The AVD name to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
+   * @param childProcess - Optional child process to monitor for early exit
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  waitForEmulatorReady(avdName: string, timeoutMs?: number): Promise<BootedDevice>;
+  waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
 }
 
 const execAsync = async (command: string): Promise<ExecResult> => {
@@ -367,6 +368,47 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     }
 
     return { isPanic: false };
+  }
+
+  /**
+   * Detect corrupt disk image errors in emulator output.
+   * Returns an actionable error message if corruption is detected.
+   */
+  detectCorruptImage(output: string): {
+    isCorrupt: boolean;
+    message?: string;
+    suggestion?: string;
+  } {
+    // qcow2 corruption: "qcow2: Image is corrupt; cannot be opened read/write"
+    const qcow2Match = output.match(/qcow2:\s*(.*corrupt[^"\n]*)/i);
+    if (qcow2Match) {
+      return {
+        isCorrupt: true,
+        message: `Disk image is corrupt: ${qcow2Match[1].trim()}`,
+        suggestion: "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot. All emulator data (installed apps, settings) will be lost.",
+      };
+    }
+
+    // Generic disk image errors
+    const diskErrorMatch = output.match(/(cannot open disk image|disk image .* is (?:corrupt|invalid|damaged)|failed to open .*\.img)/i);
+    if (diskErrorMatch) {
+      return {
+        isCorrupt: true,
+        message: `Disk image error: ${diskErrorMatch[1].trim()}`,
+        suggestion: "Try deleting corrupt overlay files in ~/.android/avd/<AVD_NAME>.avd/ and restarting the emulator.",
+      };
+    }
+
+    // QEMU abnormal exit with corruption context
+    if (output.includes("QEMU main loop exits abnormally") && (output.includes("corrupt") || output.includes("qcow2"))) {
+      return {
+        isCorrupt: true,
+        message: "QEMU exited abnormally due to disk image corruption",
+        suggestion: "Delete the corrupt userdata overlay to force a fresh image:\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img\n  rm ~/.android/avd/<AVD_NAME>.avd/userdata-qcow2.img.qcow2\nThe emulator will recreate it on next boot.",
+      };
+    }
+
+    return { isCorrupt: false };
   }
 
   /**
@@ -750,6 +792,28 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           return;
         }
 
+        // Check for corrupt disk image
+        const corruptResult = this.detectCorruptImage(initialOutput);
+        if (corruptResult.isCorrupt) {
+          logger.error(`Emulator corrupt image detected: ${corruptResult.message}`);
+
+          let errorMessage = `Emulator failed to start: ${corruptResult.message}`;
+          if (corruptResult.suggestion) {
+            errorMessage += `\n\nSuggestion: ${corruptResult.suggestion}`;
+          }
+
+          if (!child.killed) {
+            child.kill();
+          }
+
+          if (!startupValidationComplete) {
+            startupValidationComplete = true;
+            perf.endOperation("panicDetection");
+            reject(new ActionableError(errorMessage));
+          }
+          return;
+        }
+
         // Check for successful startup indicators
         if (output.includes("INFO         | emuDirName:") ||
           output.includes("Hax is enabled") ||
@@ -810,6 +874,22 @@ export class AndroidEmulatorClient implements AndroidEmulator {
               perf.endOperation("panicDetection");
               reject(new ActionableError(`Emulator failed to start: ${panicResult.message}`));
             }
+            return;
+          }
+
+          // Check if exit was due to corrupt disk image
+          const corruptResult = this.detectCorruptImage(initialOutput);
+          if (corruptResult.isCorrupt) {
+            logger.error(`Exit was due to corrupt image: ${corruptResult.message}`);
+            if (!startupValidationComplete) {
+              startupValidationComplete = true;
+              perf.endOperation("panicDetection");
+              let errorMessage = `Emulator failed to start: ${corruptResult.message}`;
+              if (corruptResult.suggestion) {
+                errorMessage += `\n\nSuggestion: ${corruptResult.suggestion}`;
+              }
+              reject(new ActionableError(errorMessage));
+            }
           } else if (!startupValidationComplete) {
             startupValidationComplete = true;
             perf.endOperation("panicDetection");
@@ -857,13 +937,56 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
    * @returns Promise that resolves with device ID when emulator is ready
    */
-  async waitForEmulatorReady(avdName: string, timeoutMs: number = 120000): Promise<BootedDevice> {
+  async waitForEmulatorReady(avdName: string, timeoutMs: number = 120000, childProcess?: ChildProcess | null): Promise<BootedDevice> {
     const startTime = this.timer.now();
     const perf = createGlobalPerformanceTracker();
 
     // Read polling interval from environment variable (default: 500ms, minimum: 100ms)
     const pollingIntervalMs = Math.max(parseInt(process.env.EMULATOR_POLLING_INTERVAL_MS || "500", 10), 100);
     logger.info(`Waiting for emulator '${avdName}' to be ready... (polling interval: ${pollingIntervalMs}ms)`);
+
+    // Monitor child process for early exit if provided
+    let processExited = false;
+    let processExitError: ActionableError | null = null;
+    if (childProcess && childProcess.pid) {
+      const processOutput: string[] = [];
+      const captureOutput = (data: any) => {
+        const output = data.toString();
+        processOutput.push(output);
+        // Keep buffer bounded
+        if (processOutput.length > 50) {
+          processOutput.splice(0, processOutput.length - 50);
+        }
+      };
+      childProcess.stdout?.on("data", captureOutput);
+      childProcess.stderr?.on("data", captureOutput);
+      childProcess.on("exit", code => {
+        if (code !== null && code !== 0) {
+          processExited = true;
+          const combinedOutput = processOutput.join("");
+
+          // Check for known error patterns
+          const corruptResult = this.detectCorruptImage(combinedOutput);
+          if (corruptResult.isCorrupt) {
+            let msg = `Emulator failed to start: ${corruptResult.message}`;
+            if (corruptResult.suggestion) {
+              msg += `\n\nSuggestion: ${corruptResult.suggestion}`;
+            }
+            processExitError = new ActionableError(msg);
+          } else {
+            const panicResult = this.detectArchitecturePanic(combinedOutput);
+            if (panicResult.isPanic) {
+              processExitError = new ActionableError(`Emulator failed to start: ${panicResult.message}`);
+            } else {
+              processExitError = new ActionableError(
+                `Emulator process exited with code ${code} while waiting for readiness`
+              );
+            }
+          }
+          logger.error(`Emulator process exited during readiness wait: ${processExitError.message}`);
+        }
+      });
+    }
 
     // Start background polling immediately with configurable intervals
     let pollingActive = true;
@@ -957,6 +1080,14 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     // Main timeout loop
     while (this.timer.now() - startTime < timeoutMs) {
+      // Check if emulator process crashed during readiness wait
+      if (processExited && processExitError) {
+        pollingActive = false;
+        await pollingPromise;
+        perf.endOperation("devicePolling");
+        throw processExitError;
+      }
+
       if (foundDeviceId) {
         pollingActive = false;
         perf.endOperation("devicePolling");

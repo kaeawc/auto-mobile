@@ -27,6 +27,19 @@ import java.io.RandomAccessFile
 import java.nio.channels.FileLock
 import java.nio.file.Path
 
+/** True when running on macOS; used to pick Meta (Cmd) vs Ctrl for accelerators. */
+private val IS_MACOS: Boolean =
+    System.getProperty("os.name")?.lowercase()?.contains("mac") == true
+
+/**
+ * Creates a [KeyShortcut] that uses Meta (Cmd) on macOS and Ctrl on other platforms,
+ * matching the convention already used in [AutoMobileContent] keyboard handlers.
+ */
+private fun platformShortcut(
+    key: Key,
+    shift: Boolean = false,
+): KeyShortcut = KeyShortcut(key, meta = IS_MACOS, ctrl = !IS_MACOS, shift = shift)
+
 /** Lock file ensuring only one instance of the desktop app runs at a time. */
 private val LOCK_FILE: Path = Path.of(System.getProperty("java.io.tmpdir"), "automobile-desktop.lock")
 private var lock: FileLock? = null
@@ -114,60 +127,60 @@ fun main() {
           Item(
             "Settings",
             onClick = { menuBarActions.showSettings = true },
-            shortcut = KeyShortcut(Key.Comma, meta = true),
+            shortcut = platformShortcut(Key.Comma),
           )
           Separator()
           Item(
             "Quit",
             onClick = { exitApplication() },
-            shortcut = KeyShortcut(Key.Q, meta = true),
+            shortcut = platformShortcut(Key.Q),
           )
         }
         Menu("View", mnemonic = 'V') {
           Item(
             "Toggle Left Pane",
             onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
-            shortcut = KeyShortcut(Key.Zero, meta = true),
+            shortcut = platformShortcut(Key.Zero),
           )
           Item(
             "Toggle Right Pane",
             onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
-            shortcut = KeyShortcut(Key.Zero, meta = true, shift = true),
+            shortcut = platformShortcut(Key.Zero, shift = true),
           )
           Item(
             "Toggle Bottom Pane",
             onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
-            shortcut = KeyShortcut(Key.Y, meta = true, shift = true),
+            shortcut = platformShortcut(Key.Y, shift = true),
           )
         }
         Menu("Tools", mnemonic = 'T') {
           Item(
             "Command Palette",
             onClick = { menuBarActions.showCommandPalette = true },
-            shortcut = KeyShortcut(Key.P, meta = true, shift = true),
+            shortcut = platformShortcut(Key.P, shift = true),
           )
           Item(
             "Global Search",
             onClick = { menuBarActions.showGlobalSearch = true },
-            shortcut = KeyShortcut(Key.F, meta = true, shift = true),
+            shortcut = platformShortcut(Key.F, shift = true),
           )
           Item(
             "Quick Jump",
             onClick = { menuBarActions.showQuickJump = true },
-            shortcut = KeyShortcut(Key.K, meta = true),
+            shortcut = platformShortcut(Key.K),
           )
           Separator()
           Item(
             "Take Screenshot",
             onClick = { menuBarActions.onTakeScreenshot?.invoke() },
-            shortcut = KeyShortcut(Key.S, meta = true, shift = true),
+            shortcut = platformShortcut(Key.S, shift = true),
           )
         }
         Menu("Help", mnemonic = 'H') {
           Item(
             "Keyboard Shortcuts",
             onClick = { menuBarActions.showCheatSheet = true },
-            shortcut = KeyShortcut(Key.Slash, meta = true),
+            shortcut = platformShortcut(Key.Slash),
           )
           Separator()
           Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })

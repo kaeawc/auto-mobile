@@ -6,14 +6,7 @@ import kotlinx.coroutines.delay
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * Represents an installed app on the device.
- */
-data class InstalledApp(
-    val packageName: String,
-    val displayName: String?,
-    val isForeground: Boolean,
-)
+typealias InstalledApp = dev.jasonpearson.automobile.desktop.domain.InstalledApp
 
 /**
  * Data source interface for fetching installed apps from the device.

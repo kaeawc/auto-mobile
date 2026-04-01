@@ -932,7 +932,8 @@ private fun SQLView(
         if (queryResult != null) {
             Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(colors.text.normal.copy(alpha = 0.1f)))
 
-            if (queryResult.error != null) {
+            val queryError = queryResult.error
+            if (queryError != null) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -940,7 +941,7 @@ private fun SQLView(
                         .padding(12.dp),
                 ) {
                     Text(
-                        queryResult.error,
+                        queryError,
                         fontSize = 12.sp,
                         color = Color(0xFFFF5722),
                         fontFamily = FontFamily.Monospace,
@@ -1006,9 +1007,10 @@ private fun QueryHistoryView(
                             color = colors.text.normal.copy(alpha = 0.5f),
                         )
                     }
-                    if (!entry.success && entry.error != null) {
+                    val entryError = entry.error
+                    if (!entry.success && entryError != null) {
                         Text(
-                            entry.error,
+                            entryError,
                             fontSize = 10.sp,
                             color = Color(0xFFFF5722),
                             modifier = Modifier.padding(top = 4.dp),

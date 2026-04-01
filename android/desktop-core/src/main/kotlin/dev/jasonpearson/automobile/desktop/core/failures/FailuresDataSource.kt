@@ -8,63 +8,11 @@ import dev.jasonpearson.automobile.desktop.core.time.SystemClock
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 
-/**
- * Data returned from timeline queries
- */
-data class TimelineData(
-    val dataPoints: List<TimelineDataPoint>,
-    val previousPeriodTotals: PeriodTotals,
-)
-
-/**
- * Data point for timeline chart
- */
-data class TimelineDataPoint(
-    val label: String,
-    val crashes: Int,
-    val anrs: Int,
-    val toolFailures: Int,
-    val nonfatals: Int = 0,
-) {
-    val total: Int get() = crashes + anrs + toolFailures + nonfatals
-}
-
-/**
- * Totals for a period (used for previous period comparison)
- */
-data class PeriodTotals(
-    val crashes: Int,
-    val anrs: Int,
-    val toolFailures: Int,
-    val nonfatals: Int = 0,
-)
-
-/**
- * Date range options for the timeline
- */
-enum class DateRange(val label: String, val durationMs: Long) {
-    OneHour("1h", 60 * 60 * 1000L),
-    TwentyFourHours("24h", 24 * 60 * 60 * 1000L),
-    ThreeDays("3d", 3 * 24 * 60 * 60 * 1000L),
-    SevenDays("7d", 7 * 24 * 60 * 60 * 1000L),
-    ThirtyDays("30d", 30 * 24 * 60 * 60 * 1000L),
-    ;
-
-    fun toQueryParam(): String = label
-}
-
-/**
- * Time aggregation options for the timeline
- */
-enum class TimeAggregation(val label: String, val durationMs: Long) {
-    Minute("Min", 60 * 1000L),
-    Hour("Hour", 60 * 60 * 1000L),
-    Day("Day", 24 * 60 * 60 * 1000L),
-    Week("Week", 7 * 24 * 60 * 60 * 1000L),
-    ;
-
-    fun toQueryParam(): String = name.lowercase()
-}
+typealias TimelineData = dev.jasonpearson.automobile.desktop.domain.TimelineData
+typealias TimelineDataPoint = dev.jasonpearson.automobile.desktop.domain.TimelineDataPoint
+typealias PeriodTotals = dev.jasonpearson.automobile.desktop.domain.PeriodTotals
+typealias DateRange = dev.jasonpearson.automobile.desktop.domain.DateRange
+typealias TimeAggregation = dev.jasonpearson.automobile.desktop.domain.TimeAggregation
 
 // DataSourceMode has been moved to dev.jasonpearson.automobile.desktop.core.datasource package
 

@@ -233,11 +233,12 @@ fun ScreenDetailView(
     var screenshotBitmap by remember { mutableStateOf<ImageBitmap?>(null) }
     var isLoadingScreenshot by remember { mutableStateOf(false) }
 
-    LaunchedEffect(screen.screenshotUri, screenshotLoader) {
-        if (screen.screenshotUri != null && screenshotLoader != null) {
+    val screenshotUri = screen.screenshotUri
+    LaunchedEffect(screenshotUri, screenshotLoader) {
+        if (screenshotUri != null && screenshotLoader != null) {
             isLoadingScreenshot = true
             screenshotBitmap = withContext(Dispatchers.IO) {
-                screenshotLoader.load(screen.screenshotUri)
+                screenshotLoader.load(screenshotUri)
             }
             isLoadingScreenshot = false
         } else {

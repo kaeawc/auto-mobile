@@ -158,12 +158,12 @@ Connection state is modeled as a sealed class: `Connecting`, `Connected`, `Disco
 
 ## Data Source Layer
 
-Each data domain follows a four-part pattern:
+Each data domain follows a two-part pattern (interface with Real and Fake implementations). Navigation and AppList additionally use a cached wrapper:
 
 ```
 Interface  -->  RealXxxDataSource (calls AutoMobileClient)
            -->  FakeXxxDataSource (returns canned data)
-           -->  CachedXxxDataSource (wraps delegate with InMemoryCache)
+           -->  CachedXxxDataSource (wraps delegate with InMemoryCache)  [Navigation, AppList only]
 ```
 
 | DataSource | Domain | Cache TTL |
@@ -226,7 +226,7 @@ The center content area uses a split layout. When the Navigation view is active,
 
 ### ViewModels
 
-Each dashboard has an independent ViewModel that manages UI state via `StateFlow` and dispatches one-shot effects via `Channel`:
+Navigation and Failures each have a dedicated ViewModel that manages UI state via `StateFlow` and dispatches one-shot effects via `Channel`. Other dashboards do not yet have standalone ViewModels:
 
 **NavigationViewModel**
 - State: `Loading | Content(graph, selectedScreenId, currentSection) | Error(message)`

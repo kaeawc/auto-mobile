@@ -7,6 +7,7 @@ import android.os.Looper
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
+import dev.jasonpearson.automobile.sdk.SdkConstants
 
 /**
  * Broadcasts batched SDK events via Intent for cross-process communication.
@@ -97,7 +98,7 @@ object SdkEventBroadcaster {
       val intent = Intent(ACTION_SDK_EVENT_BATCH).apply {
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON, batchJson)
         putExtra(SdkEventSerializer.EXTRA_SDK_EVENT_TYPE, SdkEventSerializer.EventTypes.EVENT_BATCH)
-        setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+        setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
       }
       context.sendBroadcast(intent)
     } catch (_: Exception) {

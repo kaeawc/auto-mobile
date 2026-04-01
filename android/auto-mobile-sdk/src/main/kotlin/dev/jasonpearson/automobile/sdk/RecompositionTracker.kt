@@ -104,15 +104,13 @@ object RecompositionTracker {
     )
   }
 
-  private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
-
   private fun broadcastSnapshot() {
     val ctx = context ?: return
     val payload = buildSnapshotJson(ctx.packageName)
     val intent =
         Intent(AutoMobileSDK.ACTION_RECOMPOSITION_SNAPSHOT).apply {
           putExtra(AutoMobileSDK.EXTRA_RECOMPOSITION_SNAPSHOT, payload)
-          setPackage(ACCESSIBILITY_SERVICE_PACKAGE)
+          setPackage(SdkConstants.CTRL_PROXY_PACKAGE)
         }
     ctx.sendBroadcast(intent)
   }
@@ -136,10 +134,16 @@ object RecompositionTracker {
     val filter = IntentFilter().apply { addAction(AutoMobileSDK.ACTION_RECOMPOSITION_CONTROL) }
 
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-      context.registerReceiver(controlReceiver, filter, Context.RECEIVER_EXPORTED)
+      context.registerReceiver(
+          controlReceiver,
+          filter,
+          SdkConstants.PERMISSION_NETWORK_CONTROL,
+          null,
+          Context.RECEIVER_EXPORTED)
     } else {
       @SuppressLint("UnspecifiedRegisterReceiverFlag")
-      context.registerReceiver(controlReceiver, filter)
+      context.registerReceiver(
+          controlReceiver, filter, SdkConstants.PERMISSION_NETWORK_CONTROL, null)
     }
   }
 

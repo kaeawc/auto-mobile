@@ -8,6 +8,7 @@ import android.content.IntentFilter
 import android.os.Build
 import dev.jasonpearson.automobile.protocol.NetworkMockRuleDto
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
+import dev.jasonpearson.automobile.sdk.SdkConstants
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.serialization.builtins.ListSerializer
@@ -31,8 +32,7 @@ class NetworkMockRuleStore(private val clock: () -> Long = { System.currentTimeM
     const val EXTRA_ERROR_SIM_TYPE = "error_type"
     const val EXTRA_ERROR_SIM_LIMIT = "limit"
     const val EXTRA_ERROR_SIM_EXPIRES_AT = "expires_at"
-    private const val PERMISSION_NETWORK_CONTROL =
-        "dev.jasonpearson.automobile.sdk.permission.NETWORK_CONTROL"
+    private const val PERMISSION_NETWORK_CONTROL = SdkConstants.PERMISSION_NETWORK_CONTROL
 
     @Volatile private var instance: NetworkMockRuleStore? = null
 

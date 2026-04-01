@@ -23,7 +23,8 @@ fun <T> retryWithBackoffBlocking(
     block: () -> T,
 ): T {
   var lastException: Exception? = null
-  repeat(policy.maxRetries) { attempt ->
+  val attempts = maxOf(1, policy.maxRetries)
+  repeat(attempts) { attempt ->
     try {
       return block()
     } catch (e: CancellationException) {
@@ -31,7 +32,7 @@ fun <T> retryWithBackoffBlocking(
     } catch (e: Exception) {
       if (!isRetryable(e)) throw e
       lastException = e
-      if (attempt < policy.maxRetries - 1) {
+      if (attempt < attempts - 1) {
         val baseDelay = policy.initialDelayMs * policy.backoffMultiplier.pow(attempt.toDouble())
         val jitter = baseDelay * policy.jitterFraction * Random.nextDouble()
         Thread.sleep(min(baseDelay.toLong() + jitter.toLong(), policy.maxDelayMs))

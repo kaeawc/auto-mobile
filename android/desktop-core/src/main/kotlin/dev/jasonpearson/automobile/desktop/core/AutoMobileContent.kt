@@ -280,6 +280,7 @@ fun AutoMobileContent(
   // Command palette & global search state (delegated to MenuBarActions)
   var showCommandPalette by actions::showCommandPalette
   var showGlobalSearch by actions::showGlobalSearch
+  var showQuickJump by actions::showQuickJump
 
   // Theme state toggled via command palette
   var isDarkMode by remember { mutableStateOf(true) }
@@ -1085,6 +1086,7 @@ fun AutoMobileContent(
       onJumpToTop = { selectedEventIndex = 0 },
       onJumpToBottom = { /* No-op until event list size is known */ },
       onQuickJump = { /* Timestamp jump placeholder */ },
+      menuBarActions = menuBarActions,
       vimModeEnabled = vimModeEnabled,
       centerContent = { mod ->
           if (isLiveLayoutMode) {

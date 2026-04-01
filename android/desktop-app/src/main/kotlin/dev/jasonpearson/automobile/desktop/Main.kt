@@ -153,7 +153,7 @@ fun main() {
           )
           Item(
             "Quick Jump",
-            onClick = { menuBarActions.showCommandPalette = true },
+            onClick = { menuBarActions.showQuickJump = true },
             shortcut = KeyShortcut(Key.K, meta = true),
           )
           Separator()

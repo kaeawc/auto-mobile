@@ -25,6 +25,7 @@ class MenuBarActions {
     var showSettings by mutableStateOf(false)
     var showCommandPalette by mutableStateOf(false)
     var showGlobalSearch by mutableStateOf(false)
+    var showQuickJump by mutableStateOf(false)
     var showCheatSheet by mutableStateOf(false)
 
     // ---- Action callbacks (set by AutoMobileContent once wired) ----

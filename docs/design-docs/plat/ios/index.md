@@ -22,7 +22,10 @@ flowchart TB
 
     subgraph "iOS Simulator/Device"
         CtrlProxy iOS[CtrlProxy iOS]
-        SimApp[YourAwesome.app]
+        subgraph "YourAwesome.app"
+            SimApp[App Code]
+            SDK[AutoMobile SDK]
+        end
     end
 
     Agent -->|MCP Protocol| MCP
@@ -32,6 +35,7 @@ flowchart TB
     WSClient -->|ws://localhost:8765| CtrlProxy iOS
     Simctl -->|simulator lifecycle| SimApp
     CtrlProxy iOS -->|XCUITest APIs| SimApp
+    SDK -->|events, crashes| MCP
 ```
 
 ## Components
@@ -44,6 +48,7 @@ flowchart TB
 | [Managed App Configuration](managed-app-config.md) | MDM policies and app config payloads. | <kbd>🚧 Design Only</kbd> |
 | [Managed Apple IDs](managed-apple-ids.md) | Account policies and device profiles. | <kbd>🚧 Design Only</kbd> |
 | [Xcode integration](ide-plugin/overview.md) | Companion macOS app + source editor extension. | <kbd>⚠️ Partial</kbd> |
+| [AutoMobile SDK](auto-mobile-sdk.md) | Cross-platform SDK for event tracking, crash reporting, session management, and diagnostics. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | [Screen Streaming](screen-streaming.md) | AVFoundation/ScreenCaptureKit live mirroring. | <kbd>🚧 Design Only</kbd> |
 
 ## Status
@@ -52,6 +57,7 @@ flowchart TB
 - XCTestRunner fully implemented: `AutoMobileTestCase` base class, plan execution, retry, test ordering by timing, CI/local modes.
 - Xcode Companion app (macOS): scaffolded with all views; feature completeness ongoing.
 - Xcode Source Editor Extension: scaffolded with 5 registered commands; implementations are minimal stubs.
+- AutoMobile SDK fully implemented: event tracking, crash reporting, session management, and diagnostics with full test coverage.
 - Physical device support tracked in GitHub issues [#912](https://github.com/jasonpearson/auto-mobile/issues/912), [#913](https://github.com/jasonpearson/auto-mobile/issues/913), [#914](https://github.com/jasonpearson/auto-mobile/issues/914).
 
 ## Parity goal

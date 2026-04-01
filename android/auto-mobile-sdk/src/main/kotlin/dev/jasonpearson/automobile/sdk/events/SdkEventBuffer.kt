@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.sdk.events
 
 import dev.jasonpearson.automobile.protocol.SdkEvent
+import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 import java.util.concurrent.Executors
 import java.util.concurrent.ScheduledExecutorService
 import java.util.concurrent.ScheduledFuture
@@ -18,12 +19,14 @@ import kotlin.concurrent.withLock
  * @param maxBufferSize Maximum events before forced flush (default 50)
  * @param flushIntervalMs Periodic flush interval in milliseconds (default 500)
  * @param onFlush Callback invoked with the batch of events to send
+ * @param persistence Optional disk persistence — events are written before broadcast and removed on success
  * @param executor Optional executor for periodic flush scheduling (for testing)
  */
 internal class SdkEventBuffer(
   private val maxBufferSize: Int = 50,
   private val flushIntervalMs: Long = 500,
   private val onFlush: (List<SdkEvent>) -> Unit,
+  private val persistence: EventPersistence? = null,
   private val executor: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { r ->
     Thread(r, "SdkEventBuffer").apply { isDaemon = true }
   },
@@ -76,7 +79,7 @@ internal class SdkEventBuffer(
     }
 
     if (shouldFlush) {
-      deliverBatch(snapshot)
+      executor.execute { deliverBatch(snapshot) }
     }
   }
 
@@ -93,6 +96,13 @@ internal class SdkEventBuffer(
     deliverBatch(snapshot)
   }
 
+  /** Submit a task to run on the buffer's background executor. */
+  fun execute(task: Runnable) {
+    if (!isShutdown) {
+      executor.execute(task)
+    }
+  }
+
   /** Shutdown the buffer, flushing remaining events. */
   fun shutdown() {
     isShutdown = true
@@ -103,10 +113,13 @@ internal class SdkEventBuffer(
 
   private fun deliverBatch(events: List<SdkEvent>) {
     if (events.isEmpty()) return
+    val batchId = persistence?.persist(events) // persist to disk first
     try {
       onFlush(events)
+      batchId?.let { persistence?.removeBatch(it) } // remove on success
     } catch (_: Exception) {
       repeat(events.size) { dropCounter?.increment(DropReason.FLUSH_ERROR) }
+      // Keep on disk for retry on next launch
     }
   }
 }

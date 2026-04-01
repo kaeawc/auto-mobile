@@ -17,6 +17,9 @@ import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
+import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
+import java.io.File
 import android.app.Application
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker
@@ -67,6 +70,7 @@ object AutoMobileSDK {
   private var context: Context? = null
   private var configuration: AutoMobileConfiguration? = null
   private var eventBuffer: SdkEventBuffer? = null
+  private var persistence: EventPersistence? = null
   private var mainHandler: Handler? = null
   private var sessionTracker: SessionTracker? = null
   private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
@@ -106,11 +110,18 @@ object AutoMobileSDK {
     this.configuration = configuration
     val appContext = this.context!!
 
-    // Create shared event buffer with broadcast flush callback
+    // Create disk persistence for events
+    val eventPersistence = FileEventPersistence(
+      File(appContext.cacheDir, "automobile_events"),
+    )
+    persistence = eventPersistence
+
+    // Create shared event buffer with broadcast flush callback and disk persistence
     val buffer = SdkEventBuffer(
       maxBufferSize = configuration.bufferSize,
       flushIntervalMs = configuration.flushIntervalMs,
       onFlush = { events -> SdkEventBroadcaster.broadcastBatch(appContext, events) },
+      persistence = eventPersistence,
     )
     buffer.isEnabled = isEnabled
     buffer.start()
@@ -124,6 +135,12 @@ object AutoMobileSDK {
       // PackageManager lookup may fail in test environments
     }
     sdkContext = ctx
+    // Replay pending batches and clean up old ones on the buffer's executor
+    // to avoid blocking the calling thread with disk I/O.
+    buffer.execute {
+      replayPendingBatches(appContext, eventPersistence)
+      eventPersistence.cleanup()
+    }
 
     // Thread-safe subsystems — can initialize from any thread
     NetworkMockRuleStore.initialize(appContext)
@@ -329,6 +346,21 @@ object AutoMobileSDK {
   fun getContextSnapshot(): SdkContextSnapshot? = sdkContext?.snapshot()
 
   /**
+   * Replay pending event batches from disk (events that survived process death).
+   * Each batch is broadcast and removed on success; failures remain on disk.
+   */
+  private fun replayPendingBatches(context: Context, persistence: EventPersistence) {
+    for ((batchId, events) in persistence.loadPending()) {
+      try {
+        SdkEventBroadcaster.broadcastBatch(context, events)
+        persistence.removeBatch(batchId)
+      } catch (_: Exception) {
+        // Keep on disk for next launch attempt
+      }
+    }
+  }
+
+  /**
    * Shuts down the SDK, releasing all resources. After calling this method, [initialize] may be
    * called again to restart the SDK.
    */
@@ -369,6 +401,7 @@ object AutoMobileSDK {
     sdkContext = null
     breadcrumbTrail?.clear()
     breadcrumbTrail = null
+    persistence = null
     RecompositionTracker.reset()
     listeners.clear()
     isEnabled = true

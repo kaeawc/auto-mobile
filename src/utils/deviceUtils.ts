@@ -49,9 +49,10 @@ export interface PlatformDeviceManager {
    * Wait for a device to be ready for use after starting
    * @param device - The device to wait for
    * @param timeoutMs - Maximum time to wait in milliseconds (default: 120000 = 2 minutes)
+   * @param childProcess - Optional child process to monitor for early exit
    * @returns Promise that resolves with the booted device information when device is ready
    */
-  waitForDeviceReady(device: DeviceInfo, timeoutMs?: number): Promise<BootedDevice>;
+  waitForDeviceReady(device: DeviceInfo, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
 }
 
 export class MultiPlatformDeviceManager implements PlatformDeviceManager {
@@ -177,10 +178,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   async waitForDeviceReady(
     device: DeviceInfo,
     timeoutMs: number = 120000,
+    childProcess?: ChildProcess | null,
   ): Promise<BootedDevice> {
     switch (device.platform) {
       case "android":
-        return this.emulator.waitForEmulatorReady(device.name, timeoutMs);
+        return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess);
       case "ios":
         return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name);
       default:

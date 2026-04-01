@@ -150,9 +150,9 @@ export function registerDeviceTools() {
         await progress(60, 100, "Device started, waiting for readiness...");
       }
 
-      // Wait for device to be ready
+      // Wait for device to be ready, passing child process for crash monitoring
       perf.startOperation("waitForReady");
-      const readyDevice = await deviceUtils.waitForDeviceReady(args.device, args.timeoutMs);
+      const readyDevice = await deviceUtils.waitForDeviceReady(args.device, args.timeoutMs, childProcess);
       perf.endOperation("waitForReady");
 
       if (progress) {

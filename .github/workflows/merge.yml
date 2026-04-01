@@ -130,8 +130,12 @@ jobs:
           path: android/ide-plugin/build/reports/tests/test/
 
   build-desktop-app:
-    name: "Build Desktop App"
-    runs-on: ubuntu-latest
+    name: "Build Desktop App (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     defaults:
       run:
         working-directory: android
@@ -145,9 +149,10 @@ jobs:
         with:
           gradle-tasks: ":desktop-app:build -x test"
           gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
+          gradle-home-directory: "~/.gradle/${{ github.job }}-${{ matrix.os }}"
           reuse-configuration-cache: true
           gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
+          malloc-replacement: ${{ runner.os == 'Linux' && 'jemalloc' || 'none' }}
 
   desktop-app-unit-tests:
     name: "Run Desktop App Unit Tests"

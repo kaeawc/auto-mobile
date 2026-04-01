@@ -84,7 +84,7 @@ class NavigationViewModel(
                     }
                     is Result.Error -> {
                         LOG.warn("Failed to load navigation data: ${result.message}")
-                        _state.value = NavigationUiState.Error(message = result.message)
+                        _state.value = NavigationUiState.Error(message = result.message ?: "Unknown error")
                     }
                     is Result.Loading -> {
                         // Keep loading state

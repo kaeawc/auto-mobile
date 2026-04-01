@@ -1,6 +1,7 @@
 export interface LocalizationSettingsResult {
   success: boolean;
   locale?: string | null;
+  languages?: string | null;
   timeZone?: string | null;
   textDirection?: "ltr" | "rtl" | null;
   timeFormat?: "12" | "24" | null;

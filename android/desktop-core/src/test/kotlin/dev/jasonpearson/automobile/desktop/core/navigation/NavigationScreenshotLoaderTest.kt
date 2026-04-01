@@ -77,6 +77,65 @@ class NavigationScreenshotLoaderTest {
   }
 
   @Test
+  fun `load evicts LRU entries when byte limit is exceeded`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    // Use unique base64 blobs so FakeImageDecoder creates distinct bitmaps per URI
+    client.setResourceResponse("uri1", SMALL_PNG_BASE64)
+    client.setResourceResponse("uri2", SMALL_PNG_BASE64_ALT)
+    client.setResourceResponse("uri3", SMALL_PNG_BASE64)
+
+    // Each 100x100 image = 100*100*4 = 40,000 bytes
+    // Set byte limit to 79,999 so only 1 image fits (2 would be 80,000)
+    val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
+    val loader = NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50, // Count limit won't trigger
+        maxCacheBytes = 79_999L,
+        imageDecoder = decoder
+    )
+
+    loader.load("uri1")
+    assertEquals(1, loader.cacheSize())
+
+    // Loading uri2 should evict uri1 since 2 images exceed byte limit
+    loader.load("uri2")
+    assertEquals(1, loader.cacheSize())
+
+    // uri1 should have been evicted, requiring a re-fetch
+    loader.load("uri1")
+    assertEquals(3, client.readResourceCallCount) // 1 + 1 + 1 (cache miss on uri1)
+  }
+
+  @Test
+  fun `clearCache resets byte tracking`() = runBlocking {
+    val client = FakeAutoMobileClient()
+    client.setResourceResponse("uri1", SMALL_PNG_BASE64)
+    client.setResourceResponse("uri2", SMALL_PNG_BASE64_ALT)
+
+    // Each 100x100 image = 40,000 bytes, byte limit allows 2
+    val decoder = FakeImageDecoder(bitmapWidth = 100, bitmapHeight = 100)
+    val loader = NavigationScreenshotLoader(
+        clientProvider = { client },
+        maxCacheSize = 50,
+        maxCacheBytes = 80_000L,
+        imageDecoder = decoder
+    )
+
+    loader.load("uri1")
+    loader.load("uri2")
+    assertEquals(2, loader.cacheSize())
+
+    loader.clearCache()
+    assertEquals(0, loader.cacheSize())
+
+    // After clear, both should fit again without eviction
+    loader.load("uri1")
+    loader.load("uri2")
+    assertEquals(2, loader.cacheSize())
+    assertEquals(4, client.readResourceCallCount)
+  }
+
+  @Test
   fun `load returns null when client throws McpConnectionException`() = runBlocking {
     val client = FakeAutoMobileClient()
     client.throwOnReadResource = McpConnectionException("Connection failed")
@@ -164,6 +223,8 @@ class NavigationScreenshotLoaderTest {
     // Minimal valid PNG base64 - only used to simulate blob content
     private const val SMALL_PNG_BASE64 =
         "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=="
+    private const val SMALL_PNG_BASE64_ALT =
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg=="
   }
 }
 
@@ -171,13 +232,16 @@ class NavigationScreenshotLoaderTest {
  * Fake ImageDecoder for testing that returns a mock ImageBitmap without Skia dependencies.
  * Creates a unique bitmap per byte array content for identity checks.
  */
-class FakeImageDecoder : ImageDecoder {
+class FakeImageDecoder(
+    private val bitmapWidth: Int = 1,
+    private val bitmapHeight: Int = 1,
+) : ImageDecoder {
   private val bitmapCache = mutableMapOf<String, ImageBitmap>()
 
   override fun decode(bytes: ByteArray): ImageBitmap {
     // Create a cache key from bytes to return consistent bitmaps for same content
     val key = bytes.contentHashCode().toString()
-    return bitmapCache.getOrPut(key) { FakeImageBitmap() }
+    return bitmapCache.getOrPut(key) { FakeImageBitmap(bitmapWidth, bitmapHeight) }
   }
 }
 
@@ -185,12 +249,13 @@ class FakeImageDecoder : ImageDecoder {
  * Minimal fake ImageBitmap for testing.
  * Uses a stub implementation since tests only need identity/null checks.
  */
-class FakeImageBitmap : ImageBitmap {
+class FakeImageBitmap(
+    override val width: Int = 1,
+    override val height: Int = 1,
+) : ImageBitmap {
   override val colorSpace get() = throw NotImplementedError("Stub")
   override val config get() = throw NotImplementedError("Stub")
   override val hasAlpha get() = true
-  override val height get() = 1
-  override val width get() = 1
 
   override fun prepareToDraw() {}
 

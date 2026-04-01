@@ -73,10 +73,13 @@ class FakeScreenshotLoader : ScreenshotLoader {
 class NavigationScreenshotLoader(
     private val clientProvider: (() -> AutoMobileClient)?,
     private val maxCacheSize: Int = 50, // Maximum number of cached images
+    private val maxCacheBytes: Long = 100L * 1024 * 1024, // Maximum total byte size (100MB)
     private val imageDecoder: ImageDecoder = SkiaImageDecoder,
 ) : ScreenshotLoader {
     private val cache = ConcurrentHashMap<String, ImageBitmap>()
+    private val entrySizes = mutableMapOf<String, Long>()
     private val accessOrder = mutableListOf<String>() // Track access order for LRU eviction
+    private var totalBytes: Long = 0
 
     /**
      * Load a screenshot from MCP resource URI.
@@ -127,14 +130,21 @@ class NavigationScreenshotLoader(
     }
 
     private fun addToCache(uri: String, bitmap: ImageBitmap) {
+        val estimatedBytes = bitmap.width.toLong() * bitmap.height.toLong() * 4L
         synchronized(accessOrder) {
-            // Evict oldest entries if cache is full
-            while (accessOrder.size >= maxCacheSize) {
+            // Evict oldest entries if count limit or byte limit exceeded
+            while (accessOrder.size >= maxCacheSize ||
+                (accessOrder.isNotEmpty() && totalBytes + estimatedBytes > maxCacheBytes)
+            ) {
                 val oldest = accessOrder.removeFirstOrNull() ?: break
                 cache.remove(oldest)
+                val removedSize = entrySizes.remove(oldest) ?: 0L
+                totalBytes -= removedSize
             }
 
             cache[uri] = bitmap
+            entrySizes[uri] = estimatedBytes
+            totalBytes += estimatedBytes
             accessOrder.add(uri)
         }
     }
@@ -146,6 +156,8 @@ class NavigationScreenshotLoader(
         synchronized(accessOrder) {
             cache.remove(uri)
             accessOrder.remove(uri)
+            val removedSize = entrySizes.remove(uri) ?: 0L
+            totalBytes -= removedSize
         }
     }
 
@@ -156,6 +168,8 @@ class NavigationScreenshotLoader(
         synchronized(accessOrder) {
             cache.clear()
             accessOrder.clear()
+            entrySizes.clear()
+            totalBytes = 0
         }
     }
 

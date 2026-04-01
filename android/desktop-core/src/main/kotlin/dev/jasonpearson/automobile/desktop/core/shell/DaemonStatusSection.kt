@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.mcp.DaemonStatusResponse
 import dev.jasonpearson.automobile.desktop.core.mcp.RealSocketFileChecker
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -33,6 +34,7 @@ fun DaemonStatusSection(
     dataSourceMode: DataSourceMode,
     modifier: Modifier = Modifier,
 ) {
+    val graph = LocalAutoMobileGraph.current
     val colors = SharedTheme.globalColors
     var expanded by remember { mutableStateOf(true) }
     var daemonStatus by remember { mutableStateOf<DaemonStatusResponse?>(null) }
@@ -44,10 +46,8 @@ fun DaemonStatusSection(
         if (dataSourceMode == DataSourceMode.Real) {
             withContext(Dispatchers.IO) {
                 try {
-                    val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                    daemonStatus = client.getDaemonStatus()
+                    daemonStatus = graph.autoMobileClient.getDaemonStatus()
                     socketPath = RealSocketFileChecker().findDaemonSocketFiles().firstOrNull()
-                    client.close()
                 } catch (_: Exception) {
                     daemonStatus = null
                     socketPath = null

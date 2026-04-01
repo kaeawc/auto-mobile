@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop
 
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -16,6 +17,7 @@ import androidx.compose.ui.window.WindowPosition
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
 import dev.jasonpearson.automobile.desktop.core.daemon.McpConnectionException
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.shell.MenuBarActions
 import dev.jasonpearson.automobile.desktop.di.AutoMobileGraph
 import dev.zacsweers.metro.createGraphFactory
@@ -122,71 +124,73 @@ fun main() {
       state = windowState,
       visible = isWindowVisible,
     ) {
-      MenuBar {
-        Menu("File", mnemonic = 'F') {
-          Item(
-            "Settings",
-            onClick = { menuBarActions.showSettings = true },
-            shortcut = platformShortcut(Key.Comma),
-          )
-          Separator()
-          Item(
-            "Quit",
-            onClick = { exitApplication() },
-            shortcut = platformShortcut(Key.Q),
-          )
+      CompositionLocalProvider(LocalAutoMobileGraph provides graph) {
+        MenuBar {
+          Menu("File", mnemonic = 'F') {
+            Item(
+              "Settings",
+              onClick = { menuBarActions.showSettings = true },
+              shortcut = platformShortcut(Key.Comma),
+            )
+            Separator()
+            Item(
+              "Quit",
+              onClick = { exitApplication() },
+              shortcut = platformShortcut(Key.Q),
+            )
+          }
+          Menu("View", mnemonic = 'V') {
+            Item(
+              "Toggle Left Pane",
+              onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
+              shortcut = platformShortcut(Key.Zero),
+            )
+            Item(
+              "Toggle Right Pane",
+              onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
+              shortcut = platformShortcut(Key.Zero, shift = true),
+            )
+            Item(
+              "Toggle Bottom Pane",
+              onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
+              shortcut = platformShortcut(Key.Y, shift = true),
+            )
+          }
+          Menu("Tools", mnemonic = 'T') {
+            Item(
+              "Command Palette",
+              onClick = { menuBarActions.showCommandPalette = true },
+              shortcut = platformShortcut(Key.P, shift = true),
+            )
+            Item(
+              "Global Search",
+              onClick = { menuBarActions.showGlobalSearch = true },
+              shortcut = platformShortcut(Key.F, shift = true),
+            )
+            Item(
+              "Quick Jump",
+              onClick = { menuBarActions.showQuickJump = true },
+              shortcut = platformShortcut(Key.K),
+            )
+            Separator()
+            Item(
+              "Take Screenshot",
+              onClick = { menuBarActions.onTakeScreenshot?.invoke() },
+              shortcut = platformShortcut(Key.S, shift = true),
+            )
+          }
+          Menu("Help", mnemonic = 'H') {
+            Item(
+              "Keyboard Shortcuts",
+              onClick = { menuBarActions.showCheatSheet = true },
+              shortcut = platformShortcut(Key.Slash),
+            )
+            Separator()
+            Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
+          }
         }
-        Menu("View", mnemonic = 'V') {
-          Item(
-            "Toggle Left Pane",
-            onClick = { menuBarActions.showLeftPane = !menuBarActions.showLeftPane },
-            shortcut = platformShortcut(Key.Zero),
-          )
-          Item(
-            "Toggle Right Pane",
-            onClick = { menuBarActions.showRightPane = !menuBarActions.showRightPane },
-            shortcut = platformShortcut(Key.Zero, shift = true),
-          )
-          Item(
-            "Toggle Bottom Pane",
-            onClick = { menuBarActions.showBottomPane = !menuBarActions.showBottomPane },
-            shortcut = platformShortcut(Key.Y, shift = true),
-          )
-        }
-        Menu("Tools", mnemonic = 'T') {
-          Item(
-            "Command Palette",
-            onClick = { menuBarActions.showCommandPalette = true },
-            shortcut = platformShortcut(Key.P, shift = true),
-          )
-          Item(
-            "Global Search",
-            onClick = { menuBarActions.showGlobalSearch = true },
-            shortcut = platformShortcut(Key.F, shift = true),
-          )
-          Item(
-            "Quick Jump",
-            onClick = { menuBarActions.showQuickJump = true },
-            shortcut = platformShortcut(Key.K),
-          )
-          Separator()
-          Item(
-            "Take Screenshot",
-            onClick = { menuBarActions.onTakeScreenshot?.invoke() },
-            shortcut = platformShortcut(Key.S, shift = true),
-          )
-        }
-        Menu("Help", mnemonic = 'H') {
-          Item(
-            "Keyboard Shortcuts",
-            onClick = { menuBarActions.showCheatSheet = true },
-            shortcut = platformShortcut(Key.Slash),
-          )
-          Separator()
-          Item("About AutoMobile", onClick = { /* TODO: show about dialog */ })
-        }
+        AutoMobileDesktopApp(menuBarActions = menuBarActions)
       }
-      AutoMobileDesktopApp(menuBarActions = menuBarActions)
     }
   }
 }

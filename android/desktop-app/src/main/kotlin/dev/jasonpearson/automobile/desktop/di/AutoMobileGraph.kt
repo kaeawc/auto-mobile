@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.desktop.di
 
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
 import dev.jasonpearson.automobile.desktop.core.di.AppScope
+import dev.jasonpearson.automobile.desktop.core.di.AutoMobileGraphProvider
 import dev.jasonpearson.automobile.desktop.core.di.SingleIn
 import dev.jasonpearson.automobile.desktop.core.settings.SettingsProvider
 import dev.zacsweers.metro.DependencyGraph
@@ -14,13 +16,16 @@ import dev.zacsweers.metro.DependencyGraph
  */
 @DependencyGraph(scope = AppScope::class)
 @SingleIn(AppScope::class)
-interface AutoMobileGraph {
+interface AutoMobileGraph : AutoMobileGraphProvider {
 
     /** The MCP client for communicating with the AutoMobile daemon. */
-    val autoMobileClient: AutoMobileClient
+    override val autoMobileClient: AutoMobileClient
 
     /** Application settings provider. */
-    val settingsProvider: SettingsProvider
+    override val settingsProvider: SettingsProvider
+
+    /** Factory for creating data source instances. */
+    override val dataSourceFactory: DataSourceFactory
 
     /** Factory for creating the graph. Metro generates the implementation. */
     @DependencyGraph.Factory

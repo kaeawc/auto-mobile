@@ -75,6 +75,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.diagnostics.DiagnosticsDashboard
 import dev.jasonpearson.automobile.desktop.core.datasource.InstalledApp
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
@@ -256,6 +257,7 @@ fun AutoMobileContent(
   // pane-visibility and overlay state to it so the native menu items and the
   // Compose keyboard shortcuts share the same mutable state.
   val actions = menuBarActions ?: remember { MenuBarActions() }
+  val graph = LocalAutoMobileGraph.current
 
   var showSettings by actions::showSettings
   var selectedIndex by remember { mutableIntStateOf(0) }
@@ -791,7 +793,7 @@ fun AutoMobileContent(
           while (true) {
               kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
                   try {
-                      val appListDataSource = DataSourceFactory.createAppListDataSource(
+                      val appListDataSource = graph.dataSourceFactory.createAppListDataSource(
                           dataSourceMode,
                           clientProvider,
                           activeDeviceId
@@ -832,7 +834,7 @@ fun AutoMobileContent(
       } else if (dataSourceMode == DataSourceMode.Fake) {
           // Load fake apps for development (no polling needed)
           kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
-              val fakeAppListDataSource = DataSourceFactory.createAppListDataSource(dataSourceMode, null, null)
+              val fakeAppListDataSource = graph.dataSourceFactory.createAppListDataSource(dataSourceMode, null, null)
               when (val result = fakeAppListDataSource.getInstalledApps()) {
                   is Result.Success -> {
                       installedApps = result.data
@@ -2386,6 +2388,7 @@ private fun McpProcessesPanel(
     onProcessConnected: (McpProcess?) -> Unit = {},  // Called when MCP process connection changes
     suppressAutoSelect: Boolean = false,  // When true, don't auto-select device (user wants to browse)
 ) {
+    val graph = LocalAutoMobileGraph.current
     val colors = SharedTheme.globalColors
 
     // Use appropriate detector based on mode
@@ -2516,15 +2519,11 @@ private fun McpProcessesPanel(
                 client.close()
 
                 // Fetch daemon status in background (best-effort)
-                var statusClient: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
                 try {
-                    statusClient = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                    daemonStatus = statusClient.getDaemonStatus()
+                    daemonStatus = graph.autoMobileClient.getDaemonStatus()
                     LOG.debug("[AutoMobile IDE] Fetched daemon status: version=${daemonStatus?.version}")
                 } catch (e: Exception) {
                     LOG.debug("[AutoMobile IDE] Failed to fetch daemon status: ${e.message}")
-                } finally {
-                    statusClient?.close()
                 }
             } catch (e: Exception) {
                 val stackTrace = e.stackTraceToString()
@@ -2552,8 +2551,7 @@ private fun McpProcessesPanel(
             // Also set the active device on the MCP server
             kotlinx.coroutines.withContext(Dispatchers.IO) {
                 try {
-                    val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                    client.setActiveDevice(autoSelectDevice.deviceId, autoSelectDevice.platform)
+                    graph.autoMobileClient.setActiveDevice(autoSelectDevice.deviceId, autoSelectDevice.platform)
                     LOG.debug("[McpProcessesPanel] Auto-selected device on MCP server: ${autoSelectDevice.name}")
                 } catch (e: Exception) {
                     LOG.warn("[McpProcessesPanel] Failed to set active device on MCP: ${e.message}")
@@ -2624,8 +2622,7 @@ private fun McpProcessesPanel(
         scope.launch(Dispatchers.IO) {
             try {
                 LOG.debug("[AutoMobile IDE] Booting device: ${image.name}")
-                val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                val result = client.startDevice(
+                val result = graph.autoMobileClient.startDevice(
                     name = image.name,
                     platform = image.platform,
                     deviceId = image.deviceId,
@@ -2654,8 +2651,7 @@ private fun McpProcessesPanel(
         onDeviceSelected(device.deviceId, device.name)
         scope.launch(Dispatchers.IO) {
             try {
-                val client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                val result = client.setActiveDevice(device.deviceId, device.platform)
+                val result = graph.autoMobileClient.setActiveDevice(device.deviceId, device.platform)
                 if (result.success) {
                     LOG.debug("[AutoMobile IDE] Device selected successfully: ${device.name}")
                     selectError = null
@@ -2676,11 +2672,9 @@ private fun McpProcessesPanel(
         killingDeviceIds = killingDeviceIds + device.deviceId
         killErrors = killErrors - device.deviceId
         scope.launch(Dispatchers.IO) {
-            var client: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
             try {
                 LOG.warn("[AutoMobile IDE] Killing device: ${device.name} (${device.deviceId}, ${device.platform})")
-                client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                val result = client.killDevice(
+                val result = graph.autoMobileClient.killDevice(
                     name = device.name,
                     deviceId = device.deviceId,
                     platform = device.platform,
@@ -2696,8 +2690,6 @@ private fun McpProcessesPanel(
             } catch (e: Exception) {
                 LOG.warn("[AutoMobile IDE] Exception killing device: ${e.javaClass.name}: ${e.message}")
                 killErrors = killErrors + (device.deviceId to (e.message ?: "Error killing device"))
-            } finally {
-                client?.close()
             }
             killingDeviceIds = killingDeviceIds - device.deviceId
         }
@@ -2707,11 +2699,9 @@ private fun McpProcessesPanel(
     val onUpdateServiceAction: (dev.jasonpearson.automobile.desktop.core.mcp.BootedDeviceInfo) -> Unit = { device ->
         updatingServiceDeviceIds = updatingServiceDeviceIds + device.deviceId
         scope.launch(Dispatchers.IO) {
-            var client: dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient? = null
             try {
                 LOG.warn("[AutoMobile IDE] Updating service for device: ${device.name} (${device.deviceId}, ${device.platform})")
-                client = dev.jasonpearson.automobile.desktop.core.daemon.McpClientFactory.createPreferred(null)
-                val result = client.updateService(device.deviceId, device.platform)
+                val result = graph.autoMobileClient.updateService(device.deviceId, device.platform)
                 if (result.success) {
                     LOG.warn("[AutoMobile IDE] Service updated successfully for: ${device.name}")
                     kotlinx.coroutines.delay(1000)
@@ -2721,8 +2711,6 @@ private fun McpProcessesPanel(
                 }
             } catch (e: Exception) {
                 LOG.warn("[AutoMobile IDE] Exception updating service: ${e.javaClass.name}: ${e.message}")
-            } finally {
-                client?.close()
             }
             updatingServiceDeviceIds = updatingServiceDeviceIds - device.deviceId
         }

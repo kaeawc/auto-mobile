@@ -30,6 +30,7 @@ import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.datasource.Result
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.datasource.StorageDataSource
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
 
@@ -55,6 +56,7 @@ fun StorageDashboard(
     packageName: String? = null,
     platform: StoragePlatform = StoragePlatform.Android,
 ) {
+    val graph = LocalAutoMobileGraph.current
     val colors = SharedTheme.globalColors
     var selectedTab by remember { mutableStateOf(StorageTab.Database) }
 
@@ -71,7 +73,7 @@ fun StorageDashboard(
         error = null
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val newDataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createStorageDataSource(
+                val newDataSource = graph.dataSourceFactory.createStorageDataSource(
                     dataSourceMode,
                     clientProvider,
                     deviceId,

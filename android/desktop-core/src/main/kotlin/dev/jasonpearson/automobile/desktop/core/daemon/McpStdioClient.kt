@@ -24,6 +24,7 @@ class McpStdioClient(
   override val connectionDescription: String = command
   private val testRecordingClient = TestRecordingSocketClient()
 
+  private val ioLock = Any()
   private var process: Process? = null
   private var reader: BufferedReader? = null
   private var writer: BufferedWriter? = null
@@ -354,20 +355,24 @@ class McpStdioClient(
   }
 
   override fun close() {
-    try {
-      writer?.flush()
-    } catch (_: Exception) {}
-    process?.destroy()
-    process = null
-    reader = null
-    writer = null
+    synchronized(ioLock) {
+      try {
+        writer?.flush()
+      } catch (_: Exception) {}
+      process?.destroy()
+      process = null
+      reader = null
+      writer = null
+    }
   }
 
   private fun ensureInitialized() {
-    if (initialized) {
-      return
+    synchronized(ioLock) {
+      if (initialized) {
+        return
+      }
+      ensureProcessStarted()
     }
-    ensureProcessStarted()
 
     val response =
         sendRequest(
@@ -387,7 +392,9 @@ class McpStdioClient(
     if (response.result == null) {
       throw McpConnectionException("Initialize response missing result")
     }
-    initialized = true
+    synchronized(ioLock) {
+      initialized = true
+    }
     sendNotification("notifications/initialized")
   }
 
@@ -413,39 +420,41 @@ class McpStdioClient(
   }
 
   private fun sendRequest(request: JsonRpcRequest, expectResponse: Boolean): JsonRpcResponse {
-    ensureProcessStarted()
-    val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
-    val currentReader = reader ?: throw McpConnectionException("MCP stdio reader unavailable")
+    synchronized(ioLock) {
+      ensureProcessStarted()
+      val currentWriter = writer ?: throw McpConnectionException("MCP stdio writer unavailable")
+      val currentReader = reader ?: throw McpConnectionException("MCP stdio reader unavailable")
 
-    val requestBody = json.encodeToString(JsonRpcRequest.serializer(), request)
-    currentWriter.write(requestBody)
-    currentWriter.newLine()
-    currentWriter.flush()
+      val requestBody = json.encodeToString(JsonRpcRequest.serializer(), request)
+      currentWriter.write(requestBody)
+      currentWriter.newLine()
+      currentWriter.flush()
 
-    if (!expectResponse) {
-      return JsonRpcResponse(jsonrpc = "2.0")
-    }
+      if (!expectResponse) {
+        return JsonRpcResponse(jsonrpc = "2.0")
+      }
 
-    val expectedId = request.id?.jsonPrimitive?.content
-    while (true) {
-      val line = currentReader.readLine() ?: throw McpConnectionException("MCP stdio closed")
-      if (line.isBlank()) {
-        continue
+      val expectedId = request.id?.jsonPrimitive?.content
+      while (true) {
+        val line = currentReader.readLine() ?: throw McpConnectionException("MCP stdio closed")
+        if (line.isBlank()) {
+          continue
+        }
+        val response = json.decodeFromString(JsonRpcResponse.serializer(), line)
+        val responseId = response.id?.jsonPrimitive?.content
+        if (expectedId != null && responseId != expectedId) {
+          continue
+        }
+        if (response.error != null) {
+          throw McpConnectionException(
+              "MCP stdio error ${response.error.code}: ${response.error.message}"
+          )
+        }
+        if (response.result == null) {
+          throw McpConnectionException("MCP stdio response missing result")
+        }
+        return response
       }
-      val response = json.decodeFromString(JsonRpcResponse.serializer(), line)
-      val responseId = response.id?.jsonPrimitive?.content
-      if (expectedId != null && responseId != expectedId) {
-        continue
-      }
-      if (response.error != null) {
-        throw McpConnectionException(
-            "MCP stdio error ${response.error.code}: ${response.error.message}"
-        )
-      }
-      if (response.result == null) {
-        throw McpConnectionException("MCP stdio response missing result")
-      }
-      return response
     }
   }
 

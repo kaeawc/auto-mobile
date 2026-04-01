@@ -22,6 +22,7 @@ import androidx.compose.material3.MaterialTheme
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
+import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
 import dev.jasonpearson.automobile.desktop.core.tabs.PanelHeader
 import dev.jasonpearson.automobile.desktop.core.tabs.VerticalCollapsibleTab
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
@@ -41,6 +42,7 @@ fun LayoutInspectorDashboard(
     platform: String = "android",  // Device platform ("android" or "ios")
     onRestartDaemon: (() -> Unit)? = null,
 ) {
+    val graph = LocalAutoMobileGraph.current
     val state = rememberLayoutInspectorState()
     val colors = SharedTheme.globalColors
 
@@ -137,7 +139,7 @@ fun LayoutInspectorDashboard(
     LaunchedEffect(dataSourceMode, clientProvider) {
         kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             try {
-                val dataSource = dev.jasonpearson.automobile.desktop.core.datasource.DataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider, platform)
+                val dataSource = graph.dataSourceFactory.createLayoutDataSource(dataSourceMode, clientProvider, platform)
                 when (val result = dataSource.getObservation()) {
                     is dev.jasonpearson.automobile.desktop.core.datasource.Result.Success -> {
                         val observation = result.data

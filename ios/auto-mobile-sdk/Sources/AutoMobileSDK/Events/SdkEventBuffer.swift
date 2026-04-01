@@ -13,6 +13,7 @@ public protocol EventBuffering: AnyObject, Sendable {
 /// Thread-safe event buffer that flushes on capacity or timer.
 public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private let maxBufferSize: Int
+    private let maxPendingEvents: Int
     private let flushIntervalMs: Int
     private let onFlush: @Sendable ([any SdkEvent]) throws -> Void
     private let lock = NSLock()
@@ -21,16 +22,21 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private let timerFactory: () -> any TimerScheduling
     private var _isBufferEnabled = true
     private let dropCounter: (any DropCounting)?
+    private let processors: [any EventProcessing]
 
     public init(
         maxBufferSize: Int = 50,
         flushIntervalMs: Int = 500,
+        maxPendingEvents: Int = 500,
+        processors: [any EventProcessing] = [],
         timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() },
         dropCounter: (any DropCounting)? = nil,
         onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void
     ) {
         self.maxBufferSize = maxBufferSize
+        self.maxPendingEvents = max(1, maxPendingEvents)
         self.flushIntervalMs = flushIntervalMs
+        self.processors = processors
         self.timerFactory = timerFactory
         self.dropCounter = dropCounter
         self.onFlush = onFlush
@@ -69,16 +75,44 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     }
 
     public func add(_ event: any SdkEvent) {
-        var shouldFlush = false
+        // Check disabled state first, before running processors
         lock.lock()
         guard _isBufferEnabled else {
             lock.unlock()
             dropCounter?.increment(.disabled)
             return
         }
-        buffer.append(event)
+        lock.unlock()
+
+        // Run processor chain outside lock
+        var current: (any SdkEvent)? = event
+        for processor in processors {
+            guard let e = current else { break }
+            current = processor.process(e)
+        }
+        guard let processed = current else {
+            dropCounter?.increment(.filtered)
+            return
+        }
+
+        var shouldFlush = false
+        var didOverflow = false
+        lock.lock()
+        guard _isBufferEnabled else {
+            lock.unlock()
+            dropCounter?.increment(.disabled)
+            return
+        }
+        if maxPendingEvents > 0, buffer.count >= maxPendingEvents {
+            buffer.removeFirst()
+            didOverflow = true
+        }
+        buffer.append(processed)
         shouldFlush = buffer.count >= maxBufferSize
         lock.unlock()
+        if didOverflow {
+            dropCounter?.increment(.bufferOverflow)
+        }
         if shouldFlush {
             flush()
         }

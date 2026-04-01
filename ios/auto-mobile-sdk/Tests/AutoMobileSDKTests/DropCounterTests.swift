@@ -57,6 +57,19 @@ final class DefaultDropCounterTests: XCTestCase {
 
         XCTAssertEqual(counter.snapshot()[.disabled], iterations)
     }
+
+    func testNewDropReasons() {
+        let counter = DefaultDropCounter()
+        counter.increment(.bufferOverflow)
+        counter.increment(.bufferOverflow)
+        counter.increment(.filtered)
+        counter.increment(.deliveryFailed, count: 3)
+
+        let snap = counter.snapshot()
+        XCTAssertEqual(snap[.bufferOverflow], 2)
+        XCTAssertEqual(snap[.filtered], 1)
+        XCTAssertEqual(snap[.deliveryFailed], 3)
+    }
 }
 
 // MARK: - SdkEventBuffer + DropCounter

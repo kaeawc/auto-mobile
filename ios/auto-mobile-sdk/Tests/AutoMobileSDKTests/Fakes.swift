@@ -161,6 +161,20 @@ final class FakeEventBuffer: EventBuffering, @unchecked Sendable {
     }
 }
 
+// MARK: - FakeEventProcessor
+
+final class FakeEventProcessor: EventProcessing, @unchecked Sendable {
+    private let handler: @Sendable (any SdkEvent) -> (any SdkEvent)?
+
+    init(_ handler: @escaping @Sendable (any SdkEvent) -> (any SdkEvent)?) {
+        self.handler = handler
+    }
+
+    func process(_ event: any SdkEvent) -> (any SdkEvent)? {
+        handler(event)
+    }
+}
+
 // MARK: - FakeNavigationListener
 
 final class FakeNavigationListener: NavigationListener, @unchecked Sendable {

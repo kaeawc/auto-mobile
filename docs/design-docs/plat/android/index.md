@@ -4,7 +4,7 @@
 
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
-AutoMobile's Android stack spans the MCP server, daemon, IDE plugin, JUnitRunner, and device-side services.
+AutoMobile's Android stack spans the MCP server, daemon, IDE plugin, JUnitRunner, Desktop companion app, and device-side services.
 
 ## Test Execution
 
@@ -17,6 +17,25 @@ self-healing test flows.
 The Android Accessibility Service provides real-time access to view hierarchy data and UI elements without
 rooting or special permissions beyond accessibility enablement. When enabled, it monitors UI changes,
 stores the latest hierarchy in app-private storage, and streams updates over WebSocket.
+
+## AutoMobile SDK
+
+The [AutoMobile SDK](auto-mobile-sdk.md) provides Android-specific components for integrating AutoMobile
+into applications and test suites. Beyond the core JUnitRunner and Accessibility Service, the SDK includes
+an event pipeline, crash and ANR handling, session tracking, Compose recomposition tracking, navigation
+adapters, SQLite and SharedPreferences inspection, and notification triggering.
+
+## Desktop Companion App
+
+The Desktop companion app is a Compose Desktop application for monitoring and controlling AutoMobile
+sessions from a developer workstation. It provides a graphical interface for viewing connected devices,
+inspecting view hierarchies, and triggering actions without requiring the CLI or MCP client.
+
+The app lives under `android/desktop-app/`, with shared logic in `android/desktop-core/` and domain
+models in `android/desktop-domain/`. It uses Metro for dependency injection and connects to the
+AutoMobile daemon via HTTP, stdio, or socket transport.
+
+See [Desktop App](desktop-app.md) for full details.
 
 ## Batteries Included
 

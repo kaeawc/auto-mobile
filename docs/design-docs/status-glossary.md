@@ -51,6 +51,8 @@ The following items are documented as designs or proposals but have **no corresp
 
 - **`AutoMobileBiometrics.overrideResult()`** — Optional SDK hook for deterministic biometric bypass in apps under test. Not implemented. See [biometrics.md](plat/android/biometrics.md).
 
+> **Note:** The AutoMobile SDK itself (event tracking, crash reporting, session management, diagnostics) is fully implemented and tested on both Android and iOS. The entry above tracks a specific optional biometric hook that remains unbuilt.
+
 #### Vision
 
 - **Hybrid vision fallback (Tier 1 local models)** — Proposed Florence-2 / PaddleOCR local model layer. Not implemented. See [vision-fallback.md](mcp/observe/vision-fallback.md).
@@ -66,6 +68,8 @@ The following items are documented as designs or proposals but have **no corresp
 - **`highlight` tool** — Fully implemented on Android; returns an unsupported error on iOS.
 - **`rawViewHierarchy` (control-proxy source)** — Android only. iOS returns XCUITest JSON.
 - **Work profile `userId` override** — Auto-detection works; manual `userId` parameter is not supported in MCP tool schemas.
+- **AutoMobile SDK event pipeline** — Event tracking, crash handling, session management, and breadcrumbs are fully implemented on both Android and iOS. The SDK Event Pipeline MCP integration is complete. See [sdk-event-pipeline.md](mcp/sdk-event-pipeline.md).
+- **Desktop App** — Compose Desktop companion app for monitoring and controlling sessions is fully implemented with Compose Desktop UI tests. See [desktop-app.md](plat/android/desktop-app.md).
 
 ### Features That Lack Test Coverage
 

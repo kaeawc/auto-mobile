@@ -6,7 +6,9 @@ import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
+import org.junit.Assert.fail
 import org.junit.Test
+import kotlin.coroutines.cancellation.CancellationException
 
 class ResultExtensionsTest {
 
@@ -53,5 +55,16 @@ class ResultExtensionsTest {
 
         assertEquals(1, results.size)
         assertTrue(results[0] is Result.Loading)
+    }
+
+    @Test
+    fun `asResult propagates CancellationException instead of catching it`() = runBlocking {
+        val cancellation = CancellationException("cancelled")
+        try {
+            flow<String> { throw cancellation }.asResult().toList()
+            fail("Expected CancellationException to be thrown")
+        } catch (e: CancellationException) {
+            assertEquals("cancelled", e.message)
+        }
     }
 }

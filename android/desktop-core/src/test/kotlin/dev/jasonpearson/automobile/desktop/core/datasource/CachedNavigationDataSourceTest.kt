@@ -69,7 +69,7 @@ class CachedNavigationDataSourceTest {
     fun `caches error results too`() = runBlocking {
         val delegate = CountingNavigationDataSource(
             listOf(
-                Result.Error(Exception("fail")),
+                Result.Error(RuntimeException("fail")),
                 Result.Success(graph),
             ).iterator()
         )

@@ -1,39 +1,42 @@
 package dev.jasonpearson.automobile.sdk
 
+import android.app.Application
 import android.content.Context
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.AnyThread
+import androidx.annotation.RequiresPermission
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
+import androidx.lifecycle.ProcessLifecycleOwner
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
-import dev.jasonpearson.automobile.sdk.context.SdkContext
-import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
 import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTrail
+import dev.jasonpearson.automobile.sdk.context.SdkContext
+import dev.jasonpearson.automobile.sdk.context.SdkContextSnapshot
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.database.DatabaseInspector
 import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
-import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
-import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
-import java.io.File
-import android.app.Application
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker
 import dev.jasonpearson.automobile.sdk.logging.AutoMobileLog
+import dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger
+import dev.jasonpearson.automobile.sdk.logging.SdkLogger
 import dev.jasonpearson.automobile.sdk.network.AutoMobileNetwork
 import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor
 import dev.jasonpearson.automobile.sdk.os.AutoMobileOsEvents
+import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
+import dev.jasonpearson.automobile.sdk.persistence.FileEventPersistence
 import dev.jasonpearson.automobile.sdk.session.SessionTracker
 import dev.jasonpearson.automobile.sdk.storage.SharedPreferencesInspector
-import androidx.annotation.RequiresPermission
-import androidx.lifecycle.DefaultLifecycleObserver
-import androidx.lifecycle.LifecycleOwner
-import androidx.lifecycle.ProcessLifecycleOwner
+import java.io.File
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**
@@ -65,6 +68,12 @@ import java.util.concurrent.CopyOnWriteArrayList
  * ```
  */
 object AutoMobileSDK {
+  private const val TAG = "AutoMobileSDK"
+
+  /** Internal SDK logger. Replace with [NoOpSdkLogger][dev.jasonpearson.automobile.sdk.logging.NoOpSdkLogger] to silence. */
+  @Volatile
+  internal var logger: SdkLogger = DefaultSdkLogger()
+
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
   private var isEnabled = true
   private var context: Context? = null
@@ -193,6 +202,7 @@ object AutoMobileSDK {
    *
    * @param listener The listener to add
    */
+  @AnyThread
   fun addNavigationListener(listener: NavigationListener) {
     listeners.add(listener)
   }
@@ -202,6 +212,7 @@ object AutoMobileSDK {
    *
    * @param listener The listener to remove
    */
+  @AnyThread
   fun removeNavigationListener(listener: NavigationListener) {
     listeners.remove(listener)
   }
@@ -217,6 +228,7 @@ object AutoMobileSDK {
    *
    * @param event The navigation event to emit
    */
+  @AnyThread
   fun notifyNavigationEvent(event: NavigationEvent) {
     if (!isEnabled) return
 
@@ -226,7 +238,7 @@ object AutoMobileSDK {
         listener.onNavigationEvent(event)
       } catch (e: Exception) {
         // Catch exceptions to prevent one listener from breaking others
-        e.printStackTrace()
+        logger.e(TAG, { "Listener threw" }, e)
       }
     }
 
@@ -288,6 +300,7 @@ object AutoMobileSDK {
    * @param name The event name
    * @param properties Optional key-value properties
    */
+  @AnyThread
   fun trackEvent(name: String, properties: Map<String, String> = emptyMap()) {
     if (!isEnabled) return
 

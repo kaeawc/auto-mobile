@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import java.io.PrintWriter
@@ -97,11 +97,10 @@ object AutoMobileFailures {
     ) {
         val ctx = context
         if (ctx == null) {
-            Log.w(
-                TAG,
+            AutoMobileSDK.logger.w(TAG) {
                 "AutoMobileFailures not initialized; call AutoMobileSDK.initialize() or " +
-                    "AutoMobileFailures.initialize().",
-            )
+                    "AutoMobileFailures.initialize()."
+            }
             return
         }
 
@@ -110,7 +109,7 @@ object AutoMobileFailures {
             storeEvent(event)
             broadcastEvent(ctx, event)
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to record handled exception", e)
+            AutoMobileSDK.logger.e(TAG, { "Failed to record handled exception" }, e)
         }
     }
 
@@ -227,9 +226,9 @@ object AutoMobileFailures {
                     putExtra(EXTRA_SDK_INT, event.deviceInfo.sdkInt)
                 }
             context.sendBroadcast(intent)
-            Log.d(TAG, "Broadcasted handled exception: ${event.exceptionClass}")
+            AutoMobileSDK.logger.d(TAG) { "Broadcasted handled exception: ${event.exceptionClass}" }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to broadcast handled exception", e)
+            AutoMobileSDK.logger.e(TAG, { "Failed to broadcast handled exception" }, e)
         }
     }
 
@@ -247,7 +246,7 @@ object AutoMobileFailures {
                 }
             packageInfo.versionName
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get app version", e)
+            AutoMobileSDK.logger.w(TAG, { "Failed to get app version" }, e)
             null
         }
     }

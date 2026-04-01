@@ -4,8 +4,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
-import android.util.Log
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
@@ -78,7 +78,7 @@ object AutoMobileCrashes {
      */
     fun initialize(context: Context) {
         if (!isInstalled.compareAndSet(false, true)) {
-            Log.d(TAG, "AutoMobileCrashes already initialized")
+            AutoMobileSDK.logger.d(TAG) { "AutoMobileCrashes already initialized" }
             return
         }
 
@@ -90,7 +90,7 @@ object AutoMobileCrashes {
         // Install our handler
         Thread.setDefaultUncaughtExceptionHandler(AutoMobileExceptionHandler())
 
-        Log.d(TAG, "AutoMobileCrashes initialized - crash detection enabled")
+        AutoMobileSDK.logger.d(TAG) { "AutoMobileCrashes initialized - crash detection enabled" }
     }
 
     /**
@@ -113,7 +113,7 @@ object AutoMobileCrashes {
         context = null
         currentScreenProvider = null
         breadcrumbTrail = null
-        Log.d(TAG, "AutoMobileCrashes uninstalled - crash detection disabled")
+        AutoMobileSDK.logger.d(TAG) { "AutoMobileCrashes uninstalled - crash detection disabled" }
     }
 
     private class AutoMobileExceptionHandler : Thread.UncaughtExceptionHandler {
@@ -122,7 +122,7 @@ object AutoMobileCrashes {
                 // Broadcast the crash before the app terminates
                 broadcastCrash(thread, throwable)
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to broadcast crash", e)
+                AutoMobileSDK.logger.e(TAG, { "Failed to broadcast crash" }, e)
             }
 
             // Call the original handler to preserve default crash behavior
@@ -138,7 +138,7 @@ object AutoMobileCrashes {
 
     private fun broadcastCrash(thread: Thread, throwable: Throwable) {
         val ctx = context ?: run {
-            Log.w(TAG, "Context not available, cannot broadcast crash")
+            AutoMobileSDK.logger.w(TAG) { "Context not available, cannot broadcast crash" }
             return
         }
 
@@ -233,9 +233,9 @@ object AutoMobileCrashes {
                 Thread.sleep(200)
             } catch (_: InterruptedException) {}
 
-            Log.i(TAG, "Broadcasted crash: ${throwable.javaClass.name} on thread ${thread.name}")
+            AutoMobileSDK.logger.i(TAG) { "Broadcasted crash: ${throwable.javaClass.name} on thread ${thread.name}" }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to broadcast crash", e)
+            AutoMobileSDK.logger.e(TAG, { "Failed to broadcast crash" }, e)
         }
     }
 
@@ -297,7 +297,7 @@ object AutoMobileCrashes {
             }
             packageInfo.versionName
         } catch (e: Exception) {
-            Log.w(TAG, "Failed to get app version", e)
+            AutoMobileSDK.logger.w(TAG, { "Failed to get app version" }, e)
             null
         }
     }

@@ -7,12 +7,13 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.Window
 import android.view.accessibility.AccessibilityNodeInfo
+import androidx.annotation.MainThread
 import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 
 /**
@@ -50,6 +51,7 @@ object AutoMobileClickTracker {
     @Volatile private var lastTapProcessedAt = 0L
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
 
+    @MainThread
     internal fun initialize(application: Application, appId: String?, buffer: SdkEventBuffer) {
         this.buffer = buffer
         this.applicationId = appId
@@ -181,7 +183,7 @@ object AutoMobileClickTracker {
                     properties = props,
                 ))
             } catch (e: Exception) {
-                Log.d(TAG, "Error tracking tap: ${e.message}")
+                AutoMobileSDK.logger.d(TAG) { "Error tracking tap: ${e.message}" }
             }
         }
 

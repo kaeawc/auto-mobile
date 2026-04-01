@@ -5,8 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
-import android.util.Log
 import androidx.annotation.VisibleForTesting
+import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import java.util.concurrent.atomic.AtomicReference
 
 /**
@@ -125,7 +125,7 @@ object AutoMobileBiometrics {
     fun overrideResult(result: BiometricResult, ttlMs: Long = 5000L) {
         val expiryMs = System.currentTimeMillis() + ttlMs
         pendingOverride.set(PendingOverride(result, expiryMs))
-        Log.d(TAG, "Biometric override set: $result (expires in ${ttlMs}ms)")
+        AutoMobileSDK.logger.d(TAG) { "Biometric override set: $result (expires in ${ttlMs}ms)" }
     }
 
     /**
@@ -136,7 +136,7 @@ object AutoMobileBiometrics {
      */
     fun clearOverride() {
         pendingOverride.set(null)
-        Log.d(TAG, "Biometric override cleared")
+        AutoMobileSDK.logger.d(TAG) { "Biometric override cleared" }
     }
 
     /**
@@ -155,11 +155,11 @@ object AutoMobileBiometrics {
         val override = pendingOverride.get() ?: return null
         if (System.currentTimeMillis() > override.expiryMs) {
             pendingOverride.set(null)
-            Log.d(TAG, "Biometric override expired, discarding")
+            AutoMobileSDK.logger.d(TAG) { "Biometric override expired, discarding" }
             return null
         }
         return if (pendingOverride.compareAndSet(override, null)) {
-            Log.d(TAG, "Biometric override consumed: ${override.result}")
+            AutoMobileSDK.logger.d(TAG) { "Biometric override consumed: ${override.result}" }
             override.result
         } else {
             null
@@ -179,9 +179,9 @@ object AutoMobileBiometrics {
                 ctx.registerReceiver(broadcastReceiver, filter)
             }
             receiverRegistered = true
-            Log.d(TAG, "Biometric override broadcast receiver registered")
+            AutoMobileSDK.logger.d(TAG) { "Biometric override broadcast receiver registered" }
         } catch (e: Exception) {
-            Log.e(TAG, "Failed to register biometric override receiver", e)
+            AutoMobileSDK.logger.e(TAG, { "Failed to register biometric override receiver" }, e)
         }
     }
 
@@ -194,7 +194,7 @@ object AutoMobileBiometrics {
     @VisibleForTesting
     internal fun handleBroadcastIntent(intent: Intent) {
         val resultStr = intent.getStringExtra(EXTRA_RESULT) ?: run {
-            Log.w(TAG, "Biometric override broadcast missing '$EXTRA_RESULT' extra")
+            AutoMobileSDK.logger.w(TAG) { "Biometric override broadcast missing '$EXTRA_RESULT' extra" }
             return
         }
         val ttlMs = intent.getLongExtra(EXTRA_TTL_MS, 5000L)
@@ -207,14 +207,14 @@ object AutoMobileBiometrics {
                 val errorCode = if (intent.hasExtra(EXTRA_ERROR_CODE)) {
                     intent.getIntExtra(EXTRA_ERROR_CODE, -1)
                 } else {
-                    Log.w(TAG, "Biometric ERROR override broadcast missing '$EXTRA_ERROR_CODE' extra; " +
-                        "app will receive Error(-1) which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)")
+                    AutoMobileSDK.logger.w(TAG) { "Biometric ERROR override broadcast missing '$EXTRA_ERROR_CODE' extra; " +
+                        "app will receive Error(-1) which is not a valid BiometricPrompt.ERROR_* constant (valid values start at 1)" }
                     -1
                 }
                 BiometricResult.Error(errorCode)
             }
             else -> {
-                Log.w(TAG, "Unknown biometric override result: '$resultStr'")
+                AutoMobileSDK.logger.w(TAG) { "Unknown biometric override result: '$resultStr'" }
                 return
             }
         }

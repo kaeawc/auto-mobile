@@ -27,6 +27,7 @@ const IOS_PHYSICAL_DEVICE_ERROR = "Localization changes are only supported on iO
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
 const SPRINGBOARD_POLL_INTERVAL_MS = 500;
 const SPRINGBOARD_MAX_RETRIES = 10;
+const BUNDLE_ID_PATTERN = /^[a-zA-Z][a-zA-Z0-9-]*(\.[a-zA-Z][a-zA-Z0-9-]*)+$/;
 
 export interface ApplyLiveChangesResult {
   springBoardRestarted: boolean;
@@ -664,19 +665,23 @@ export class SystemConfigurationManager {
     };
 
     if (restartAppBundleId) {
-      try {
-        await this.processExecutor.exec(
-          this.iosSpawnCommand(`launchctl stop ${restartAppBundleId}`)
-        );
-        // Give the app time to terminate before relaunching
-        await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
-        await this.processExecutor.exec(
-          `xcrun simctl launch ${this.device.deviceId} ${restartAppBundleId}`
-        );
-        result.appRestarted = true;
-      } catch (error) {
-        logger.warn(`[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`);
+      if (!BUNDLE_ID_PATTERN.test(restartAppBundleId)) {
+        logger.warn(`[SystemConfigurationManager] Invalid bundle ID: ${restartAppBundleId}`);
         result.appRestarted = false;
+      } else {
+        try {
+          await this.processExecutor.exec(
+            `xcrun simctl terminate ${this.device.deviceId} ${restartAppBundleId}`
+          );
+          await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
+          await this.processExecutor.exec(
+            `xcrun simctl launch ${this.device.deviceId} ${restartAppBundleId}`
+          );
+          result.appRestarted = true;
+        } catch (error) {
+          logger.warn(`[SystemConfigurationManager] Failed to restart app ${restartAppBundleId}: ${error}`);
+          result.appRestarted = false;
+        }
       }
     }
 

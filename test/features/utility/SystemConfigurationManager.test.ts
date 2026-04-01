@@ -622,7 +622,7 @@ describe("SystemConfigurationManager", () => {
       expect(result.appRestarted).toBe(true);
       expect(
         fakeExec.wasCommandExecuted(
-          `xcrun simctl spawn ${IOS_SIMULATOR.deviceId} launchctl stop com.example.MyApp`
+          `xcrun simctl terminate ${IOS_SIMULATOR.deviceId} com.example.MyApp`
         )
       ).toBe(true);
       expect(
@@ -632,18 +632,38 @@ describe("SystemConfigurationManager", () => {
       ).toBe(true);
     });
 
-    test("reports appRestarted false when app restart fails", async () => {
+    test("reports appRestarted false when app terminate fails", async () => {
       fakeExec.setDefaultResponse(execResult(""));
       fakeExec.setCommandResponse("launchctl list com.apple.SpringBoard", execResult("com.apple.SpringBoard\n"));
       const originalExec = fakeExec.exec.bind(fakeExec);
       fakeExec.exec = async (command, options) => {
-        if (command.includes("launchctl stop com.example.MyApp")) {
+        if (command.includes("simctl terminate")) {
           throw new Error("app not running");
         }
         return originalExec(command, options);
       };
       const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
       const result = await mgr.applyIosLiveChanges("com.example.MyApp");
+
+      expect(result.appRestarted).toBe(false);
+    });
+
+    test("rejects invalid bundle ID with shell metacharacters", async () => {
+      fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("launchctl list com.apple.SpringBoard", execResult("com.apple.SpringBoard\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
+      const result = await mgr.applyIosLiveChanges("com.example.App; rm -rf /");
+
+      expect(result.appRestarted).toBe(false);
+      expect(fakeExec.wasCommandExecuted("simctl terminate")).toBe(false);
+      expect(fakeExec.wasCommandExecuted("simctl launch")).toBe(false);
+    });
+
+    test("rejects bundle ID that does not match reverse-DNS format", async () => {
+      fakeExec.setDefaultResponse(execResult(""));
+      fakeExec.setCommandResponse("launchctl list com.apple.SpringBoard", execResult("com.apple.SpringBoard\n"));
+      const mgr = new SystemConfigurationManager(IOS_SIMULATOR, fakeAdbFactory, fakeExec, fakeTimer);
+      const result = await mgr.applyIosLiveChanges("notabundleid");
 
       expect(result.appRestarted).toBe(false);
     });

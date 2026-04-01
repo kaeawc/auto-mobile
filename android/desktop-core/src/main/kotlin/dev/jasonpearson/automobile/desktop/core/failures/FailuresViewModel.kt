@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.desktop.core.failures
 
+import dev.jasonpearson.automobile.desktop.core.datasource.Result
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.channels.Channel
@@ -79,13 +80,16 @@ class FailuresViewModel(
         scope.launch {
             try {
                 when (val result = dataSource.getFailureGroups()) {
-                    is DataSourceResult.Success -> {
+                    is Result.Success -> {
                         LOG.info("Failures loaded: ${result.data.size} groups")
                         _state.value = FailuresUiState.Content(failureGroups = result.data)
                     }
-                    is DataSourceResult.Error -> {
+                    is Result.Error -> {
                         LOG.warn("Failed to load failures: ${result.message}")
-                        _state.value = FailuresUiState.Error(message = result.message)
+                        _state.value = FailuresUiState.Error(message = result.message ?: "Unknown error")
+                    }
+                    is Result.Loading -> {
+                        // Keep loading state
                     }
                 }
             } catch (e: Exception) {

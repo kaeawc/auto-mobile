@@ -1,17 +1,21 @@
 import XCTest
 @testable import AutoMobileSDK
 
+private final class EventAccumulator: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [any SdkEvent] = []
+    var events: [any SdkEvent] { lock.lock(); defer { lock.unlock() }; return _events }
+    func append(_ events: [any SdkEvent]) { lock.lock(); _events.append(contentsOf: events); lock.unlock() }
+}
+
 final class ConcurrencyTests: XCTestCase {
     func testConcurrentEventBufferAccess() {
         let expectation = self.expectation(description: "concurrent access")
         expectation.expectedFulfillmentCount = 10
 
-        var receivedEvents: [any SdkEvent] = []
-        let lock = NSLock()
+        let accumulator = EventAccumulator()
         let buffer = SdkEventBuffer { events in
-            lock.lock()
-            receivedEvents.append(contentsOf: events)
-            lock.unlock()
+            accumulator.append(events)
         }
         buffer.start()
 
@@ -28,9 +32,7 @@ final class ConcurrencyTests: XCTestCase {
         buffer.flush()
         buffer.shutdown()
 
-        lock.lock()
-        XCTAssertEqual(receivedEvents.count, 10)
-        lock.unlock()
+        XCTAssertEqual(accumulator.events.count, 10)
     }
 
     func testConcurrentNavigationListenerAccess() {

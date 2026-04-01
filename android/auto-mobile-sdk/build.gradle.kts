@@ -63,7 +63,9 @@ dependencies {
   // Compose runtime for @Composable support
   implementation(platform(libs.compose.bom))
   implementation("androidx.compose.runtime:runtime")
-  implementation(libs.bundles.compose.ui)
+  implementation(libs.bundles.compose.sdk)
+  debugImplementation(libs.compose.ui.tooling)
+  debugImplementation(libs.compose.ui.tooling.preview)
 
   // Navigation3 support for Compose navigation tracking
   implementation(libs.navigation3.runtime)

@@ -175,6 +175,13 @@ compose-ui = [
   "compose-material",
   "compose-material-icons-extended"
 ]
+compose-sdk = [
+  "compose-ui-core",
+  "compose-ui-util",
+  "compose-ui-graphics",
+  "compose-ui-foundation",
+  "compose-material"
+]
 compose-ui-espresso-test = [
   "androidx-junit",
   "compose-ui-junit",

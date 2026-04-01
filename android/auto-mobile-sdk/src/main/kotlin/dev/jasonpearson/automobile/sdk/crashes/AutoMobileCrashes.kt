@@ -8,6 +8,7 @@ import dev.jasonpearson.automobile.protocol.SdkCrashEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
+import dev.jasonpearson.automobile.sdk.SdkConstants
 import dev.jasonpearson.automobile.sdk.breadcrumbs.Breadcrumb
 import dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbTracking
 import java.io.PrintWriter
@@ -36,8 +37,7 @@ import org.json.JSONObject
 object AutoMobileCrashes {
     private const val TAG = "AutoMobileCrashes"
 
-    /** Package name of the AutoMobile AccessibilityService that receives broadcasts */
-    private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+    private const val ACCESSIBILITY_SERVICE_PACKAGE = SdkConstants.CTRL_PROXY_PACKAGE
 
     const val ACTION_CRASH = "dev.jasonpearson.automobile.sdk.CRASH"
     const val EXTRA_TIMESTAMP = "timestamp"

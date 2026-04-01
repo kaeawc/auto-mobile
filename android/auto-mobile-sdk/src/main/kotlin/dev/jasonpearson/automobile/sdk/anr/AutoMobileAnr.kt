@@ -12,6 +12,7 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
+import dev.jasonpearson.automobile.sdk.SdkConstants
 
 /**
  * SDK API for detecting ANRs (Application Not Responding) from previous sessions.
@@ -36,8 +37,7 @@ import dev.jasonpearson.automobile.protocol.SdkEventSerializer
 object AutoMobileAnr {
     private const val TAG = "AutoMobileAnr"
 
-    /** Package name of the AutoMobile AccessibilityService that receives broadcasts */
-    private const val ACCESSIBILITY_SERVICE_PACKAGE = "dev.jasonpearson.automobile.ctrlproxy"
+    private const val ACCESSIBILITY_SERVICE_PACKAGE = SdkConstants.CTRL_PROXY_PACKAGE
 
     const val ACTION_ANR = "dev.jasonpearson.automobile.sdk.ANR"
 

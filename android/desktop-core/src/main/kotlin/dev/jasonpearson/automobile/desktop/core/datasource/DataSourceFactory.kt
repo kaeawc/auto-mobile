@@ -17,18 +17,26 @@ object DataSourceFactory {
 
     /**
      * Creates a navigation data source based on the specified mode.
+     * In Real mode the data source is wrapped with a TTL cache to avoid
+     * re-fetching on every tab switch or recomposition.
+     *
      * @param mode The data source mode (Fake or Real)
      * @param clientProvider Optional function to provide an AutoMobileClient for MCP access
      * @param appId Optional app ID to filter the navigation graph by specific app
+     * @param cacheTtlMs TTL in milliseconds for the in-memory cache (Real mode only)
      */
     fun createNavigationDataSource(
         mode: DataSourceMode,
         clientProvider: (() -> AutoMobileClient)? = null,
         appId: String? = null,
+        cacheTtlMs: Long = 30_000L,
     ): NavigationDataSource {
         return when (mode) {
             DataSourceMode.Fake -> FakeNavigationDataSource()
-            DataSourceMode.Real -> RealNavigationDataSource(clientProvider, appId)
+            DataSourceMode.Real -> CachedNavigationDataSource(
+                delegate = RealNavigationDataSource(clientProvider, appId),
+                ttlMs = cacheTtlMs,
+            )
         }
     }
 
@@ -102,18 +110,26 @@ object DataSourceFactory {
 
     /**
      * Creates an app list data source based on the specified mode.
+     * In Real mode the data source is wrapped with a TTL cache to avoid
+     * re-fetching on every tab switch or recomposition.
+     *
      * @param mode The data source mode (Fake or Real)
      * @param clientProvider Optional function to provide an AutoMobileClient for MCP access
      * @param deviceId The device ID to fetch apps for (required for Real mode)
+     * @param cacheTtlMs TTL in milliseconds for the in-memory cache (Real mode only)
      */
     fun createAppListDataSource(
         mode: DataSourceMode,
         clientProvider: (() -> AutoMobileClient)? = null,
         deviceId: String? = null,
+        cacheTtlMs: Long = 30_000L,
     ): AppListDataSource {
         return when (mode) {
             DataSourceMode.Fake -> FakeAppListDataSource()
-            DataSourceMode.Real -> RealAppListDataSource(clientProvider, deviceId)
+            DataSourceMode.Real -> CachedAppListDataSource(
+                delegate = RealAppListDataSource(clientProvider, deviceId),
+                ttlMs = cacheTtlMs,
+            )
         }
     }
 

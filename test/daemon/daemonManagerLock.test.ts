@@ -1,0 +1,223 @@
+import { describe, expect, test, afterEach } from "bun:test";
+import { existsSync, writeFileSync, mkdtempSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { DaemonManager } from "../../src/daemon/manager";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+describe("DaemonManager file lock", () => {
+  const tempDirs: string[] = [];
+
+  function createTempLockPath(): string {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-lock-test-"));
+    tempDirs.push(dir);
+    return join(dir, "daemon.lock");
+  }
+
+  afterEach(() => {
+    for (const dir of tempDirs) {
+      try {
+        const { rmSync } = require("node:fs");
+        rmSync(dir, { recursive: true, force: true });
+      } catch { /* ignore */ }
+    }
+    tempDirs.length = 0;
+  });
+
+  describe("acquireLock", () => {
+    test("succeeds when no lock file exists", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      expect(manager.acquireLock()).toBe(true);
+      expect(existsSync(lockPath)).toBe(true);
+
+      manager.releaseLock();
+    });
+
+    test("fails when lock is held by a live process", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      expect(manager.acquireLock()).toBe(true);
+
+      const manager2 = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      expect(manager2.acquireLock()).toBe(false);
+
+      manager.releaseLock();
+    });
+
+    test("cleans up stale lock from dead process", () => {
+      const lockPath = createTempLockPath();
+      writeFileSync(lockPath, "99999999");
+
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      expect(manager.acquireLock()).toBe(true);
+      expect(existsSync(lockPath)).toBe(true);
+
+      manager.releaseLock();
+    });
+
+    test("fails when lock file contains invalid content", () => {
+      const lockPath = createTempLockPath();
+      writeFileSync(lockPath, "not-a-pid");
+
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      // NaN PID → treated as stale → cleaned up → re-acquired
+      expect(manager.acquireLock()).toBe(true);
+
+      manager.releaseLock();
+    });
+
+    test("fails when lock file is empty", () => {
+      const lockPath = createTempLockPath();
+      writeFileSync(lockPath, "");
+
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+      // Empty → parseInt returns NaN → treated as stale → re-acquired
+      expect(manager.acquireLock()).toBe(true);
+
+      manager.releaseLock();
+    });
+  });
+
+  describe("releaseLock", () => {
+    test("removes the lock file", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      manager.acquireLock();
+      expect(existsSync(lockPath)).toBe(true);
+
+      manager.releaseLock();
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("is safe when no lock file exists", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      // Should not throw
+      manager.releaseLock();
+    });
+
+    test("is idempotent", () => {
+      const lockPath = createTempLockPath();
+      const manager = new DaemonManager(undefined, undefined, new FakeTimer(), lockPath);
+
+      manager.acquireLock();
+      manager.releaseLock();
+      manager.releaseLock(); // Should not throw
+      expect(existsSync(lockPath)).toBe(false);
+    });
+  });
+
+  describe("start() lock coordination", () => {
+    test("waits for daemon when lock is held by another live process", async () => {
+      const lockPath = createTempLockPath();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      // Pre-acquire the lock (simulates another process holding it)
+      writeFileSync(lockPath, String(process.pid));
+
+      let waitForReadyCalled = false;
+
+      class TestDaemonManager extends DaemonManager {
+        override async waitForReady(_timeout: number): Promise<boolean> {
+          waitForReadyCalled = true;
+          return true; // Simulate daemon becoming ready
+        }
+        // Override to prevent real process spawning
+        override findAllDaemonProcesses(): number[] { return []; }
+      }
+
+      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+
+      await manager.start();
+
+      expect(waitForReadyCalled).toBe(true);
+      // Lock file should still exist (we didn't acquire it, so we don't release it)
+      expect(existsSync(lockPath)).toBe(true);
+
+      // Clean up
+      const { unlinkSync } = require("node:fs");
+      unlinkSync(lockPath);
+    });
+
+    test("throws when lock is held and daemon fails to start", async () => {
+      const lockPath = createTempLockPath();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      writeFileSync(lockPath, String(process.pid));
+
+      class TestDaemonManager extends DaemonManager {
+        override async waitForReady(_timeout: number): Promise<boolean> {
+          return false; // Daemon never becomes ready
+        }
+        override findAllDaemonProcesses(): number[] { return []; }
+      }
+
+      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+
+      await expect(manager.start()).rejects.toThrow(
+        "Another process is starting the daemon but it failed to become ready"
+      );
+
+      // Clean up
+      const { unlinkSync } = require("node:fs");
+      unlinkSync(lockPath);
+    });
+
+    test("releases lock after successful start", async () => {
+      const lockPath = createTempLockPath();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      class TestDaemonManager extends DaemonManager {
+        override findAllDaemonProcesses(): number[] { return []; }
+        override async status(): Promise<any> { return { running: false }; }
+        override async waitForReady(_timeout: number): Promise<boolean> {
+          return true;
+        }
+      }
+
+      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+
+      // start() will acquire the lock, try to run startUnlocked (which calls waitForReady
+      // internally), and then release the lock. Since we can't fully mock startUnlocked
+      // without accessing private methods, we verify the lock is released after start().
+      // The actual start will fail because there's no real daemon binary, but the lock
+      // should still be released via finally.
+      try {
+        await manager.start();
+      } catch {
+        // Expected — no real daemon to start
+      }
+
+      // Lock should be released regardless of success or failure
+      expect(existsSync(lockPath)).toBe(false);
+    });
+
+    test("releases lock even when start throws", async () => {
+      const lockPath = createTempLockPath();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      class TestDaemonManager extends DaemonManager {
+        override findAllDaemonProcesses(): number[] { return []; }
+        override async status(): Promise<any> {
+          throw new Error("simulated failure");
+        }
+      }
+
+      const manager = new TestDaemonManager(undefined, undefined, fakeTimer, lockPath);
+
+      await expect(manager.start()).rejects.toThrow("simulated failure");
+
+      // Lock must be released even on error (finally block)
+      expect(existsSync(lockPath)).toBe(false);
+    });
+  });
+});

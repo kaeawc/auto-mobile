@@ -526,7 +526,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     this.consecutiveConnectionFailures++;
     logger.info(`[CtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`);
 
-    if (this.consecutiveConnectionFailures >= CtrlProxyClient.MAX_FAILURES_BEFORE_RESTART &&
+    if (this.consecutiveConnectionFailures === CtrlProxyClient.MAX_FAILURES_BEFORE_RESTART &&
         !this.isRequestingServiceRestart) {
       this.triggerServiceRestart();
     }

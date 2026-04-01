@@ -51,23 +51,38 @@ export class DaemonClient {
   }
 
   /**
-   * Check if daemon is available (socket file exists and is accessible)
+   * Check if daemon is available (socket file exists and is connectable).
+   * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
    */
   static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
-    // Quick check: socket file exists
     if (!existsSync(socketPath)) {
       return false;
     }
 
-    // Try to connect to verify daemon is responding
-    const client = new DaemonClient(socketPath, 1000); // Short timeout for availability check
-    try {
-      await client.connect();
-      await client.close();
-      return true;
-    } catch (error) {
-      return false;
-    }
+    return new Promise<boolean>(resolve => {
+      let settled = false;
+      const settle = (value: boolean) => {
+        if (!settled) {
+          settled = true;
+          resolve(value);
+        }
+      };
+
+      const socket = createConnection(socketPath, () => {
+        defaultTimer.clearTimeout(timeout);
+        socket.destroy();
+        settle(true);
+      });
+      socket.on("error", () => {
+        defaultTimer.clearTimeout(timeout);
+        socket.destroy();
+        settle(false);
+      });
+      const timeout = defaultTimer.setTimeout(() => {
+        socket.destroy();
+        settle(false);
+      }, 1000);
+    });
   }
 
   /**

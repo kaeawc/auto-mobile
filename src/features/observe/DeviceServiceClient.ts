@@ -176,9 +176,6 @@ export abstract class DeviceServiceClient {
   ): Promise<boolean> {
     const result = await this.retryExecutor.execute(
       async attempt => {
-        // Reset connection attempts counter to allow fresh connection attempts
-        this.connectionAttempts = 0;
-
         const connected = await this.ensureConnected();
         if (connected) {
           logger.info(`[${this.logTag}] WebSocket connected after ${attempt} attempt(s) (${(attempt - 1) * delayMs}ms)`);
@@ -265,7 +262,6 @@ export abstract class DeviceServiceClient {
         // Ignore close errors on stale socket
       }
       this.ws = null;
-      this.connectionAttempts = 0;
     }
 
     // Connection already in progress - wait for it
@@ -343,7 +339,6 @@ export abstract class DeviceServiceClient {
           logger.info(`[${this.logTag}] WebSocket connection closed`);
           this.ws = null;
           this.isConnecting = false;
-          this.connectionAttempts = 0;
 
           // Stop health check
           this.stopHealthCheck();

@@ -1,6 +1,25 @@
 import XCTest
 @testable import AutoMobileSDK
 
+/// Thread-safe collector for events flushed by SdkEventBuffer, avoiding
+/// `mutation of captured var in concurrently-executing code` errors.
+private final class EventCollector: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _events: [any SdkEvent] = []
+
+    var events: [any SdkEvent] {
+        lock.lock()
+        defer { lock.unlock() }
+        return _events
+    }
+
+    func append(_ newEvents: [any SdkEvent]) {
+        lock.lock()
+        _events.append(contentsOf: newEvents)
+        lock.unlock()
+    }
+}
+
 final class SetEnabledPropagationTests: XCTestCase {
     override func tearDown() {
         AutoMobileSDK.shared.reset()
@@ -44,9 +63,9 @@ final class SetEnabledPropagationTests: XCTestCase {
     }
 
     func testOsEventsDoesNotPostWhenDisabled() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
         let buffer = SdkEventBuffer { events in
-            flushedEvents.append(contentsOf: events)
+            collector.append(events)
         }
         buffer.start()
         AutoMobileOsEvents.shared.initialize(bundleId: "test.osevents", buffer: buffer)
@@ -61,7 +80,7 @@ final class SetEnabledPropagationTests: XCTestCase {
 
         buffer.flush()
 
-        let lifecycleEvents = flushedEvents.compactMap { $0 as? SdkLifecycleEvent }
+        let lifecycleEvents = collector.events.compactMap { $0 as? SdkLifecycleEvent }
         XCTAssertTrue(lifecycleEvents.isEmpty, "No lifecycle events should be recorded when OsEvents is disabled")
 
         AutoMobileOsEvents.shared.reset()
@@ -98,9 +117,9 @@ final class SetEnabledPropagationTests: XCTestCase {
     }
 
     func testInteractionTrackerDoesNotRecordWhenSdkDisabled() {
-        var flushedEvents: [any SdkEvent] = []
+        let collector = EventCollector()
         let buffer = SdkEventBuffer { events in
-            flushedEvents.append(contentsOf: events)
+            collector.append(events)
         }
         buffer.start()
         let tracker = AutoMobileInteractionTracker.shared
@@ -113,7 +132,7 @@ final class SetEnabledPropagationTests: XCTestCase {
         tracker.recordTap(x: 100, y: 200)
         buffer.flush()
 
-        let tapEvents = flushedEvents.compactMap { $0 as? SdkCustomEvent }
+        let tapEvents = collector.events.compactMap { $0 as? SdkCustomEvent }
         XCTAssertTrue(tapEvents.isEmpty, "No tap events should be recorded when SDK is disabled")
 
         tracker.reset()

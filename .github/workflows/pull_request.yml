@@ -902,24 +902,19 @@ jobs:
         with:
           lfs: false
 
-      - name: "Cache Turborepo"
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-${{ github.sha }}
-          restore-keys: |
-            turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
-            turbo-ubuntu-latest-
-
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Tests with Coverage"
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run test:coverage --output-logs=errors-only
+        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+
+      - name: "Verify Coverage Output"
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "::error::coverage/lcov.info not found"
+            ls -la coverage/ 2>/dev/null || echo "coverage/ directory does not exist"
+            exit 1
+          fi
+          echo "Coverage file size: $(wc -c < coverage/lcov.info) bytes"
 
       - name: "Upload Coverage"
         uses: actions/upload-artifact@v6
@@ -1103,7 +1098,6 @@ jobs:
       matrix:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
           - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
@@ -1133,10 +1127,13 @@ jobs:
         with:
           lfs: false
 
-      - name: "Select Xcode 26.0"
+      - name: "Select Xcode 26.3"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.0"
+          xcode-version: "26.3"
+
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Install xcpretty"
         run: gem install xcpretty

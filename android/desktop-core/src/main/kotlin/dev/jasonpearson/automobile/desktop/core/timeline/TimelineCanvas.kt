@@ -40,32 +40,31 @@ fun TimelineCanvas(
     onEventClicked: (TelemetryDisplayEvent) -> Unit,
     modifier: Modifier = Modifier,
 ) {
-  val colors = SharedTheme.globalColors
-  val textMeasurer = rememberTextMeasurer()
-  val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
-  val isMac = remember { System.getProperty("os.name")?.lowercase()?.contains("mac") == true }
-  val infoColor = colors.text.info
-  val textColor = colors.text.normal
+    val colors = SharedTheme.globalColors
+    val textMeasurer = rememberTextMeasurer()
+    val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+    val isMac = remember { System.getProperty("os.name")?.lowercase()?.contains("mac") == true }
+    val infoColor = colors.text.info
+    val textColor = colors.text.normal
 
-  Box(
-      modifier =
-          modifier
-              .onPointerEvent(PointerEventType.Scroll) { event ->
+    Box(
+        modifier = modifier
+            .onPointerEvent(PointerEventType.Scroll) { event ->
                 val change = event.changes.first()
-                val isZoomModifier =
-                    if (isMac) event.keyboardModifiers.isMetaPressed
-                    else event.keyboardModifiers.isCtrlPressed
+                val isZoomModifier = if (isMac) event.keyboardModifiers.isMetaPressed else event.keyboardModifiers.isCtrlPressed
                 if (isZoomModifier) {
-                  val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
-                  val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
-                  state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
-                  change.consume()
+                    val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
+                    val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
+                    state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
+                    change.consume()
                 }
-              }
-              .pointerInput(Unit) {
-                detectDragGestures { _, dragAmount -> state.panBy(-dragAmount.x / size.width) }
-              }
-              .pointerInput(spans) {
+            }
+            .pointerInput(Unit) {
+                detectDragGestures { _, dragAmount ->
+                    state.panBy(-dragAmount.x / size.width)
+                }
+            }
+            .pointerInput(spans) {
                 detectTapGestures { offset ->
                   val chartWidth = size.width - LANE_LABEL_WIDTH
                   val chartHeight = size.height - TIME_AXIS_HEIGHT
@@ -99,96 +98,91 @@ fun TimelineCanvas(
                     onEventClicked(nearest.event)
                   }
                 }
-              }
-  ) {
-    Canvas(Modifier.fillMaxSize()) {
-      if (activeLanes.isEmpty()) return@Canvas
-      val chartLeft = LANE_LABEL_WIDTH
-      val chartWidth = size.width - chartLeft
-      val chartHeight = size.height - TIME_AXIS_HEIGHT
-      if (chartWidth <= 0 || chartHeight <= 0) return@Canvas
-      val laneHeight = chartHeight / activeLanes.size
+            }
+    ) {
+        Canvas(Modifier.fillMaxSize()) {
+            if (activeLanes.isEmpty()) return@Canvas
+            val chartLeft = LANE_LABEL_WIDTH
+            val chartWidth = size.width - chartLeft
+            val chartHeight = size.height - TIME_AXIS_HEIGHT
+            if (chartWidth <= 0 || chartHeight <= 0) return@Canvas
+            val laneHeight = chartHeight / activeLanes.size
 
-      // Draw lane backgrounds
-      activeLanes.forEachIndexed { index, _ ->
-        val y = index * laneHeight
-        val bgAlpha = if (index % 2 == 0) 0.03f else 0.06f
-        drawRect(
-            color = textColor.copy(alpha = bgAlpha),
-            topLeft = Offset(chartLeft, y),
-            size = Size(chartWidth, laneHeight),
-        )
-      }
+            activeLanes.forEachIndexed { index, _ ->
+                val y = index * laneHeight
+                val bgAlpha = if (index % 2 == 0) 0.03f else 0.06f
+                drawRect(
+                    color = textColor.copy(alpha = bgAlpha),
+                    topLeft = Offset(chartLeft, y),
+                    size = Size(chartWidth, laneHeight),
+                )
+            }
 
-      // Draw spans
-      for (span in spans) {
-        val laneIndex = activeLanes.indexOf(span.category.laneIndex)
-        if (laneIndex < 0) continue
-        val startFrac = state.timestampToFraction(span.startMs)
-        val endFrac = state.timestampToFraction(span.endMs)
-        if (endFrac < 0f || startFrac > 1f) continue
-        val x1 = (chartLeft + startFrac * chartWidth).coerceAtLeast(chartLeft)
-        val x2 = (chartLeft + endFrac * chartWidth).coerceAtMost(chartLeft + chartWidth)
-        val spanWidth = (x2 - x1).coerceAtLeast(MIN_SPAN_WIDTH)
-        val laneY = laneIndex * laneHeight
-        val spanH = laneHeight * SPAN_HEIGHT_FRACTION
-        val spanY = laneY + (laneHeight - spanH) / 2
-        val alpha = if (span.isFiltered) 0.2f else 1.0f
-        drawRoundRect(
-            color = span.category.color.copy(alpha = alpha),
-            topLeft = Offset(x1, spanY),
-            size = Size(spanWidth, spanH),
-            cornerRadius = CornerRadius(2f, 2f),
-        )
-      }
+            for (span in spans) {
+                val laneIndex = activeLanes.indexOf(span.category.laneIndex)
+                if (laneIndex < 0) continue
+                val startFrac = state.timestampToFraction(span.startMs)
+                val endFrac = state.timestampToFraction(span.endMs)
+                if (endFrac < 0f || startFrac > 1f) continue
+                val x1 = (chartLeft + startFrac * chartWidth).coerceAtLeast(chartLeft)
+                val x2 = (chartLeft + endFrac * chartWidth).coerceAtMost(chartLeft + chartWidth)
+                val spanWidth = (x2 - x1).coerceAtLeast(MIN_SPAN_WIDTH)
+                val laneY = laneIndex * laneHeight
+                val spanH = laneHeight * SPAN_HEIGHT_FRACTION
+                val spanY = laneY + (laneHeight - spanH) / 2
+                val alpha = if (span.isFiltered) 0.2f else 1.0f
+                drawRoundRect(
+                    color = span.category.color.copy(alpha = alpha),
+                    topLeft = Offset(x1, spanY),
+                    size = Size(spanWidth, spanH),
+                    cornerRadius = CornerRadius(2f, 2f),
+                )
+            }
 
-      // Draw playhead
-      state.selectedTimestampMs?.let { ts ->
-        val frac = state.timestampToFraction(ts)
-        if (frac in 0f..1f) {
-          val x = chartLeft + frac * chartWidth
-          drawLine(
-              color = infoColor.copy(alpha = 0.8f),
-              start = Offset(x, 0f),
-              end = Offset(x, chartHeight),
-              strokeWidth = 1.5f,
-          )
+            state.selectedTimestampMs?.let { ts ->
+                val frac = state.timestampToFraction(ts)
+                if (frac in 0f..1f) {
+                    val x = chartLeft + frac * chartWidth
+                    drawLine(
+                        color = infoColor.copy(alpha = 0.8f),
+                        start = Offset(x, 0f),
+                        end = Offset(x, chartHeight),
+                        strokeWidth = 1.5f,
+                    )
+                }
+            }
+
+            val tickCount = (chartWidth / 80).toInt().coerceIn(2, 10)
+            for (i in 0..tickCount) {
+                val frac = i.toFloat() / tickCount
+                val x = chartLeft + frac * chartWidth
+                val ts = state.fractionToTimestamp(frac)
+                drawLine(
+                    color = textColor.copy(alpha = 0.2f),
+                    start = Offset(x, chartHeight),
+                    end = Offset(x, chartHeight + 4f),
+                    strokeWidth = 1f,
+                )
+                val label = timeFormat.format(Date(ts))
+                val textResult = textMeasurer.measure(label, style = TextStyle(fontSize = 8.sp))
+                drawText(
+                    textLayoutResult = textResult,
+                    color = textColor.copy(alpha = 0.4f),
+                    topLeft = Offset(x - textResult.size.width / 2f, chartHeight + 4f),
+                )
+            }
+
+            val laneLabels = mapOf(0 to "Net/Tool", 1 to "Nav/State", 2 to "Diag")
+            activeLanes.forEachIndexed { index, laneIdx ->
+                val label = laneLabels[laneIdx] ?: ""
+                val textResult = textMeasurer.measure(label, style = TextStyle(fontSize = 9.sp))
+                val laneY = index * laneHeight + laneHeight / 2 - textResult.size.height / 2
+                drawText(
+                    textLayoutResult = textResult,
+                    color = textColor.copy(alpha = 0.4f),
+                    topLeft = Offset(4f, laneY),
+                )
+            }
         }
-      }
-
-      // Draw time axis ticks
-      val tickCount = (chartWidth / 80).toInt().coerceIn(2, 10)
-      for (i in 0..tickCount) {
-        val frac = i.toFloat() / tickCount
-        val x = chartLeft + frac * chartWidth
-        val ts = state.fractionToTimestamp(frac)
-        drawLine(
-            color = textColor.copy(alpha = 0.2f),
-            start = Offset(x, chartHeight),
-            end = Offset(x, chartHeight + 4f),
-            strokeWidth = 1f,
-        )
-        val label = timeFormat.format(Date(ts))
-        val textResult = textMeasurer.measure(label, style = TextStyle(fontSize = 8.sp))
-        drawText(
-            textLayoutResult = textResult,
-            color = textColor.copy(alpha = 0.4f),
-            topLeft = Offset(x - textResult.size.width / 2f, chartHeight + 4f),
-        )
-      }
-
-      // Draw lane labels
-      val laneLabels = mapOf(0 to "Net/Tool", 1 to "Nav/State", 2 to "Diag")
-      activeLanes.forEachIndexed { index, laneIdx ->
-        val label = laneLabels[laneIdx] ?: ""
-        val textResult = textMeasurer.measure(label, style = TextStyle(fontSize = 9.sp))
-        val laneY = index * laneHeight + laneHeight / 2 - textResult.size.height / 2
-        drawText(
-            textLayoutResult = textResult,
-            color = textColor.copy(alpha = 0.4f),
-            topLeft = Offset(4f, laneY),
-        )
-      }
     }
-  }
 }

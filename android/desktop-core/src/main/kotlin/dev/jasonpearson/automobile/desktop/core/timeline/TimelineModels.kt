@@ -39,8 +39,8 @@ data class TimelineSpan(
     val isFiltered: Boolean,
 )
 
-fun buildTimelineSpans(events: List<TelemetryDisplayEvent>, activeFilterCategory: String?): List<TimelineSpan> =
-    events.map { event ->
+fun buildTimelineSpans(events: List<TelemetryDisplayEvent>, activeFilterCategory: String?): List<TimelineSpan> {
+    return events.map { event ->
         val category = event.toTimelineCategory()
         val durationMs = when (event) {
             is TelemetryDisplayEvent.Network -> event.durationMs
@@ -56,6 +56,7 @@ fun buildTimelineSpans(events: List<TelemetryDisplayEvent>, activeFilterCategory
             isFiltered = activeFilterCategory != null && activeFilterCategory != "All" && category.label != activeFilterCategory,
         )
     }
+}
 
 fun activeLanes(spans: List<TimelineSpan>): List<Int> =
     spans.map { it.category.laneIndex }.distinct().sorted()

@@ -123,8 +123,10 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
     const fakeChild = createFakeChildProcess();
 
     const spawnFn = (() => {
-      // Emit corrupt image output after a tick
-      queueMicrotask(() => {
+      // Emit corrupt image output after listeners are attached.
+      // Use process.nextTick instead of queueMicrotask to avoid racing with
+      // setImmediate callbacks from FakeTimer auto-advance on Windows.
+      process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
         fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
       });
@@ -142,11 +144,20 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
-    fakeTimer.enableAutoAdvance();
+    // Don't use enableAutoAdvance — it schedules setImmediate callbacks that
+    // race with microtask-based data emission on Windows, causing timeouts.
+    // Instead, advance time manually after spawning to trigger the startup timeout.
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
+    const promise = client.startEmulator("Pixel_9_Pro");
+    // Suppress unhandled rejection while async setup completes
+    promise.catch(() => {});
+    // Let async operations resolve, then advance past startup validation timeout
+    await new Promise(resolve => setImmediate(resolve));
+    fakeTimer.advanceTime(6000);
+
     try {
-      await client.startEmulator("Pixel_9_Pro");
+      await promise;
       expect(true).toBe(false); // Should not reach here
     } catch (error: any) {
       expect(error.message).toContain("corrupt");
@@ -160,7 +171,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     const spawnFn = (() => {
       // Emit some generic error and then exit
-      queueMicrotask(() => {
+      process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("some random error\n"));
         fakeChild.emit("exit", 1);
       });
@@ -174,11 +185,16 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
-    fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
+    const promise = client.startEmulator("Pixel_9_Pro");
+    // Suppress unhandled rejection while async setup completes
+    promise.catch(() => {});
+    await new Promise(resolve => setImmediate(resolve));
+    fakeTimer.advanceTime(6000);
+
     try {
-      await client.startEmulator("Pixel_9_Pro");
+      await promise;
       expect(true).toBe(false);
     } catch (error: any) {
       expect(error.message).toContain("exited with code: 1");

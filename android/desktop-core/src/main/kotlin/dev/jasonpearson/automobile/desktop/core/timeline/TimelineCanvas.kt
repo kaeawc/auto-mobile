@@ -39,6 +39,7 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
     if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
 
 private const val TIME_AXIS_HEIGHT = 16f
+private const val LANE_LABEL_WIDTH = 48f
 private const val LABEL_PADDING = 8f
 private const val SPAN_HEIGHT_FRACTION = 0.6f
 private const val MIN_SPAN_WIDTH_PX = 2f

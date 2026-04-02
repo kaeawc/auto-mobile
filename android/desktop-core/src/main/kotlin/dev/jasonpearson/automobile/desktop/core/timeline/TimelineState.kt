@@ -32,6 +32,19 @@ class TimelineState(
         visibleEndMs += delta
     }
 
+    fun zoomIn() = scrollZoom(-1f, 0.5f)
+
+    fun zoomOut() = scrollZoom(1f, 0.5f)
+
+    fun fitToEvents(spans: List<TimelineSpan>) {
+        if (spans.isEmpty()) return
+        val minMs = spans.minOf { it.startMs }
+        val maxMs = spans.maxOf { it.endMs }
+        val padding = ((maxMs - minMs) * 0.05).toLong().coerceAtLeast(500L)
+        visibleStartMs = minMs - padding
+        visibleEndMs = maxMs + padding
+    }
+
     fun timestampToFraction(timestampMs: Long): Float =
         (timestampMs - visibleStartMs).toFloat() / visibleDurationMs().toFloat()
 

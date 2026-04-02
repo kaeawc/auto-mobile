@@ -25,8 +25,16 @@ fun EventTimeline(
     modifier: Modifier = Modifier,
 ) {
     val colors = SharedTheme.globalColors
-    val spans by remember(events.size, activeFilterCategory) {
-        derivedStateOf { buildTimelineSpans(events, activeFilterCategory) }
+    val filteredCategories by remember(activeFilterCategory) {
+        derivedStateOf {
+            if (activeFilterCategory == null) emptySet()
+            else TimelineCategory.entries
+                .filter { it.label.equals(activeFilterCategory, ignoreCase = true) }
+                .toSet()
+        }
+    }
+    val spans by remember(events.size, filteredCategories) {
+        derivedStateOf { buildTimelineSpans(events, filteredCategories) }
     }
     val lanes by remember(spans) {
         derivedStateOf { activeLanes(spans) }

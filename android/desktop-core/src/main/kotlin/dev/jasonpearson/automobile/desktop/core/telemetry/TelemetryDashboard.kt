@@ -130,6 +130,74 @@ private fun groupEvents(
     return result
 }
 
+/**
+ * Returns the LazyColumn item index that contains the event closest to [timestampMs].
+ * Each [EventListItem.Single] contributes 1 item; each [EventListItem.Group] contributes
+ * 1 header + N children (when expanded) or just 1 header (when collapsed).
+ */
+private fun lazyColumnIndexForTimestamp(
+    groupedItems: List<EventListItem>,
+    timestampMs: Long,
+): Int {
+    var bestIndex = -1
+    var bestDelta = Long.MAX_VALUE
+    var itemIndex = 0
+    for (listItem in groupedItems) {
+        when (listItem) {
+            is EventListItem.Single -> {
+                val delta = kotlin.math.abs(listItem.event.timestamp - timestampMs)
+                if (delta < bestDelta) { bestDelta = delta; bestIndex = itemIndex }
+                itemIndex++
+            }
+            is EventListItem.Group -> {
+                // Header item — use first event timestamp as representative
+                val headerDelta = kotlin.math.abs(listItem.events.first().timestamp - timestampMs)
+                if (headerDelta < bestDelta) { bestDelta = headerDelta; bestIndex = itemIndex }
+                itemIndex++ // header
+                if (listItem.isExpanded) {
+                    for (event in listItem.events) {
+                        val delta = kotlin.math.abs(event.timestamp - timestampMs)
+                        if (delta < bestDelta) { bestDelta = delta; bestIndex = itemIndex }
+                        itemIndex++
+                    }
+                }
+            }
+        }
+    }
+    return bestIndex
+}
+
+/**
+ * Returns the [TelemetryDisplayEvent] rendered at the given LazyColumn [itemIndex],
+ * accounting for group headers and collapsed groups.  Returns null if the index points
+ * to a collapsed group header (which has no single representative event) or is out of bounds.
+ */
+private fun eventAtLazyColumnIndex(
+    groupedItems: List<EventListItem>,
+    itemIndex: Int,
+): TelemetryDisplayEvent? {
+    var cursor = 0
+    for (listItem in groupedItems) {
+        when (listItem) {
+            is EventListItem.Single -> {
+                if (cursor == itemIndex) return listItem.event
+                cursor++
+            }
+            is EventListItem.Group -> {
+                if (cursor == itemIndex) return listItem.events.firstOrNull() // header → first event
+                cursor++ // header
+                if (listItem.isExpanded) {
+                    for (event in listItem.events) {
+                        if (cursor == itemIndex) return event
+                        cursor++
+                    }
+                }
+            }
+        }
+    }
+    return null
+}
+
 private const val DETAIL_PANEL_WIDTH_KEY = "automobile.telemetry.detailPanelWidth"
 private const val DETAIL_PANEL_WIDTH_DEFAULT = 320
 private const val DETAIL_PANEL_WIDTH_MIN = 200
@@ -310,22 +378,33 @@ fun TelemetryDashboard(
         onFilterChanged?.invoke(if (selectedFilter == CategoryFilter.All) null else selectedFilter.label)
     }
 
-    // Sync: when timeline selection changes, scroll to nearest event
+    // Sync: when timeline selection changes, scroll to nearest event.
+    // Non-network tabs render groupedItems (headers + children), so we must
+    // translate the target timestamp into the correct LazyColumn item index.
     LaunchedEffect(timelineState?.selectedTimestampMs) {
         val ts = timelineState?.selectedTimestampMs ?: return@LaunchedEffect
-        val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
-            .takeIf { it >= 0 } ?: filteredEvents.lastIndex
-        if (nearestIndex >= 0) {
-            listState.animateScrollToItem(nearestIndex)
+        if (selectedFilter == CategoryFilter.Network) {
+            val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
+                .takeIf { it >= 0 } ?: filteredEvents.lastIndex
+            if (nearestIndex >= 0) listState.animateScrollToItem(nearestIndex)
+        } else {
+            val targetIndex = lazyColumnIndexForTimestamp(groupedItems, ts)
+            if (targetIndex >= 0) listState.animateScrollToItem(targetIndex)
         }
     }
 
-    // Sync: when telemetry scrolls, update timeline visible window center
+    // Sync: when telemetry scrolls, update timeline visible window center.
+    // Resolve the visible event from groupedItems on non-network tabs so
+    // collapsed group headers don't cause an index mismatch.
     LaunchedEffect(Unit) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { index ->
                 if (timelineState == null || filteredEvents.isEmpty()) return@collect
-                val visibleEvent = filteredEvents.getOrNull(index) ?: return@collect
+                val visibleEvent = if (selectedFilter == CategoryFilter.Network) {
+                    filteredEvents.getOrNull(index)
+                } else {
+                    eventAtLazyColumnIndex(groupedItems, index)
+                } ?: return@collect
                 val eventTs = visibleEvent.timestamp
                 // Only re-center if the event is outside the visible window
                 if (eventTs < timelineState.visibleStartMs || eventTs > timelineState.visibleEndMs) {

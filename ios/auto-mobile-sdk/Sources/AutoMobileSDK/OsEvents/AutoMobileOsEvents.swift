@@ -24,8 +24,26 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     private var lastBatteryLevel: Int?
     private var lastBatteryCharging: Bool?
     private var observers: [NSObjectProtocol] = []
+    private var _isEnabled = true
 
     private init() {}
+
+    // MARK: - Enable/Disable
+
+    /// Whether OS event tracking is enabled.
+    public var isEnabled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isEnabled
+    }
+
+    /// Enable or disable OS event tracking.
+    /// When disabled, observer callbacks short-circuit and no events are recorded.
+    public func setEnabled(_ enabled: Bool) {
+        lock.lock()
+        _isEnabled = enabled
+        lock.unlock()
+    }
 
     // MARK: - Initialization
 
@@ -54,6 +72,7 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
     func shutdown() {
         lock.lock()
         _isInitialized = false
+        _isEnabled = true
 
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
@@ -230,6 +249,10 @@ public final class AutoMobileOsEvents: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         lock.lock()
+        guard _isEnabled else {
+            lock.unlock()
+            return
+        }
         let currentBuffer = buffer
         let currentBundleId = bundleId
         lock.unlock()

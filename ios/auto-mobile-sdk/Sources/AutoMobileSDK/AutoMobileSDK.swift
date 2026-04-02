@@ -222,11 +222,14 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// Enable or disable the SDK.
-    /// When disabled, the event buffer stops accepting events and its flush timer is cancelled.
+    /// When disabled, the event buffer stops accepting events, its flush timer is cancelled,
+    /// and all subsystems (hang detection, OS events, interaction tracking, network, notifications)
+    /// are paused. When re-enabled, subsystems resume.
     public func setEnabled(_ enabled: Bool) {
         lock.lock()
         _isEnabled = enabled
         let buffer = eventBuffer
+        let initialized = _isInitialized
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
@@ -235,6 +238,16 @@ public final class AutoMobileSDK: @unchecked Sendable {
         } else {
             buffer?.stop()
         }
+
+        // Propagate to all subsystems (only if initialized)
+        guard initialized else { return }
+        AutoMobileHangs.shared.setEnabled(enabled)
+        AutoMobileOsEvents.shared.setEnabled(enabled)
+        AutoMobileNotificationObserver.shared.setEnabled(enabled)
+        AutoMobileInteractionTracker.shared.setEnabled(enabled)
+        AutoMobileNetwork.shared.setEnabled(enabled)
+        // Crashes: signal handlers can't be safely uninstalled; the exception handler
+        // already checks AutoMobileSDK.shared.isEnabled before posting events.
     }
 
     /// Whether the SDK has been initialized.

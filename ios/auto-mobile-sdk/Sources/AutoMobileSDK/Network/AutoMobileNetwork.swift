@@ -8,6 +8,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     private let lock = NSLock()
     private var bundleId: String?
     private var buffer: SdkEventBuffer?
+    private var _isEnabled = true
     private var _captureHeaders = false
     private var _captureBodies = false
     var _maxBodyBytes: Int = 32 * 1024 // 32KB default (internal for URLProtocol access)
@@ -33,6 +34,23 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     }
 
     private init() {}
+
+    // MARK: - Enable/Disable
+
+    /// Whether network tracking is enabled.
+    public var isEnabled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isEnabled
+    }
+
+    /// Enable or disable network tracking.
+    /// When disabled, recordRequest and recordWebSocketFrame short-circuit.
+    public func setEnabled(_ enabled: Bool) {
+        lock.lock()
+        _isEnabled = enabled
+        lock.unlock()
+    }
 
     func initialize(bundleId: String?, buffer: SdkEventBuffer) {
         lock.lock()
@@ -92,6 +110,10 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         lock.lock()
+        guard _isEnabled else {
+            lock.unlock()
+            return
+        }
         let captureHeaders = _captureHeaders
         let captureBodies = _captureBodies
         let maxBytes = _maxBodyBytes
@@ -164,6 +186,10 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         lock.lock()
+        guard _isEnabled else {
+            lock.unlock()
+            return
+        }
         let currentBuffer = buffer
         lock.unlock()
 
@@ -182,6 +208,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         lock.lock()
         bundleId = nil
         buffer = nil
+        _isEnabled = true
         _captureHeaders = false
         _captureBodies = false
         lock.unlock()

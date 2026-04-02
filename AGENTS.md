@@ -71,5 +71,14 @@ This is a high-level summary of core MCP tools exposed by the server.
 - github-cli: Use `gh` for PRs, issues, checks, and repo metadata. Path: `skills/github-cli/SKILL.md`.
 - gh-pr-workflow: Create/update PRs without mangling newlines. Path: `skills/gh-pr-workflow/SKILL.md`.
 - android-gradlew: Run Android tasks via `android/gradlew`. Path: `skills/android-gradlew/SKILL.md`.
-- local-validation-scripts: Use `scripts/` for local validations. Path: `skills/local-validation-scripts/SKILL.md`.
 - bun-tasks: Use `package.json` scripts with Bun. Path: `skills/bun-tasks/SKILL.md`.
+- check-ci: Inspect PR checks, fetch failing logs, reproduce issues locally, and summarize next steps. Path: `skills/check-ci/SKILL.md`.
+- dead-code: Detect and remove dead code using repo scripts and targeted validation. Path: `skills/dead-code/SKILL.md`.
+- observe: Inspect the current connected device state through AutoMobile observation tooling. Path: `skills/observe/SKILL.md`.
+- test: Run targeted or full test suites with the narrowest relevant command first. Path: `skills/test/SKILL.md`.
+- validate: Run repo validation starting with Bun and existing scripts. Path: `skills/validate/SKILL.md`.
+- push-pr: Commit, push, create or update a PR, and optionally enable automerge. Path: `skills/push-pr/SKILL.md`.
+- fan-out-fan-in: Split work into isolated worktrees and merge validated results back. Path: `skills/fan-out-fan-in/SKILL.md`.
+- pr-analysis: Perform a deep read-only PR review covering code, tests, CI, and risk. Path: `skills/pr-analysis/SKILL.md`.
+- push-my-prs: Iterate over open authored PRs, address feedback, and keep them moving. Path: `skills/push-my-prs/SKILL.md`.
+- research: Conduct cited research with saved sources and synthesis summaries. Path: `skills/research/SKILL.md`.

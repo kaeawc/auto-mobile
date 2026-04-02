@@ -36,6 +36,7 @@ add_check "shellcheck" "\"$PROJECT_ROOT/scripts/shellcheck/validate_shell_script
 add_check "mkdocs-nav" "\"$PROJECT_ROOT/scripts/validate_mkdocs_nav.sh\"" "docs" "Validate MkDocs navigation"
 add_check "ktfmt" "ONLY_TOUCHED_FILES=true \"$PROJECT_ROOT/scripts/ktfmt/validate_ktfmt.sh\"" "format,kotlin" "Validate Kotlin formatting"
 add_check "claude-plugin" "\"$PROJECT_ROOT/scripts/claude/validate_plugin.sh\"" "config" "Validate Claude plugin structure"
+add_check "codex-skills" "\"$PROJECT_ROOT/scripts/validate_codex_skills.sh\"" "config,docs" "Validate Codex skills and AGENTS inventory"
 add_check "lychee" "\"$PROJECT_ROOT/scripts/lychee/validate_lychee.sh\"" "docs,links" "Validate documentation links"
 add_check "dependabot" "\"$PROJECT_ROOT/scripts/validate_dependabot.sh\"" "config,yaml" "Validate Dependabot config"
 

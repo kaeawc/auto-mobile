@@ -122,23 +122,17 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
-    // Emit corrupt image data when the stderr "data" listener is attached.
-    // startEmulator has a deep async chain (listAvds, isAvdRunning, etc.)
-    // before it spawns and attaches listeners, so timing-based approaches
-    // (process.nextTick, setImmediate) race on Linux CI.
-    const origOn = fakeChild.stderr!.on.bind(fakeChild.stderr!);
-    (fakeChild.stderr as any).on = function(event: string, listener: (...args: any[]) => void) {
-      origOn.call(this, event, listener);
-      if (event === "data") {
-        process.nextTick(() => {
-          fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
-          fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
-        });
-      }
-      return this;
-    };
-
-    const spawnFn = (() => fakeChild) as any;
+    // Emit corrupt image data on stderr then exit with code 1 — matching
+    // real emulator behavior. Use the same process.nextTick-from-spawnFn
+    // pattern as the "exit code" test below, which passes reliably on Linux CI.
+    const spawnFn = (() => {
+      process.nextTick(() => {
+        fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
+        fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
+        fakeChild.emit("exit", 1);
+      });
+      return fakeChild;
+    }) as any;
 
     const execAsync = async (command: string): Promise<ExecResult> => {
       if (command.includes("-list-avds")) {
@@ -154,8 +148,6 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     const promise = client.startEmulator("Pixel_9_Pro");
     promise.catch(() => {});
-
-    // Yield to let the listener-triggered nextTick fire
     await new Promise(resolve => setImmediate(resolve));
     fakeTimer.advanceTime(6000);
 

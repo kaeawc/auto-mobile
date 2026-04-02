@@ -690,6 +690,15 @@ export class RealObserveScreen implements ObserveScreen {
           }
         }
 
+        // Populate activeWindow from view hierarchy packageName if not already set
+        if (result.viewHierarchy?.packageName && !result.activeWindow) {
+          result.activeWindow = {
+            appId: result.viewHierarchy.packageName,
+            activityName: "",
+            layoutSeqSum: 0
+          };
+        }
+
         perf.end();
         break;
     }

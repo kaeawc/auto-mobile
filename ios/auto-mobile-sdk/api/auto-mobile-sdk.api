@@ -263,7 +263,7 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable
 // Events/SdkEventBuffer.swift
 public protocol EventBuffering: AnyObject, Sendable
 public final class SdkEventBuffer: EventBuffering, @unchecked Sendable
-  public init( maxBufferSize: Int = 50, flushIntervalMs: Int = 500, maxPendingEvents: Int = 500, processors: [any EventProcessing] = [], timerFactory: @escaping () -> any TimerScheduling =
+  public init( maxBufferSize: Int = 50, flushIntervalMs: Int = 500, maxPendingEvents: Int = 500, processors: [any EventProcessing] = [], timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() }, dropCounter: (any DropCounting)? = nil, onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void )
   public var isBufferEnabled: Bool
   public func start()
   public func stop()
@@ -423,7 +423,7 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable
 public protocol SessionTracking: AnyObject, Sendable
 public final class SessionTracker: SessionTracking, @unchecked Sendable
 public enum State
-  public init( timeoutMs: Int = 30_000, uuidProvider: @escaping () -> String =
+  public init( timeoutMs: Int = 30_000, uuidProvider: @escaping () -> String = { UUID().uuidString }, timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() } )
   public func currentSessionId() -> String?
   public func onForeground()
   public func onBackground()

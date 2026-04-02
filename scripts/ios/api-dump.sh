@@ -24,6 +24,37 @@ count_paren_depth() {
   echo $(( ${#opens} - ${#closes} ))
 }
 
+# Strip the function body's opening brace from a declaration string.
+# Unlike ${var%%\{*}, this preserves braces inside default closure values
+# (e.g., `timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() }`)
+# by finding the last `{` at brace-depth 0—the body opener—and stripping
+# from there. Balanced closure defaults like `= { GCDTimer() }` are skipped
+# because their `{` is closed by a `}` before the body brace.
+strip_body_brace() {
+  local s="$1"
+  local depth=0
+  local i=0
+  local len=${#s}
+  local last_open_at=-1
+  while (( i < len )); do
+    local ch="${s:i:1}"
+    if [[ "$ch" == "{" ]]; then
+      if (( depth == 0 )); then
+        last_open_at=$i
+      fi
+      (( depth++ ))
+    elif [[ "$ch" == "}" ]]; then
+      (( depth-- ))
+    fi
+    (( i++ ))
+  done
+  if (( last_open_at >= 0 )); then
+    echo "${s:0:last_open_at}"
+  else
+    echo "$s"
+  fi
+}
+
 # Build the API dump from Swift source files.
 generate_api() {
   local current_file=""
@@ -60,7 +91,8 @@ generate_api() {
         # Declaration complete when parens are balanced (depth <= 0)
         if [[ $paren_depth -le 0 ]]; then
           collecting_multiline=false
-          local clean="${multiline_buffer%%\{*}"
+          local clean
+          clean="$(strip_body_brace "$multiline_buffer")"
           clean="${clean%"${clean##*[![:space:]]}"}"
           emit_file_header "$rel_path"
           echo "  $clean"
@@ -70,7 +102,8 @@ generate_api() {
 
       # Detect top-level public type declarations
       if [[ "$stripped" =~ ^public[[:space:]]+(final[[:space:]]+)?(class|struct|enum|protocol)[[:space:]] ]]; then
-        local clean="${stripped%%\{*}"
+        local clean
+        clean="$(strip_body_brace "$stripped")"
         clean="${clean%"${clean##*[![:space:]]}"}"
         emit_file_header "$rel_path"
         echo "$clean"
@@ -79,7 +112,8 @@ generate_api() {
 
       # Detect public extension declarations
       if [[ "$stripped" =~ ^public[[:space:]]+extension[[:space:]] ]]; then
-        local clean="${stripped%%\{*}"
+        local clean
+        clean="$(strip_body_brace "$stripped")"
         clean="${clean%"${clean##*[![:space:]]}"}"
         emit_file_header "$rel_path"
         echo "$clean"
@@ -101,7 +135,8 @@ generate_api() {
           continue
         fi
 
-        local member="${stripped%%\{*}"
+        local member
+        member="$(strip_body_brace "$stripped")"
         member="${member%"${member##*[![:space:]]}"}"
         emit_file_header "$rel_path"
         echo "  $member"

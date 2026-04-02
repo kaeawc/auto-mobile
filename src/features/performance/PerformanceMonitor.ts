@@ -839,13 +839,6 @@ function getLastTtiMs(packageName: string): number | null {
   return entry.ttiMs;
 }
 
-/**
- * Clear all stored TTI values (for testing).
- */
-export function _clearTtiStore(): void {
-  ttiStore.clear();
-}
-
 // Singleton instance
 let monitorInstance: PerformanceMonitor | null = null;
 
@@ -881,8 +874,4 @@ export function _resetPerformanceMonitor(): void {
     monitorInstance.stop();
   }
   monitorInstance = null;
-}
-
-export function _setPerformanceMonitor(monitor: PerformanceMonitor): void {
-  monitorInstance = monitor;
 }

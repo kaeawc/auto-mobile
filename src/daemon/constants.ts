@@ -77,12 +77,6 @@ export const CONNECTION_TIMEOUT_MS =
     : 120000;
 
 /**
- * Health check interval in milliseconds
- * How often to check if daemon is still alive
- */
-export const HEALTH_CHECK_INTERVAL_MS = 30000;
-
-/**
  * Daemon startup timeout in milliseconds
  * How long to wait for daemon to become ready
  */

@@ -77,6 +77,12 @@ public class CtrlProxy {
             }
             hierarchyDebouncer.start()
 
+            // Start OSLogStore-based log capture (iOS 15+)
+            if #available(iOS 15.0, *) {
+                OSLogReaderHolder.shared.start()
+                print("[CtrlProxy] OSLogReader active (polling every 500ms)")
+            }
+
             // Start FPS monitoring and broadcast updates to connected clients
             fpsMonitor.startMonitoring { [weak self] snapshot in
                 self?.server.broadcastPerformanceUpdate(snapshot)
@@ -103,6 +109,9 @@ public class CtrlProxy {
 
     /// Stops the service
     public func stop() {
+        if #available(iOS 15.0, *) {
+            OSLogReaderHolder.shared.stop()
+        }
         fpsMonitor.stopMonitoring()
         hierarchyDebouncer.stop()
         server.stop()

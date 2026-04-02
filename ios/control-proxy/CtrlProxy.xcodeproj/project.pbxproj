@@ -10,6 +10,7 @@
 		0377180BB666F63386C77E17 /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
 		0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */; };
 		12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */; };
+		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
@@ -31,6 +32,7 @@
 		B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */; };
 		BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
 		BD7D2FF024054ED74F17958D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
+		C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		C194D73F02D0776F0F7FCA7B /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
 		CC061B4978496D75042B253A /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
@@ -117,6 +119,7 @@
 		B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		B4CB9272A186932D89EB1072 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		D81453AD074F2A392251CFC3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		DBA97A6C3A1240A055D9876C /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
 		DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProviderTests.swift; sourceTree = "<group>"; };
 		F2144B84CD70DB35A1030624 /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -204,6 +207,7 @@
 				F2144B84CD70DB35A1030624 /* GesturePerformer.swift */,
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
 				D81453AD074F2A392251CFC3 /* Models.swift */,
+				DBA97A6C3A1240A055D9876C /* OSLogReader.swift */,
 				B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */,
 				A284B6FFBE969931BB03A2FF /* PerfProvider.swift */,
 				0F9D7B74C318EE243B225B95 /* Protocols.swift */,
@@ -328,7 +332,6 @@
 				};
 			};
 			buildConfigurationList = E05A42B658B1C02C052C128D /* Build configuration list for PBXProject "CtrlProxy" */;
-			compatibilityVersion = "Xcode 14.0";
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -338,6 +341,7 @@
 			mainGroup = 893219E941F14547E673AD18;
 			minimizedProjectReferenceProxies = 1;
 			preferredProjectObjectVersion = 77;
+			productRefGroup = ECABFBABEC912FAB47B50B74 /* Products */;
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
@@ -373,6 +377,7 @@
 				D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */,
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
 				BD7D2FF024054ED74F17958D /* Models.swift in Sources */,
+				C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */,
 				D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */,
 				E8327D679D58C8F804C064B1 /* PerformanceMetrics.swift in Sources */,
 				47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */,
@@ -403,6 +408,7 @@
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
 				BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */,
+				141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */,
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,
 				B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */,
 				2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */,

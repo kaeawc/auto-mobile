@@ -84,8 +84,8 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
         ) { _ in }
 
         buffer.isBufferEnabled = false
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
 
         XCTAssertEqual(dropCounter.snapshot()[.disabled], 2)
     }
@@ -98,7 +98,7 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
             dropCounter: dropCounter
         ) { _ in }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
 
         XCTAssertTrue(dropCounter.snapshot().isEmpty)
     }
@@ -114,9 +114,9 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
             throw FlushError()
         }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
-        buffer.add(SdkCustomEvent(name: "e3"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e3"))
         buffer.flush()
 
         XCTAssertEqual(dropCounter.snapshot()[.flushError], 3)
@@ -133,8 +133,8 @@ final class SdkEventBufferDropCounterTests: XCTestCase {
             throw FlushError()
         }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
         buffer.shutdown()
 
         XCTAssertEqual(dropCounter.snapshot()[.flushError], 2)

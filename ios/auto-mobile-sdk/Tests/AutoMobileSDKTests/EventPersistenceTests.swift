@@ -22,8 +22,8 @@ final class EventPersistenceTests: XCTestCase {
 
     // MARK: - Persist + Load Round-Trip
 
-    func testPersistAndLoadCustomEvent() {
-        let event = SdkCustomEvent(name: "test_event", properties: ["key": "value"])
+    func testPersistAndLoadInteractionEvent() {
+        let event = SdkInteractionEvent(interactionType: "test_event", properties: ["key": "value"])
         let batchId = persistence.persist([event])
         XCTAssertNotNil(batchId)
 
@@ -33,12 +33,12 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(pending[0].events.count, 1)
 
         let loaded = pending[0].events[0]
-        XCTAssertEqual(loaded.eventType, .custom)
-        if let custom = loaded as? SdkCustomEvent {
-            XCTAssertEqual(custom.name, "test_event")
-            XCTAssertEqual(custom.properties["key"], "value")
+        XCTAssertEqual(loaded.eventType, .interaction)
+        if let interaction = loaded as? SdkInteractionEvent {
+            XCTAssertEqual(interaction.interactionType, "test_event")
+            XCTAssertEqual(interaction.properties["key"], "value")
         } else {
-            XCTFail("Expected SdkCustomEvent")
+            XCTFail("Expected SdkInteractionEvent")
         }
     }
 
@@ -74,8 +74,8 @@ final class EventPersistenceTests: XCTestCase {
     func testLoadPendingReturnsFIFOOrder() {
         // Create files with explicit timestamp prefixes to guarantee ordering
         let encoder = JSONEncoder()
-        let event1 = SdkCustomEvent(name: "first", properties: [:])
-        let event2 = SdkCustomEvent(name: "second", properties: [:])
+        let event1 = SdkInteractionEvent(interactionType: "first", properties: [:])
+        let event2 = SdkInteractionEvent(interactionType: "second", properties: [:])
 
         let id1 = "1000000000000_AAA"
         let id2 = "2000000000000_BBB"
@@ -93,18 +93,18 @@ final class EventPersistenceTests: XCTestCase {
         XCTAssertEqual(pending.count, 2)
         XCTAssertEqual(pending[0].batchId, id1)
         XCTAssertEqual(pending[1].batchId, id2)
-        if let first = pending[0].events.first as? SdkCustomEvent {
-            XCTAssertEqual(first.name, "first")
+        if let first = pending[0].events.first as? SdkInteractionEvent {
+            XCTAssertEqual(first.interactionType, "first")
         }
-        if let second = pending[1].events.first as? SdkCustomEvent {
-            XCTAssertEqual(second.name, "second")
+        if let second = pending[1].events.first as? SdkInteractionEvent {
+            XCTAssertEqual(second.interactionType, "second")
         }
     }
 
     // MARK: - Remove Batch
 
     func testRemoveBatchDeletesFile() {
-        let event = SdkCustomEvent(name: "to_remove", properties: [:])
+        let event = SdkInteractionEvent(interactionType: "to_remove", properties: [:])
         let batchId = persistence.persist([event])!
 
         XCTAssertEqual(persistence.loadPending().count, 1)
@@ -127,11 +127,11 @@ final class EventPersistenceTests: XCTestCase {
         // Create a file with an old timestamp (8 days ago)
         let oldTs = Int(now.timeIntervalSince1970 * 1000) - (8 * 24 * 60 * 60 * 1000)
         let oldFile = tempDir.appendingPathComponent("events_\(oldTs)_OLD.json")
-        let data = try! JSONSerialization.data(withJSONObject: [["eventType": "custom"]])
+        let data = try! JSONSerialization.data(withJSONObject: [["eventType": "interaction"]])
         try! data.write(to: oldFile)
 
         // Create a recent file
-        let event = SdkCustomEvent(name: "recent", properties: [:])
+        let event = SdkInteractionEvent(interactionType: "recent", properties: [:])
         persistence.persist([event])
 
         persistence.cleanup(maxAgeDays: 7)
@@ -159,15 +159,15 @@ final class EventPersistenceTests: XCTestCase {
     // MARK: - Multiple Event Types in One Batch
 
     func testPersistMultipleEventTypesInBatch() {
-        let custom = SdkCustomEvent(name: "mixed", properties: ["a": "b"])
+        let interaction = SdkInteractionEvent(interactionType: "mixed", properties: ["a": "b"])
         let nav = SdkNavigationEvent(destination: "/settings", source: .deepLink)
-        let batchId = persistence.persist([custom, nav])
+        let batchId = persistence.persist([interaction, nav])
         XCTAssertNotNil(batchId)
 
         let pending = persistence.loadPending()
         XCTAssertEqual(pending.count, 1)
         XCTAssertEqual(pending[0].events.count, 2)
-        XCTAssertEqual(pending[0].events[0].eventType, .custom)
+        XCTAssertEqual(pending[0].events[0].eventType, .interaction)
         XCTAssertEqual(pending[0].events[1].eventType, .navigation)
     }
 }

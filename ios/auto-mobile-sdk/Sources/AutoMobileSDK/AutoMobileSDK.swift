@@ -201,19 +201,6 @@ public final class AutoMobileSDK: @unchecked Sendable {
         return sessionTracker?.currentSessionId()
     }
 
-    // MARK: - Custom Events
-
-    /// Track a custom event with optional properties.
-    public func trackEvent(name: String, properties: [String: String] = [:]) {
-        guard isEnabled else {
-            InternalLogger.debug("trackEvent(\(name)) skipped: SDK disabled")
-            return
-        }
-        InternalLogger.debug("trackEvent(\(name)), buffer=\(eventBuffer != nil ? "exists" : "nil")")
-        let event = SdkCustomEvent(name: name, properties: properties)
-        eventBuffer?.add(event)
-    }
-
     // MARK: - Enable/Disable
 
     /// Whether the SDK is enabled for tracking.

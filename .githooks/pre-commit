@@ -12,4 +12,17 @@ if ! scripts/ktfmt/apply_ktfmt.sh; then
     exit 1
 fi
 
+# Regenerate Xcode project if any iOS files were changed
+if git diff --cached --name-only | grep -q '^ios/'; then
+    if command -v xcodegen >/dev/null 2>&1; then
+        echo "iOS files changed — regenerating Xcode project..."
+        (cd ios/control-proxy && xcodegen generate --quiet 2>/dev/null)
+        # Stage the regenerated project file if it changed
+        if ! git diff --quiet ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj 2>/dev/null; then
+            git add ios/control-proxy/CtrlProxy.xcodeproj/project.pbxproj
+            echo "Updated CtrlProxy.xcodeproj"
+        fi
+    fi
+fi
+
 exit 0

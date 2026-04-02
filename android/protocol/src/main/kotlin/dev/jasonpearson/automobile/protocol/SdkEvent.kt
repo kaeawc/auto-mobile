@@ -280,7 +280,7 @@ data class SdkWebSocketFrameEvent(
 // =============================================================================
 
 /**
- * Represents a log entry that matched a registered filter.
+ * Represents a log entry captured from logcat or the SDK log API.
  */
 @Serializable
 @SerialName("log")
@@ -293,8 +293,10 @@ data class SdkLogEvent(
   val tag: String,
   /** Log message */
   val message: String,
-  /** Name of the filter that matched this log entry */
-  val filterName: String,
+  /** Process ID that produced this log entry */
+  val pid: Int = 0,
+  /** Thread ID that produced this log entry */
+  val tid: Int = 0,
 ) : SdkEvent()
 
 // =============================================================================
@@ -333,24 +335,6 @@ data class SdkLifecycleEvent(
   val kind: String,
   /** Additional details about the event */
   val details: Map<String, String>? = null,
-) : SdkEvent()
-
-// =============================================================================
-// Custom Events
-// =============================================================================
-
-/**
- * Represents an app-defined custom event.
- */
-@Serializable
-@SerialName("custom")
-data class SdkCustomEvent(
-  override val timestamp: Long,
-  override val applicationId: String? = null,
-  /** Event name defined by the app */
-  val name: String,
-  /** App-defined properties */
-  val properties: Map<String, String> = emptyMap(),
 ) : SdkEvent()
 
 // =============================================================================

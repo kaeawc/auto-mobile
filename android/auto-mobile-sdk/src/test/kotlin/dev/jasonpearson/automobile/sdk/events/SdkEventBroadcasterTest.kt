@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.sdk.events
 
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
@@ -10,9 +10,9 @@ import kotlin.test.assertTrue
 
 class SdkEventBroadcasterTest {
 
-    private fun makeEvent(name: String): SdkEvent = SdkCustomEvent(
+    private fun makeEvent(name: String): SdkEvent = SdkLifecycleEvent(
         timestamp = 1000L,
-        name = name,
+        kind = name,
     )
 
     @Test

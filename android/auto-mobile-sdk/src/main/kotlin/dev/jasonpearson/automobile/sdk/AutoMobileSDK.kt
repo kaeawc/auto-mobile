@@ -10,7 +10,6 @@ import androidx.lifecycle.DefaultLifecycleObserver
 import androidx.lifecycle.LifecycleOwner
 import androidx.lifecycle.ProcessLifecycleOwner
 import dev.jasonpearson.automobile.protocol.NavigationSourceType
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkNavigationEvent
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics
@@ -167,7 +166,7 @@ object AutoMobileSDK {
     // Thread-safe subsystems — can initialize from any thread
     NetworkMockRuleStore.initialize(appContext)
     AutoMobileNetwork.initialize(appContext.packageName, buffer, NetworkMockRuleStore.getInstance().ruleMatcher)
-    AutoMobileLog.initialize(appContext.packageName, buffer)
+    AutoMobileLog.initialize()
     AutoMobileBroadcastInterceptor.initialize(appContext, buffer)
     DatabaseInspector.initialize(appContext)
     SharedPreferencesInspector.initialize(appContext)
@@ -205,7 +204,7 @@ object AutoMobileSDK {
       RecompositionTracker.setEnabled(isEnabled)
       AutoMobileNotifications.initialize(appContext)
       if (appContext is Application) {
-        AutoMobileClickTracker.initialize(appContext, appContext.packageName, buffer)
+        AutoMobileClickTracker.initialize(appContext, appContext.packageName)
       }
     }
   }
@@ -306,29 +305,6 @@ object AutoMobileSDK {
 
   /** Returns the current number of registered listeners. */
   fun getListenerCount(): Int = listeners.size
-
-  /**
-   * Track a custom app-defined event.
-   *
-   * @param name The event name
-   * @param properties Optional key-value properties
-   */
-  @AnyThread
-  fun trackEvent(name: String, properties: Map<String, String> = emptyMap()) {
-    if (!isEnabled) return
-
-    addBreadcrumb(name, BreadcrumbCategory.CUSTOM, properties)
-
-    val buf = eventBuffer ?: return
-    buf.add(
-      SdkCustomEvent(
-        timestamp = System.currentTimeMillis(),
-        applicationId = context?.packageName,
-        name = name,
-        properties = properties,
-      )
-    )
-  }
 
   /** Returns the current session ID, or null if no active session. */
   fun currentSessionId(): String? = sessionTracker?.currentSessionId()

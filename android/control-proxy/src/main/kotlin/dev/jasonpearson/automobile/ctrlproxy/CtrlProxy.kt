@@ -50,8 +50,6 @@ import dev.jasonpearson.automobile.protocol.NavigationEventData
 import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.BroadcastEventData
 import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
-import dev.jasonpearson.automobile.protocol.CustomEventData
-import dev.jasonpearson.automobile.protocol.CustomEventResponse
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
 import dev.jasonpearson.automobile.protocol.LogEventData
@@ -61,7 +59,6 @@ import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
@@ -171,6 +168,9 @@ class CtrlProxy : AccessibilityService() {
 
   // Storage subscription manager for SharedPreferences inspection
   private lateinit var storageSubscriptionManager: StorageSubscriptionManager
+
+  // Logcat reader for automatic log capture
+  private var logcatReader: LogcatReader? = null
 
   private val commandReceiver =
       object : BroadcastReceiver() {
@@ -893,6 +893,15 @@ class CtrlProxy : AccessibilityService() {
       webSocketServer.start()
       Log.d(TAG, "WebSocket server started on port 8765")
 
+      // Start logcat reader for automatic log capture
+      logcatReader = LogcatReader { response ->
+        if (::webSocketServer.isInitialized && webSocketServer.isRunning()) {
+          serviceScope.launch { webSocketServer.broadcast(response) }
+        }
+      }
+      logcatReader?.start()
+      Log.d(TAG, "Logcat reader started")
+
       Log.d(TAG, "AutoMobile Accessibility Service connected successfully")
     } catch (e: Exception) {
       Log.e(TAG, "Error during service connection", e)
@@ -956,6 +965,10 @@ class CtrlProxy : AccessibilityService() {
     } catch (e: Exception) {
       Log.e(TAG, "Error unregistering screen state receiver", e)
     }
+
+    // Stop logcat reader
+    logcatReader?.stop()
+    logcatReader = null
 
     if (::overlayDrawer.isInitialized) {
       overlayDrawer.destroy()
@@ -4337,16 +4350,8 @@ class CtrlProxy : AccessibilityService() {
             applicationId = event.applicationId,
           ),
         )
-        is SdkLogEvent -> LogEventResponse(
-          timestamp = event.timestamp,
-          event = LogEventData(
-            level = event.level,
-            tag = event.tag,
-            message = event.message,
-            filterName = event.filterName,
-            applicationId = event.applicationId,
-          ),
-        )
+        // SdkLogEvent no longer broadcast from SDK — logs captured via logcat reader
+        is SdkLogEvent -> null
         is SdkBroadcastEvent -> BroadcastEventResponse(
           timestamp = event.timestamp,
           event = BroadcastEventData(
@@ -4361,14 +4366,6 @@ class CtrlProxy : AccessibilityService() {
           event = LifecycleEventData(
             kind = event.kind,
             details = event.details,
-            applicationId = event.applicationId,
-          ),
-        )
-        is SdkCustomEvent -> CustomEventResponse(
-          timestamp = event.timestamp,
-          event = CustomEventData(
-            name = event.name,
-            properties = event.properties,
             applicationId = event.applicationId,
           ),
         )

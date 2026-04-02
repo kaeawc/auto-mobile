@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.sdk.events
 
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import org.junit.Test
 import java.util.concurrent.CopyOnWriteArrayList
@@ -13,9 +13,9 @@ import kotlin.test.assertTrue
 
 class SdkEventBufferTest {
 
-  private fun makeEvent(i: Int): SdkEvent = SdkCustomEvent(
+  private fun makeEvent(i: Int): SdkEvent = SdkLifecycleEvent(
     timestamp = i.toLong(),
-    name = "event-$i",
+    kind = "event-$i",
   )
 
   /** Wait for any pending tasks on the executor to complete. */

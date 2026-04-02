@@ -104,7 +104,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void clearNavigationListeners();
   public final void notifyNavigationEvent(dev.jasonpearson.automobile.sdk.NavigationEvent);
   public final void setEnabled(boolean);
-  public final boolean isEnabled();
+  public final boolean isTrackingEnabled();
   public final int getListenerCount();
   public final java.lang.String currentSessionId();
   public final void addBreadcrumb(java.lang.String, dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory, java.util.Map<java.lang.String, java.lang.String>);

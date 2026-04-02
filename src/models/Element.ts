@@ -8,6 +8,7 @@ export interface Element {
   text?: string;
   "content-desc"?: string;
   "resource-id"?: string;
+  "view-id"?: string;
   "class"?: string;
   "package"?: string;
   checkable?: boolean | string;

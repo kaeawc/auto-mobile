@@ -121,12 +121,12 @@ export class CtrlProxyHierarchy {
 
     // Return cached (stale) data if available
     if (cachedHierarchy) {
-      // Don't serve stale cache if the app has changed
-      if (this.lastKnownPackageName && cachedHierarchy.hierarchy.packageName &&
-          cachedHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
-        logger.warn(`[CTRL_PROXY] Discarding stale cache: packageName changed from ${cachedHierarchy.hierarchy.packageName} to ${this.lastKnownPackageName}`);
-        this.context.setCachedHierarchy(null);
-        return { hierarchy: null, fresh: false };
+      // Update tracking from cache — it may have been refreshed by a WebSocket push
+      if (cachedHierarchy.hierarchy.packageName) {
+        if (this.lastKnownPackageName && cachedHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
+          logger.warn(`[CTRL_PROXY] Stale cache packageName differs: cached=${cachedHierarchy.hierarchy.packageName}, lastKnown=${this.lastKnownPackageName}`);
+        }
+        this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
       }
       return {
         hierarchy: cachedHierarchy.hierarchy,

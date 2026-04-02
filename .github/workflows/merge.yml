@@ -616,8 +616,6 @@ jobs:
 
   ios-xcode-build:
     name: "Build Xcode Projects (${{ matrix.config.name }})"
-    # Disabled with iOS merge cleanup.
-    if: ${{ false }}
     runs-on: ${{ matrix.config.runner }}
     needs: ios-xcodegen
     strategy:
@@ -625,7 +623,7 @@ jobs:
       matrix:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
+          - { name: "Xcode 26", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1017,8 +1015,6 @@ jobs:
 
   ts-code-coverage:
     name: "TypeScript Code Coverage"
-    # Disabled: the badge generation step is currently failing because coverage/lcov.info is missing.
-    if: ${{ false }}
     runs-on: ubuntu-latest
     steps:
       - name: "Git Checkout"
@@ -1026,24 +1022,19 @@ jobs:
         with:
           lfs: false
 
-      - name: "Cache Turborepo"
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-${{ github.sha }}
-          restore-keys: |
-            turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
-            turbo-ubuntu-latest-
-
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Tests with Coverage"
-        env:
-          TURBO_TELEMETRY_DISABLED: "1"
-          TURBO_NO_UPDATE_NOTIFIER: "1"
-          DO_NOT_TRACK: "1"
-          NO_COLOR: "1"
-        run: turbo run test:coverage --output-logs=errors-only
+        run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
+
+      - name: "Verify Coverage Output"
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            echo "::error::coverage/lcov.info not found"
+            ls -la coverage/ 2>/dev/null || echo "coverage/ directory does not exist"
+            exit 1
+          fi
+          echo "Coverage file size: $(wc -c < coverage/lcov.info) bytes"
 
       - name: "Generate Coverage Badge"
         run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"

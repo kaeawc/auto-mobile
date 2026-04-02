@@ -39,6 +39,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
       filter: {
         deviceId: options.deviceId ?? null,
       },
+      backfilling: false,
     });
     return { socket, subscriptionId };
   }

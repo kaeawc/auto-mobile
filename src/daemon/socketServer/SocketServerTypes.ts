@@ -36,6 +36,8 @@ export interface Subscriber<TFilter = unknown> {
   subscriptionId: string;
   lastActivity: number;
   filter: TFilter;
+  /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
+  backfilling: boolean;
 }
 
 /**

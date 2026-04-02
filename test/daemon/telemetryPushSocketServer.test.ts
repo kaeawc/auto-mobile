@@ -38,7 +38,9 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
       filter: {
         category: options.category ?? null,
         deviceId: options.deviceId ?? null,
+        sessionId: null,
       },
+      backfilling: false,
     });
     return { socket, subscriptionId };
   }
@@ -282,6 +284,32 @@ describe("TelemetryPushSocketServer", () => {
     server.pushTelemetryEvent(wrongCategory);
     server.pushTelemetryEvent(wrongDevice);
 
+    expect(socket.getWrittenMessages()).toHaveLength(1);
+  });
+
+  it("skips subscribers that are backfilling", () => {
+    const { socket, subscriptionId } = server.simulateSubscription({});
+
+    // Simulate backfill in progress
+    const subscriber = server.subscribers.get(subscriptionId)!;
+    subscriber.backfilling = true;
+
+    const event: TelemetryEvent = {
+      category: "log",
+      timestamp: 1000,
+      deviceId: null,
+      data: { level: 4, tag: "Test", message: "during backfill" },
+    };
+
+    server.pushTelemetryEvent(event);
+
+    // Should not receive the event while backfilling
+    expect(socket.getWrittenMessages()).toHaveLength(0);
+
+    // After backfill completes, events should flow again
+    subscriber.backfilling = false;
+
+    server.pushTelemetryEvent(event);
     expect(socket.getWrittenMessages()).toHaveLength(1);
   });
 });

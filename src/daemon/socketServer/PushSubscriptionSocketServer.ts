@@ -191,6 +191,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       subscriptionId,
       lastActivity: this.timer.now(),
       filter,
+      backfilling: false,
     });
 
     const response: SubscriptionResponse = {
@@ -208,7 +209,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
   /**
    * Called after a new subscriber is added. Override to send backfill data.
    */
-  protected onSubscribed(_subscriptionId: string, _filter: F, _socket: Socket): void {
+  protected onSubscribed(_subscriptionId: string, _filter: TFilter, _socket: Socket): void {
     // Default: no-op
   }
 
@@ -283,6 +284,10 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     const deadSubscribers: string[] = [];
 
     for (const [subscriptionId, subscriber] of this.subscribers) {
+      if (subscriber.backfilling) {
+        continue;
+      }
+
       if (!this.matchesFilter(subscriber.filter, data)) {
         continue;
       }

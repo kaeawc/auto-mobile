@@ -70,10 +70,19 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     return true;
   }
 
-  protected override onSubscribed(_subscriptionId: string, filter: TelemetryFilter, socket: Socket): void {
+  protected override onSubscribed(subscriptionId: string, filter: TelemetryFilter, socket: Socket): void {
+    const subscriber = this.subscribers.get(subscriptionId);
+    if (subscriber) {
+      subscriber.backfilling = true;
+    }
     this.backfillRecentEvents(filter, socket).catch(err =>
       logger.warn(`[TelemetryPush] Backfill failed: ${err}`)
-    );
+    ).finally(() => {
+      const sub = this.subscribers.get(subscriptionId);
+      if (sub) {
+        sub.backfilling = false;
+      }
+    });
   }
 
   private async backfillRecentEvents(filter: TelemetryFilter, socket: Socket): Promise<void> {

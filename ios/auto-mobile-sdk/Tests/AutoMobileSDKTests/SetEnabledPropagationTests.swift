@@ -132,7 +132,7 @@ final class SetEnabledPropagationTests: XCTestCase {
         tracker.recordTap(x: 100, y: 200)
         buffer.flush()
 
-        let tapEvents = collector.events.compactMap { $0 as? SdkCustomEvent }
+        let tapEvents = collector.events.compactMap { $0 as? SdkInteractionEvent }
         XCTAssertTrue(tapEvents.isEmpty, "No tap events should be recorded when SDK is disabled")
 
         tracker.reset()

@@ -276,6 +276,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 dedupeTextContentDesc,
                 accessibilityFocusedNode,
                 skipVisibilityFilter,
+                parentPath = "w${window.id}",
             )
         // Skip optimization if disableAllFiltering is true
         val processedElement =
@@ -554,6 +555,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       dedupeTextContentDesc: Boolean = true,
       accessibilityFocusedNode: AccessibilityNodeInfo? = null,
       skipVisibilityFilter: Boolean = false,
+      parentPath: String = "",
+      childIndex: Int = 0,
   ): UIElementInfo? {
     if (depth > MAX_DEPTH) {
       return null
@@ -583,6 +586,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         return null
       }
 
+      // Build deterministic path for viewId generation
+      val segment = if (node.viewIdResourceName != null) {
+        "$childIndex:${node.viewIdResourceName}"
+      } else {
+        childIndex.toString()
+      }
+      val currentPath = if (parentPath.isEmpty()) segment else "$parentPath/$segment"
+
       val children = mutableListOf<UIElementInfo>()
       val childCount = min(node.childCount, MAX_CHILDREN)
 
@@ -598,6 +609,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                   dedupeTextContentDesc,
                   accessibilityFocusedNode,
                   skipVisibilityFilter,
+                  parentPath = currentPath,
+                  childIndex = i,
               )
           if (childInfo != null) {
             children.add(childInfo)
@@ -766,6 +779,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val hasAccessibilityFocus =
           accessibilityFocusedNode != null && node == accessibilityFocusedNode
 
+      // Generate viewId: use resourceId if available, otherwise deterministic UUID from path
+      val viewId = node.viewIdResourceName ?: generateDeterministicUuid(currentPath)
+
       val elementInfo =
           UIElementInfo(
               text = text,
@@ -774,6 +790,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               contentDesc = contentDesc,
               className = className,
               resourceId = node.viewIdResourceName,
+              viewId = viewId,
               bounds = ElementBounds(bounds),
               clickable = if (node.isClickable) "true" else null,
               enabled = if (!node.isEnabled) "false" else null, // Only include if disabled
@@ -812,6 +829,16 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       Log.e(TAG, "Error extracting node info at depth $depth", e)
       null
     }
+  }
+
+  /**
+   * Generate a deterministic UUID from a hierarchy path string. Uses SHA-256 to hash the path and
+   * formats the first 16 bytes as a UUID string.
+   */
+  private fun generateDeterministicUuid(path: String): String {
+    val bytes = java.security.MessageDigest.getInstance("SHA-256").digest(path.toByteArray())
+    val hex = bytes.take(16).joinToString("") { "%02x".format(it) }
+    return "${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20, 32)}"
   }
 
   /**

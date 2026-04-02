@@ -46,10 +46,27 @@ export const observeSchema = addDeviceTargetingToSchema(z.object({
   raw: z.boolean().optional().describe("When true, include unprocessed view hierarchy in response alongside normal output (default: false)")
 }));
 
+const mediaViewSchema = z.object({
+  viewId: z.string().optional(),
+  className: z.string(),
+  mediaType: z.enum(["image", "video", "loading", "mixed"]),
+  bounds: z.object({
+    left: z.number(),
+    top: z.number(),
+    right: z.number(),
+    bottom: z.number()
+  }),
+  contentDescription: z.string().optional(),
+  resourceId: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  isLoading: z.boolean().optional()
+});
+
 const observeElementsSchema = z.object({
   clickable: z.array(elementSchema),
   scrollable: z.array(elementSchema),
-  text: z.array(elementSchema)
+  text: z.array(elementSchema),
+  media: z.array(mediaViewSchema)
 });
 
 const observeResultSchema = z.object({

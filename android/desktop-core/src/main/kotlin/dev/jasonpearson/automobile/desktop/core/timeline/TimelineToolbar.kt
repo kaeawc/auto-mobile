@@ -1,9 +1,12 @@
 package dev.jasonpearson.automobile.desktop.core.timeline
 
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.hoverable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsHoveredAsState
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -12,6 +15,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -33,6 +37,7 @@ fun TimelineToolbar(
 ) {
     val colors = SharedTheme.globalColors
     val timeFormat = remember { SimpleDateFormat("HH:mm:ss", Locale.US) }
+
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -51,27 +56,42 @@ fun TimelineToolbar(
             color = colors.text.normal.copy(alpha = 0.5f),
         )
         Spacer(Modifier.width(8.dp))
-        ToolbarButton("-") { state.zoomOut() }
+        ToolbarButton(label = "-", onClick = { state.zoomOut() })
         Spacer(Modifier.width(2.dp))
-        ToolbarButton("+") { state.zoomIn() }
+        ToolbarButton(label = "+", onClick = { state.zoomIn() })
         Spacer(Modifier.width(2.dp))
-        ToolbarButton("Fit", onClick = onFitAll)
+        ToolbarButton(label = "Fit", onClick = onFitAll)
     }
 }
 
 @Composable
-private fun ToolbarButton(label: String, onClick: () -> Unit) {
+private fun ToolbarButton(
+    label: String,
+    onClick: () -> Unit,
+) {
     val colors = SharedTheme.globalColors
     val interactionSource = remember { MutableInteractionSource() }
+    val isHovered by interactionSource.collectIsHoveredAsState()
+
+    val bgColor by animateColorAsState(
+        targetValue = colors.text.normal.copy(alpha = if (isHovered) 0.10f else 0.05f),
+        animationSpec = tween(durationMillis = 100),
+        label = "toolbarBtnBg",
+    )
+
     Text(
         text = label,
         fontSize = 10.sp,
-        color = colors.text.normal.copy(alpha = 0.6f),
+        color = colors.text.normal.copy(alpha = 0.5f),
         modifier = Modifier
+            .background(bgColor)
             .hoverable(interactionSource)
-            .clickable(interactionSource = interactionSource, indication = null, onClick = onClick)
             .pointerHoverIcon(PointerIcon.Hand)
-            .background(colors.text.normal.copy(alpha = 0.05f))
+            .clickable(
+                interactionSource = interactionSource,
+                indication = null,
+                onClick = onClick,
+            )
             .padding(horizontal = 6.dp, vertical = 2.dp),
     )
 }

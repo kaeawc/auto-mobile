@@ -355,7 +355,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     // MARK: - Context
 
     /// The SDK context holding ambient state attached to events.
-    public var sdkContext: SdkContext? {
+    internal var sdkContext: SdkContext? {
         lock.lock()
         defer { lock.unlock() }
         return _sdkContext
@@ -377,7 +377,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// The drop counter tracking events lost due to buffer overflow, disabled state, or flush errors.
-    public var dropCounter: (any DropCounting)? {
+    internal var dropCounter: (any DropCounting)? {
         lock.lock()
         defer { lock.unlock() }
         return _dropCounter

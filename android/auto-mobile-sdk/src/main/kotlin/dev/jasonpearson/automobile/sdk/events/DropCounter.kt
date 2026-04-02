@@ -15,14 +15,14 @@ enum class DropReason {
 }
 
 /** Tracks counts of dropped events by reason. */
-interface DropCounter {
+internal interface DropCounter {
   fun increment(reason: DropReason, count: Int = 1)
   fun snapshot(): Map<DropReason, Long>
   fun reset()
 }
 
 /** Thread-safe [DropCounter] backed by [ConcurrentHashMap] and [AtomicLong]. */
-class DefaultDropCounter : DropCounter {
+internal class DefaultDropCounter : DropCounter {
 
   private val counts = ConcurrentHashMap<DropReason, AtomicLong>()
 

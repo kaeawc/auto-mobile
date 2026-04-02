@@ -73,7 +73,7 @@ interface SharedPreferencesDriver {
 }
 
 /** Abstraction for file system operations to enable testing. */
-interface FileSystemOperations {
+internal interface FileSystemOperations {
   /**
    * Lists files in a directory.
    *
@@ -92,7 +92,7 @@ interface FileSystemOperations {
 }
 
 /** Real implementation of FileSystemOperations that delegates to the file system. */
-class RealFileSystemOperations : FileSystemOperations {
+internal class RealFileSystemOperations : FileSystemOperations {
   override fun listFiles(directory: File): List<File> {
     return directory.listFiles()?.toList() ?: emptyList()
   }

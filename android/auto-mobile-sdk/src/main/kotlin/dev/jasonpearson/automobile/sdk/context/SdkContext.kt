@@ -6,7 +6,7 @@ import kotlin.concurrent.withLock
 /**
  * Thread-safe mutable context holding ambient state attached to SDK events.
  */
-class SdkContext {
+internal class SdkContext {
   private val lock = ReentrantLock()
 
   @Volatile var sessionId: String? = null

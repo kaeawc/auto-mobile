@@ -90,6 +90,7 @@ nav:
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
       - 'API Surface':
+          - 'Autocomplete Audit': design-docs/api-surface/autocomplete-audit.md
           - 'Cross-Platform Parity': design-docs/api-surface/cross-platform-parity.md
           - 'Doc Generation': design-docs/api-surface/doc-generation.md
           - 'Navigation Alignment': design-docs/api-surface/navigation-alignment.md

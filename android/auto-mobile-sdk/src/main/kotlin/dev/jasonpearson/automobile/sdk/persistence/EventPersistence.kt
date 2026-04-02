@@ -25,7 +25,7 @@ import java.util.UUID
  * Persistence layer for SDK events. Persists event batches to disk so they
  * survive process death and can be replayed on next launch.
  */
-interface EventPersistence {
+internal interface EventPersistence {
   /** Persist a batch of events to disk. Returns batch ID on success, null on failure. */
   fun persist(events: List<SdkEvent>): String?
 
@@ -43,7 +43,7 @@ interface EventPersistence {
  * File-based event persistence. One JSON file per batch.
  * Files named: events_{timestamp}_{uuid}.json for FIFO ordering.
  */
-class FileEventPersistence(
+internal class FileEventPersistence(
   private val directory: File,
   private val clock: () -> Long = System::currentTimeMillis,
   private val uuidProvider: () -> String = { UUID.randomUUID().toString() },

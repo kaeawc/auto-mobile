@@ -14,7 +14,7 @@ import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
  * Only captures broadcast action, categories, and extra key names + type names
  * (not values) to avoid leaking sensitive data.
  */
-object AutoMobileBroadcastInterceptor {
+internal object AutoMobileBroadcastInterceptor {
 
   /** Curated system broadcasts to intercept (avoids noise). */
   private val MONITORED_ACTIONS = listOf(

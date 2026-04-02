@@ -135,7 +135,7 @@ const tapOnBaseSchema = z.object({
   container: elementContainerSchema.optional().describe(
     "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
   ),
-  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).describe("Action type"),
+  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).default("tap").describe("Action type (default: tap)"),
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
     "Element selection strategy when multiple matches are found (default: first)"
   ),

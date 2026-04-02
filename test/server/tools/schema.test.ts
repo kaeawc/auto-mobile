@@ -183,6 +183,12 @@ describe("MCP Tools Schema", () => {
     }
   });
 
+  test("tapOn should default action to 'tap' when omitted", async () => {
+    const { tapOnSchema } = await import("../../../src/server/interactionTools");
+    const result = tapOnSchema.parse({ platform: "android", text: "Online" });
+    expect(result.action).toBe("tap");
+  });
+
   test("given a request contains fields that are defined by the schema but have incorrect values, should return an error response", async function() {
 
     const { client } = fixture.getContext();

@@ -3,6 +3,7 @@ package dev.jasonpearson.automobile.sdk.biometrics
 import android.content.Intent
 import org.junit.After
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -93,6 +94,42 @@ class AutoMobileBiometricsTest {
         AutoMobileBiometrics.overrideResult(BiometricResult.Success)
         AutoMobileBiometrics.overrideResult(BiometricResult.Failure)
         assertEquals(BiometricResult.Failure, AutoMobileBiometrics.consumeOverride())
+    }
+
+    // -------------------------------------------------------------------------
+    // hasOverride
+    // -------------------------------------------------------------------------
+
+    @Test
+    fun `hasOverride returns false when no override is set`() {
+        assertFalse(AutoMobileBiometrics.hasOverride)
+    }
+
+    @Test
+    fun `hasOverride returns true after overrideResult`() {
+        AutoMobileBiometrics.overrideResult(BiometricResult.Success)
+        assertTrue(AutoMobileBiometrics.hasOverride)
+    }
+
+    @Test
+    fun `hasOverride returns false after consumeOverride`() {
+        AutoMobileBiometrics.overrideResult(BiometricResult.Success)
+        AutoMobileBiometrics.consumeOverride()
+        assertFalse(AutoMobileBiometrics.hasOverride)
+    }
+
+    @Test
+    fun `hasOverride returns false after clearOverride`() {
+        AutoMobileBiometrics.overrideResult(BiometricResult.Cancel)
+        assertTrue(AutoMobileBiometrics.hasOverride)
+        AutoMobileBiometrics.clearOverride()
+        assertFalse(AutoMobileBiometrics.hasOverride)
+    }
+
+    @Test
+    fun `hasOverride returns false when override has expired`() {
+        AutoMobileBiometrics.overrideResult(BiometricResult.Success, ttlMs = -1L)
+        assertFalse(AutoMobileBiometrics.hasOverride)
     }
 
     // -------------------------------------------------------------------------

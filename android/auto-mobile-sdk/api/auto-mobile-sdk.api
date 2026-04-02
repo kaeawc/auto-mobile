@@ -338,6 +338,7 @@ public final class dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometri
   public final void initialize(android.content.Context);
   public final void overrideResult(dev.jasonpearson.automobile.sdk.biometrics.BiometricResult, long);
   public static void overrideResult$default(dev.jasonpearson.automobile.sdk.biometrics.AutoMobileBiometrics, dev.jasonpearson.automobile.sdk.biometrics.BiometricResult, long, int, java.lang.Object);
+  public final boolean getHasOverride();
   public final void clearOverride();
   public final dev.jasonpearson.automobile.sdk.biometrics.BiometricResult consumeOverride();
   public final void handleBroadcastIntent$auto_mobile_sdk(android.content.Intent);

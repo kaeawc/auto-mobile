@@ -129,6 +129,21 @@ object AutoMobileBiometrics {
     }
 
     /**
+     * Whether an override is currently set and has not expired.
+     *
+     * Useful for asserting override state in tests without consuming the override.
+     */
+    val hasOverride: Boolean
+        get() {
+            val override = pendingOverride.get() ?: return false
+            if (System.currentTimeMillis() > override.expiryMs) {
+                pendingOverride.compareAndSet(override, null)
+                return false
+            }
+            return true
+        }
+
+    /**
      * Clear any stored override.
      *
      * Call this in `@Before` test setup so that stale overrides from a previous test cannot
@@ -154,7 +169,7 @@ object AutoMobileBiometrics {
     fun consumeOverride(): BiometricResult? {
         val override = pendingOverride.get() ?: return null
         if (System.currentTimeMillis() > override.expiryMs) {
-            pendingOverride.set(null)
+            pendingOverride.compareAndSet(override, null)
             AutoMobileSDK.logger.d(TAG) { "Biometric override expired, discarding" }
             return null
         }

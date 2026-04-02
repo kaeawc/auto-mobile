@@ -318,9 +318,6 @@ fun AutoMobileContent(
   // Shared telemetry event cache for global search (populated from push client)
   val telemetryEventCache = remember { mutableStateListOf<TelemetryDisplayEvent>() }
 
-  val timelineState = rememberTimelineState()
-  var activeFilterCategory by remember { mutableStateOf<String?>(null) }
-
   // Command registry — populated after all state is declared below
 
   // Keyboard navigation state for event list
@@ -1039,7 +1036,7 @@ fun AutoMobileContent(
 
   // Search provider wired to telemetry events, navigation screens, and installed apps
   val searchProvider: SearchResultProvider =
-      remember(telemetryEventCache.size, installedApps.size) {
+      remember(telemetryEventCache.size, telemetryEventCache.lastOrNull()?.timestamp, installedApps.size) {
         object : SearchResultProvider {
           override fun search(query: String): List<SearchResult> {
             if (query.isBlank()) return emptyList()
@@ -1916,7 +1913,7 @@ fun AutoMobileContent(
         },
         bottomPaneContent = {
           val spans =
-              remember(telemetryEventCache.size, filteredTimelineCategories) {
+              remember(telemetryEventCache.size, telemetryEventCache.lastOrNull()?.timestamp, filteredTimelineCategories) {
                 buildTimelineSpans(telemetryEventCache.toList(), filteredTimelineCategories)
               }
           val lanes = remember(spans) { activeLanes(spans) }

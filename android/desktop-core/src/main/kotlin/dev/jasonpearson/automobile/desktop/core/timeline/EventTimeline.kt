@@ -33,7 +33,8 @@ fun EventTimeline(
                 .toSet()
         }
     }
-    val spans by remember(events.size, filteredCategories) {
+    val latestTimestamp = events.lastOrNull()?.timestamp ?: 0L
+    val spans by remember(events.size, latestTimestamp, filteredCategories) {
         derivedStateOf { buildTimelineSpans(events, filteredCategories) }
     }
     val lanes by remember(spans) {

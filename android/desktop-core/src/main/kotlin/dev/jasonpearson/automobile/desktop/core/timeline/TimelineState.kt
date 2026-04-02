@@ -11,25 +11,21 @@ class TimelineState {
     var visibleEndMs: Long by mutableStateOf(1L)
     var selectedTimestampMs: Long? by mutableStateOf(null)
 
-    fun visibleDurationMs(): Long = visibleEndMs - visibleStartMs
+    fun visibleDurationMs(): Long = (visibleEndMs - visibleStartMs).coerceAtLeast(1L)
 
     fun zoomIn(pivotFraction: Float = 0.5f) {
         val duration = visibleDurationMs()
-        val shrink = duration * 0.20f
-        val leftShrink = shrink * pivotFraction
-        val rightShrink = shrink * (1f - pivotFraction)
-        visibleStartMs += leftShrink.toLong()
-        visibleEndMs -= rightShrink.toLong()
+        val shrink = (duration * 0.1f).toLong().coerceAtLeast(1L)
+        visibleStartMs += (shrink * pivotFraction).toLong()
+        visibleEndMs -= (shrink * (1f - pivotFraction)).toLong()
         if (visibleEndMs <= visibleStartMs) visibleEndMs = visibleStartMs + 1
     }
 
     fun zoomOut(pivotFraction: Float = 0.5f) {
         val duration = visibleDurationMs()
-        val expand = duration * 0.25f
-        val leftExpand = expand * pivotFraction
-        val rightExpand = expand * (1f - pivotFraction)
-        visibleStartMs -= leftExpand.toLong()
-        visibleEndMs += rightExpand.toLong()
+        val expand = (duration * 0.125f).toLong().coerceAtLeast(1L)
+        visibleStartMs -= (expand * pivotFraction).toLong()
+        visibleEndMs += (expand * (1f - pivotFraction)).toLong()
     }
 
     fun panBy(fractionOfVisible: Float) {
@@ -40,32 +36,24 @@ class TimelineState {
 
     fun fitToEvents(spans: List<TimelineSpan>) {
         if (spans.isEmpty()) {
-            visibleStartMs = 0L
-            visibleEndMs = 10_000L
+            visibleStartMs = System.currentTimeMillis() - 10_000L
+            visibleEndMs = System.currentTimeMillis()
             return
         }
-        val minMs = spans.minOf { it.startMs }
-        val maxMs = spans.maxOf { it.endMs }
-        if (maxMs <= minMs) {
-            // Single point in time — center a 10-second window around it
-            visibleStartMs = minMs - 5_000L
-            visibleEndMs = minMs + 5_000L
-            return
-        }
-        val range = maxMs - minMs
-        val padding = (range * 0.05f).toLong().coerceAtLeast(1L)
-        visibleStartMs = minMs - padding
-        visibleEndMs = maxMs + padding
+        val minTs = spans.minOf { it.startMs }
+        val maxTs = spans.maxOf { it.endMs }
+        val range = (maxTs - minTs).coerceAtLeast(1L)
+        val padding = (range * 0.05f).toLong().coerceAtLeast(100L)
+        visibleStartMs = minTs - padding
+        visibleEndMs = maxTs + padding
     }
 
     fun scrollZoom(scrollDelta: Float, pivotFraction: Float) {
         val factor = 0.05f * scrollDelta
         val duration = visibleDurationMs()
         val change = (duration * factor).toLong()
-        val leftChange = (change * pivotFraction).toLong()
-        val rightChange = change - leftChange
-        visibleStartMs += leftChange
-        visibleEndMs -= rightChange
+        visibleStartMs -= (change * pivotFraction).toLong()
+        visibleEndMs += (change * (1f - pivotFraction)).toLong()
         if (visibleEndMs <= visibleStartMs) visibleEndMs = visibleStartMs + 1
     }
 

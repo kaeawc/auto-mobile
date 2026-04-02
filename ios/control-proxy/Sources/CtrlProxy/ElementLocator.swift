@@ -44,6 +44,9 @@ public class ElementLocator: ElementLocating {
         /// Cache of resource IDs to XCUIElements
         private var elementCache: [String: XCUIElement] = [:]
 
+        /// Whether the last foreground detection fell back to SpringBoard
+        private var didFallbackToSpringboard: Bool = false
+
         /// Performance tracking provider
         private let perfProvider: PerfProvider
 
@@ -118,16 +121,29 @@ public class ElementLocator: ElementLocating {
             }
         }
 
+        /// Switch the tracked foreground app to the given bundle ID, clearing caches
+        private func switchToApp(bundleId: String) {
+            foregroundApp = nil
+            foregroundBundleId = nil
+            elementCache.removeAll()
+
+            if bundleId == "com.apple.springboard" {
+                foregroundApp = springboard
+            } else {
+                foregroundApp = XCUIApplication(bundleIdentifier: bundleId)
+                observedBundleIds.insert(bundleId)
+            }
+            foregroundBundleId = bundleId
+        }
+
         /// Detect and switch to the foreground application if current app is not in foreground
         private func ensureForegroundApp() {
-            // Run XCUITest state checks on main thread
             // IMPORTANT: Create fresh XCUIApplication instances to check state, because
             // cached instances may return stale state values
             let stateInfo: (springboardState: UInt, currentAppState: UInt?, currentBundleId: String?) =
                 perfProvider.track("checkState") {
                     runOnMainThread {
                         let sbState = self.springboard.state.rawValue
-                        // Create fresh instance to get accurate state (cached instances return stale state)
                         let freshAppState: UInt? = self.foregroundBundleId.map { bundleId in
                             XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                         }
@@ -139,43 +155,34 @@ public class ElementLocator: ElementLocating {
                 4 // .runningForeground only (3 = .runningBackground)
             let isCurrentAppSpringboard = stateInfo.currentBundleId == "com.apple.springboard"
 
-            // If we have an app (not springboard) and it's in foreground, we're good
-            // Note: We always try to detect when current app is springboard, because
-            // springboard reports as foreground even when another app is on top
+            // Springboard reports as foreground even when another app is on top,
+            // so we always re-detect unless a non-springboard app is confirmed foreground
             if isCurrentAppInForeground && !isCurrentAppSpringboard {
                 return
             }
 
-            // Always try to detect foreground app first, even if springboard reports as foreground
-            // This is because springboard may report as foreground even when another app is visible
-
-            // Try to find the foreground app by checking springboard
             if let detectedBundleId = perfProvider.track("detectForeground", block: { detectForegroundAppBundleId() }) {
                 if detectedBundleId != foregroundBundleId {
                     print("[ElementLocator] Switching to foreground app: \(detectedBundleId)")
-                    // Release old app before creating new one
-                    foregroundApp = nil
-                    foregroundBundleId = nil
-                    elementCache.removeAll()
-
-                    // Create new app instance for the detected bundle
-                    foregroundApp = XCUIApplication(bundleIdentifier: detectedBundleId)
-                    foregroundBundleId = detectedBundleId
-
-                    // Track this bundle ID for future detection
-                    observedBundleIds.insert(detectedBundleId)
+                    switchToApp(bundleId: detectedBundleId)
                 }
+                didFallbackToSpringboard = false
             } else if !isCurrentAppInForeground {
-                // No foreground app detected and current app is in the background.
-                // Fall back to springboard (user is on the home screen).
-                if foregroundBundleId != "com.apple.springboard" {
-                    print("[ElementLocator] No foreground app detected, switching to springboard")
-                    foregroundApp = nil
-                    foregroundBundleId = nil
-                    elementCache.removeAll()
+                // Retry once after a brief delay to handle race conditions during app launch
+                Thread.sleep(forTimeInterval: 0.05)
+                if let retryBundleId = detectForegroundAppBundleId() {
+                    if retryBundleId != foregroundBundleId {
+                        print("[ElementLocator] Retry found foreground app: \(retryBundleId)")
+                        switchToApp(bundleId: retryBundleId)
+                    }
+                    didFallbackToSpringboard = false
+                    return
+                }
 
-                    foregroundApp = springboard
-                    foregroundBundleId = "com.apple.springboard"
+                if foregroundBundleId != "com.apple.springboard" {
+                    print("[ElementLocator] WARNING: No foreground app detected after retry, falling back to springboard")
+                    switchToApp(bundleId: "com.apple.springboard")
+                    didFallbackToSpringboard = true
                 }
             }
         }
@@ -489,7 +496,8 @@ public class ElementLocator: ElementLocating {
                 windows: [windowInfo],
                 screenScale: screenScale,
                 screenWidth: screenWidth,
-                screenHeight: screenHeight
+                screenHeight: screenHeight,
+                fallbackToSpringboard: didFallbackToSpringboard ? true : nil
             )
         }
 

@@ -249,6 +249,7 @@ public struct ViewHierarchy: Codable {
     public let screenWidth: Int?
     public let screenHeight: Int?
     public let error: String?
+    public let fallbackToSpringboard: Bool?
 
     public init(
         updatedAt: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
@@ -259,7 +260,8 @@ public struct ViewHierarchy: Codable {
         screenScale: Float? = nil,
         screenWidth: Int? = nil,
         screenHeight: Int? = nil,
-        error: String? = nil
+        error: String? = nil,
+        fallbackToSpringboard: Bool? = nil
     ) {
         self.updatedAt = updatedAt
         self.packageName = packageName
@@ -270,6 +272,7 @@ public struct ViewHierarchy: Codable {
         self.screenWidth = screenWidth
         self.screenHeight = screenHeight
         self.error = error
+        self.fallbackToSpringboard = fallbackToSpringboard
     }
 }
 

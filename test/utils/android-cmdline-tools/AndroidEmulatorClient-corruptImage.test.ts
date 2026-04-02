@@ -122,18 +122,24 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
-    const spawnFn = (() => {
-      // Emit corrupt image output after listeners are attached.
-      // Use process.nextTick instead of queueMicrotask to avoid racing with
-      // setImmediate callbacks from FakeTimer auto-advance on Windows.
-      process.nextTick(() => {
-        fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
-        fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
-      });
-      return fakeChild;
-    }) as any;
+    // Emit corrupt image data when the stderr "data" listener is attached.
+    // startEmulator has a deep async chain (listAvds, isAvdRunning, etc.)
+    // before it spawns and attaches listeners, so timing-based approaches
+    // (process.nextTick, setImmediate) race on Linux CI.
+    const origOn = fakeChild.stderr!.on.bind(fakeChild.stderr!);
+    (fakeChild.stderr as any).on = function(event: string, listener: (...args: any[]) => void) {
+      origOn.call(this, event, listener);
+      if (event === "data") {
+        process.nextTick(() => {
+          fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
+          fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
+        });
+      }
+      return this;
+    };
 
-    // Mock execAsync to return a valid AVD list
+    const spawnFn = (() => fakeChild) as any;
+
     const execAsync = async (command: string): Promise<ExecResult> => {
       if (command.includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
@@ -144,15 +150,12 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
-    // Don't use enableAutoAdvance — it schedules setImmediate callbacks that
-    // race with microtask-based data emission on Windows, causing timeouts.
-    // Instead, advance time manually after spawning to trigger the startup timeout.
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
     const promise = client.startEmulator("Pixel_9_Pro");
-    // Suppress unhandled rejection while async setup completes
     promise.catch(() => {});
-    // Let async operations resolve, then advance past startup validation timeout
+
+    // Yield to let the listener-triggered nextTick fire
     await new Promise(resolve => setImmediate(resolve));
     fakeTimer.advanceTime(6000);
 

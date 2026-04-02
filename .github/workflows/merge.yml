@@ -257,7 +257,10 @@ jobs:
           elif command -v brew &>/dev/null; then
             brew install bats-core
           else
-            sudo apt-get update && sudo apt-get install -y bats
+            # Ubuntu apt 'bats' is the old sstephenson/bats which doesn't
+            # capture stderr in run output. Install bats-core from source.
+            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
           fi
 
       - name: "Run BATS Tests"

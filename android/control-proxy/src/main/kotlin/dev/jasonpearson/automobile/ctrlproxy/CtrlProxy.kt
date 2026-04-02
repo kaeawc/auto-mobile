@@ -136,7 +136,7 @@ class CtrlProxy : AccessibilityService() {
   private val deviceAdminComponent by lazy {
     ComponentName(this, AutoMobileDeviceAdminReceiver::class.java)
   }
-  private var lastWindowClassName: String? = null
+  @Volatile private var lastWindowClassName: String? = null
 
   @Volatile
   private var isRecording: Boolean = false
@@ -1428,18 +1428,18 @@ class CtrlProxy : AccessibilityService() {
    * from TYPE_WINDOW_STATE_CHANGED events, avoiding the restricted
    * ActivityManager.getRunningTasks() API.
    */
-  private fun getForegroundActivity(): String? {
+  private fun getForegroundActivity(rootPackage: String? = null, windowClass: String? = null): String? {
     return try {
-      val rootPackage = rootInActiveWindow?.packageName?.toString()
-      val className = lastWindowClassName
-      if (rootPackage != null && className != null) {
+      val pkg = rootPackage ?: rootInActiveWindow?.packageName?.toString()
+      val className = windowClass ?: lastWindowClassName
+      if (pkg != null && className != null) {
         // Use short class name format if it starts with the package
-        val shortName = if (className.startsWith(rootPackage)) {
-          className.removePrefix(rootPackage)
+        val shortName = if (className.startsWith(pkg)) {
+          className.removePrefix(pkg)
         } else {
           className
         }
-        "$rootPackage/$shortName"
+        "$pkg/$shortName"
       } else {
         // Don't return package-only value — it produces an empty activityName
         // in ObserveScreen and prevents the ADB fallback from filling the real one
@@ -1555,6 +1555,10 @@ class CtrlProxy : AccessibilityService() {
     // Get all windows to capture popups, toolbars, and other floating windows
     val allWindows = windows
     val rootNode = rootInActiveWindow
+    // Capture foreground info atomically with rootNode to avoid race conditions
+    // where the app state changes between hierarchy extraction and getForegroundActivity()
+    val capturedRootPackage = rootNode?.packageName?.toString()
+    val capturedWindowClass = lastWindowClassName
     val screenDimensions = getScreenDimensions()
     val rotation = getRotation()
     val systemInsets = getSystemInsets()
@@ -1590,7 +1594,7 @@ class CtrlProxy : AccessibilityService() {
 
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
-    val foreground = getForegroundActivity()
+    val foreground = getForegroundActivity(capturedRootPackage, capturedWindowClass)
     val density = getDensity()
     return hierarchy?.copy(
         screenWidth = screenDimensions?.width,

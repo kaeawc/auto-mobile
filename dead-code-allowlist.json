@@ -2,9 +2,6 @@
   "ignorePaths": [
     "src/daemon/socketServer/index.ts",
     "src/db/index.ts",
-    "src/features/action/Fling.ts",
-    "src/features/action/SwipeOnBounds.ts",
-    "src/features/action/SwipeOnScreen.ts",
     "src/features/action/UninstallApp.ts",
     "src/features/action/swipeon/index.ts",
     "src/features/appearance/index.ts",
@@ -14,7 +11,6 @@
     "src/features/snapshot/index.ts",
     "src/features/video/index.ts",
     "src/models/index.ts",
-    "src/utils/factories/DeviceSessionManagerFactory.ts",
     "src/utils/hostControlClient.ts",
     "src/utils/interfaces/PlanExecutor.ts",
     "src/utils/interfaces/PlanSerializer.ts",

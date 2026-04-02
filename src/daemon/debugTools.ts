@@ -168,22 +168,6 @@ export function formatHealthReport(report: DaemonHealthReport): string {
 }
 
 /**
- * Get daemon statistics and connection info
- */
-export interface DaemonStats {
-  pid: number;
-  port: number;
-  uptime: number;
-  memoryUsage?: {
-    rss: number; // Resident Set Size
-    heapTotal: number;
-    heapUsed: number;
-    external: number;
-  };
-  timestamp: string;
-}
-
-/**
  * Check socket diagnostic info
  */
 export interface SocketDiagnostics {

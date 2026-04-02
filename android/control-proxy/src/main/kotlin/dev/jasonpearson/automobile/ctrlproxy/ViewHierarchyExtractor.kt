@@ -587,7 +587,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
 
       // Build deterministic path for viewId generation
-      val segment = node.viewIdResourceName ?: childIndex.toString()
+      val segment = if (node.viewIdResourceName != null) {
+        "$childIndex:${node.viewIdResourceName}"
+      } else {
+        childIndex.toString()
+      }
       val currentPath = if (parentPath.isEmpty()) segment else "$parentPath/$segment"
 
       val children = mutableListOf<UIElementInfo>()

@@ -20,6 +20,7 @@
 		4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
 		5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */; };
+		5BD7FFA4EE2841F197219322 /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
 		5DF6CF60A8796BBB8C80341C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0CDD96577EB9823B5FCF2585 /* Assets.xcassets */; };
 		5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
 		74CA22BFA1779993CDCF59AE /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
@@ -36,6 +37,7 @@
 		C194D73F02D0776F0F7FCA7B /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
 		CC061B4978496D75042B253A /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
+		CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
 		D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
 		DFEE186C8B4CD32EF76D995A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */; };
@@ -103,6 +105,7 @@
 		0F9D7B74C318EE243B225B95 /* Protocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocols.swift; sourceTree = "<group>"; };
 		1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayLinkFPSMonitor.swift; sourceTree = "<group>"; };
 		184CFC1280E0802EBF53965F /* ModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsTests.swift; sourceTree = "<group>"; };
+		1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultStorageInspecting.swift; sourceTree = "<group>"; };
 		22671C94D317E15EED752E59 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandlerTests.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
@@ -201,6 +204,7 @@
 			children = (
 				77305F40F85694E983987E68 /* CommandHandler.swift */,
 				0EE277596991C059142C485B /* CtrlProxy.swift */,
+				1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */,
 				1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */,
 				95565999DC108319DEED894A /* ElementLocator.swift */,
 				9A1B2931E58B158EE51C5F4F /* Fakes.swift */,
@@ -371,6 +375,7 @@
 			files = (
 				0377180BB666F63386C77E17 /* CommandHandler.swift in Sources */,
 				74CA22BFA1779993CDCF59AE /* CtrlProxy.swift in Sources */,
+				5BD7FFA4EE2841F197219322 /* DefaultStorageInspecting.swift in Sources */,
 				F469E7EF16C59A99DBD519DA /* DisplayLinkFPSMonitor.swift in Sources */,
 				9FE4564D1819768FEFD62606 /* ElementLocator.swift in Sources */,
 				A603343B94D35DDF48F7AA4D /* Fakes.swift in Sources */,
@@ -403,6 +408,7 @@
 				CC061B4978496D75042B253A /* CommandHandler.swift in Sources */,
 				C194D73F02D0776F0F7FCA7B /* CtrlProxy.swift in Sources */,
 				7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */,
+				CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */,
 				3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */,
 				1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */,
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,

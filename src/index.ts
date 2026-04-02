@@ -46,6 +46,7 @@ function parseArgs(): {
   daemonCommand?: string;
   daemonArgs: string[];
   skipCtrlProxyDownload: boolean;
+  dismissKeyboardAfterInput: boolean;
   mcpRecording: boolean;
   noProxy: boolean;
   noDaemon: boolean;
@@ -101,8 +102,8 @@ function parseArgs(): {
   const rawElementSearch = args.includes("--raw-element-search");
   const skipCtrlProxyDownload = args.includes("--skip-ctrl-proxy-download") || args.includes("--skip-accessibility-download");
   const networkMockable = args.includes("--network-mockable");
-  const mcpRecording = args.includes("--mcp-recording");
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
+  const mcpRecording = args.includes("--mcp-recording");
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -294,8 +295,8 @@ function parseArgs(): {
     daemonArgs,
     skipCtrlProxyDownload,
     networkMockable,
-    mcpRecording,
     dismissKeyboardAfterInput,
+    mcpRecording,
     noProxy,
     noDaemon,
   };
@@ -364,8 +365,8 @@ async function main() {
       daemonArgs,
       skipCtrlProxyDownload,
       networkMockable,
-      mcpRecording,
       dismissKeyboardAfterInput,
+      mcpRecording,
       noProxy,
       noDaemon,
     } = parseArgs();

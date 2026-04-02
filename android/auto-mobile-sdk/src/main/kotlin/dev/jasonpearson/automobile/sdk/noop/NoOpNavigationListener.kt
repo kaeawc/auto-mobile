@@ -4,6 +4,6 @@ import dev.jasonpearson.automobile.sdk.NavigationEvent
 import dev.jasonpearson.automobile.sdk.NavigationListener
 
 /** Silent [NavigationListener] that ignores all navigation events. */
-object NoOpNavigationListener : NavigationListener {
+internal object NoOpNavigationListener : NavigationListener {
   override fun onNavigationEvent(event: NavigationEvent) = Unit
 }

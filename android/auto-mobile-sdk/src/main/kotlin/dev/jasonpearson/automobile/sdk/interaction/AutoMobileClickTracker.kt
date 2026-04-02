@@ -34,7 +34,7 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
  *
  * Usage: call [initialize] once from AutoMobileSDK.initialize().
  */
-object AutoMobileClickTracker {
+internal object AutoMobileClickTracker {
 
     private const val TAG = "AutoMobileClickTracker"
     private const val TAP_SLOP_PX = 20 // Max movement to still be a tap

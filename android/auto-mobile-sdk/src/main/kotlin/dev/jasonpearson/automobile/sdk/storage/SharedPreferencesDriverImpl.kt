@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicLong
  * @param context Application context
  * @param fileSystemOperations File system abstraction for listing preference files
  */
-class SharedPreferencesDriverImpl(
+internal class SharedPreferencesDriverImpl(
   private val context: Context,
   private val fileSystemOperations: FileSystemOperations = RealFileSystemOperations(),
 ) : SharedPreferencesDriver {

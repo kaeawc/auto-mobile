@@ -14,7 +14,7 @@ import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONArray
 import org.json.JSONObject
 
-object RecompositionTracker {
+internal object RecompositionTracker {
   private const val WINDOW_MS = 1000L
   private const val BROADCAST_INTERVAL_MS = 1000L
 

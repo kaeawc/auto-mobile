@@ -29,7 +29,7 @@ import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
  * - Battery changes via [BroadcastReceiver]
  * - Screen on/off via [BroadcastReceiver]
  */
-object AutoMobileOsEvents {
+internal object AutoMobileOsEvents {
 
   @Volatile private var buffer: SdkEventBuffer? = null
   @Volatile private var applicationId: String? = null

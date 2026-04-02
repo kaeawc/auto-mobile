@@ -2,7 +2,6 @@ import { logger } from "../../utils/logger";
 import { recordNetworkEvent, type RecordNetworkEventInput } from "../../db/networkEventRepository";
 import { NetworkState } from "../../server/NetworkState";
 import { recordLogEvent, type RecordLogEventInput } from "../../db/logEventRepository";
-import { recordCustomEvent, type RecordCustomEventInput } from "../../db/customEventRepository";
 import { recordOsEvent, type RecordOsEventInput } from "../../db/osEventRepository";
 import { recordNavigationEvent, type RecordNavigationEventInput } from "../../db/navigationEventRepository";
 import { recordStorageEvent, type RecordStorageEventInput } from "../../db/storageEventRepository";
@@ -10,7 +9,7 @@ import { recordLayoutEvent, type RecordLayoutEventInput } from "../../db/layoutE
 import { getTelemetryPushServer } from "../../daemon/telemetryPushSocketServer";
 
 export type TelemetryCategory =
-  | "network" | "log" | "custom" | "os" | "navigation"
+  | "network" | "log" | "os" | "navigation"
   | "crash" | "anr" | "nonfatal" | "storage" | "layout"
   | "performance" | "toolcall";
 
@@ -29,7 +28,6 @@ export interface TelemetryPushTarget {
 export interface TelemetryRepository {
   recordNetworkEvent(input: RecordNetworkEventInput): Promise<number>;
   recordLogEvent(input: RecordLogEventInput): Promise<void>;
-  recordCustomEvent(input: RecordCustomEventInput): Promise<void>;
   recordOsEvent(input: RecordOsEventInput): Promise<void>;
   recordNavigationEvent(input: RecordNavigationEventInput): Promise<void>;
   recordStorageEvent(input: RecordStorageEventInput): Promise<void>;
@@ -39,7 +37,6 @@ export interface TelemetryRepository {
 const defaultRepository: TelemetryRepository = {
   recordNetworkEvent: input => recordNetworkEvent(input),
   recordLogEvent: input => recordLogEvent(input),
-  recordCustomEvent: input => recordCustomEvent(input),
   recordOsEvent: input => recordOsEvent(input),
   recordNavigationEvent: input => recordNavigationEvent(input),
   recordStorageEvent: input => recordStorageEvent(input),
@@ -154,24 +151,6 @@ export class TelemetryRecorder {
     }
 
     this.pushToSocket({ category: "log", timestamp: event.timestamp, deviceId, sessionId, data: event });
-  }
-
-  async recordCustomEvent(event: {
-    timestamp: number;
-    applicationId: string | null;
-    name: string;
-    properties: Record<string, string>;
-  }): Promise<void> {
-    const { deviceId, sessionId } = this.snapshotContext();
-    const input: RecordCustomEventInput = { deviceId, sessionId, ...event };
-
-    try {
-      await this.repository.recordCustomEvent(input);
-    } catch (e) {
-      logger.error(`[TelemetryRecorder] Failed to record custom event: ${e}`);
-    }
-
-    this.pushToSocket({ category: "custom", timestamp: event.timestamp, deviceId, sessionId, data: event });
   }
 
   async recordOsEvent(event: {

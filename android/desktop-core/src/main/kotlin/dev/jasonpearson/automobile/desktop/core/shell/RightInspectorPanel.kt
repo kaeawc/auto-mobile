@@ -170,7 +170,6 @@ private fun inspectorTitle(event: TelemetryDisplayEvent): String = when (event) 
     is TelemetryDisplayEvent.Failure -> event.type
     is TelemetryDisplayEvent.Log -> "Log (${event.level})"
     is TelemetryDisplayEvent.Os -> "OS: ${event.category}"
-    is TelemetryDisplayEvent.Custom -> event.name
     is TelemetryDisplayEvent.Storage -> "Storage"
     is TelemetryDisplayEvent.Layout -> "Layout"
     is TelemetryDisplayEvent.Performance -> "Performance"

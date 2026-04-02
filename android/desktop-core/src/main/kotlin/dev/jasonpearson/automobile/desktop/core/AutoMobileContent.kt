@@ -940,7 +940,6 @@ fun AutoMobileContent(
                           is TelemetryDisplayEvent.Network -> "${event.method} ${event.url}" to "${event.statusCode}"
                           is TelemetryDisplayEvent.Log -> "[${event.tag}] ${event.message.take(40)}" to event.tag
                           is TelemetryDisplayEvent.Navigation -> event.destination to (event.source ?: "")
-                          is TelemetryDisplayEvent.Custom -> event.name to event.properties.entries.take(2).joinToString { "${it.key}=${it.value}" }
                           is TelemetryDisplayEvent.Failure -> event.title to event.type
                           else -> (event::class.simpleName ?: "Event") to ""
                       }

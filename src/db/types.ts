@@ -548,18 +548,7 @@ export interface LogEventsTable {
   level: number;
   tag: string;
   message: string;
-  filter_name: string;
-  created_at: Generated<string>;
-}
-
-export interface CustomEventsTable {
-  id: Generated<number>;
-  device_id: string | null;
-  timestamp: number;
-  application_id: string | null;
-  session_id: string | null;
-  name: string;
-  properties_json: string | null;
+  filter_name: string | null;
   created_at: Generated<string>;
 }
 
@@ -665,7 +654,7 @@ export interface Database {
   navigation_suggestions: NavigationSuggestionsTable;
   network_events: NetworkEventsTable;
   log_events: LogEventsTable;
-  custom_events: CustomEventsTable;
+
   os_events: OsEventsTable;
   navigation_events: NavigationEventsTable;
   storage_events: StorageEventsTable;

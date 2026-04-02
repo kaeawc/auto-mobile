@@ -8,7 +8,6 @@ import {
 import { NetworkState } from "../../../src/server/NetworkState";
 import type { RecordNetworkEventInput } from "../../../src/db/networkEventRepository";
 import type { RecordLogEventInput } from "../../../src/db/logEventRepository";
-import type { RecordCustomEventInput } from "../../../src/db/customEventRepository";
 import type { RecordOsEventInput } from "../../../src/db/osEventRepository";
 import type { RecordNavigationEventInput } from "../../../src/db/navigationEventRepository";
 import type { RecordStorageEventInput } from "../../../src/db/storageEventRepository";
@@ -17,7 +16,6 @@ import type { RecordLayoutEventInput } from "../../../src/db/layoutEventReposito
 class FakeRepository implements TelemetryRepository {
   networkEvents: RecordNetworkEventInput[] = [];
   logEvents: RecordLogEventInput[] = [];
-  customEvents: RecordCustomEventInput[] = [];
   osEvents: RecordOsEventInput[] = [];
   navigationEvents: RecordNavigationEventInput[] = [];
   storageEvents: RecordStorageEventInput[] = [];
@@ -33,10 +31,6 @@ class FakeRepository implements TelemetryRepository {
   async recordLogEvent(input: RecordLogEventInput): Promise<void> {
     if (this.shouldThrow) {throw new Error("db error");}
     this.logEvents.push(input);
-  }
-  async recordCustomEvent(input: RecordCustomEventInput): Promise<void> {
-    if (this.shouldThrow) {throw new Error("db error");}
-    this.customEvents.push(input);
   }
   async recordOsEvent(input: RecordOsEventInput): Promise<void> {
     if (this.shouldThrow) {throw new Error("db error");}
@@ -177,19 +171,6 @@ describe("TelemetryRecorder", () => {
     expect(repo.logEvents[0].deviceId).toBe("d1");
   });
 
-  it("records custom event to repository", async () => {
-    await recorder.recordCustomEvent({
-      timestamp: 3000,
-      applicationId: null,
-      name: "purchase",
-      properties: { item: "premium" },
-    });
-
-    expect(repo.customEvents).toHaveLength(1);
-    expect(repo.customEvents[0].name).toBe("purchase");
-    expect(repo.customEvents[0].properties).toEqual({ item: "premium" });
-  });
-
   it("records OS event to repository", async () => {
     await recorder.recordOsEvent({
       timestamp: 4000,
@@ -212,15 +193,12 @@ describe("TelemetryRecorder", () => {
     await recorder.recordLogEvent({
       timestamp: 2, applicationId: null, level: 4, tag: "t", message: "m", filterName: "f",
     });
-    await recorder.recordCustomEvent({
-      timestamp: 3, applicationId: null, name: "n", properties: {},
-    });
     await recorder.recordOsEvent({
-      timestamp: 4, applicationId: null, category: "c", kind: "k", details: null,
+      timestamp: 3, applicationId: null, category: "c", kind: "k", details: null,
     });
 
-    expect(pushTarget.pushedEvents).toHaveLength(4);
-    expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["network", "log", "custom", "os"]);
+    expect(pushTarget.pushedEvents).toHaveLength(3);
+    expect(pushTarget.pushedEvents.map(e => e.category)).toEqual(["network", "log", "os"]);
   });
 
   it("still pushes to socket when repository throws", async () => {
@@ -488,7 +466,6 @@ describe("TelemetryRecorder", () => {
 
     expect(repo.networkEvents).toHaveLength(0);
     expect(repo.logEvents).toHaveLength(0);
-    expect(repo.customEvents).toHaveLength(0);
     expect(repo.osEvents).toHaveLength(0);
     expect(repo.navigationEvents).toHaveLength(0);
     expect(repo.storageEvents).toHaveLength(0);

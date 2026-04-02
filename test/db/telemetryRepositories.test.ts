@@ -4,7 +4,6 @@ import type { Database } from "../../src/db/types";
 import { createTestDatabase } from "./testDbHelper";
 import { recordNetworkEvent, getNetworkEvents } from "../../src/db/networkEventRepository";
 import { recordLogEvent, getLogEvents } from "../../src/db/logEventRepository";
-import { recordCustomEvent, getCustomEvents } from "../../src/db/customEventRepository";
 import { recordOsEvent, getOsEvents } from "../../src/db/osEventRepository";
 
 describe("NetworkEventRepository", () => {
@@ -128,48 +127,6 @@ describe("LogEventRepository", () => {
     expect(events).toHaveLength(1);
     expect(events[0].level).toBe(4);
     expect(events[0].filterName).toBe("http");
-  });
-});
-
-describe("CustomEventRepository", () => {
-  let db: Kysely<Database>;
-
-  beforeEach(async () => {
-    db = await createTestDatabase();
-  });
-
-  afterEach(async () => {
-    await db.destroy();
-  });
-
-  test("recordCustomEvent inserts with properties", async () => {
-    await recordCustomEvent({
-      deviceId: "d1",
-      timestamp: 1000,
-      applicationId: "com.example.app",
-      sessionId: "s1",
-      name: "purchase",
-      properties: { amount: "9.99", currency: "USD" },
-    }, db);
-
-    const events = await getCustomEvents({ name: "purchase" }, db);
-    expect(events).toHaveLength(1);
-    expect(events[0].properties).toEqual({ amount: "9.99", currency: "USD" });
-  });
-
-  test("recordCustomEvent inserts with empty properties", async () => {
-    await recordCustomEvent({
-      deviceId: "d1",
-      timestamp: 1000,
-      applicationId: null,
-      sessionId: null,
-      name: "click",
-      properties: {},
-    }, db);
-
-    const events = await getCustomEvents({}, db);
-    expect(events).toHaveLength(1);
-    expect(events[0].properties).toEqual({});
   });
 });
 

@@ -121,7 +121,7 @@ class TelemetryModelsTest {
     }
 
     @Test
-    fun `parseTelemetryEvent parses custom event with properties object`() {
+    fun `parseTelemetryEvent converts custom event with properties to log`() {
         val envelope = TelemetryEventEnvelope(
             category = "custom",
             timestamp = 6000L,
@@ -134,14 +134,16 @@ class TelemetryModelsTest {
             },
         )
 
-        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Custom
+        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Log
         assertEquals(6000L, event.timestamp)
-        assertEquals("button_click", event.name)
-        assertEquals(mapOf("screen" to "home", "button" to "refresh"), event.properties)
+        assertEquals("CustomEvent", event.tag)
+        assertEquals(4, event.level)
+        assertTrue(event.message.contains("button_click"))
+        assertTrue(event.message.contains("screen:home"))
     }
 
     @Test
-    fun `parseTelemetryEvent parses custom event with properties_json string`() {
+    fun `parseTelemetryEvent converts custom event with properties_json to log`() {
         val envelope = TelemetryEventEnvelope(
             category = "custom",
             timestamp = 7000L,
@@ -151,13 +153,14 @@ class TelemetryModelsTest {
             },
         )
 
-        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Custom
-        assertEquals("purchase", event.name)
-        assertEquals(mapOf("item" to "premium", "price" to "9.99"), event.properties)
+        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Log
+        assertEquals("CustomEvent", event.tag)
+        assertTrue(event.message.contains("purchase"))
+        assertTrue(event.message.contains("item:premium"))
     }
 
     @Test
-    fun `parseTelemetryEvent parses custom event with empty properties`() {
+    fun `parseTelemetryEvent converts custom event with empty properties to log`() {
         val envelope = TelemetryEventEnvelope(
             category = "custom",
             timestamp = 8000L,
@@ -166,9 +169,9 @@ class TelemetryModelsTest {
             },
         )
 
-        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Custom
-        assertEquals("page_view", event.name)
-        assertTrue(event.properties.isEmpty())
+        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Log
+        assertEquals("page_view", event.message)
+        assertEquals("CustomEvent", event.tag)
     }
 
     @Test
@@ -238,7 +241,7 @@ class TelemetryModelsTest {
     }
 
     @Test
-    fun `parseTelemetryEvent prefers properties object over properties_json`() {
+    fun `parseTelemetryEvent custom prefers properties object over properties_json`() {
         val envelope = TelemetryEventEnvelope(
             category = "custom",
             timestamp = 13000L,
@@ -251,8 +254,8 @@ class TelemetryModelsTest {
             },
         )
 
-        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Custom
-        assertEquals(mapOf("from" to "object"), event.properties)
+        val event = parseTelemetryEvent(envelope) as TelemetryDisplayEvent.Log
+        assertTrue(event.message.contains("from:object"))
     }
 
     // --- Navigation with new fields ---

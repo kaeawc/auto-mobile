@@ -62,6 +62,23 @@ echo -e "${BLUE}Xcode version:${NC} ${XCODE_VERSION}"
 echo -e "${BLUE}Derived data:${NC} ${DERIVED_DATA}"
 echo ""
 
+# Ensure iOS Simulator platform is available (Xcode 26+ requires separate download)
+has_simulator_platform() {
+    xcodebuild -showsdks 2>/dev/null | grep -q "iphonesimulator" \
+        && xcrun simctl list runtimes 2>/dev/null | grep -qiE "^iOS "
+}
+
+if ! has_simulator_platform; then
+    echo -e "${YELLOW}No iOS Simulator platform detected. Attempting to install...${NC}"
+    xcodebuild -downloadPlatform iOS 2>&1 || true
+
+    if ! has_simulator_platform; then
+        echo -e "${RED}iOS Simulator platform still missing after download attempt.${NC}"
+        echo -e "${YELLOW}Install the iOS platform in Xcode > Settings > Components.${NC}"
+        exit 1
+    fi
+fi
+
 # Generate Xcode project if needed (xcodeproj is committed to git, so this is
 # only triggered in local dev when the project file is missing)
 if [ ! -d "${XCODEPROJ}" ]; then

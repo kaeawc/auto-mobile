@@ -70,7 +70,11 @@ has_simulator_sdk() {
         echo -e "${YELLOW}(dry-run) Skipping simulator SDK detection.${NC}"
         return 0
     fi
-    xcodebuild -showsdks 2>/dev/null | grep -q "iphonesimulator"
+    # Check both that the SDK is listed AND that simulator runtimes are available.
+    # On Xcode 26+, the iOS platform may need a separate download even if SDK
+    # headers appear in -showsdks.
+    xcodebuild -showsdks 2>/dev/null | grep -q "iphonesimulator" \
+        && xcrun simctl list runtimes 2>/dev/null | grep -qiE "^iOS "
 }
 
 # Check if xcodebuild is available

@@ -190,6 +190,17 @@ fun TelemetryDashboard(
   val lastSeenCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
   var previousDeviceId by remember { mutableStateOf<String?>(null) }
   LaunchedEffect(activeDeviceId) {
+    if (previousDeviceId == null) {
+      categoryCounts.clear()
+      initializeCounts(categoryCounts, events)
+      previousDeviceId = activeDeviceId
+      return@LaunchedEffect
+    }
+
+    if (previousDeviceId == activeDeviceId) {
+      return@LaunchedEffect
+    }
+
     // Save current events + counts to cache before switching
     if (previousDeviceId != null && events.isNotEmpty()) {
       deviceEventCache[previousDeviceId!!] = events.toList()
@@ -846,6 +857,13 @@ private fun incrementCount(
   if (cat != null) {
     counts[cat] = (counts[cat] ?: 0) + 1
   }
+}
+
+private fun initializeCounts(
+    counts: MutableMap<CategoryFilter, Int>,
+    events: List<TelemetryDisplayEvent>,
+) {
+  events.forEach { event -> incrementCount(counts, event) }
 }
 
 /** Remove oldest events until [events] fits within [limit], decrementing [counts]. */

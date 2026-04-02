@@ -55,6 +55,7 @@ import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.TelemetryPushClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import dev.jasonpearson.automobile.desktop.core.timeline.TimelineState
 import androidx.compose.material3.Text
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -162,6 +163,8 @@ fun TelemetryDashboard(
     activeDeviceId: String? = null,
     selectedEvent: TelemetryDisplayEvent? = null,
     onEventSelected: (TelemetryDisplayEvent?) -> Unit = {},
+    timelineState: TimelineState? = null,
+    onFilterChanged: ((String?) -> Unit)? = null,
     modifier: Modifier = Modifier,
 ) {
     val colors = SharedTheme.globalColors
@@ -304,6 +307,33 @@ fun TelemetryDashboard(
     // Mark current tab as seen when the selected filter changes
     LaunchedEffect(selectedFilter) {
         lastSeenCounts[selectedFilter] = categoryCounts[selectedFilter] ?: 0
+        onFilterChanged?.invoke(if (selectedFilter == CategoryFilter.All) null else selectedFilter.label)
+    }
+
+    // Sync: when timeline selection changes, scroll to nearest event
+    LaunchedEffect(timelineState?.selectedTimestampMs) {
+        val ts = timelineState?.selectedTimestampMs ?: return@LaunchedEffect
+        val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
+            .takeIf { it >= 0 } ?: filteredEvents.lastIndex
+        if (nearestIndex >= 0) {
+            listState.animateScrollToItem(nearestIndex)
+        }
+    }
+
+    // Sync: when telemetry scrolls, update timeline visible window center
+    LaunchedEffect(Unit) {
+        snapshotFlow { listState.firstVisibleItemIndex }
+            .collect { index ->
+                if (timelineState == null || filteredEvents.isEmpty()) return@collect
+                val visibleEvent = filteredEvents.getOrNull(index) ?: return@collect
+                val eventTs = visibleEvent.timestamp
+                // Only re-center if the event is outside the visible window
+                if (eventTs < timelineState.visibleStartMs || eventTs > timelineState.visibleEndMs) {
+                    val halfDuration = timelineState.visibleDurationMs() / 2
+                    timelineState.visibleStartMs = eventTs - halfDuration
+                    timelineState.visibleEndMs = eventTs + halfDuration
+                }
+            }
     }
 
     Column(modifier = modifier.fillMaxSize()) {

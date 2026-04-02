@@ -1,3 +1,4 @@
+import CryptoKit
 import Foundation
 #if canImport(XCTest) && os(iOS)
     import UIKit
@@ -588,7 +589,9 @@ public class ElementLocator: ElementLocating {
         private func buildElementInfoFromSnapshot(
             _ snapshot: XCUIElementSnapshot,
             depth: Int,
-            screenBounds: CGRect
+            screenBounds: CGRect,
+            parentPath: String = "",
+            childIndex: Int = 0
         )
             -> UIElementInfo
         {
@@ -607,6 +610,17 @@ public class ElementLocator: ElementLocating {
             // Get identifier
             let identifier = snapshot.identifier
 
+            // Build deterministic path for viewId generation
+            let resId = identifier.isEmpty ? nil : identifier
+            let segment: String
+            if let rid = resId {
+                segment = "\(childIndex):\(rid)"
+            } else {
+                segment = "\(childIndex)"
+            }
+            let currentPath = parentPath.isEmpty ? segment : "\(parentPath)/\(segment)"
+            let viewId = resId ?? generateDeterministicUuid(from: currentPath)
+
             // Get children from snapshot (already captured - fast!)
             // Filter out offscreen and zero-area children
             // Alert-type elements are SKIPPED here because they are extracted separately
@@ -616,7 +630,7 @@ public class ElementLocator: ElementLocating {
             if depth < ElementLocator.maxDepth {
                 let children = snapshot.children
                 if !children.isEmpty {
-                    let filteredChildren = children.compactMap { child -> UIElementInfo? in
+                    let filteredChildren = children.enumerated().compactMap { (idx, child) -> UIElementInfo? in
                         // Skip alert elements - they are extracted separately as system alerts
                         // to ensure they're always visible as top-level children
                         if child.elementType == .alert {
@@ -640,7 +654,9 @@ public class ElementLocator: ElementLocating {
                         return buildElementInfoFromSnapshot(
                             child,
                             depth: depth + 1,
-                            screenBounds: screenBounds
+                            screenBounds: screenBounds,
+                            parentPath: currentPath,
+                            childIndex: idx
                         )
                     }
                     childNodes = filteredChildren.isEmpty ? nil : filteredChildren
@@ -682,9 +698,6 @@ public class ElementLocator: ElementLocating {
             // Get label - use for text (don't duplicate in content-desc)
             let label = snapshot.label.isEmpty ? nil : snapshot.label
 
-            // Use resourceId (don't duplicate in testTag)
-            let resId = identifier.isEmpty ? nil : identifier
-
             return UIElementInfo(
                 text: label,
                 textSize: nil,
@@ -709,9 +722,24 @@ public class ElementLocator: ElementLocating {
                 stateDescription: nil,
                 errorMessage: nil,
                 hintText: snapshot.placeholderValue,
+                viewId: viewId,
+                extras: nil,
                 actions: actions,
                 node: childNodes
             )
+        }
+
+        // MARK: - Deterministic ID Generation
+
+        /// Generate a deterministic UUID from a hierarchy path string using SHA-256.
+        /// The path encodes the element's position in the tree, ensuring stable IDs
+        /// across snapshots when the tree structure hasn't changed.
+        private func generateDeterministicUuid(from path: String) -> String {
+            let data = Data(path.utf8)
+            let digest = SHA256.hash(data: data)
+            let bytes = Array(digest)
+            let hex = bytes.prefix(16).map { String(format: "%02x", $0) }.joined()
+            return "\(hex.prefix(8))-\(hex.dropFirst(8).prefix(4))-\(hex.dropFirst(12).prefix(4))-\(hex.dropFirst(16).prefix(4))-\(hex.dropFirst(20).prefix(12))"
         }
 
         // MARK: - Hierarchy Optimization

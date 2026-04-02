@@ -42,6 +42,15 @@ bun test --bail        # Stop on first failure (no cache)
 bun test <file>        # Run specific test file (no cache)
 ```
 
+# Validate Shell Scripts
+
+Shell scripts under `scripts/` are tested with [BATS](https://github.com/bats-core/bats-core) and linted with shellcheck.
+
+```bash
+bats test/bats/        # Run all BATS shell tests
+shellcheck scripts/**/*.sh  # Lint shell scripts
+```
+
 # MCP Tools Reference
 
 This is a high-level summary of core MCP tools exposed by the server.

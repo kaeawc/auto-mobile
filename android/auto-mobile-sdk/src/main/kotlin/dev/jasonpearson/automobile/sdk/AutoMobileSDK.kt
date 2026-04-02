@@ -78,17 +78,17 @@ object AutoMobileSDK {
   internal var logger: SdkLogger = DefaultSdkLogger()
 
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
-  private var isEnabled = true
-  private var context: Context? = null
-  private var configuration: AutoMobileConfiguration? = null
-  private var eventBuffer: SdkEventBuffer? = null
-  private var persistence: EventPersistence? = null
-  private var mainHandler: Handler? = null
-  private var sessionTracker: SessionTracker? = null
-  private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
-  private var sdkContext: SdkContext? = null
-  private var breadcrumbTrail: BreadcrumbTrail? = null
-  private var dropCounter: DropCounter? = null
+  @Volatile private var isEnabled = true
+  @Volatile private var context: Context? = null
+  @Volatile private var configuration: AutoMobileConfiguration? = null
+  @Volatile private var eventBuffer: SdkEventBuffer? = null
+  @Volatile private var persistence: EventPersistence? = null
+  @Volatile private var mainHandler: Handler? = null
+  @Volatile private var sessionTracker: SessionTracker? = null
+  @Volatile private var sessionLifecycleObserver: DefaultLifecycleObserver? = null
+  @Volatile private var sdkContext: SdkContext? = null
+  @Volatile private var breadcrumbTrail: BreadcrumbTrail? = null
+  @Volatile private var dropCounter: DropCounter? = null
 
   const val ACTION_NAVIGATION_EVENT = "dev.jasonpearson.automobile.sdk.NAVIGATION_EVENT"
   const val EXTRA_DESTINATION = "destination"
@@ -143,6 +143,7 @@ object AutoMobileSDK {
       dropCounter = counter,
       processors = configuration.eventProcessors,
       maxPendingEvents = configuration.maxPendingEvents,
+      backPressureStrategy = configuration.backPressureStrategy,
     )
     buffer.isEnabled = isEnabled
     buffer.start()

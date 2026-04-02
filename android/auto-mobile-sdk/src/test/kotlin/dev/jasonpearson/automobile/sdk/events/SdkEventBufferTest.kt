@@ -276,4 +276,90 @@ class SdkEventBufferTest {
     assertEquals(1, flushed.size, "Second event should be buffered after first processor failure")
     assertEquals(1, flushed[0].size)
   }
+
+  @Test
+  fun `IGNORE_NEWEST drops incoming event when buffer full`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val counter = DefaultDropCounter()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      dropCounter = counter,
+      maxPendingEvents = 3,
+      backPressureStrategy = BackPressureStrategy.IGNORE_NEWEST,
+    )
+
+    buffer.add(makeEvent(1))
+    buffer.add(makeEvent(2))
+    buffer.add(makeEvent(3))
+    // Buffer is now full — next event should be dropped
+    buffer.add(makeEvent(4))
+    buffer.flush()
+
+    assertEquals(1, flushed.size)
+    assertEquals(3, flushed[0].size, "Only the first 3 events should be in the buffer")
+    val timestamps = flushed[0].map { it.timestamp }
+    assertEquals(listOf(1L, 2L, 3L), timestamps, "Original events should be preserved")
+
+    val snapshot = counter.snapshot()
+    assertEquals(1L, snapshot[DropReason.BUFFER_OVERFLOW], "Dropped event should be counted")
+  }
+
+  @Test
+  fun `IGNORE_NEWEST allows events after flush frees space`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      maxPendingEvents = 2,
+      backPressureStrategy = BackPressureStrategy.IGNORE_NEWEST,
+    )
+
+    buffer.add(makeEvent(1))
+    buffer.add(makeEvent(2))
+    // Buffer full — this should be dropped
+    buffer.add(makeEvent(3))
+    // Flush to free space
+    buffer.flush()
+    // Now buffer has space again
+    buffer.add(makeEvent(4))
+    buffer.flush()
+
+    assertEquals(2, flushed.size)
+    assertEquals(listOf(1L, 2L), flushed[0].map { it.timestamp })
+    assertEquals(listOf(4L), flushed[1].map { it.timestamp })
+  }
+
+  @Test
+  fun `DROP_OLDEST evicts oldest event when buffer full`() {
+    val flushed = mutableListOf<List<SdkEvent>>()
+    val counter = DefaultDropCounter()
+    val buffer = SdkEventBuffer(
+      maxBufferSize = 100,
+      flushIntervalMs = 60_000,
+      onFlush = { flushed.add(it) },
+      executor = Executors.newSingleThreadScheduledExecutor(),
+      dropCounter = counter,
+      maxPendingEvents = 3,
+      backPressureStrategy = BackPressureStrategy.DROP_OLDEST,
+    )
+
+    buffer.add(makeEvent(1))
+    buffer.add(makeEvent(2))
+    buffer.add(makeEvent(3))
+    buffer.add(makeEvent(4))
+    buffer.flush()
+
+    assertEquals(1, flushed.size)
+    assertEquals(3, flushed[0].size, "Buffer should contain maxPendingEvents events")
+    val timestamps = flushed[0].map { it.timestamp }
+    assertEquals(listOf(2L, 3L, 4L), timestamps, "Oldest event should have been evicted")
+
+    val snapshot = counter.snapshot()
+    assertEquals(1L, snapshot[DropReason.BUFFER_OVERFLOW])
+  }
 }

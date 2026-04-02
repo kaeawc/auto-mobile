@@ -1,5 +1,6 @@
 package dev.jasonpearson.automobile.sdk
 
+import dev.jasonpearson.automobile.sdk.events.BackPressureStrategy
 import dev.jasonpearson.automobile.sdk.events.EventProcessor
 
 /**
@@ -25,6 +26,8 @@ data class AutoMobileConfiguration internal constructor(
   val eventProcessors: List<EventProcessor> = emptyList(),
   /** Hard cap on pending events in the buffer. Oldest events are evicted when exceeded. */
   val maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS,
+  /** Strategy for handling events when the buffer is full. */
+  val backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST,
 ) {
 
   class Builder {
@@ -34,6 +37,7 @@ data class AutoMobileConfiguration internal constructor(
     private var sessionTimeoutMs: Long = DEFAULT_SESSION_TIMEOUT_MS
     private var eventProcessors: List<EventProcessor> = emptyList()
     private var maxPendingEvents: Int = DEFAULT_MAX_PENDING_EVENTS
+    private var backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST
 
     /** Maximum events before forced flush. Must be > 0. */
     fun bufferSize(value: Int) = apply { this.bufferSize = value }
@@ -53,6 +57,9 @@ data class AutoMobileConfiguration internal constructor(
     /** Hard cap on pending events in the buffer. Must be > 0. */
     fun maxPendingEvents(value: Int) = apply { this.maxPendingEvents = value }
 
+    /** Strategy for handling events when the buffer is full. */
+    fun backPressureStrategy(value: BackPressureStrategy) = apply { this.backPressureStrategy = value }
+
     fun build(): AutoMobileConfiguration {
       require(bufferSize > 0) { "bufferSize must be > 0, was $bufferSize" }
       require(flushIntervalMs > 0) { "flushIntervalMs must be > 0, was $flushIntervalMs" }
@@ -67,6 +74,7 @@ data class AutoMobileConfiguration internal constructor(
         sessionTimeoutMs = sessionTimeoutMs,
         eventProcessors = eventProcessors,
         maxPendingEvents = maxPendingEvents,
+        backPressureStrategy = backPressureStrategy,
       )
     }
   }

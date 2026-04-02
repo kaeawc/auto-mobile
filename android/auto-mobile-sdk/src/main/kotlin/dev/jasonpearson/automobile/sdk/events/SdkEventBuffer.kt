@@ -35,6 +35,7 @@ internal class SdkEventBuffer(
   private val dropCounter: DropCounter? = null,
   private val processors: List<EventProcessor> = emptyList(),
   private val maxPendingEvents: Int = 500,
+  private val backPressureStrategy: BackPressureStrategy = BackPressureStrategy.DROP_OLDEST,
 ) {
   private val lock = ReentrantLock()
   private val buffer = mutableListOf<SdkEvent>()
@@ -85,8 +86,16 @@ internal class SdkEventBuffer(
 
     lock.withLock {
       if (buffer.size >= maxPendingEvents) {
-        buffer.removeFirst()
-        dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
+        when (backPressureStrategy) {
+          BackPressureStrategy.DROP_OLDEST -> {
+            buffer.removeFirst()
+            dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
+          }
+          BackPressureStrategy.IGNORE_NEWEST -> {
+            dropCounter?.increment(DropReason.BUFFER_OVERFLOW)
+            return
+          }
+        }
       }
 
       buffer.add(current)

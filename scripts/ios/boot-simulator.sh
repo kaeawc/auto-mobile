@@ -45,16 +45,40 @@ echo "Looking for iPhone simulator running iOS ${IOS_VERSION}..." >&2
 
 # Look up the actual runtime identifier from simctl rather than constructing it.
 # The identifier format varies across Xcode versions (e.g. iOS-26-3 vs iOS-26-3-0).
-RUNTIME_ID=$(xcrun simctl list runtimes iOS --json \
-  | jq -r --arg v "${IOS_VERSION}" '
-      .runtimes[]
-      | select(.version | startswith($v))
-      | .identifier
-    ' \
-  | head -1)
+#
+# Strategy: try exact version first, then major.minor, then major-only fallback.
+# This handles CI runners where the exact SDK version runtime may not be
+# pre-installed (e.g. Xcode SDK 26.3 but only runtimes 26.1, 26.2, 26.4).
+RUNTIMES_JSON=$(xcrun simctl list runtimes iOS --json)
+
+pick_runtime() {
+  echo "${RUNTIMES_JSON}" \
+    | jq -r --arg v "$1" '
+        [.runtimes[] | select(.version | startswith($v))]
+        | sort_by(.version) | last
+        | .identifier // empty
+      '
+}
+
+MAJOR_MINOR="${IOS_VERSION%.*}"
+MAJOR="${MAJOR_MINOR%%.*}"
+
+# 1) Exact version match (e.g. "26.3" matches "26.3.0")
+RUNTIME_ID=$(pick_runtime "${IOS_VERSION}")
+
+# 2) Major.minor match (handles "26.3.1" SDK → "26.3.x" runtime)
+if [[ -z "${RUNTIME_ID}" ]]; then
+  RUNTIME_ID=$(pick_runtime "${MAJOR_MINOR}.")
+fi
+
+# 3) Major-only fallback — pick the highest runtime in the same major (e.g. 26.x)
+if [[ -z "${RUNTIME_ID}" ]]; then
+  echo "No iOS ${MAJOR_MINOR} runtime found, falling back to highest iOS ${MAJOR}.x runtime..." >&2
+  RUNTIME_ID=$(pick_runtime "${MAJOR}.")
+fi
 
 if [[ -z "${RUNTIME_ID}" ]]; then
-  echo "error: no simulator runtime found for iOS ${IOS_VERSION}" >&2
+  echo "error: no simulator runtime found for iOS ${IOS_VERSION} (tried ${MAJOR_MINOR}, ${MAJOR}.x)" >&2
   echo "Available runtimes:" >&2
   xcrun simctl list runtimes 2>/dev/null | grep iOS >&2 || true
   exit 1

@@ -1161,8 +1161,11 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
       - name: "Boot iOS Simulator"
-        run: ./scripts/ios/boot-simulator.sh --ios-version ${{ matrix.xcode }}
+        run: ./scripts/ios/boot-simulator.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |

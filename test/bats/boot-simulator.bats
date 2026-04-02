@@ -48,7 +48,44 @@ SCRIPT
 
   run bash "$SCRIPT" --ios-version 99.0
   [ "$status" -eq 1 ]
-  [[ "$output" == *"no simulator runtime found for iOS 99.0"* ]]
+  [[ "$output" == *"no simulator runtime found"* ]]
+}
+
+@test "falls back to major version when exact match unavailable" {
+  # Xcode SDK 26.3 but only 26.1, 26.2, 26.4 runtimes available
+  cat > "${MOCK_BIN}/xcrun" <<'SCRIPT'
+#!/bin/sh
+if [ "$1" = "--sdk" ] && [ "$2" = "iphonesimulator" ] && [ "$3" = "--show-sdk-version" ]; then
+  echo "26.3"
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "runtimes" ]; then
+  if [ "$4" = "iOS" ] && [ "$5" = "--json" ]; then
+    echo '{"runtimes":[
+      {"version":"26.1.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-1"},
+      {"version":"26.2.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-2"},
+      {"version":"26.4.0","identifier":"com.apple.CoreSimulator.SimRuntime.iOS-26-4"}
+    ]}'
+  else
+    echo "== Runtimes =="
+    echo "iOS 26.1 (26.1 - 23A1) - com.apple.CoreSimulator.SimRuntime.iOS-26-1"
+    echo "iOS 26.2 (26.2 - 23B1) - com.apple.CoreSimulator.SimRuntime.iOS-26-2"
+    echo "iOS 26.4 (26.4 - 23D1) - com.apple.CoreSimulator.SimRuntime.iOS-26-4"
+  fi
+elif [ "$1" = "simctl" ] && [ "$2" = "list" ] && [ "$3" = "devices" ]; then
+  echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-4":[{"name":"iPhone 16","udid":"FAKE-UDID","state":"Shutdown"}]}}'
+elif [ "$1" = "simctl" ] && [ "$2" = "boot" ]; then
+  exit 0
+elif [ "$1" = "simctl" ] && [ "$2" = "bootstatus" ]; then
+  exit 0
+fi
+SCRIPT
+  chmod +x "${MOCK_BIN}/xcrun"
+  export PATH="${MOCK_BIN}:${PATH}"
+
+  run bash "$SCRIPT" --ios-version 26.3
+  [ "$status" -eq 0 ]
+  # Should fall back to 26.4 (highest 26.x available)
+  [[ "$output" == *"falling back to highest iOS 26.x runtime"* ]]
+  [[ "$output" == *"FAKE-UDID"* ]]
 }
 
 @test "looks up runtime dynamically instead of constructing ID" {

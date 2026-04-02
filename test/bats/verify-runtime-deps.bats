@@ -23,7 +23,11 @@ create_mock_command() {
 }
 
 @test "passes when all dependencies are present" {
-  # All the tools should exist on the dev machine
+  # Skip on CI runners that may not have all tools installed
+  for cmd in bun bunx ffmpeg shellcheck jq rg; do
+    command -v "$cmd" >/dev/null 2>&1 || skip "missing $cmd — not a full dev environment"
+  done
+
   run bash "$SCRIPT"
   [ "$status" -eq 0 ]
   [[ "$output" == *"All runtime dependencies verified."* ]]

@@ -19,7 +19,19 @@ fun Modifier.autoMobileRecompositionId(id: String): Modifier {
   return semantics { autoMobileRecompositionId = id }
 }
 
-/** Adds the recomposition id semantics and records recompositions while enabled. */
+/**
+ * Modifier that attaches a recomposition tracking ID via semantics and records each
+ * recomposition while tracking is enabled.
+ *
+ * @param id Stable identifier for this composable (e.g. screen or component name)
+ * @param composableName Optional human-readable composable function name
+ * @param resourceId Optional resource ID associated with the composable
+ * @param testTag Optional test tag for cross-referencing with UI tests
+ * @param parentChain Optional list of parent composable IDs for hierarchy context
+ * @param stableAnnotated Whether the composable is annotated with @Stable
+ * @param rememberedCount Number of remembered values in the composable
+ * @param likelyCause Optional cause of the recomposition
+ */
 fun Modifier.autoMobileRecomposition(
     id: String,
     composableName: String? = null,

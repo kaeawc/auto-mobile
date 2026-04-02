@@ -4,6 +4,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Handler
 import android.os.Looper
+import androidx.annotation.RestrictTo
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkEventBatch
 import dev.jasonpearson.automobile.protocol.SdkEventSerializer
@@ -16,7 +17,8 @@ import dev.jasonpearson.automobile.sdk.SdkConstants
  * Caps batch JSON at [MAX_BATCH_BYTES] and splits if exceeded to respect
  * the Android Intent size limit (~1MB).
  */
-internal object SdkEventBroadcaster {
+@RestrictTo(RestrictTo.Scope.LIBRARY_GROUP)
+object SdkEventBroadcaster {
 
   const val MAX_BATCH_BYTES = 100_000 // 100KB per Intent — lower to avoid TransactionTooLargeException
 

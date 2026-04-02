@@ -8,7 +8,7 @@ import kotlin.concurrent.withLock
 /**
  * Interface for tracking user sessions based on app foreground/background state.
  */
-interface SessionTracking {
+internal interface SessionTracking {
   fun currentSessionId(): String?
   fun onForeground()
   fun onBackground()
@@ -23,7 +23,7 @@ interface SessionTracking {
  * @param uuidProvider Injectable UUID generator for testing
  * @param timerFactory Injectable timer for testing - takes a delayMs and Runnable, returns a cancel function
  */
-class SessionTracker(
+internal class SessionTracker(
   private val timeoutMs: Long = 30_000L,
   private val uuidProvider: () -> String = { java.util.UUID.randomUUID().toString() },
   private val timerFactory: (Long, Runnable) -> (() -> Unit) = { delayMs, action ->

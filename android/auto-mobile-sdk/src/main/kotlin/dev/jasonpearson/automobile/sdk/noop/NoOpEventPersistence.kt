@@ -4,7 +4,7 @@ import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.sdk.persistence.EventPersistence
 
 /** Silent [EventPersistence] that never persists anything. */
-object NoOpEventPersistence : EventPersistence {
+internal object NoOpEventPersistence : EventPersistence {
   override fun persist(events: List<SdkEvent>): String? = null
   override fun loadPending(): List<Pair<String, List<SdkEvent>>> = emptyList()
   override fun removeBatch(batchId: String) = Unit

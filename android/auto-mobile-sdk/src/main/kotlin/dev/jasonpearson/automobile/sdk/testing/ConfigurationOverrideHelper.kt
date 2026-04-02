@@ -2,7 +2,9 @@ package dev.jasonpearson.automobile.sdk.testing
 
 import android.app.Activity
 import android.content.res.Configuration
+import androidx.annotation.RestrictTo
 
+@RestrictTo(RestrictTo.Scope.LIBRARY)
 object ConfigurationOverrideHelper {
   /**
    * Apply a configuration override in tests and trigger configuration change callbacks. Uses

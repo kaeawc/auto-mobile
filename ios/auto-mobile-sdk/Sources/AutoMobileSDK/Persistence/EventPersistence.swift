@@ -1,7 +1,7 @@
 import Foundation
 
 /// Protocol for persisting SDK event batches to disk for reliable delivery.
-public protocol EventPersisting: AnyObject, Sendable {
+protocol EventPersisting: AnyObject, Sendable {
     /// Persist a batch of events. Returns a batch ID on success, nil on failure.
     func persist(_ events: [any SdkEvent]) -> String?
     /// Load all pending (unsent) batches in FIFO order.
@@ -20,18 +20,18 @@ struct PersistedEvent: Codable {
 }
 
 /// File-backed event persistence using JSON serialization.
-public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
+final class FileEventPersistence: EventPersisting, @unchecked Sendable {
     private let directory: URL
     private let lock = NSLock()
     private let dateProvider: DateProvider
 
-    public init(directory: URL, dateProvider: DateProvider = SystemDateProvider()) {
+    init(directory: URL, dateProvider: DateProvider = SystemDateProvider()) {
         self.directory = directory
         self.dateProvider = dateProvider
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
-    public func persist(_ events: [any SdkEvent]) -> String? {
+    func persist(_ events: [any SdkEvent]) -> String? {
         guard !events.isEmpty else { return nil }
         let batchId = "\(Int(dateProvider.now().timeIntervalSince1970 * 1000))_\(UUID().uuidString)"
         let fileURL = directory.appendingPathComponent("events_\(batchId).json")
@@ -54,7 +54,7 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
         }
     }
 
-    public func loadPending() -> [(batchId: String, events: [any SdkEvent])] {
+    func loadPending() -> [(batchId: String, events: [any SdkEvent])] {
         lock.lock()
         defer { lock.unlock() }
 
@@ -88,14 +88,14 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
         }
     }
 
-    public func removeBatch(_ batchId: String) {
+    func removeBatch(_ batchId: String) {
         lock.lock()
         defer { lock.unlock() }
         let fileURL = directory.appendingPathComponent("events_\(batchId).json")
         try? FileManager.default.removeItem(at: fileURL)
     }
 
-    public func cleanup(maxAgeDays: Int = 7) {
+    func cleanup(maxAgeDays: Int = 7) {
         lock.lock()
         defer { lock.unlock() }
         let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)

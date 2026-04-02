@@ -1,7 +1,7 @@
 import Foundation
 
 /// Protocol for tracking user sessions based on app lifecycle.
-public protocol SessionTracking: AnyObject, Sendable {
+protocol SessionTracking: AnyObject, Sendable {
     func currentSessionId() -> String?
     func onForeground()
     func onBackground()
@@ -10,8 +10,8 @@ public protocol SessionTracking: AnyObject, Sendable {
 
 /// Tracks user sessions based on app lifecycle.
 /// A new session starts on first foreground or after timeout while backgrounded.
-public final class SessionTracker: SessionTracking, @unchecked Sendable {
-    public enum State { case active, backgrounded, ended }
+final class SessionTracker: SessionTracking, @unchecked Sendable {
+    enum State { case active, backgrounded, ended }
 
     private let lock = NSLock()
     private let timeoutMs: Int
@@ -21,7 +21,7 @@ public final class SessionTracker: SessionTracking, @unchecked Sendable {
     private var state: State = .ended
     private var timeoutTimer: (any TimerScheduling)?
 
-    public convenience init(
+    convenience init(
         timeoutMs: Int = 30_000,
         uuidProvider: @escaping () -> String = { UUID().uuidString }
     ) {
@@ -38,13 +38,13 @@ public final class SessionTracker: SessionTracking, @unchecked Sendable {
         self.timerFactory = timerFactory
     }
 
-    public func currentSessionId() -> String? {
+    func currentSessionId() -> String? {
         lock.lock()
         defer { lock.unlock() }
         return _sessionId
     }
 
-    public func onForeground() {
+    func onForeground() {
         lock.lock()
         timeoutTimer?.cancel()
         timeoutTimer = nil
@@ -60,7 +60,7 @@ public final class SessionTracker: SessionTracking, @unchecked Sendable {
         lock.unlock()
     }
 
-    public func onBackground() {
+    func onBackground() {
         lock.lock()
         guard state == .active else { lock.unlock(); return }
         state = .backgrounded
@@ -81,7 +81,7 @@ public final class SessionTracker: SessionTracking, @unchecked Sendable {
         }
     }
 
-    public func shutdown() {
+    func shutdown() {
         lock.lock()
         timeoutTimer?.cancel()
         timeoutTimer = nil

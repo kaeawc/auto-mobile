@@ -35,7 +35,7 @@ public final class ViewBodyTracker: @unchecked Sendable {
         setEnabled(enabled, timerFactory: nil)
     }
 
-    /// Enable or disable tracking (internal overload for timer injection in tests).
+    /// Enable or disable tracking with an injectable timer factory (internal for testing).
     func setEnabled(_ enabled: Bool, timerFactory: (() -> any TimerScheduling)?) {
         lock.lock()
         _isEnabled = enabled

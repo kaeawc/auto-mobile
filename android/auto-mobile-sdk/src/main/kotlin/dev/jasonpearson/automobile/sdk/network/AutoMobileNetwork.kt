@@ -1,8 +1,47 @@
 package dev.jasonpearson.automobile.sdk.network
 
+import dev.jasonpearson.automobile.protocol.SdkNetworkRequestEvent
 import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 import okhttp3.Interceptor
 import okhttp3.WebSocketListener
+
+/**
+ * Grouped parameters for recording a network request/response manually.
+ *
+ * Use this with [AutoMobileNetwork.recordRequest] instead of constructing
+ * [SdkNetworkRequestEvent] directly.
+ *
+ * @property url The full request URL (e.g. "https://api.example.com/users?page=1").
+ * @property method HTTP method (e.g. "GET", "POST").
+ * @property requestHeaders Optional request headers. Only recorded when header capture is enabled.
+ * @property requestBodySize Size of the request body in bytes, or -1 if unknown.
+ * @property statusCode HTTP status code of the response (e.g. 200, 404), or 0 on failure.
+ * @property responseHeaders Optional response headers. Only recorded when header capture is enabled.
+ * @property responseBodySize Size of the response body in bytes, or -1 if unknown.
+ * @property durationMs Round-trip duration in milliseconds.
+ * @property error Error description if the request failed, null on success.
+ * @property host The request host (e.g. "api.example.com"). Extracted from [url] if omitted.
+ * @property path The request path (e.g. "/users"). Extracted from [url] if omitted.
+ * @property requestBody Request body text. Only useful when body capture is enabled and content is text-based.
+ * @property responseBody Response body text. Only useful when body capture is enabled and content is text-based.
+ * @property contentType Content type of the response (e.g. "application/json").
+ */
+data class NetworkRequestRecord(
+    val url: String,
+    val method: String,
+    val requestHeaders: Map<String, String>? = null,
+    val requestBodySize: Long = -1,
+    val statusCode: Int = 0,
+    val responseHeaders: Map<String, String>? = null,
+    val responseBodySize: Long = -1,
+    val durationMs: Long = 0,
+    val error: String? = null,
+    val host: String? = null,
+    val path: String? = null,
+    val requestBody: String? = null,
+    val responseBody: String? = null,
+    val contentType: String? = null,
+)
 
 /**
  * Public API for network interception.
@@ -10,7 +49,10 @@ import okhttp3.WebSocketListener
  * Provides an OkHttp [Interceptor] for HTTP request/response tracking and a
  * wrapper for [WebSocketListener] to track WebSocket frames.
  *
- * OkHttp is a `compileOnly` dependency — consumers must include OkHttp themselves.
+ * For custom transport layers (gRPC, GraphQL, etc.) that do not use OkHttp,
+ * use [recordRequest] to record request metadata manually.
+ *
+ * OkHttp is a `compileOnly` dependency -- consumers must include OkHttp themselves.
  */
 object AutoMobileNetwork {
 
@@ -55,14 +97,63 @@ object AutoMobileNetwork {
   }
 
   /**
+   * Record a network request/response manually using a [NetworkRequestRecord].
+   *
+   * Use this for custom transport layers (gRPC, GraphQL, etc.) where the OkHttp
+   * [interceptor] approach is not applicable.
+   *
+   * @param record A [NetworkRequestRecord] describing the request and response.
+   * @param captureHeaders Whether to include request/response headers (default false for privacy).
+   * @param captureBodies Whether to include request/response bodies (default false).
+   */
+  fun recordRequest(
+      record: NetworkRequestRecord,
+      captureHeaders: Boolean = false,
+      captureBodies: Boolean = false,
+  ) {
+    val buf = buffer ?: return
+    val parsedUrl = if (record.host == null || record.path == null) {
+      try { java.net.URL(record.url) } catch (_: Exception) { null }
+    } else null
+    val host = record.host ?: parsedUrl?.host
+    val path = record.path ?: parsedUrl?.path
+    buf.add(
+        SdkNetworkRequestEvent(
+            timestamp = System.currentTimeMillis(),
+            applicationId = applicationId,
+            url = record.url,
+            method = record.method,
+            statusCode = record.statusCode,
+            durationMs = record.durationMs,
+            requestBodySize = record.requestBodySize,
+            responseBodySize = record.responseBodySize,
+            host = host,
+            path = path,
+            error = record.error,
+            requestHeaders = if (captureHeaders) record.requestHeaders else null,
+            responseHeaders = if (captureHeaders) record.responseHeaders else null,
+            requestBody = if (captureBodies) record.requestBody else null,
+            responseBody = if (captureBodies) record.responseBody else null,
+            contentType = record.contentType,
+        ))
+  }
+
+  /**
    * Wrap a [WebSocketListener] to capture WebSocket frame metadata.
    *
-   * @param delegate The original WebSocketListener
-   * @param url The WebSocket URL for identification
-   * @return A wrapping listener that records frame events
+   * @param delegate The original WebSocketListener to forward callbacks to
+   * @param url The WebSocket URL for identification in recorded events
+   * @return A wrapping listener that records frame events and delegates to the original
    */
   fun wrapWebSocketListener(delegate: WebSocketListener, url: String): WebSocketListener {
     val buf = buffer ?: return delegate
     return AutoMobileWebSocketListener(delegate, url, buf, applicationId)
+  }
+
+  /** Reset internal state. Visible for testing only. */
+  internal fun reset() {
+    buffer = null
+    applicationId = null
+    ruleStore = null
   }
 }

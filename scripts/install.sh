@@ -1722,37 +1722,15 @@ show_config_diff() {
     show_colored_diff "${old_content}" "${new_content}" "${config_path}"
 }
 
-# Build the PATH env value that ensures bunx is available for GUI clients.
-# Only includes paths not already on the system PATH (e.g. ~/.bun/bin,
-# /opt/homebrew/bin). Returns empty if nothing extra is needed.
-_bun_path_env() {
-    # Always include ~/.bun/bin — GUI clients (Claude Desktop, Cursor, etc.)
-    # won't have it on their PATH even if the installer's shell does.
-    local parts="${HOME}/.bun/bin"
-    if command_exists brew; then
-        local brew_bin
-        brew_bin="$(brew --prefix 2>/dev/null)/bin"
-        if [[ ":${PATH}:" != *":${brew_bin}:"* ]]; then
-            parts="${parts}:${brew_bin}"
-        fi
-    fi
-    echo "${parts}"
-}
-
 # Generate auto-mobile MCP server config based on preset
 generate_auto_mobile_config() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-    local bun_path
-    bun_path=$(_bun_path_env)
 
     # Build env object parts
     local env_parts=""
-    if [[ -n "${bun_path}" ]]; then
-        env_parts="\"PATH\":\"${bun_path}\""
-    fi
     if [[ -n "${BUN_CONFIG_REGISTRY:-}" ]]; then
-        env_parts="${env_parts:+${env_parts},}\"BUN_CONFIG_REGISTRY\":\"${BUN_CONFIG_REGISTRY}\""
+        env_parts="\"BUN_CONFIG_REGISTRY\":\"${BUN_CONFIG_REGISTRY}\""
     fi
 
     local args='"@kaeawc/auto-mobile@latest"'
@@ -1776,8 +1754,6 @@ generate_auto_mobile_config() {
 generate_auto_mobile_config_toml() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-    local bun_path
-    bun_path=$(_bun_path_env)
 
     local args='["@kaeawc/auto-mobile@latest"]'
     local has_env=false
@@ -1790,9 +1766,6 @@ generate_auto_mobile_config_toml() {
             ;;
     esac
 
-    if [[ -n "${bun_path}" ]]; then
-        has_env=true
-    fi
     if [[ -n "${BUN_CONFIG_REGISTRY:-}" ]]; then
         has_env=true
     fi
@@ -1806,9 +1779,6 @@ EOF
     if [[ "${has_env}" == "true" ]]; then
         echo ""
         echo "[mcp_servers.auto-mobile.env]"
-        if [[ -n "${bun_path}" ]]; then
-            echo "PATH = \"${bun_path}\""
-        fi
         if [[ -n "${BUN_CONFIG_REGISTRY:-}" ]]; then
             echo "BUN_CONFIG_REGISTRY = \"${BUN_CONFIG_REGISTRY}\""
         fi
@@ -1895,8 +1865,6 @@ ensure_yq() {
 generate_auto_mobile_config_yaml() {
     local preset="${1:-minimal}"
     local android_home="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
-    local bun_path
-    bun_path=$(_bun_path_env)
 
     local has_env=false
     local args_block='      - "@kaeawc/auto-mobile@latest"'
@@ -1911,9 +1879,6 @@ generate_auto_mobile_config_yaml() {
             ;;
     esac
 
-    if [[ -n "${bun_path}" ]]; then
-        has_env=true
-    fi
     if [[ -n "${BUN_CONFIG_REGISTRY:-}" ]]; then
         has_env=true
     fi
@@ -1931,9 +1896,6 @@ EOF
 
     if [[ "${has_env}" == "true" ]]; then
         echo "    env:"
-        if [[ -n "${bun_path}" ]]; then
-            echo "      PATH: \"${bun_path}\""
-        fi
         if [[ -n "${BUN_CONFIG_REGISTRY:-}" ]]; then
             echo "      BUN_CONFIG_REGISTRY: \"${BUN_CONFIG_REGISTRY}\""
         fi

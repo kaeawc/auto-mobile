@@ -15,6 +15,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createPerformanceTracker, createGlobalPerformanceTracker } from "./PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
+import { disableStylusHandwriting } from "./disableStylusHandwriting";
 
 /**
  * Provider interface for device clients - enables dependency injection for testing
@@ -359,7 +360,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
-    await applyAppearanceOnConnect(selectedDevice);
+    if (deviceSource !== "current") {
+      await applyAppearanceOnConnect(selectedDevice);
+      await disableStylusHandwriting(selectedDevice);
+    }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;
   }

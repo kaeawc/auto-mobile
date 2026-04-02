@@ -5,12 +5,14 @@ final class EventPersistenceTests: XCTestCase {
 
     private var tempDir: URL!
     private var persistence: FileEventPersistence!
+    private var fakeDateProvider: FakeDateProvider!
 
     override func setUp() {
         super.setUp()
         tempDir = URL(fileURLWithPath: NSTemporaryDirectory())
             .appendingPathComponent("event_persistence_tests_\(UUID().uuidString)")
-        persistence = FileEventPersistence(directory: tempDir)
+        fakeDateProvider = FakeDateProvider(initialDate: Date())
+        persistence = FileEventPersistence(directory: tempDir, dateProvider: fakeDateProvider)
     }
 
     override func tearDown() {
@@ -118,8 +120,12 @@ final class EventPersistenceTests: XCTestCase {
     // MARK: - Cleanup TTL
 
     func testCleanupRemovesOldBatches() {
+        // Use a fixed time for deterministic testing
+        let now = Date(timeIntervalSince1970: 1_700_000_000)
+        fakeDateProvider.set(now)
+
         // Create a file with an old timestamp (8 days ago)
-        let oldTs = Int(Date().timeIntervalSince1970 * 1000) - (8 * 24 * 60 * 60 * 1000)
+        let oldTs = Int(now.timeIntervalSince1970 * 1000) - (8 * 24 * 60 * 60 * 1000)
         let oldFile = tempDir.appendingPathComponent("events_\(oldTs)_OLD.json")
         let data = try! JSONSerialization.data(withJSONObject: [["eventType": "custom"]])
         try! data.write(to: oldFile)

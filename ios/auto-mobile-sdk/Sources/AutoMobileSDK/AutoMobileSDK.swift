@@ -53,14 +53,16 @@ public final class AutoMobileSDK: @unchecked Sendable {
         let counter = DefaultDropCounter()
         _dropCounter = counter
 
+        let dateProvider: DateProvider = SystemDateProvider()
+
         // Set up disk-first event persistence
         let persistence: any EventPersisting
         if let cachesDir = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             let eventsDir = cachesDir.appendingPathComponent("automobile_events")
-            persistence = FileEventPersistence(directory: eventsDir)
+            persistence = FileEventPersistence(directory: eventsDir, dateProvider: dateProvider)
         } else {
             let tmpDir = URL(fileURLWithPath: NSTemporaryDirectory()).appendingPathComponent("automobile_events")
-            persistence = FileEventPersistence(directory: tmpDir)
+            persistence = FileEventPersistence(directory: tmpDir, dateProvider: dateProvider)
         }
         self.eventPersistence = persistence
         SdkEventBroadcaster.shared.persistence = persistence
@@ -97,7 +99,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileNotificationObserver.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
-        ViewBodyTracker.shared.initialize(buffer: buffer)
+        ViewBodyTracker.shared.initialize(buffer: buffer, dateProvider: dateProvider)
         UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
 

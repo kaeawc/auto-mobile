@@ -23,15 +23,17 @@ struct PersistedEvent: Codable {
 public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
     private let directory: URL
     private let lock = NSLock()
+    private let dateProvider: DateProvider
 
-    public init(directory: URL) {
+    public init(directory: URL, dateProvider: DateProvider = SystemDateProvider()) {
         self.directory = directory
+        self.dateProvider = dateProvider
         try? FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
     }
 
     public func persist(_ events: [any SdkEvent]) -> String? {
         guard !events.isEmpty else { return nil }
-        let batchId = "\(Int(Date().timeIntervalSince1970 * 1000))_\(UUID().uuidString)"
+        let batchId = "\(Int(dateProvider.now().timeIntervalSince1970 * 1000))_\(UUID().uuidString)"
         let fileURL = directory.appendingPathComponent("events_\(batchId).json")
 
         // Reuse SdkEventEnvelope which already handles type-erased encoding
@@ -96,7 +98,7 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
     public func cleanup(maxAgeDays: Int = 7) {
         lock.lock()
         defer { lock.unlock() }
-        let cutoff = Date().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)
+        let cutoff = dateProvider.now().timeIntervalSince1970 * 1000 - Double(maxAgeDays * 24 * 60 * 60 * 1000)
         guard let files = try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
             .filter({ $0.lastPathComponent.hasPrefix("events_") })
         else { return }

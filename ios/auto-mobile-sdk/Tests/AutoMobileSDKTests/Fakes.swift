@@ -45,6 +45,35 @@ final class FakeTimer: TimerScheduling, @unchecked Sendable {
     }
 }
 
+// MARK: - FakeDateProvider
+
+final class FakeDateProvider: DateProvider, @unchecked Sendable {
+    private let lock = NSLock()
+    private var _currentDate: Date
+
+    init(initialDate: Date = Date(timeIntervalSince1970: 1_000_000)) {
+        _currentDate = initialDate
+    }
+
+    func now() -> Date {
+        lock.lock()
+        defer { lock.unlock() }
+        return _currentDate
+    }
+
+    func advance(by interval: TimeInterval) {
+        lock.lock()
+        _currentDate = _currentDate.addingTimeInterval(interval)
+        lock.unlock()
+    }
+
+    func set(_ date: Date) {
+        lock.lock()
+        _currentDate = date
+        lock.unlock()
+    }
+}
+
 // MARK: - FakeDropCounter
 
 final class FakeDropCounter: DropCounting, @unchecked Sendable {

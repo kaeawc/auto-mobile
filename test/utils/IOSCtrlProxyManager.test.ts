@@ -316,6 +316,59 @@ describe("IOSCtrlProxyManager", function() {
       });
     });
   });
+
+  describe("simulator start uses xcodebuild test-without-building", function() {
+    let fakeExecutor: FakeProcessExecutor;
+
+    beforeEach(function() {
+      fakeExecutor = new FakeProcessExecutor();
+    });
+
+    test("start() throws when simulator xctestrun path is missing", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => null,
+        getRunnerBinaryPath: async () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor
+      );
+
+      // Health check fails → not already running → tries to start
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("", ""));
+      fakeTimer.enableAutoAdvance();
+
+      await expect(manager.start()).rejects.toThrow(
+        "CtrlProxy xctestrun not found for simulator"
+      );
+    });
+
+    test("start() does not use simctl spawn for simulator", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => "/tmp/test.xctestrun",
+        getRunnerBinaryPath: async () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor
+      );
+
+      // Health check succeeds on first poll (simulating xcodebuild starting the service)
+      fakeExecutor.setCommandResponse("curl -s", createExecResult("ok", ""));
+      fakeTimer.enableAutoAdvance();
+
+      await manager.start();
+
+      // simctl spawn should never be invoked via processExecutor
+      expect(fakeExecutor.wasCommandExecuted("simctl spawn")).toBe(false);
+    });
+  });
 });
 
 function createExecResult(stdout: string, stderr: string): ExecResult {

@@ -548,14 +548,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       this.xcTestProcess = null;
     }
 
-    // Kill any lingering simulator runner processes (simctl spawn path)
+    // Kill any lingering simulator runner processes (legacy simctl spawn path)
     try {
       await this.processExecutor.exec("pkill -f 'CtrlProxyUITests-Runner'");
     } catch {
       // Ignore errors if no process found
     }
 
-    // Kill any lingering xcodebuild test processes (physical device path)
+    // Kill any lingering xcodebuild test processes (simulator and physical device)
     try {
       await this.processExecutor.exec("pkill -f 'xcodebuild.*CtrlProxyUITests'");
     } catch {
@@ -742,39 +742,42 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    // Get runner binary path for simctl spawn (lighter than xcodebuild test-without-building)
-    const runnerBinaryPath = await this.builder.getRunnerBinaryPath("simulator");
-    if (!runnerBinaryPath) {
-      throw new Error("CtrlProxy runner binary not found. Download the CtrlProxy bundle before starting.");
+    // Use xcodebuild test-without-building (same approach as physical devices).
+    // simctl spawn is unreliable on Xcode 26.3+ (NSPOSIXErrorDomain code=2).
+    const xctestrunPath = await this.builder.getXctestrunPath("simulator");
+    if (!xctestrunPath) {
+      throw new Error("CtrlProxy xctestrun not found for simulator. Download the CtrlProxy bundle before starting.");
     }
 
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
 
-    // simctl spawn requires SIMCTL_CHILD_ prefixed env vars (--setenv is not supported)
+    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values
     const childEnv: Record<string, string> = {
-      SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: String(this.servicePort),
-      SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT: timeout,
+      CTRL_PROXY_IOS_PORT: String(this.servicePort),
+      CTRL_PROXY_IOS_TIMEOUT: timeout,
     };
     if (bundleId) {
-      childEnv.SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
-      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} via SIMCTL_CHILD_ env`);
+      childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
     }
     const command = [
-      "xcrun simctl spawn",
-      `"${this.device.deviceId}"`,
-      `"${runnerBinaryPath}"`,
+      "xcodebuild",
+      "test-without-building",
+      `-xctestrun "${xctestrunPath}"`,
+      `-destination "platform=iOS Simulator,id=${this.device.deviceId}"`,
+      "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
       "2>&1"
     ].join(" ");
 
-    logger.info("[IOSCtrlProxy] Using simctl spawn to start runner binary");
+    logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
 
-    // Start in background with SIMCTL_CHILD_ env vars
+    // Start in background with env vars passed via exec options (not interpolated into the command)
     // Note: exec() is used here intentionally — the command is built from internal constants,
     // not user input, and we need shell features (2>&1 redirection, quoted paths).
     const child = exec(command, { env: { ...process.env, ...childEnv } }, error => {
       if (error) {
-        logger.warn(`[IOSCtrlProxy] simctl spawn exited: ${error.message}`);
+        logger.warn(`[IOSCtrlProxy] xcodebuild test exited: ${error.message}`);
         this.handleProcessExit();
       }
     });
@@ -782,7 +785,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (child.pid) {
       this.xcTestProcessId = child.pid;
       this.xcTestProcess = child;
-      logger.info(`[IOSCtrlProxy] Started simctl spawn with PID ${child.pid}`);
+      logger.info(`[IOSCtrlProxy] Started xcodebuild test with PID ${child.pid}`);
 
       // Start process monitoring
       this.startProcessMonitoring();

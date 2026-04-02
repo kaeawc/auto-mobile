@@ -1006,6 +1006,7 @@ jobs:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
+          - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1056,6 +1057,7 @@ jobs:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
+          - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1098,6 +1100,7 @@ jobs:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
           - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
+          - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1145,21 +1148,25 @@ jobs:
           retention-days: 1
 
   ios-xctest-runner-simulator-tests:
-    name: "XCTestRunner Simulator Tests"
+    name: "XCTestRunner Simulator Tests (Xcode ${{ matrix.xcode }})"
     runs-on: macos-26
     needs: [detect-changes, ios-ctrl-proxy-build]
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        xcode: ["26.2", "26.3"]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
-      - name: "Select Xcode 26.2"
+      - name: "Select Xcode ${{ matrix.xcode }}"
         uses: maxim-lobanov/setup-xcode@v1
         with:
-          xcode-version: "26.2"
+          xcode-version: ${{ matrix.xcode }}
 
       - name: "Download CtrlProxy iOS Artifacts"
         uses: actions/download-artifact@v7
@@ -1175,7 +1182,7 @@ jobs:
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Boot iOS Simulator"
-        run: ./scripts/ios/boot-simulator.sh --ios-version 26.2
+        run: ./scripts/ios/boot-simulator.sh --ios-version ${{ matrix.xcode }}
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |

@@ -88,11 +88,11 @@ private sealed class EventListItem {
   ) : EventListItem()
 }
 
-private fun EventListItem.representativeEvent(): TelemetryDisplayEvent? =
-    when (this) {
-      is EventListItem.Single -> event
-      is EventListItem.Group -> events.firstOrNull()
-    }
+private data class RenderedTelemetryRow(
+    val event: TelemetryDisplayEvent,
+    val startTimestamp: Long,
+    val endTimestamp: Long,
+)
 
 /**
  * Processes a flat event list into [EventListItem]s, collapsing runs of 3+ consecutive
@@ -226,22 +226,48 @@ private enum class CategoryFilter(
 }
 
 private fun groupedRowIndexForTimestamp(
-    renderedRowEvents: List<TelemetryDisplayEvent>,
+    renderedRows: List<RenderedTelemetryRow>,
     timestamp: Long,
 ): Int {
-  val nearestRow = renderedRowEvents.indexOfFirst { event -> event.timestamp >= timestamp }
-  return if (nearestRow >= 0) nearestRow else renderedRowEvents.lastIndex
+  val nearestRow =
+      renderedRows.indexOfFirst { row ->
+        timestamp in row.startTimestamp..row.endTimestamp || row.startTimestamp >= timestamp
+      }
+  return if (nearestRow >= 0) nearestRow else renderedRows.lastIndex
 }
 
-private fun buildRenderedRowEvents(groupedItems: List<EventListItem>): List<TelemetryDisplayEvent> =
+private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedTelemetryRow> =
     buildList {
       groupedItems.forEach { listItem ->
         when (listItem) {
-          is EventListItem.Single -> add(listItem.event)
+          is EventListItem.Single ->
+              add(
+                  RenderedTelemetryRow(
+                      event = listItem.event,
+                      startTimestamp = listItem.event.timestamp,
+                      endTimestamp = listItem.event.timestamp,
+                  )
+              )
           is EventListItem.Group -> {
-            listItem.events.firstOrNull()?.let(::add)
+            val firstEvent = listItem.events.firstOrNull() ?: return@forEach
+            val lastEvent = listItem.events.lastOrNull() ?: firstEvent
+            add(
+                RenderedTelemetryRow(
+                    event = firstEvent,
+                    startTimestamp = firstEvent.timestamp,
+                    endTimestamp = lastEvent.timestamp,
+                )
+            )
             if (listItem.isExpanded) {
-              addAll(listItem.events)
+              listItem.events.forEach { event ->
+                add(
+                    RenderedTelemetryRow(
+                        event = event,
+                        startTimestamp = event.timestamp,
+                        endTimestamp = event.timestamp,
+                    )
+                )
+              }
             }
           }
         }
@@ -407,7 +433,7 @@ fun TelemetryDashboard(
   val groupedItems by remember {
     derivedStateOf { groupEvents(filteredEvents, expandedGroups.toSet()) }
   }
-  val renderedRowEvents by remember { derivedStateOf { buildRenderedRowEvents(groupedItems) } }
+  val renderedRows by remember { derivedStateOf { buildRenderedRows(groupedItems) } }
 
   // Auto-scroll to bottom when new events arrive
   LaunchedEffect(filteredEvents.size) {
@@ -415,7 +441,7 @@ fun TelemetryDashboard(
         if (selectedFilter == CategoryFilter.Network) {
           filteredEvents.lastIndex
         } else {
-          renderedRowEvents.lastIndex
+          renderedRows.lastIndex
         }
     if (autoScrollEnabled && !isPaused && lastVisibleRow >= 0) {
       listState.animateScrollToItem(lastVisibleRow)
@@ -436,7 +462,7 @@ fun TelemetryDashboard(
           filteredEvents.indexOfFirst { it.timestamp >= ts }.takeIf { it >= 0 }
               ?: filteredEvents.lastIndex
         } else {
-          groupedRowIndexForTimestamp(renderedRowEvents, ts)
+          groupedRowIndexForTimestamp(renderedRows, ts)
         }
     if (nearestIndex >= 0) {
       listState.animateScrollToItem(nearestIndex)
@@ -452,7 +478,7 @@ fun TelemetryDashboard(
               if (selectedFilter == CategoryFilter.Network) {
                 filteredEvents.getOrNull(index)
               } else {
-                renderedRowEvents.getOrNull(index)
+                renderedRows.getOrNull(index)?.event
               } ?: return@collect
           val eventTs = visibleEvent.timestamp
           // Only re-center if the event is outside the visible window
@@ -546,7 +572,7 @@ fun TelemetryDashboard(
                             if (selectedFilter == CategoryFilter.Network) {
                               filteredEvents.lastIndex
                             } else {
-                              renderedRowEvents.lastIndex
+                              renderedRows.lastIndex
                             }
                         if (lastVisibleRow >= 0) {
                           listState.animateScrollToItem(lastVisibleRow)
@@ -598,12 +624,12 @@ fun TelemetryDashboard(
           modifier =
               Modifier.clickable {
                     autoScrollEnabled = true
-                    val lastVisibleRow =
-                        if (selectedFilter == CategoryFilter.Network) {
-                          filteredEvents.lastIndex
-                        } else {
-                          renderedRowEvents.lastIndex
-                        }
+                        val lastVisibleRow =
+                            if (selectedFilter == CategoryFilter.Network) {
+                              filteredEvents.lastIndex
+                            } else {
+                              renderedRows.lastIndex
+                            }
                     if (lastVisibleRow >= 0) {
                       coroutineScope.launch { listState.animateScrollToItem(lastVisibleRow) }
                     }

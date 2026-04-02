@@ -42,7 +42,7 @@ class ConcurrencyTest {
     }
 
     assertTrue(latch.await(5, TimeUnit.SECONDS))
-    assertEquals(100, AutoMobileSDK.getListenerCount())
+    assertEquals(100, AutoMobileSDK.listenerCount)
 
     executor.shutdown()
     assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
@@ -78,7 +78,7 @@ class ConcurrencyTest {
     val listeners = (1..50).map { NavigationListener {} }
     listeners.forEach { AutoMobileSDK.addNavigationListener(it) }
 
-    assertEquals(50, AutoMobileSDK.getListenerCount())
+    assertEquals(50, AutoMobileSDK.listenerCount)
 
     val executor = Executors.newFixedThreadPool(10)
     val latch = CountDownLatch(50)
@@ -91,7 +91,7 @@ class ConcurrencyTest {
     }
 
     assertTrue(latch.await(5, TimeUnit.SECONDS))
-    assertEquals(0, AutoMobileSDK.getListenerCount())
+    assertEquals(0, AutoMobileSDK.listenerCount)
 
     executor.shutdown()
     assertTrue(executor.awaitTermination(5, TimeUnit.SECONDS))
@@ -116,7 +116,7 @@ class ConcurrencyTest {
     assertTrue(latch.await(5, TimeUnit.SECONDS))
 
     // Final state should be consistent
-    val isEnabled = AutoMobileSDK.isEnabled()
+    val isEnabled = AutoMobileSDK.isTrackingEnabled
     assertTrue(isEnabled || !isEnabled) // Just verify we can read the state
 
     executor.shutdown()

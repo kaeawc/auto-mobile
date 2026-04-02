@@ -153,10 +153,10 @@ AutoMobileSDK.clearNavigationListeners()
 AutoMobileSDK.setEnabled(true)
 
 // Check if tracking is enabled
-val isEnabled = AutoMobileSDK.isEnabled()
+val isEnabled = AutoMobileSDK.isTrackingEnabled
 
 // Get listener count
-val count = AutoMobileSDK.getListenerCount()
+val count = AutoMobileSDK.listenerCount
 ```
 
 ### NavigationEvent

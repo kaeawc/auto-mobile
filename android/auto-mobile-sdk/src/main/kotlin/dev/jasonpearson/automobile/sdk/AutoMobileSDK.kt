@@ -77,7 +77,7 @@ object AutoMobileSDK {
   internal var logger: SdkLogger = DefaultSdkLogger()
 
   private val listeners = CopyOnWriteArrayList<NavigationListener>()
-  @Volatile private var isEnabled = true
+  @Volatile private var _isEnabled = true
   @Volatile private var context: Context? = null
   @Volatile private var configuration: AutoMobileConfiguration? = null
   @Volatile private var eventBuffer: SdkEventBuffer? = null
@@ -144,7 +144,7 @@ object AutoMobileSDK {
       maxPendingEvents = configuration.maxPendingEvents,
       backPressureStrategy = configuration.backPressureStrategy,
     )
-    buffer.isEnabled = isEnabled
+    buffer.isEnabled = _isEnabled
     buffer.start()
     eventBuffer = buffer
 
@@ -201,7 +201,7 @@ object AutoMobileSDK {
       sessionLifecycleObserver = observer
       ProcessLifecycleOwner.get().lifecycle.addObserver(observer)
       RecompositionTracker.initialize(appContext)
-      RecompositionTracker.setEnabled(isEnabled)
+      RecompositionTracker.setEnabled(_isEnabled)
       AutoMobileNotifications.initialize(appContext)
       if (appContext is Application) {
         AutoMobileClickTracker.initialize(appContext, appContext.packageName)
@@ -242,7 +242,7 @@ object AutoMobileSDK {
    */
   @AnyThread
   fun notifyNavigationEvent(event: NavigationEvent) {
-    if (!isEnabled) return
+    if (!_isEnabled) return
 
     // Notify in-process listeners
     listeners.forEach { listener ->
@@ -295,16 +295,16 @@ object AutoMobileSDK {
    * @param enabled Whether navigation tracking should be enabled
    */
   fun setEnabled(enabled: Boolean) {
-    isEnabled = enabled
+    _isEnabled = enabled
     eventBuffer?.isEnabled = enabled
     RecompositionTracker.setEnabled(enabled)
   }
 
-  /** Returns whether navigation tracking is currently enabled. */
-  fun isEnabled(): Boolean = isEnabled
+  /** Whether navigation tracking is currently enabled. */
+  val isTrackingEnabled: Boolean get() = _isEnabled
 
-  /** Returns the current number of registered listeners. */
-  fun getListenerCount(): Int = listeners.size
+  /** The current number of registered listeners. */
+  val listenerCount: Int get() = listeners.size
 
   /** Returns the current session ID, or null if no active session. */
   fun currentSessionId(): String? = sessionTracker?.currentSessionId()
@@ -333,11 +333,11 @@ object AutoMobileSDK {
   }
 
   /**
-   * Returns a snapshot of drop counts by reason.
+   * A snapshot of drop counts by reason.
    *
    * Useful for diagnostics — the map is empty when no events have been dropped.
    */
-  fun getDropReport(): Map<DropReason, Long> = dropCounter?.snapshot() ?: emptyMap()
+  val dropReport: Map<DropReason, Long> get() = dropCounter?.snapshot() ?: emptyMap()
 
   /** Returns the shared event buffer, or null if not initialized. */
   internal fun getEventBuffer(): SdkEventBuffer? = eventBuffer
@@ -351,8 +351,8 @@ object AutoMobileSDK {
   /** Removes a tag from the SDK context. */
   fun removeTag(key: String) { sdkContext?.removeTag(key) }
 
-  /** Returns an immutable snapshot of the current SDK context, or null if not initialized. */
-  fun getContextSnapshot(): SdkContextSnapshot? = sdkContext?.snapshot()
+  /** An immutable snapshot of the current SDK context, or null if not initialized. */
+  val contextSnapshot: SdkContextSnapshot? get() = sdkContext?.snapshot()
 
   /**
    * Replay pending event batches from disk (events that survived process death).
@@ -415,7 +415,7 @@ object AutoMobileSDK {
     persistence = null
     RecompositionTracker.reset()
     listeners.clear()
-    isEnabled = true
+    _isEnabled = true
     configuration = null
     context = null
   }

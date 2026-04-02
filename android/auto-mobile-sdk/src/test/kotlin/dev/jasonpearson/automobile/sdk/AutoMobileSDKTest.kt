@@ -24,7 +24,7 @@ class AutoMobileSDKTest {
     val listener = NavigationListener {}
     AutoMobileSDK.addNavigationListener(listener)
 
-    assertEquals(1, AutoMobileSDK.getListenerCount())
+    assertEquals(1, AutoMobileSDK.listenerCount)
   }
 
   @Test
@@ -33,7 +33,7 @@ class AutoMobileSDKTest {
     AutoMobileSDK.addNavigationListener(listener)
     AutoMobileSDK.removeNavigationListener(listener)
 
-    assertEquals(0, AutoMobileSDK.getListenerCount())
+    assertEquals(0, AutoMobileSDK.listenerCount)
   }
 
   @Test
@@ -44,7 +44,7 @@ class AutoMobileSDKTest {
 
     AutoMobileSDK.clearNavigationListeners()
 
-    assertEquals(0, AutoMobileSDK.getListenerCount())
+    assertEquals(0, AutoMobileSDK.listenerCount)
   }
 
   @Test
@@ -97,13 +97,13 @@ class AutoMobileSDKTest {
 
   @Test
   fun `setEnabled should control tracking state`() {
-    assertTrue(AutoMobileSDK.isEnabled())
+    assertTrue(AutoMobileSDK.isTrackingEnabled)
 
     AutoMobileSDK.setEnabled(false)
-    assertFalse(AutoMobileSDK.isEnabled())
+    assertFalse(AutoMobileSDK.isTrackingEnabled)
 
     AutoMobileSDK.setEnabled(true)
-    assertTrue(AutoMobileSDK.isEnabled())
+    assertTrue(AutoMobileSDK.isTrackingEnabled)
   }
 
   @Test
@@ -133,8 +133,8 @@ class AutoMobileSDKTest {
 
     AutoMobileSDK.shutdown()
 
-    assertEquals(0, AutoMobileSDK.getListenerCount())
-    assertTrue(AutoMobileSDK.isEnabled())
+    assertEquals(0, AutoMobileSDK.listenerCount)
+    assertTrue(AutoMobileSDK.isTrackingEnabled)
     assertNull(AutoMobileSDK.getEventBuffer())
   }
 
@@ -143,7 +143,7 @@ class AutoMobileSDKTest {
     AutoMobileSDK.shutdown()
     AutoMobileSDK.shutdown()
 
-    assertEquals(0, AutoMobileSDK.getListenerCount())
+    assertEquals(0, AutoMobileSDK.listenerCount)
   }
 
   @Test

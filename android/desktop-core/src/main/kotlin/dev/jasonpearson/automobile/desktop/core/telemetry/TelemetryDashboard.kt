@@ -229,10 +229,9 @@ private fun groupedRowIndexForTimestamp(
     renderedRows: List<RenderedTelemetryRow>,
     timestamp: Long,
 ): Int {
-  val nearestRow =
-      renderedRows.indexOfFirst { row ->
-        timestamp in row.startTimestamp..row.endTimestamp || row.startTimestamp >= timestamp
-      }
+  val nearestRow = renderedRows.indexOfFirst { row ->
+    timestamp in row.startTimestamp..row.endTimestamp || row.startTimestamp >= timestamp
+  }
   return if (nearestRow >= 0) nearestRow else renderedRows.lastIndex
 }
 
@@ -251,11 +250,14 @@ private fun buildRenderedRows(groupedItems: List<EventListItem>): List<RenderedT
           is EventListItem.Group -> {
             val firstEvent = listItem.events.firstOrNull() ?: return@forEach
             val lastEvent = listItem.events.lastOrNull() ?: firstEvent
+            // When expanded, restrict header range so child rows are reachable
+            // by timestamp lookup; when collapsed, span the full group range.
+            val headerEnd = if (listItem.isExpanded) firstEvent.timestamp else lastEvent.timestamp
             add(
                 RenderedTelemetryRow(
                     event = firstEvent,
                     startTimestamp = firstEvent.timestamp,
-                    endTimestamp = lastEvent.timestamp,
+                    endTimestamp = headerEnd,
                 )
             )
             if (listItem.isExpanded) {
@@ -483,9 +485,10 @@ fun TelemetryDashboard(
           val eventTs = visibleEvent.timestamp
           // Only re-center if the event is outside the visible window
           if (eventTs < timelineState.visibleStartMs || eventTs > timelineState.visibleEndMs) {
-            val halfDuration = timelineState.visibleDurationMs() / 2
+            val halfDuration = timelineState.visibleDurationMs().coerceAtLeast(1L) / 2
             timelineState.visibleStartMs = eventTs - halfDuration
-            timelineState.visibleEndMs = eventTs + halfDuration
+            timelineState.visibleEndMs =
+                (eventTs + halfDuration).coerceAtLeast(timelineState.visibleStartMs + 1)
           }
         }
   }
@@ -624,12 +627,12 @@ fun TelemetryDashboard(
           modifier =
               Modifier.clickable {
                     autoScrollEnabled = true
-                        val lastVisibleRow =
-                            if (selectedFilter == CategoryFilter.Network) {
-                              filteredEvents.lastIndex
-                            } else {
-                              renderedRows.lastIndex
-                            }
+                    val lastVisibleRow =
+                        if (selectedFilter == CategoryFilter.Network) {
+                          filteredEvents.lastIndex
+                        } else {
+                          renderedRows.lastIndex
+                        }
                     if (lastVisibleRow >= 0) {
                       coroutineScope.launch { listState.animateScrollToItem(lastVisibleRow) }
                     }

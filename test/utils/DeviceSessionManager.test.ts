@@ -5,6 +5,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
+import { FakeSimctl } from "../fakes/FakeSimctl";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
 import { CtrlProxyClient } from "../../src/features/observe/android";
@@ -356,5 +357,142 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     // Third call: flag is set, no retry
     await manager.verifyIosDevice("ios-sim-1");
     expect(fakeSimctl.getMethodCalls("openSimulatorApp")).toHaveLength(2);
+  });
+});
+
+describe("DeviceSessionManager dual-platform resolution", () => {
+  const androidDevice: BootedDevice = {
+    name: "emulator-5554",
+    deviceId: "emulator-5554",
+    platform: "android",
+  };
+
+  const iosDevice: BootedDevice = {
+    name: "iPhone 15",
+    deviceId: "ios-sim-1",
+    platform: "ios",
+  };
+
+  let fakeAdb: FakeAdbExecutor;
+  let fakeDeviceUtils: FakeDeviceUtils;
+  let fakeSimctl: FakeSimctl;
+  let originalGetActive: typeof Window.prototype.getActive;
+  let originalAndroidCtrlProxyMgr: typeof AndroidCtrlProxyManager.getInstance;
+  let originalAndroidCtrlProxyClient: typeof CtrlProxyClient.getInstance;
+  let originalIOSCtrlProxyMgr: typeof IOSCtrlProxyManager.getInstance;
+  let originalIOSCtrlProxyClient: typeof IOSCtrlProxyClient.getInstance;
+  let originalAppearanceDefaults: AppearanceConfigInput;
+
+  beforeEach(() => {
+    fakeAdb = new FakeAdbExecutor();
+    fakeDeviceUtils = new FakeDeviceUtils();
+    fakeSimctl = new FakeSimctl();
+
+    fakeAdb.setDevices([androidDevice]);
+    fakeSimctl.setBootedSimulators([iosDevice]);
+    fakeSimctl.setDeviceInfo("ios-sim-1", {
+      udid: "ios-sim-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+
+    originalAppearanceDefaults = serverConfig.getAppearanceDefaults();
+    serverConfig.setAppearanceDefaults({
+      ...originalAppearanceDefaults,
+      applyOnConnect: false,
+      syncWithHost: false,
+      defaultMode: "light",
+    });
+
+    originalGetActive = Window.prototype.getActive;
+    Window.prototype.getActive = async function() {
+      return { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 };
+    };
+
+    originalAndroidCtrlProxyMgr = AndroidCtrlProxyManager.getInstance;
+    originalAndroidCtrlProxyClient = CtrlProxyClient.getInstance;
+    originalIOSCtrlProxyMgr = IOSCtrlProxyManager.getInstance;
+    originalIOSCtrlProxyClient = IOSCtrlProxyClient.getInstance;
+
+    const fakeCtrlProxy = new FakeCtrlProxyManager();
+    fakeCtrlProxy.setInstalled(true);
+    fakeCtrlProxy.setEnabled(true);
+    fakeCtrlProxy.setVersionCompatible(true);
+    AndroidCtrlProxyManager.getInstance = () => fakeCtrlProxy as any;
+    CtrlProxyClient.getInstance = () =>
+      ({ isConnected: () => true, verifyServiceReady: () => Promise.resolve(true) }) as any;
+
+    IOSCtrlProxyManager.getInstance = () =>
+      ({
+        getServicePort: () => 8080,
+        isRunning: async () => false,
+        setup: async () => ({ success: false, error: "skipped" }),
+        resetSetupState: () => {},
+      }) as any;
+    IOSCtrlProxyClient.getInstance = () => ({ isConnected: () => false }) as any;
+  });
+
+  afterEach(() => {
+    Window.prototype.getActive = originalGetActive;
+    AndroidCtrlProxyManager.getInstance = originalAndroidCtrlProxyMgr;
+    CtrlProxyClient.getInstance = originalAndroidCtrlProxyClient;
+    IOSCtrlProxyManager.getInstance = originalIOSCtrlProxyMgr;
+    IOSCtrlProxyClient.getInstance = originalIOSCtrlProxyClient;
+    serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
+  });
+
+  test("should throw when both platforms connected and no active device or deviceId", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+    );
+
+    await expect(
+      manager.ensureDeviceReady("either")
+    ).rejects.toThrow("Both Android and iOS devices are connected");
+  });
+
+  test("should resolve to ios when setActiveDevice was called with ios", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+    );
+
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    const result = await manager.ensureDeviceReady("either", iosDevice.deviceId);
+    expect(result.platform).toBe("ios");
+    expect(result.deviceId).toBe("ios-sim-1");
+  });
+
+  test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+    );
+
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    const result = await manager.ensureDeviceReady("either");
+    expect(result.platform).toBe("ios");
+    expect(result.deviceId).toBe("ios-sim-1");
+  });
+
+  test("should resolve ios device by providedDeviceId when no active device set", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+    );
+
+    const result = await manager.ensureDeviceReady("either", "ios-sim-1");
+    expect(result.platform).toBe("ios");
+    expect(result.deviceId).toBe("ios-sim-1");
+  });
+
+  test("should resolve android device by providedDeviceId when no active device set", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+    );
+
+    const result = await manager.ensureDeviceReady("either", "emulator-5554");
+    expect(result.platform).toBe("android");
+    expect(result.deviceId).toBe("emulator-5554");
   });
 });

@@ -427,8 +427,10 @@ final class StorageCommandHandlerTests: XCTestCase {
         XCTAssertTrue(filesResponse.success)
         XCTAssertEqual(filesResponse.files?.count, 2)
         XCTAssertEqual(filesResponse.files?[0].displayName, "Standard")
+        XCTAssertEqual(filesResponse.files?[0].path, "Standard")
         XCTAssertEqual(filesResponse.files?[0].entryCount, 5)
         XCTAssertEqual(filesResponse.files?[1].name, "group.com.example")
+        XCTAssertEqual(filesResponse.files?[1].path, "group.com.example")
         XCTAssertEqual(fakeStorage.listSuitesCallCount, 1)
     }
 

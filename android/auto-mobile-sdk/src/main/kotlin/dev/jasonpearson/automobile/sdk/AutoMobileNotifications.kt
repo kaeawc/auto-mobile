@@ -33,7 +33,12 @@ enum class NotificationStyle {
   }
 }
 
-/** Notification action payload. */
+/**
+ * An action button attached to a notification.
+ *
+ * @property label The text displayed on the action button
+ * @property actionId A unique identifier broadcast when the user taps the action
+ */
 data class NotificationAction(val label: String, val actionId: String)
 
 /** Debug-focused notification helper for AutoMobile tests. Requires app-under-test integration. */
@@ -61,10 +66,26 @@ object AutoMobileNotifications {
 
   private var context: Context? = null
 
+  /**
+   * Initialize with application context. Called automatically by [AutoMobileSDK.initialize].
+   *
+   * @param context Application context
+   */
   fun initialize(context: Context) {
     this.context = context.applicationContext
   }
 
+  /**
+   * Post a notification to the system notification tray.
+   *
+   * @param title Notification title
+   * @param body Notification body text
+   * @param style Visual style (default, big text, or big picture)
+   * @param imagePath Path or base64 data for big picture style
+   * @param actions Actionable buttons to include on the notification
+   * @param channelId Custom notification channel ID (uses default if null)
+   * @return true if the notification was posted successfully
+   */
   fun post(
       title: String,
       body: String,

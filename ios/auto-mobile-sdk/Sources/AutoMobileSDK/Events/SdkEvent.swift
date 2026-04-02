@@ -26,6 +26,7 @@ public enum SdkEventType: String, Codable, Sendable {
 
 // MARK: - Event Types
 
+/// A navigation event recording an in-app screen transition.
 public struct SdkNavigationEvent: SdkEvent {
     public let eventType: SdkEventType = .navigation
     public let timestamp: Int64
@@ -49,6 +50,7 @@ public struct SdkNavigationEvent: SdkEvent {
     }
 }
 
+/// A handled (non-fatal) exception event with stack trace and device context.
 public struct SdkHandledExceptionEvent: SdkEvent {
     public let eventType: SdkEventType = .handledException
     public let timestamp: Int64
@@ -84,6 +86,7 @@ public struct SdkHandledExceptionEvent: SdkEvent {
     }
 }
 
+/// An unhandled crash event captured by exception or signal handlers.
 public struct SdkCrashEvent: SdkEvent {
     public let eventType: SdkEventType = .crash
     public let timestamp: Int64
@@ -116,6 +119,7 @@ public struct SdkCrashEvent: SdkEvent {
     }
 }
 
+/// A main-thread hang event with duration and diagnostic stack trace.
 public struct SdkHangEvent: SdkEvent {
     public let eventType: SdkEventType = .hang
     public let timestamp: Int64
@@ -136,6 +140,7 @@ public struct SdkHangEvent: SdkEvent {
     }
 }
 
+/// A network request/response event with URL, status code, timing, and optional body capture.
 public struct SdkNetworkRequestEvent: SdkEvent {
     public let eventType: SdkEventType = .networkRequest
     public let timestamp: Int64
@@ -189,6 +194,7 @@ public struct SdkNetworkRequestEvent: SdkEvent {
     }
 }
 
+/// A WebSocket frame event recording direction, type, and payload size.
 public struct SdkWebSocketFrameEvent: SdkEvent {
     public let eventType: SdkEventType = .webSocketFrame
     public let timestamp: Int64
@@ -212,11 +218,13 @@ public struct SdkWebSocketFrameEvent: SdkEvent {
     }
 }
 
+/// Direction of a WebSocket frame (sent or received).
 public enum WebSocketFrameDirection: String, Codable, Sendable {
     case sent
     case received
 }
 
+/// Type of a WebSocket frame (text, binary, ping, pong, close).
 public enum WebSocketFrameType: String, Codable, Sendable {
     case text
     case binary
@@ -225,6 +233,7 @@ public enum WebSocketFrameType: String, Codable, Sendable {
     case close
 }
 
+/// A log event with level, tag, and message.
 public struct SdkLogEvent: SdkEvent {
     public let eventType: SdkEventType = .log
     public let timestamp: Int64
@@ -245,6 +254,7 @@ public struct SdkLogEvent: SdkEvent {
     }
 }
 
+/// Log severity level, ordered from verbose (lowest) to fault (highest).
 public enum LogLevel: Int, Codable, Sendable, Comparable {
     case verbose = 0
     case debug = 1
@@ -258,6 +268,7 @@ public enum LogLevel: Int, Codable, Sendable, Comparable {
     }
 }
 
+/// An app lifecycle event (foreground, background, terminated, etc.).
 public struct SdkLifecycleEvent: SdkEvent {
     public let eventType: SdkEventType = .lifecycle
     public let timestamp: Int64
@@ -278,6 +289,7 @@ public struct SdkLifecycleEvent: SdkEvent {
     }
 }
 
+/// A notification action tap event.
 public struct SdkNotificationActionEvent: SdkEvent {
     public let eventType: SdkEventType = .notificationAction
     public let timestamp: Int64
@@ -295,6 +307,7 @@ public struct SdkNotificationActionEvent: SdkEvent {
     }
 }
 
+/// A periodic snapshot of SwiftUI view body evaluation metrics.
 public struct SdkViewBodySnapshotEvent: SdkEvent {
     public let eventType: SdkEventType = .viewBodySnapshot
     public let timestamp: Int64
@@ -309,6 +322,7 @@ public struct SdkViewBodySnapshotEvent: SdkEvent {
     }
 }
 
+/// A snapshot of a single view's body evaluation count and average duration.
 public struct ViewBodySnapshot: Codable, Sendable {
     public let id: String
     public let viewName: String?
@@ -331,6 +345,7 @@ public struct ViewBodySnapshot: Codable, Sendable {
     }
 }
 
+/// Wire-format navigation source discriminator, matching ``NavigationSource`` cases.
 public enum NavigationSourceType: String, Codable, Sendable {
     case swiftUINavigation = "swiftui_navigation"
     case uiKitNavigation = "uikit_navigation"
@@ -338,6 +353,7 @@ public enum NavigationSourceType: String, Codable, Sendable {
     case custom
 }
 
+/// Device metadata attached to crash and failure events.
 public struct SdkDeviceInfo: Codable, Sendable {
     public let model: String
     public let manufacturer: String
@@ -368,6 +384,7 @@ public struct SdkEventEnvelope: Codable, Sendable {
     }
 }
 
+/// A system notification broadcast event (locale change, memory warning, etc.).
 public struct SdkBroadcastEvent: SdkEvent {
     public let eventType: SdkEventType = .broadcast
     public let timestamp: Int64
@@ -388,6 +405,7 @@ public struct SdkBroadcastEvent: SdkEvent {
     }
 }
 
+/// A user interaction event (tap, gesture) with coordinates and target view info.
 public struct SdkInteractionEvent: SdkEvent {
     public let eventType: SdkEventType = .interaction
     public let timestamp: Int64
@@ -405,6 +423,7 @@ public struct SdkInteractionEvent: SdkEvent {
     }
 }
 
+/// A UserDefaults change event with suite, key, and value metadata.
 public struct SdkStorageChangedEvent: SdkEvent {
     public let eventType: SdkEventType = .storageChanged
     public let timestamp: Int64

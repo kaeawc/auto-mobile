@@ -13,6 +13,9 @@ let package = Package(
             targets: ["AutoMobileSDK"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
+    ],
     targets: [
         .target(
             name: "AutoMobileSDK",

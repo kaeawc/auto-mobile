@@ -142,6 +142,7 @@ public final class AutoMobileFailures: @unchecked Sendable {
 
 // MARK: - HandledExceptionEvent
 
+/// A recorded handled exception with context for debugging.
 public struct HandledExceptionEvent: Sendable {
     public let timestamp: Int64
     public let errorDomain: String

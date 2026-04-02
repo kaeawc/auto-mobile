@@ -77,6 +77,7 @@ public protocol DatabaseDriver: Sendable {
 
 // MARK: - Data Types
 
+/// Describes a discovered SQLite database with name, path, and size.
 public struct DatabaseDescriptor: Sendable {
     public let name: String
     public let path: String
@@ -89,6 +90,7 @@ public struct DatabaseDescriptor: Sendable {
     }
 }
 
+/// Result of a paginated table data query.
 public struct TableDataResult: Sendable {
     public let columns: [String]
     public let rows: [[String?]]
@@ -101,6 +103,7 @@ public struct TableDataResult: Sendable {
     }
 }
 
+/// Result of a table structure query containing column definitions.
 public struct TableStructureResult: Sendable {
     public let columns: [ColumnInfo]
 
@@ -109,6 +112,7 @@ public struct TableStructureResult: Sendable {
     }
 }
 
+/// Metadata about a single database table column.
 public struct ColumnInfo: Sendable {
     public let name: String
     public let type: String
@@ -125,6 +129,7 @@ public struct ColumnInfo: Sendable {
     }
 }
 
+/// Result of a raw SQL query execution.
 public struct SQLExecutionResult: Sendable {
     public let columns: [String]?
     public let rows: [[String?]]?

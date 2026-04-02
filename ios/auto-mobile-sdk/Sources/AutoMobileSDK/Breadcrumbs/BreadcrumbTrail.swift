@@ -1,9 +1,11 @@
 import Foundation
 
+/// Category of a breadcrumb event for classification.
 public enum BreadcrumbCategory: String, Codable, Sendable {
     case navigation, tap, lifecycle, network, log, custom
 }
 
+/// A single breadcrumb entry with timestamp, category, message, and metadata.
 public struct Breadcrumb: Codable, Sendable {
     public let timestamp: TimeInterval
     public let category: BreadcrumbCategory
@@ -23,6 +25,7 @@ public struct Breadcrumb: Codable, Sendable {
     }
 }
 
+/// Protocol for adding, snapshotting, and clearing breadcrumbs.
 public protocol BreadcrumbTracking: AnyObject, Sendable {
     func add(_ breadcrumb: Breadcrumb)
     func snapshot() -> [Breadcrumb]

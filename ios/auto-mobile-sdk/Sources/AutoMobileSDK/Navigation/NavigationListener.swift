@@ -2,6 +2,7 @@ import Foundation
 
 /// Functional interface for receiving navigation events.
 public protocol NavigationListener: AnyObject, Sendable {
+    /// Called when a navigation event occurs.
     func onNavigationEvent(_ event: NavigationEvent)
 }
 

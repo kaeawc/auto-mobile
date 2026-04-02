@@ -10,9 +10,11 @@ public enum NotificationStyle: String, Sendable {
     case bigPicture
 }
 
-/// An action button attached to a notification.
+/// An action button attached to a test notification.
 public struct NotificationAction: Sendable {
+    /// Display label shown on the action button.
     public let label: String
+    /// Unique identifier for the action, reported when tapped.
     public let actionId: String
 
     public init(label: String, actionId: String) {

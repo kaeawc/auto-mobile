@@ -171,6 +171,7 @@ public protocol UserDefaultsDriver: Sendable {
 
 // MARK: - Data Types
 
+/// Describes a UserDefaults suite with its name and entry count.
 public struct UserDefaultsSuiteDescriptor: Sendable {
     public let name: String?
     public let displayName: String
@@ -183,6 +184,7 @@ public struct UserDefaultsSuiteDescriptor: Sendable {
     }
 }
 
+/// A key-value pair from UserDefaults with its type.
 public struct KeyValuePair: Sendable {
     public let key: String
     public let value: String?
@@ -195,6 +197,7 @@ public struct KeyValuePair: Sendable {
     }
 }
 
+/// The data type of a UserDefaults value.
 public enum KeyValueType: String, Sendable {
     case string
     case int

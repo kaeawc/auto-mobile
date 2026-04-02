@@ -276,14 +276,17 @@ public final class AutoMobileSDK: @unchecked Sendable {
         return _sdkContext
     }
 
+    /// Set the current user ID for event attribution.
     public func setUserId(_ userId: String?) {
         sdkContext?.userId = userId
     }
 
+    /// Set a custom tag on the SDK context.
     public func setTag(_ key: String, value: String) {
         sdkContext?.setTag(key, value: value)
     }
 
+    /// Remove a custom tag from the SDK context.
     public func removeTag(_ key: String) {
         sdkContext?.removeTag(key)
     }

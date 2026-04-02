@@ -63,6 +63,10 @@ class LogcatReader(
       while (running) {
         try {
           readLogcat()
+          // Normal exit (EOF) — backoff before restarting
+          if (!running) break
+          Log.d(TAG, "Logcat process exited, restarting in 1s")
+          Thread.sleep(1000)
         } catch (e: InterruptedException) {
           break
         } catch (e: Exception) {

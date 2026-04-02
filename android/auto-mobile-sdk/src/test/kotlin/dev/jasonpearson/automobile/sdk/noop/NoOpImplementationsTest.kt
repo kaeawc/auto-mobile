@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.sdk.noop
 
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.protocol.SdkLogEvent
 import dev.jasonpearson.automobile.sdk.NavigationEvent
 import dev.jasonpearson.automobile.sdk.NavigationSource
 import dev.jasonpearson.automobile.sdk.events.DropReason
@@ -34,7 +34,7 @@ class NoOpImplementationsTest {
 
   @Test
   fun `NoOpEventPersistence persist returns null`() {
-    val event = SdkCustomEvent(timestamp = 1L, name = "test")
+    val event = SdkLogEvent(timestamp = 1L, level = 4, tag = "test", message = "msg")
     assertNull(NoOpEventPersistence.persist(listOf(event)))
   }
 
@@ -63,7 +63,7 @@ class NoOpImplementationsTest {
 
   @Test
   fun `NoOpEventProcessor returns event unchanged`() {
-    val event = SdkCustomEvent(timestamp = 42L, name = "hello")
+    val event = SdkLogEvent(timestamp = 42L, level = 4, tag = "hello", message = "world")
     val result = NoOpEventProcessor.process(event)
     assertSame(event, result)
   }

@@ -251,11 +251,13 @@ Body capture is always disabled in release builds to prevent leaking credentials
 
 ## Logging
 
-`AutoMobileLog` provides thin wrappers around Apple's `os.Logger` for structured logging. Logs are written to the unified logging system with `privacy: .public` (non-redacted, visible in Console.app and OSLogStore). Note that `.public` disables redaction — sensitive fields such as PII or credentials must not be passed through these log methods.
+`AutoMobileLog` provides filter-based log capture. Filters are registered by name via `addFilter(name:tagPattern:messagePattern:minLevel:)` with optional `NSRegularExpression` patterns for tag and message, plus a minimum `LogLevel` (`verbose`, `debug`, `info`, `warning`, `error`, `fault`). Filters can be removed individually with `removeFilter(name:)` or all at once with `clearFilters()`.
 
-Log methods mirror standard log levels: `v()`, `d()`, `i()`, `w()`, `e()`, `fault()`. Each method accepts an optional `tag` parameter that is formatted as a `[tag] message` prefix.
+Log methods mirror standard log levels: `v()`, `d()`, `i()`, `w()`, `e()`, `fault()`. Each method accepts an optional `tag` parameter that is formatted as a `[tag] message` prefix. Logs are written to Apple's unified logging system with `privacy: .public` (non-redacted, visible in Console.app and OSLogStore). Note that `.public` disables redaction — sensitive fields such as PII or credentials must not be passed through these log methods.
 
-Note: Unlike Android's `AutoMobileLog` which has filter-based capture with regex patterns, the iOS implementation delegates filtering to the OS unified logging system. `LogLevel` and `SdkLogEvent` types exist in the event model for wire compatibility.
+Only entries matching at least one active filter are buffered as `SdkLogEvent`. Filters gate OSLogReader output only — they do not buffer events into `SdkEventBuffer` (CtrlProxy's `/sdk-events` endpoint already reads from `OSLogStore`).
+
+**Severity level mapping:** Android `wtf` (What a Terrible Failure) corresponds to iOS `fault`. Both represent the highest severity log level on their respective platforms.
 
 ## Interaction Tracking
 

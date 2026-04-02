@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { DefaultTextMatcher } from "../../../src/features/utility/TextMatcher";
+import { DefaultTextMatcher, normalizeQuotes } from "../../../src/features/utility/TextMatcher";
 
 describe("DefaultTextMatcher", () => {
   const matcher = new DefaultTextMatcher();
@@ -92,6 +92,73 @@ describe("DefaultTextMatcher", () => {
       expect(fn("Hello")).toBe(true);
       expect(fn("hello")).toBe(false);
       expect(fn("Hello World")).toBe(false);
+    });
+  });
+
+  describe("Unicode quote normalization", () => {
+    test("matches curly single quotes against straight apostrophe", () => {
+      expect(matcher.partialTextMatch("Don't Allow", "Don\u2019t Allow")).toBe(true);
+      expect(matcher.partialTextMatch("Don't Allow", "Don\u2018t Allow")).toBe(true);
+    });
+
+    test("matches curly double quotes against straight quotes", () => {
+      expect(matcher.partialTextMatch('Allow "Reminders"', "Allow \u201CReminders\u201D")).toBe(true);
+    });
+
+    test("matches em dash against hyphen", () => {
+      expect(matcher.partialTextMatch("foo-bar", "foo\u2014bar")).toBe(true);
+      expect(matcher.partialTextMatch("foo-bar", "foo\u2013bar")).toBe(true);
+    });
+
+    test("matches ellipsis against three dots", () => {
+      expect(matcher.partialTextMatch("Loading...", "Loading\u2026")).toBe(true);
+    });
+
+    test("exact match normalizes quotes", () => {
+      const fn = matcher.createTextMatcher("Don't Allow", false);
+      expect(fn("Don\u2019t Allow")).toBe(true);
+    });
+
+    test("partial match normalizes quotes", () => {
+      const fn = matcher.createTextMatcher("Don't", true);
+      expect(fn("Don\u2019t Allow")).toBe(true);
+    });
+
+    test("case-sensitive match still normalizes quotes", () => {
+      const fn = matcher.createTextMatcher("Don't Allow", false, true);
+      expect(fn("Don\u2019t Allow")).toBe(true);
+      expect(fn("don\u2019t allow")).toBe(false);
+    });
+  });
+
+  describe("normalizeQuotes", () => {
+    test("normalizes single quote variants", () => {
+      expect(normalizeQuotes("\u2018hello\u2019")).toBe("'hello'");
+      expect(normalizeQuotes("\u201Ahello\u201B")).toBe("'hello'");
+      expect(normalizeQuotes("\u2032hello\u0060")).toBe("'hello'");
+      expect(normalizeQuotes("\u00B4hello")).toBe("'hello");
+    });
+
+    test("normalizes double quote variants", () => {
+      expect(normalizeQuotes("\u201Chello\u201D")).toBe('"hello"');
+      expect(normalizeQuotes("\u201Ehello\u201F")).toBe('"hello"');
+      expect(normalizeQuotes("\u00ABhello\u00BB")).toBe('"hello"');
+      expect(normalizeQuotes("\u2033hello")).toBe('"hello');
+    });
+
+    test("normalizes dashes", () => {
+      expect(normalizeQuotes("a\u2013b")).toBe("a-b");  // en dash
+      expect(normalizeQuotes("a\u2014b")).toBe("a-b");  // em dash
+      expect(normalizeQuotes("a\u2010b")).toBe("a-b");  // hyphen
+    });
+
+    test("normalizes ellipsis", () => {
+      expect(normalizeQuotes("wait\u2026")).toBe("wait...");
+    });
+
+    test("leaves plain ASCII unchanged", () => {
+      expect(normalizeQuotes("Don't Allow")).toBe("Don't Allow");
+      expect(normalizeQuotes('"hello"')).toBe('"hello"');
     });
   });
 });

@@ -2670,12 +2670,78 @@
                 ],
                 "additionalProperties": {}
               }
+            },
+            "media": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "viewId": {
+                    "type": "string"
+                  },
+                  "className": {
+                    "type": "string"
+                  },
+                  "mediaType": {
+                    "type": "string",
+                    "enum": [
+                      "image",
+                      "video",
+                      "loading",
+                      "mixed"
+                    ]
+                  },
+                  "bounds": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "number"
+                      },
+                      "top": {
+                        "type": "number"
+                      },
+                      "right": {
+                        "type": "number"
+                      },
+                      "bottom": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "contentDescription": {
+                    "type": "string"
+                  },
+                  "resourceId": {
+                    "type": "string"
+                  },
+                  "sourceUrl": {
+                    "type": "string"
+                  },
+                  "isLoading": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "className",
+                  "mediaType",
+                  "bounds"
+                ],
+                "additionalProperties": false
+              }
             }
           },
           "required": [
             "clickable",
             "scrollable",
-            "text"
+            "text",
+            "media"
           ],
           "additionalProperties": false
         },

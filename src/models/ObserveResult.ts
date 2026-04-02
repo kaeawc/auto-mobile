@@ -12,6 +12,7 @@ import { RecompositionSummary } from "./Recomposition";
 import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
 import { SelectedElement } from "../utils/interfaces/NavigationGraph";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
+import type { MediaView } from "../features/observe/IdentifyMediaViews";
 
 export interface PredictionTarget {
   text?: string;
@@ -85,6 +86,7 @@ export interface ObserveResult {
     clickable: Element[];
     scrollable: Element[];
     text: Element[];
+    media: MediaView[];
   };
 
   /**

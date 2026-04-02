@@ -158,6 +158,7 @@ public class ElementLocator: ElementLocating {
             // Springboard reports as foreground even when another app is on top,
             // so we always re-detect unless a non-springboard app is confirmed foreground
             if isCurrentAppInForeground && !isCurrentAppSpringboard {
+                didFallbackToSpringboard = false
                 return
             }
 

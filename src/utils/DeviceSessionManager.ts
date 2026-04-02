@@ -298,8 +298,24 @@ export class DeviceSessionManager implements DeviceSessionManager {
       default:
         // Only check for mixed platforms when auto-detecting (not explicitly specified)
         if (androidDevices.length > 0 && iosDevices.length > 0) {
+          // If setActiveDevice was called, use that platform to resolve ambiguity
+          if (this.currentDevice && this.currentPlatform) {
+            platformDevices = this.currentPlatform === "android" ? androidDevices : iosDevices;
+            resolvedPlatform = this.currentPlatform;
+            break;
+          }
+          // If a specific deviceId was provided, find which platform it belongs to
+          if (providedDeviceId) {
+            const allDevices = [...androidDevices, ...iosDevices];
+            const match = allDevices.find(d => d.deviceId === providedDeviceId);
+            if (match) {
+              platformDevices = match.platform === "android" ? androidDevices : iosDevices;
+              resolvedPlatform = match.platform;
+              break;
+            }
+          }
           throw new ActionableError(
-            "Both Android and iOS devices are connected. Please disconnect devices from one platform to continue."
+            "Both Android and iOS devices are connected. Please disconnect devices from one platform or call setActiveDevice to select a platform."
           );
         }
 
@@ -333,7 +349,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     // If we have a current device for the requested platform, verify it's still ready
-    if (!selectedDevice && this.currentDevice && this.currentPlatform === platform) {
+    if (!selectedDevice && this.currentDevice && (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)) {
       logger.info(`[DeviceSessionManager] Found current device: ${this.currentDevice.deviceId}, verifying readiness`);
       try {
         await this.verifyDevice(this.currentDevice.deviceId, platform, options);

@@ -103,6 +103,9 @@ export class Daemon {
     if (options.networkMockable) {
       serverConfig.setNetworkMockableEnabled(true);
     }
+    if (options.dismissKeyboardAfterInput) {
+      serverConfig.setDismissKeyboardAfterInputEnabled(true);
+    }
     if (options.noUiPerfMode) {
       serverConfig.setUiPerfMode(false);
     }

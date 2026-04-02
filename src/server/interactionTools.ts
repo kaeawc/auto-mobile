@@ -135,7 +135,7 @@ const tapOnBaseSchema = z.object({
   container: elementContainerSchema.optional().describe(
     "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
   ),
-  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).describe("Action type"),
+  action: z.enum(["tap", "doubleTap", "longPress", "focus"]).default("tap").describe("Action type (default: tap)"),
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
     "Element selection strategy when multiple matches are found (default: first)"
   ),
@@ -380,7 +380,7 @@ export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
-    .describe("(Android only) Dismiss soft keyboard after input. Overrides server-level --dismiss-keyboard-after-input flag. Ignored on iOS."),
+    .describe("(Android only) Dismiss soft keyboard after input (default: false). Ignored on iOS."),
   platform: platformSchema
 }));
 

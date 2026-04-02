@@ -27,6 +27,7 @@ class ServerConfig {
   private _skipCtrlProxyDownload: boolean = false;
   private _networkMockableEnabled: boolean = false;
   private _mcpRecordingEnabled: boolean = false;
+  private _dismissKeyboardAfterInputEnabled: boolean = false;
 
   private constructor() {}
 
@@ -135,6 +136,14 @@ class ServerConfig {
 
   isMcpRecordingEnabled(): boolean {
     return this._mcpRecordingEnabled;
+  }
+
+  setDismissKeyboardAfterInputEnabled(enabled: boolean): void {
+    this._dismissKeyboardAfterInputEnabled = enabled;
+  }
+
+  isDismissKeyboardAfterInputEnabled(): boolean {
+    return this._dismissKeyboardAfterInputEnabled;
   }
 
 }

@@ -322,7 +322,7 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 ///
 /// This is an implementation detail -- consumers should register it via
 /// ``AutoMobileNetwork/protocolClass()`` rather than referencing this type directly.
-package class AutoMobileURLProtocol: URLProtocol {
+public class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     private var startTime: Date?
     private var urlSession: URLSession?

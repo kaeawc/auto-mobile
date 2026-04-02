@@ -82,6 +82,55 @@ class AutoMobileNetworkTest {
     }
 
     @Test
+    fun `recordRequest gates headers and bodies behind capture flags`() {
+        val (buffer, flushed) = collectingBuffer()
+        AutoMobileNetwork.initialize("com.example", buffer)
+
+        val record = NetworkRequestRecord(
+            url = "https://api.example.com/users",
+            method = "POST",
+            requestHeaders = mapOf("Authorization" to "Bearer token"),
+            responseHeaders = mapOf("X-Request-Id" to "abc"),
+            requestBody = "{\"name\":\"test\"}",
+            responseBody = "{\"id\":1}",
+        )
+
+        // Without capture flags, headers and bodies should be null
+        AutoMobileNetwork.recordRequest(record)
+        buffer.flush()
+
+        val event = flushed[0][0] as SdkNetworkRequestEvent
+        assertNull(event.requestHeaders)
+        assertNull(event.responseHeaders)
+        assertNull(event.requestBody)
+        assertNull(event.responseBody)
+    }
+
+    @Test
+    fun `recordRequest includes headers and bodies when capture flags enabled`() {
+        val (buffer, flushed) = collectingBuffer()
+        AutoMobileNetwork.initialize("com.example", buffer)
+
+        val record = NetworkRequestRecord(
+            url = "https://api.example.com/users",
+            method = "POST",
+            requestHeaders = mapOf("Authorization" to "Bearer token"),
+            responseHeaders = mapOf("X-Request-Id" to "abc"),
+            requestBody = "{\"name\":\"test\"}",
+            responseBody = "{\"id\":1}",
+        )
+
+        AutoMobileNetwork.recordRequest(record, captureHeaders = true, captureBodies = true)
+        buffer.flush()
+
+        val event = flushed[0][0] as SdkNetworkRequestEvent
+        assertEquals(mapOf("Authorization" to "Bearer token"), event.requestHeaders)
+        assertEquals(mapOf("X-Request-Id" to "abc"), event.responseHeaders)
+        assertEquals("{\"name\":\"test\"}", event.requestBody)
+        assertEquals("{\"id\":1}", event.responseBody)
+    }
+
+    @Test
     fun `NetworkRequestRecord defaults`() {
         val record = NetworkRequestRecord(url = "https://example.com", method = "GET")
         assertNull(record.requestHeaders)

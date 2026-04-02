@@ -103,8 +103,14 @@ object AutoMobileNetwork {
    * [interceptor] approach is not applicable.
    *
    * @param record A [NetworkRequestRecord] describing the request and response.
+   * @param captureHeaders Whether to include request/response headers (default false for privacy).
+   * @param captureBodies Whether to include request/response bodies (default false).
    */
-  fun recordRequest(record: NetworkRequestRecord) {
+  fun recordRequest(
+      record: NetworkRequestRecord,
+      captureHeaders: Boolean = false,
+      captureBodies: Boolean = false,
+  ) {
     val buf = buffer ?: return
     val parsedUrl = if (record.host == null || record.path == null) {
       try { java.net.URL(record.url) } catch (_: Exception) { null }
@@ -124,10 +130,10 @@ object AutoMobileNetwork {
             host = host,
             path = path,
             error = record.error,
-            requestHeaders = record.requestHeaders,
-            responseHeaders = record.responseHeaders,
-            requestBody = record.requestBody,
-            responseBody = record.responseBody,
+            requestHeaders = if (captureHeaders) record.requestHeaders else null,
+            responseHeaders = if (captureHeaders) record.responseHeaders else null,
+            requestBody = if (captureBodies) record.requestBody else null,
+            responseBody = if (captureBodies) record.responseBody else null,
             contentType = record.contentType,
         ))
   }

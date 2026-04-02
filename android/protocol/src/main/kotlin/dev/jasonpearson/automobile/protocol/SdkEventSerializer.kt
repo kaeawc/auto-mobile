@@ -32,6 +32,9 @@ import kotlinx.serialization.json.Json
  * ```
  */
 object SdkEventSerializer {
+  /** Intent action for SDK event batch broadcasts. */
+  const val ACTION_SDK_EVENT_BATCH = "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
+
   /**
    * Intent extra key for the serialized event JSON.
    * Uses a namespaced key to avoid collisions with other Intent extras.

@@ -1,7 +1,7 @@
 import Foundation
 
 /// Protocol for event buffering to allow faking in tests.
-public protocol EventBuffering: AnyObject, Sendable {
+protocol EventBuffering: AnyObject, Sendable {
     var isBufferEnabled: Bool { get set }
     func add(_ event: any SdkEvent)
     func start()
@@ -11,7 +11,7 @@ public protocol EventBuffering: AnyObject, Sendable {
 }
 
 /// Thread-safe event buffer that flushes on capacity or timer.
-public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
+final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private let maxBufferSize: Int
     private let maxPendingEvents: Int
     private let flushIntervalMs: Int
@@ -24,7 +24,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     private let dropCounter: (any DropCounting)?
     private let processors: [any EventProcessing]
 
-    public init(
+    init(
         maxBufferSize: Int = 50,
         flushIntervalMs: Int = 500,
         maxPendingEvents: Int = 500,
@@ -42,7 +42,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         self.onFlush = onFlush
     }
 
-    public var isBufferEnabled: Bool {
+    var isBufferEnabled: Bool {
         get {
             lock.lock()
             defer { lock.unlock() }
@@ -55,7 +55,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         }
     }
 
-    public func start() {
+    func start() {
         lock.lock()
         defer { lock.unlock() }
         guard timer == nil else { return }
@@ -67,14 +67,14 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
     }
 
     /// Stop the periodic flush timer without flushing remaining events.
-    public func stop() {
+    func stop() {
         lock.lock()
         defer { lock.unlock() }
         timer?.cancel()
         timer = nil
     }
 
-    public func add(_ event: any SdkEvent) {
+    func add(_ event: any SdkEvent) {
         // Check disabled state first, before running processors
         lock.lock()
         guard _isBufferEnabled else {
@@ -118,7 +118,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         }
     }
 
-    public func flush() {
+    func flush() {
         lock.lock()
         guard !buffer.isEmpty else {
             lock.unlock()
@@ -134,7 +134,7 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
         }
     }
 
-    public func shutdown() {
+    func shutdown() {
         lock.lock()
         timer?.cancel()
         timer = nil
@@ -154,19 +154,19 @@ public final class SdkEventBuffer: EventBuffering, @unchecked Sendable {
 // MARK: - Timer Abstraction
 
 /// Protocol for timer scheduling to allow faking in tests.
-public protocol TimerScheduling: AnyObject, Sendable {
+protocol TimerScheduling: AnyObject, Sendable {
     func schedule(intervalMs: Int, block: @escaping @Sendable () -> Void)
     func cancel()
 }
 
 /// GCD-based timer implementation.
-public final class GCDTimer: TimerScheduling, @unchecked Sendable {
+final class GCDTimer: TimerScheduling, @unchecked Sendable {
     private var source: DispatchSourceTimer?
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.timer")
 
-    public init() {}
+    init() {}
 
-    public func schedule(intervalMs: Int, block: @escaping @Sendable () -> Void) {
+    func schedule(intervalMs: Int, block: @escaping @Sendable () -> Void) {
         let source = DispatchSource.makeTimerSource(queue: queue)
         source.schedule(
             deadline: .now() + .milliseconds(intervalMs),
@@ -177,7 +177,7 @@ public final class GCDTimer: TimerScheduling, @unchecked Sendable {
         self.source = source
     }
 
-    public func cancel() {
+    func cancel() {
         source?.cancel()
         source = nil
     }

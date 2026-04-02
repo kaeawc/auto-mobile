@@ -1,22 +1,22 @@
 import Foundation
 
 /// Protocol for event broadcasting to allow faking in tests.
-public protocol EventBroadcasting: Sendable {
+protocol EventBroadcasting: Sendable {
     func broadcastBatch(bundleId: String?, events: [any SdkEvent])
 }
 
 /// Broadcasts SDK event batches via NotificationCenter for in-process communication
 /// and HTTP POST to CtrlProxy for cross-process telemetry forwarding.
 /// Supports disk-first persistence and retry with exponential backoff.
-public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
+final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
-    public static let eventBatchNotification = Notification.Name(
+    static let eventBatchNotification = Notification.Name(
         "dev.jasonpearson.automobile.sdk.EVENT_BATCH"
     )
 
-    public static let eventBatchUserInfoKey = "eventBatch"
+    static let eventBatchUserInfoKey = "eventBatch"
 
-    public static let shared = SdkEventBroadcaster()
+    static let shared = SdkEventBroadcaster()
 
     /// CtrlProxy HTTP endpoint for SDK event forwarding.
     /// Set by the SDK during initialization if CtrlProxy is detected.
@@ -24,10 +24,10 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
     private let urlSession: URLSession
 
     /// Disk-first event persistence for reliable delivery.
-    public var persistence: (any EventPersisting)?
+    var persistence: (any EventPersisting)?
 
     /// Retry policy for failed HTTP delivery.
-    public var retryPolicy: RetryPolicy = RetryPolicy()
+    var retryPolicy: RetryPolicy = RetryPolicy()
 
     private init() {
         let config = URLSessionConfiguration.default
@@ -46,13 +46,13 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
 
     /// Configure the CtrlProxy endpoint URL. Pass nil to disable HTTP forwarding.
     /// No-op in release builds.
-    public func setCtrlProxyUrl(_ url: URL?) {
+    func setCtrlProxyUrl(_ url: URL?) {
         #if DEBUG
         self.ctrlProxyUrl = url
         #endif
     }
 
-    public func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
+    func broadcastBatch(bundleId: String?, events: [any SdkEvent]) {
         guard !events.isEmpty else { return }
         InternalLogger.debug("broadcastBatch called with \(events.count) events, ctrlProxyUrl=\(ctrlProxyUrl?.absoluteString ?? "nil")")
 
@@ -63,7 +63,7 @@ public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable {
     }
 
     /// Replay pending persisted batches (e.g., on startup after a crash).
-    public func replayPending(bundleId: String?) {
+    func replayPending(bundleId: String?) {
         guard let persistence = persistence else { return }
         for (batchId, events) in persistence.loadPending() {
             deliverBatch(bundleId: bundleId, events: events, batchId: batchId)

@@ -74,7 +74,6 @@ import dev.jasonpearson.automobile.protocol.WebSocketFrameData
 import dev.jasonpearson.automobile.protocol.WebSocketFrameResponse
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
-import dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
 import java.io.ByteArrayOutputStream
@@ -546,7 +545,7 @@ class CtrlProxy : AccessibilityService() {
   private val eventBatchReceiver =
       object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
-          if (intent == null || intent.action != SdkEventBroadcaster.ACTION_SDK_EVENT_BATCH) {
+          if (intent == null || intent.action != SdkEventSerializer.ACTION_SDK_EVENT_BATCH) {
             return
           }
 
@@ -672,7 +671,7 @@ class CtrlProxy : AccessibilityService() {
 
       // Register broadcast receiver for SDK event batches
       val eventBatchFilter =
-          IntentFilter().apply { addAction(SdkEventBroadcaster.ACTION_SDK_EVENT_BATCH) }
+          IntentFilter().apply { addAction(SdkEventSerializer.ACTION_SDK_EVENT_BATCH) }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         registerReceiver(eventBatchReceiver, eventBatchFilter, RECEIVER_EXPORTED)

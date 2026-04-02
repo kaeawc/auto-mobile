@@ -7,7 +7,7 @@ package dev.jasonpearson.automobile.sdk.events
  * @param baseDelayMs Base delay in milliseconds before first retry (default 100)
  * @param maxDelayMs Upper bound on computed delay (default 2000)
  */
-data class RetryPolicy(
+internal data class RetryPolicy(
   val maxRetries: Int = 3,
   val baseDelayMs: Long = 100,
   val maxDelayMs: Long = 2000,

@@ -1430,8 +1430,8 @@ class CtrlProxy : AccessibilityService() {
    */
   private fun getForegroundActivity(rootPackage: String? = null, windowClass: String? = null): String? {
     return try {
-      val pkg = rootPackage ?: rootInActiveWindow?.packageName?.toString()
-      val className = windowClass ?: lastWindowClassName
+      val pkg = rootPackage
+      val className = windowClass
       if (pkg != null && className != null) {
         // Use short class name format if it starts with the package
         val shortName = if (className.startsWith(pkg)) {

@@ -322,13 +322,16 @@ public struct UIElementInfo: Codable {
     public let stateDescription: String?
     public let errorMessage: String?
     public let hintText: String?
+    public let viewId: String?
+    public let extras: [String: String]?
     public let actions: [String]?
     public let node: [UIElementInfo]?
 
     enum CodingKeys: String, CodingKey {
         case text, textSize, className, bounds, clickable, enabled
         case focusable, focused, scrollable, password, checkable, checked
-        case selected, actions, node, role, testTag
+        case selected, actions, node, role, testTag, extras
+        case viewId = "view-id"
         case contentDesc = "content-desc"
         case resourceId = "resource-id"
         case accessibilityFocused = "accessibility-focused"
@@ -361,6 +364,8 @@ public struct UIElementInfo: Codable {
         stateDescription: String? = nil,
         errorMessage: String? = nil,
         hintText: String? = nil,
+        viewId: String? = nil,
+        extras: [String: String]? = nil,
         actions: [String]? = nil,
         node: [UIElementInfo]? = nil
     ) {
@@ -386,6 +391,8 @@ public struct UIElementInfo: Codable {
         self.stateDescription = stateDescription
         self.errorMessage = errorMessage
         self.hintText = hintText
+        self.viewId = viewId
+        self.extras = extras
         self.actions = actions
         self.node = node
     }

@@ -456,6 +456,38 @@ jobs:
         run: |
           scripts/shellcheck/validate_shell_scripts.sh
 
+  bats-tests:
+    name: "BATS Shell Tests (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    needs: detect-changes
+    if: needs.detect-changes.outputs.sha256_only != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    steps:
+      - name: "Git Checkout"
+        uses: actions/checkout@v6
+        with:
+          lfs: false
+
+      - name: "Install BATS"
+        shell: bash
+        run: |
+          if command -v bats &>/dev/null; then
+            echo "bats already installed: $(bats --version)"
+          elif command -v brew &>/dev/null; then
+            brew install bats-core
+          else
+            # Ubuntu apt 'bats' is the old sstephenson/bats which doesn't
+            # capture stderr in run output. Install bats-core from source.
+            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+
+      - name: "Run BATS Tests"
+        run: bats test/bats/
+
   validate-mkdocs-nav:
     name: "Validate MkDocs Navigation"
     runs-on: ubuntu-latest
@@ -599,44 +631,7 @@ jobs:
 
       - name: "Verify runtime dependencies"
         if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
-        shell: bash
-        run: |
-          set -uo pipefail
-
-          # Refresh PATH — installer may have added ~/.bun/bin or Homebrew paths
-          export PATH="${HOME}/.bun/bin:${PATH}"
-          if [[ -f "${HOME}/.bashrc" ]]; then source "${HOME}/.bashrc" 2>/dev/null || true; fi
-          hash -r 2>/dev/null || true
-
-          missing=()
-
-          # Core runtime
-          command -v bun     >/dev/null 2>&1 || missing+=("bun")
-          command -v bunx    >/dev/null 2>&1 || missing+=("bunx")
-
-          # Runtime deps (ffmpeg installed by installer on macOS via brew,
-          # pre-installed on ubuntu-latest)
-          command -v ffmpeg  >/dev/null 2>&1 || missing+=("ffmpeg")
-
-          # Dev tools (installed by development preset via brew on macOS,
-          # some pre-installed on ubuntu-latest)
-          command -v shellcheck  >/dev/null 2>&1 || missing+=("shellcheck")
-          command -v jq          >/dev/null 2>&1 || missing+=("jq")
-          command -v rg          >/dev/null 2>&1 || missing+=("ripgrep")
-
-          # macOS-specific
-          if [[ "$(uname -s)" == "Darwin" ]]; then
-            command -v yq          >/dev/null 2>&1 || missing+=("yq")
-            command -v swiftformat >/dev/null 2>&1 || missing+=("swiftformat")
-            command -v swiftlint   >/dev/null 2>&1 || missing+=("swiftlint")
-            command -v iproxy      >/dev/null 2>&1 || missing+=("iproxy")
-          fi
-
-          if [[ ${#missing[@]} -gt 0 ]]; then
-            echo "::error::Missing runtime dependencies: ${missing[*]}"
-            exit 1
-          fi
-          echo "All runtime dependencies verified."
+        run: ./scripts/ci/verify-runtime-deps.sh
 
       - name: "Build from source"
         if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
@@ -648,20 +643,7 @@ jobs:
 
       - name: "Daemon lifecycle (start → health → doctor → stop)"
         if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
-        shell: bash
-        run: |
-          set -uo pipefail
-          export PATH="${HOME}/.bun/bin:${PATH}"
-          mkdir -p ci-logs
-
-          bun dist/src/index.js --daemon start  2>&1 | tee ci-logs/daemon-start.log
-          bun dist/src/index.js --daemon health 2>&1 | tee ci-logs/daemon-health.log
-
-          # Doctor exits non-zero when checks fail (expected on CI without devices).
-          # We just verify the daemon responds to the request.
-          bun dist/src/index.js --cli doctor --json 2>&1 | tee ci-logs/daemon-doctor.log || true
-
-          bun dist/src/index.js --daemon stop   2>&1 | tee ci-logs/daemon-stop.log
+        run: ./scripts/ci/daemon-lifecycle.sh
 
       - name: "Upload Logs"
         if: needs.detect-changes.outputs.docs_only != 'true' && (env.INSTALL_EXIT_CODE != '0' || failure())
@@ -1182,8 +1164,11 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
+      - name: "Ensure iOS Simulator runtime"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
       - name: "Boot iOS Simulator"
-        run: ./scripts/ios/boot-simulator.sh --ios-version ${{ matrix.xcode }}
+        run: ./scripts/ios/boot-simulator.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |

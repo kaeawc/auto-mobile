@@ -122,18 +122,18 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
+    // Emit corrupt image data on stderr then exit with code 1 — matching
+    // real emulator behavior. Use the same process.nextTick-from-spawnFn
+    // pattern as the "exit code" test below, which passes reliably on Linux CI.
     const spawnFn = (() => {
-      // Emit corrupt image output after listeners are attached.
-      // Use process.nextTick instead of queueMicrotask to avoid racing with
-      // setImmediate callbacks from FakeTimer auto-advance on Windows.
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
         fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
+        fakeChild.emit("exit", 1);
       });
       return fakeChild;
     }) as any;
 
-    // Mock execAsync to return a valid AVD list
     const execAsync = async (command: string): Promise<ExecResult> => {
       if (command.includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
@@ -144,15 +144,10 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
-    // Don't use enableAutoAdvance — it schedules setImmediate callbacks that
-    // race with microtask-based data emission on Windows, causing timeouts.
-    // Instead, advance time manually after spawning to trigger the startup timeout.
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
     const promise = client.startEmulator("Pixel_9_Pro");
-    // Suppress unhandled rejection while async setup completes
     promise.catch(() => {});
-    // Let async operations resolve, then advance past startup validation timeout
     await new Promise(resolve => setImmediate(resolve));
     fakeTimer.advanceTime(6000);
 

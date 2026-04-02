@@ -17,12 +17,18 @@ let package = Package(
         .target(
             name: "AutoMobileSDK",
             path: "Sources/AutoMobileSDK",
-            resources: [.process("PrivacyInfo.xcprivacy")]
+            resources: [.process("PrivacyInfo.xcprivacy")],
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency"),
+            ]
         ),
         .testTarget(
             name: "AutoMobileSDKTests",
             dependencies: ["AutoMobileSDK"],
-            path: "Tests/AutoMobileSDKTests"
+            path: "Tests/AutoMobileSDKTests",
+            swiftSettings: [
+                .enableExperimentalFeature("StrictConcurrency"),
+            ]
         ),
     ]
 )

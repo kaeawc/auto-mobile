@@ -25,6 +25,7 @@ export interface CtrlProxyNode {
   textSize?: number;
   contentDesc?: string;
   resourceId?: string;
+  viewId?: string;
   className?: string;
   bounds?: {
     left: number;

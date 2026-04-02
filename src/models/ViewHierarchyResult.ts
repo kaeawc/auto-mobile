@@ -89,5 +89,6 @@ export interface ViewHierarchyNode {
   occlusionState?: string;
   occludedBy?: string;
   "test-tag"?: string;
+  "view-id"?: string;
   extras?: Record<string, string>;
 }

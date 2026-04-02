@@ -231,6 +231,7 @@ export class CtrlProxyHierarchy {
     const stateDescription = this.readNodeField<string>(node, "stateDescription", "state-description");
     const errorMessage = this.readNodeField<string>(node, "errorMessage", "error-message");
     const hintText = this.readNodeField<string>(node, "hintText", "hint-text");
+    const viewId = this.readNodeField<string>(node, "viewId", "view-id");
 
     if (contentDesc) {attrs["content-desc"] = contentDesc;}
     if (resourceId) {attrs["resource-id"] = resourceId;}
@@ -253,6 +254,7 @@ export class CtrlProxyHierarchy {
     if (stateDescription) {attrs["state-description"] = stateDescription;}
     if (errorMessage) {attrs["error-message"] = errorMessage;}
     if (hintText) {attrs["hint-text"] = hintText;}
+    if (viewId) {attrs["view-id"] = viewId;}
 
     const result: { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } = { $: attrs };
 
@@ -283,7 +285,8 @@ export class CtrlProxyHierarchy {
       (attrs["text"] && attrs["text"] !== "") ||
       (attrs["resource-id"] && attrs["resource-id"] !== "") ||
       (attrs["content-desc"] && attrs["content-desc"] !== "") ||
-      (attrs["test-tag"] && attrs["test-tag"] !== "")
+      (attrs["test-tag"] && attrs["test-tag"] !== "") ||
+      (attrs["view-id"] && attrs["view-id"] !== "")
     );
   }
 

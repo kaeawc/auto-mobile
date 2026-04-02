@@ -41,6 +41,7 @@ export interface AccessibilityNode {
   text?: string;
   "content-desc"?: string;
   "resource-id"?: string;
+  "view-id"?: string;
   "test-tag"?: string;
   className?: string;
   packageName?: string;

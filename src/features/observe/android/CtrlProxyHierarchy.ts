@@ -683,6 +683,9 @@ export class CtrlProxyHierarchy {
     if (node["test-tag"]) {
       converted["test-tag"] = node["test-tag"];
     }
+    if (node["view-id"]) {
+      converted["view-id"] = node["view-id"];
+    }
     if (node.className) {
       converted.className = node.className;
     }

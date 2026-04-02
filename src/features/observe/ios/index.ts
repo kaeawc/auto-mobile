@@ -16,6 +16,7 @@ export { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 export { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 export { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 export { CtrlProxyClipboard } from "./CtrlProxyClipboard";
+export { CtrlProxyStorage } from "./CtrlProxyStorage";
 
 // Types
 export type {

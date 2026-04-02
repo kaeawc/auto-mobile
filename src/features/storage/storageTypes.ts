@@ -18,7 +18,19 @@ export interface PreferenceFile {
 /**
  * Type of value stored in a key-value entry.
  */
-export type KeyValueType = "STRING" | "INT" | "LONG" | "FLOAT" | "BOOLEAN" | "STRING_SET";
+export type KeyValueType =
+  | "STRING"
+  | "INT"
+  | "LONG"
+  | "FLOAT"
+  | "DOUBLE"
+  | "BOOLEAN"
+  | "STRING_SET"
+  | "DATA"
+  | "DATE"
+  | "ARRAY"
+  | "DICTIONARY"
+  | "UNKNOWN";
 
 /**
  * A single key-value entry from a preference file.

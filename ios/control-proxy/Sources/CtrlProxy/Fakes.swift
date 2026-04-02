@@ -397,6 +397,95 @@ public class FakeGesturePerformer: GesturePerforming {
     }
 }
 
+// MARK: - FakeStorageInspecting
+
+/// Fake implementation of StorageInspecting for testing
+public class FakeStorageInspecting: StorageInspecting {
+    // MARK: - Configurable State
+
+    private var suites: [StorageSuiteInfo] = []
+    private var entries: [String?: [StorageEntry]] = [:]  // keyed by suiteName
+    private var shouldThrow: Error?
+
+    // MARK: - Call History
+
+    public struct SetEntryCall {
+        public let suiteName: String?
+        public let key: String
+        public let value: String?
+        public let type: String
+    }
+
+    public struct RemoveEntryCall {
+        public let suiteName: String?
+        public let key: String
+    }
+
+    public private(set) var listSuitesCallCount = 0
+    public private(set) var getEntriesHistory: [String?] = []
+    public private(set) var getEntryHistory: [(suiteName: String?, key: String)] = []
+    public private(set) var setEntryHistory: [SetEntryCall] = []
+    public private(set) var removeEntryHistory: [RemoveEntryCall] = []
+    public private(set) var clearEntriesHistory: [String?] = []
+
+    public init() {}
+
+    // MARK: - Configuration
+
+    public func setSuites(_ suites: [StorageSuiteInfo]) {
+        self.suites = suites
+    }
+
+    public func setEntries(_ entries: [StorageEntry], forSuite suiteName: String? = nil) {
+        self.entries[suiteName] = entries
+    }
+
+    public func setShouldThrow(_ error: Error?) {
+        shouldThrow = error
+    }
+
+    public func clearHistory() {
+        listSuitesCallCount = 0
+        getEntriesHistory.removeAll()
+        getEntryHistory.removeAll()
+        setEntryHistory.removeAll()
+        removeEntryHistory.removeAll()
+        clearEntriesHistory.removeAll()
+    }
+
+    // MARK: - StorageInspecting
+
+    public func listSuites() -> [StorageSuiteInfo] {
+        listSuitesCallCount += 1
+        return suites
+    }
+
+    public func getEntries(suiteName: String?) -> [StorageEntry] {
+        getEntriesHistory.append(suiteName)
+        return entries[suiteName] ?? []
+    }
+
+    public func getEntry(suiteName: String?, key: String) -> StorageEntry? {
+        getEntryHistory.append((suiteName: suiteName, key: key))
+        return entries[suiteName]?.first { $0.key == key }
+    }
+
+    public func setEntry(suiteName: String?, key: String, value: String?, type: String) throws {
+        if let error = shouldThrow { throw error }
+        setEntryHistory.append(SetEntryCall(suiteName: suiteName, key: key, value: value, type: type))
+    }
+
+    public func removeEntry(suiteName: String?, key: String) throws {
+        if let error = shouldThrow { throw error }
+        removeEntryHistory.append(RemoveEntryCall(suiteName: suiteName, key: key))
+    }
+
+    public func clearEntries(suiteName: String?) throws {
+        if let error = shouldThrow { throw error }
+        clearEntriesHistory.append(suiteName)
+    }
+}
+
 // MARK: - FakeWebSocketServer
 
 /// Fake implementation of WebSocketServing for testing

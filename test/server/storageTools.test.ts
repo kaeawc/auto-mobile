@@ -21,7 +21,7 @@ describe("Storage Tools Registration", () => {
   });
 
   describe("setKeyValue schema", () => {
-    test("accepts valid arguments", () => {
+    test("accepts valid arguments with name parameter", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("setKeyValue");
       expect(tool).toBeDefined();
@@ -29,11 +29,27 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
         key: "dark_mode",
         value: "true",
         type: "BOOLEAN",
       })).not.toThrow();
+    });
+
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("setKeyValue");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+        key: "dark_mode",
+        value: "true",
+        type: "BOOLEAN",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
     });
 
     test("accepts null value", () => {
@@ -43,7 +59,7 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
         key: "some_key",
         value: null,
         type: "STRING",
@@ -58,7 +74,7 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
         value: "true",
         type: "BOOLEAN",
       })).toThrow();
@@ -66,7 +82,16 @@ describe("Storage Tools Registration", () => {
       // Missing appId
       expect(() => tool!.schema.parse({
         platform: "android",
-        fileName: "user_prefs",
+        name: "user_prefs",
+        key: "dark_mode",
+        value: "true",
+        type: "BOOLEAN",
+      })).toThrow();
+
+      // Missing name
+      expect(() => tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
         key: "dark_mode",
         value: "true",
         type: "BOOLEAN",
@@ -80,14 +105,14 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
         key: "dark_mode",
         value: "true",
         type: "INVALID_TYPE",
       })).toThrow();
     });
 
-    test("accepts all valid KeyValueType values", () => {
+    test("accepts all valid Android KeyValueType values", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("setKeyValue");
 
@@ -96,12 +121,43 @@ describe("Storage Tools Registration", () => {
         expect(() => tool!.schema.parse({
           platform: "android",
           appId: "com.example.app",
-          fileName: "prefs",
+          name: "prefs",
           key: "k",
           value: "v",
           type,
         })).not.toThrow();
       }
+    });
+
+    test("accepts all valid iOS KeyValueType values", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("setKeyValue");
+
+      const validTypes = ["STRING", "INT", "DOUBLE", "BOOLEAN", "DATA", "DATE", "ARRAY", "DICTIONARY"];
+      for (const type of validTypes) {
+        expect(() => tool!.schema.parse({
+          platform: "ios",
+          appId: "com.example.app",
+          name: "Standard",
+          key: "k",
+          value: "v",
+          type,
+        })).not.toThrow();
+      }
+    });
+
+    test("accepts UNKNOWN type in schema (validation happens at runtime)", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("setKeyValue");
+
+      expect(() => tool!.schema.parse({
+        platform: "ios",
+        appId: "com.example.app",
+        name: "Standard",
+        key: "k",
+        value: "v",
+        type: "UNKNOWN",
+      })).not.toThrow();
     });
   });
 
@@ -114,9 +170,23 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
         key: "dark_mode",
       })).not.toThrow();
+    });
+
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("removeKeyValue");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+        key: "dark_mode",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
     });
 
     test("rejects missing required fields", () => {
@@ -127,7 +197,7 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
       })).toThrow();
     });
   });
@@ -141,15 +211,28 @@ describe("Storage Tools Registration", () => {
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",
-        fileName: "user_prefs",
+        name: "user_prefs",
       })).not.toThrow();
+    });
+
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("clearKeyValueFile");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
     });
 
     test("rejects missing required fields", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("clearKeyValueFile");
 
-      // Missing fileName
+      // Missing name
       expect(() => tool!.schema.parse({
         platform: "android",
         appId: "com.example.app",

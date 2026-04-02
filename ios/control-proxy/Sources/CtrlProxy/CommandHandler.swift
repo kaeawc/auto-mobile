@@ -11,29 +11,34 @@ public class CommandHandler: CommandHandling {
     private let elementLocator: ElementLocating
     private let gesturePerformer: GesturePerforming
     private let perfProvider: PerfProvider
+    private let storageInspector: StorageInspecting?
 
     public init(
         elementLocator: ElementLocating,
         gesturePerformer: GesturePerforming,
-        perfProvider: PerfProvider = PerfProvider.instance
+        perfProvider: PerfProvider = PerfProvider.instance,
+        storageInspector: StorageInspecting? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
         self.perfProvider = perfProvider
+        self.storageInspector = storageInspector
     }
 
     /// Factory for testing - allows injecting fakes
     public static func createForTesting(
         elementLocator: ElementLocating,
         gesturePerformer: GesturePerforming,
-        perfProvider: PerfProvider
+        perfProvider: PerfProvider,
+        storageInspector: StorageInspecting? = nil
     )
         -> CommandHandler
     {
         return CommandHandler(
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
-            perfProvider: perfProvider
+            perfProvider: perfProvider,
+            storageInspector: storageInspector
         )
     }
 
@@ -103,6 +108,25 @@ public class CommandHandler: CommandHandling {
 
             case RequestType.getVoiceOverState.rawValue:
                 return try handleGetVoiceOverState(request, startTime: startTime)
+
+            // Storage commands
+            case RequestType.listPreferenceFiles.rawValue:
+                return handleListPreferenceFiles(request, startTime: startTime)
+
+            case RequestType.getPreferences.rawValue:
+                return handleGetPreferences(request, startTime: startTime)
+
+            case RequestType.getPreference.rawValue:
+                return handleGetPreference(request, startTime: startTime)
+
+            case RequestType.setPreference.rawValue:
+                return try handleSetPreference(request, startTime: startTime)
+
+            case RequestType.removePreference.rawValue:
+                return try handleRemovePreference(request, startTime: startTime)
+
+            case RequestType.clearPreferences.rawValue:
+                return try handleClearPreferences(request, startTime: startTime)
 
             default:
                 return WebSocketResponse.error(
@@ -416,6 +440,166 @@ public class CommandHandler: CommandHandling {
         )
     }
 
+    // MARK: - Storage
+
+    /// Resolve suite name from request fileName: nil/empty/"Standard" -> nil (UserDefaults.standard)
+    private func resolveSuiteName(_ fileName: String?) -> String? {
+        guard let name = fileName, !name.isEmpty, name != "Standard" else { return nil }
+        return name
+    }
+
+    private func handleListPreferenceFiles(_ request: WebSocketRequest, startTime: Date) -> StorageFilesResponse {
+        guard let inspector = storageInspector else {
+            return StorageFilesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        let suites = inspector.listSuites()
+        return StorageFilesResponse(
+            requestId: request.requestId,
+            success: true,
+            files: suites,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleGetPreferences(_ request: WebSocketRequest, startTime: Date) -> StorageEntriesResponse {
+        guard let inspector = storageInspector else {
+            return StorageEntriesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        let suiteName = resolveSuiteName(request.fileName)
+        let entries = inspector.getEntries(suiteName: suiteName)
+        return StorageEntriesResponse(
+            requestId: request.requestId,
+            success: true,
+            entries: entries,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleGetPreference(_ request: WebSocketRequest, startTime: Date) -> StorageEntryResponse {
+        guard let inspector = storageInspector else {
+            return StorageEntryResponse(
+                requestId: request.requestId,
+                success: false,
+                found: false,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        guard let key = request.key else {
+            return StorageEntryResponse(
+                requestId: request.requestId,
+                success: false,
+                found: false,
+                error: "Missing required parameter: key",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        let suiteName = resolveSuiteName(request.fileName)
+        if let entry = inspector.getEntry(suiteName: suiteName, key: key) {
+            return StorageEntryResponse(
+                requestId: request.requestId,
+                success: true,
+                found: true,
+                key: entry.key,
+                value: entry.value,
+                valueType: entry.type,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } else {
+            return StorageEntryResponse(
+                requestId: request.requestId,
+                success: true,
+                found: false,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleSetPreference(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        guard let inspector = storageInspector else {
+            return WebSocketResponse.error(
+                type: ResponseType.setPreferenceResult.rawValue,
+                requestId: request.requestId,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        guard let key = request.key else {
+            throw CommandError.missingParameter("key")
+        }
+        guard let valueType = request.valueType else {
+            throw CommandError.missingParameter("valueType")
+        }
+
+        let suiteName = resolveSuiteName(request.fileName)
+        try inspector.setEntry(suiteName: suiteName, key: key, value: request.value, type: valueType)
+
+        return WebSocketResponse.success(
+            type: ResponseType.setPreferenceResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleRemovePreference(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        guard let inspector = storageInspector else {
+            return WebSocketResponse.error(
+                type: ResponseType.removePreferenceResult.rawValue,
+                requestId: request.requestId,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        guard let key = request.key else {
+            throw CommandError.missingParameter("key")
+        }
+
+        let suiteName = resolveSuiteName(request.fileName)
+        try inspector.removeEntry(suiteName: suiteName, key: key)
+
+        return WebSocketResponse.success(
+            type: ResponseType.removePreferenceResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleClearPreferences(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        guard let inspector = storageInspector else {
+            return WebSocketResponse.error(
+                type: ResponseType.clearPreferencesResult.rawValue,
+                requestId: request.requestId,
+                error: "Storage inspection not available",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        let suiteName = resolveSuiteName(request.fileName)
+        try inspector.clearEntries(suiteName: suiteName)
+
+        return WebSocketResponse.success(
+            type: ResponseType.clearPreferencesResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
     // MARK: - Helpers
 
     private func totalTimeMs(from startTime: Date) -> Int64 {
@@ -454,6 +638,18 @@ public class CommandHandler: CommandHandling {
             return ResponseType.clipboardResult.rawValue
         case RequestType.getVoiceOverState.rawValue:
             return ResponseType.voiceOverStateResult.rawValue
+        case RequestType.listPreferenceFiles.rawValue:
+            return ResponseType.preferenceFiles.rawValue
+        case RequestType.getPreferences.rawValue:
+            return ResponseType.preferences.rawValue
+        case RequestType.getPreference.rawValue:
+            return ResponseType.getPreferenceResult.rawValue
+        case RequestType.setPreference.rawValue:
+            return ResponseType.setPreferenceResult.rawValue
+        case RequestType.removePreference.rawValue:
+            return ResponseType.removePreferenceResult.rawValue
+        case RequestType.clearPreferences.rawValue:
+            return ResponseType.clearPreferencesResult.rawValue
         default:
             return "error"
         }

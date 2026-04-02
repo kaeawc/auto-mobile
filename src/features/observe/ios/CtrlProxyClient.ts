@@ -82,6 +82,7 @@ import { CtrlProxyHierarchy } from "./CtrlProxyHierarchy";
 import { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 import { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
+import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 
 // Import types
@@ -270,6 +271,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   private _navigation: CtrlProxyNavigation | null = null;
   private _clipboard: CtrlProxyClipboard | null = null;
   private _voiceOver: CtrlProxyVoiceOver | null = null;
+  private _storage: CtrlProxyStorage | null = null;
 
   // Logging tag for base class
   protected readonly logTag = "CtrlProxyClient";
@@ -481,6 +483,13 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       this._voiceOver = new CtrlProxyVoiceOver(this.createDelegateContext());
     }
     return this._voiceOver;
+  }
+
+  private get storage(): CtrlProxyStorage {
+    if (!this._storage) {
+      this._storage = new CtrlProxyStorage(this.createDelegateContext());
+    }
+    return this._storage;
   }
 
   // ===========================================================================
@@ -946,6 +955,52 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
           };
           break;
 
+        // Storage response types (matching Android wire protocol)
+        case "preference_files":
+          result = {
+            success: message.success ?? false,
+            files: (message as { files?: unknown[] }).files || [],
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "preferences":
+          result = {
+            success: message.success ?? false,
+            entries: (message as { entries?: unknown[] }).entries || [],
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "get_preference_result": {
+          const msg = message as { found?: boolean; key?: string; value?: string; valueType?: string };
+          const entry = msg.found && msg.key ? {
+            key: msg.key,
+            value: msg.value ?? null,
+            type: msg.valueType ?? "UNKNOWN",
+          } : undefined;
+          result = {
+            success: message.success ?? false,
+            found: msg.found ?? false,
+            entry,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+        }
+
+        case "set_preference_result":
+        case "remove_preference_result":
+        case "clear_preferences_result":
+          result = {
+            success: message.success ?? false,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
         default:
           // Handle error responses
           if (message.error) {
@@ -1218,6 +1273,34 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     perf?: PerformanceTracker
   ): Promise<CtrlProxySwipeResult> {
     return this.gestures.requestMultiFingerSwipe(x1, y1, x2, y2, fingerCount, duration, timeoutMs, perf);
+  }
+
+  // ===========================================================================
+  // Delegated Public Methods - Storage (UserDefaults)
+  // ===========================================================================
+
+  async listPreferenceFiles(packageName: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").PreferenceFile[]> {
+    return this.storage.listPreferenceFiles(packageName, timeoutMs);
+  }
+
+  async getPreferenceEntries(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").KeyValueEntry[]> {
+    return this.storage.getPreferenceEntries(packageName, fileName, timeoutMs);
+  }
+
+  async getPreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<import("../../storage/storageTypes").KeyValueEntry | null> {
+    return this.storage.getPreference(packageName, fileName, key, timeoutMs);
+  }
+
+  async setPreference(packageName: string, fileName: string, key: string, value: string | null, type: import("../../storage/storageTypes").KeyValueType, timeoutMs: number = 5000): Promise<void> {
+    return this.storage.setPreference(packageName, fileName, key, value, type, timeoutMs);
+  }
+
+  async removePreference(packageName: string, fileName: string, key: string, timeoutMs: number = 5000): Promise<void> {
+    return this.storage.removePreference(packageName, fileName, key, timeoutMs);
+  }
+
+  async clearPreferenceStore(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<void> {
+    return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
   }
 
   // ===========================================================================

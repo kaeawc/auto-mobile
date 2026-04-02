@@ -68,13 +68,26 @@ fun TimelineCanvas(
               .pointerInput(spans) {
                 detectTapGestures { offset ->
                   val chartWidth = size.width - LANE_LABEL_WIDTH
-                  if (chartWidth <= 0 || offset.x < LANE_LABEL_WIDTH) return@detectTapGestures
+                  val chartHeight = size.height - TIME_AXIS_HEIGHT
+                  if (
+                      chartWidth <= 0 ||
+                          chartHeight <= 0 ||
+                          offset.x < LANE_LABEL_WIDTH ||
+                          offset.y !in 0f..chartHeight
+                  ) {
+                    return@detectTapGestures
+                  }
                   val fraction = (offset.x - LANE_LABEL_WIDTH) / chartWidth
                   val clickedTs = state.fractionToTimestamp(fraction)
                   state.selectedTimestampMs = clickedTs
-                  // Find nearest span
+                  val laneHeight = chartHeight / activeLanes.size.coerceAtLeast(1)
+                  val tappedLaneIndex =
+                      (offset.y / laneHeight).toInt().coerceIn(0, activeLanes.lastIndex)
+                  val tappedLane = activeLanes[tappedLaneIndex]
+                  val laneSpans = spans.filter { it.category.laneIndex == tappedLane }
+                  // Find nearest span in the tapped lane
                   val tolerance = (state.visibleDurationMs() * 0.005f).toLong().coerceAtLeast(5L)
-                  val nearest = spans.minByOrNull {
+                  val nearest = laneSpans.minByOrNull {
                     kotlin.math
                         .abs(it.startMs - clickedTs)
                         .coerceAtMost(kotlin.math.abs(it.endMs - clickedTs))

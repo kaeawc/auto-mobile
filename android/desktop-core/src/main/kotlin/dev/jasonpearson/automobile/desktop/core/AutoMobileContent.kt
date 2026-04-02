@@ -313,6 +313,7 @@ fun AutoMobileContent(
 
   // Shared telemetry event cache for global search (populated from push client)
   val telemetryEventCache = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+  var telemetryCacheDeviceId by remember { mutableStateOf<String?>(null) }
 
   val timelineState = rememberTimelineState()
   var activeFilterCategory by remember { mutableStateOf<String?>(null) }
@@ -375,6 +376,19 @@ fun AutoMobileContent(
     LOG.info(
         "State changed: activeDeviceId=$activeDeviceId, isDevicePanelExpanded=$isDevicePanelExpanded"
     )
+  }
+
+  LaunchedEffect(activeDeviceId) {
+    if (telemetryCacheDeviceId == null) {
+      telemetryCacheDeviceId = activeDeviceId
+      return@LaunchedEffect
+    }
+    if (telemetryCacheDeviceId != activeDeviceId) {
+      telemetryEventCache.clear()
+      selectedTelemetryEvent = null
+      timelineState.selectedTimestampMs = null
+      telemetryCacheDeviceId = activeDeviceId
+    }
   }
 
   // Data source mode (Fake/Real) - global toggle for all dashboards

@@ -375,3 +375,305 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertNotNil(json?["enabled"])
     }
 }
+
+// MARK: - Storage Command Tests
+
+final class StorageCommandHandlerTests: XCTestCase {
+    var fakeTimeProvider: FakeTimeProvider!
+    var perfProvider: PerfProvider!
+    var fakeElementLocator: FakeElementLocator!
+    var fakeGesturePerformer: FakeGesturePerformer!
+    var fakeStorage: FakeStorageInspecting!
+    var commandHandler: CommandHandler!
+
+    override func setUp() {
+        super.setUp()
+        fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        fakeElementLocator = FakeElementLocator()
+        fakeGesturePerformer = FakeGesturePerformer()
+        fakeStorage = FakeStorageInspecting()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            storageInspector: fakeStorage
+        )
+    }
+
+    override func tearDown() {
+        perfProvider.clear()
+        PerfProvider.resetInstance()
+        super.tearDown()
+    }
+
+    // MARK: - List Preference Files
+
+    func testListPreferenceFilesReturnsSuites() throws {
+        fakeStorage.setSuites([
+            StorageSuiteInfo(name: nil, displayName: "Standard", entryCount: 5),
+            StorageSuiteInfo(name: "group.com.example", displayName: "group.com.example", entryCount: 3),
+        ])
+
+        let request = WebSocketRequest(type: "list_preference_files", requestId: "list-1")
+        let response = commandHandler.handle(request)
+
+        guard let filesResponse = response as? StorageFilesResponse else {
+            XCTFail("Expected StorageFilesResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertEqual(filesResponse.requestId, "list-1")
+        XCTAssertTrue(filesResponse.success)
+        XCTAssertEqual(filesResponse.files?.count, 2)
+        XCTAssertEqual(filesResponse.files?[0].displayName, "Standard")
+        XCTAssertEqual(filesResponse.files?[0].entryCount, 5)
+        XCTAssertEqual(filesResponse.files?[1].name, "group.com.example")
+        XCTAssertEqual(fakeStorage.listSuitesCallCount, 1)
+    }
+
+    // MARK: - Get Preferences
+
+    func testGetPreferencesReturnsEntries() {
+        fakeStorage.setEntries([
+            StorageEntry(key: "theme", value: "dark", type: "STRING"),
+            StorageEntry(key: "count", value: "42", type: "INT"),
+        ])
+
+        let request = WebSocketRequest(type: "get_preferences", requestId: "get-all-1")
+        let response = commandHandler.handle(request)
+
+        guard let entriesResponse = response as? StorageEntriesResponse else {
+            XCTFail("Expected StorageEntriesResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertTrue(entriesResponse.success)
+        XCTAssertEqual(entriesResponse.entries?.count, 2)
+        XCTAssertEqual(entriesResponse.entries?[0].key, "theme")
+        // suiteName should be nil for Standard (no fileName provided)
+        XCTAssertEqual(fakeStorage.getEntriesHistory, [nil])
+    }
+
+    func testGetPreferencesWithCustomSuite() {
+        fakeStorage.setEntries([
+            StorageEntry(key: "setting", value: "on", type: "STRING"),
+        ], forSuite: "com.example.settings")
+
+        let request = WebSocketRequest(
+            type: "get_preferences",
+            requestId: "get-all-2",
+            fileName: "com.example.settings"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let entriesResponse = response as? StorageEntriesResponse else {
+            XCTFail("Expected StorageEntriesResponse")
+            return
+        }
+
+        XCTAssertTrue(entriesResponse.success)
+        XCTAssertEqual(entriesResponse.entries?.count, 1)
+        XCTAssertEqual(fakeStorage.getEntriesHistory.first ?? "unexpected", "com.example.settings")
+    }
+
+    func testGetPreferencesStandardMapsToNil() {
+        let request = WebSocketRequest(
+            type: "get_preferences",
+            requestId: "get-std",
+            fileName: "Standard"
+        )
+        let _ = commandHandler.handle(request)
+        XCTAssertEqual(fakeStorage.getEntriesHistory, [nil])
+    }
+
+    // MARK: - Get Single Preference
+
+    func testGetPreferenceFound() {
+        fakeStorage.setEntries([
+            StorageEntry(key: "name", value: "Alice", type: "STRING"),
+        ])
+
+        let request = WebSocketRequest(
+            type: "get_preference",
+            requestId: "get-1",
+            key: "name"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let entryResponse = response as? StorageEntryResponse else {
+            XCTFail("Expected StorageEntryResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertTrue(entryResponse.success)
+        XCTAssertTrue(entryResponse.found)
+        XCTAssertEqual(entryResponse.key, "name")
+        XCTAssertEqual(entryResponse.value, "Alice")
+        XCTAssertEqual(entryResponse.valueType, "STRING")
+    }
+
+    func testGetPreferenceNotFound() {
+        let request = WebSocketRequest(
+            type: "get_preference",
+            requestId: "get-2",
+            key: "nonexistent"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let entryResponse = response as? StorageEntryResponse else {
+            XCTFail("Expected StorageEntryResponse")
+            return
+        }
+
+        XCTAssertTrue(entryResponse.success)
+        XCTAssertFalse(entryResponse.found)
+        XCTAssertNil(entryResponse.key)
+    }
+
+    func testGetPreferenceMissingKey() {
+        let request = WebSocketRequest(
+            type: "get_preference",
+            requestId: "get-3"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let entryResponse = response as? StorageEntryResponse else {
+            XCTFail("Expected StorageEntryResponse")
+            return
+        }
+
+        XCTAssertFalse(entryResponse.success)
+        XCTAssertTrue(entryResponse.error?.contains("key") ?? false)
+    }
+
+    // MARK: - Set Preference
+
+    func testSetPreferenceSuccess() {
+        let request = WebSocketRequest(
+            type: "set_preference",
+            requestId: "set-1",
+            key: "theme",
+            value: "dark",
+            valueType: "STRING"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let wsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertTrue(wsResponse.success ?? false)
+        XCTAssertEqual(wsResponse.type, "set_preference_result")
+        XCTAssertEqual(fakeStorage.setEntryHistory.count, 1)
+        XCTAssertEqual(fakeStorage.setEntryHistory[0].key, "theme")
+        XCTAssertEqual(fakeStorage.setEntryHistory[0].value, "dark")
+        XCTAssertEqual(fakeStorage.setEntryHistory[0].type, "STRING")
+    }
+
+    func testSetPreferenceMissingKey() {
+        let request = WebSocketRequest(
+            type: "set_preference",
+            requestId: "set-2",
+            value: "dark",
+            valueType: "STRING"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let wsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertFalse(wsResponse.success ?? true)
+        XCTAssertTrue(wsResponse.error?.contains("key") ?? false)
+    }
+
+    // MARK: - Remove Preference
+
+    func testRemovePreferenceSuccess() {
+        let request = WebSocketRequest(
+            type: "remove_preference",
+            requestId: "rm-1",
+            key: "theme"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let wsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertTrue(wsResponse.success ?? false)
+        XCTAssertEqual(wsResponse.type, "remove_preference_result")
+        XCTAssertEqual(fakeStorage.removeEntryHistory.count, 1)
+        XCTAssertEqual(fakeStorage.removeEntryHistory[0].key, "theme")
+    }
+
+    // MARK: - Clear Preferences
+
+    func testClearPreferencesSuccess() {
+        let request = WebSocketRequest(
+            type: "clear_preferences",
+            requestId: "clear-1",
+            fileName: "com.example.settings"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let wsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertTrue(wsResponse.success ?? false)
+        XCTAssertEqual(wsResponse.type, "clear_preferences_result")
+        XCTAssertEqual(fakeStorage.clearEntriesHistory.count, 1)
+        XCTAssertEqual(fakeStorage.clearEntriesHistory[0], "com.example.settings")
+    }
+
+    // MARK: - Nil Inspector
+
+    func testStorageCommandsWhenInspectorNil() {
+        let handlerNoStorage = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            storageInspector: nil
+        )
+
+        let request = WebSocketRequest(type: "list_preference_files", requestId: "nil-1")
+        let response = handlerNoStorage.handle(request)
+
+        guard let filesResponse = response as? StorageFilesResponse else {
+            XCTFail("Expected StorageFilesResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertFalse(filesResponse.success)
+        XCTAssertTrue(filesResponse.error?.contains("not available") ?? false)
+    }
+
+    // MARK: - Error Propagation
+
+    func testSetPreferenceErrorPropagation() {
+        fakeStorage.setShouldThrow(StorageError.invalidValue("bad", "INT"))
+
+        let request = WebSocketRequest(
+            type: "set_preference",
+            requestId: "err-1",
+            key: "count",
+            value: "bad",
+            valueType: "INT"
+        )
+        let response = commandHandler.handle(request)
+
+        guard let wsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertFalse(wsResponse.success ?? true)
+        XCTAssertTrue(wsResponse.error?.contains("parse") ?? false)
+    }
+}

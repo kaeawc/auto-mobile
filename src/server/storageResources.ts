@@ -1,6 +1,8 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { CtrlProxyClient } from "../features/observe/android";
+import { CtrlProxyClient as AndroidCtrlProxyClient } from "../features/observe/android";
+import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios/CtrlProxyClient";
+import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
 import type { PreferenceFile, KeyValueEntry } from "../features/storage/storageTypes";
@@ -49,16 +51,54 @@ function generateHash(data: unknown): string {
 }
 
 /**
- * Find a booted Android device by ID
+ * Find a booted device by ID across both platforms
  */
-async function findBootedAndroidDevice(deviceId: string): Promise<BootedDevice | null> {
+async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
   try {
-    const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-    return devices.find(d => d.deviceId === deviceId) ?? null;
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    // Try Android first
+    const androidDevices = await manager.getBootedDevices("android");
+    const android = androidDevices.find(d => d.deviceId === deviceId);
+    if (android) {return android;}
+
+    // Try iOS
+    const iosDevices = await manager.getBootedDevices("ios");
+    const ios = iosDevices.find(d => d.deviceId === deviceId);
+    if (ios) {return ios;}
+
+    return null;
   } catch (error) {
     logger.warn(`[StorageResources] Failed to find device ${deviceId}: ${error}`);
     return null;
   }
+}
+
+/**
+ * List preference files using the platform-appropriate client
+ */
+async function listPreferenceFilesForDevice(device: BootedDevice, packageName: string): Promise<PreferenceFile[]> {
+  if (device.platform === "android") {
+    const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+    return client.listPreferenceFiles(packageName);
+  } else if (device.platform === "ios") {
+    const client = IOSCtrlProxyClient.getInstance(device);
+    return client.listPreferenceFiles(packageName);
+  }
+  throw new Error(`Unsupported platform: ${device.platform}`);
+}
+
+/**
+ * Get preference entries using the platform-appropriate client
+ */
+async function getPreferenceEntriesForDevice(device: BootedDevice, packageName: string, fileName: string): Promise<KeyValueEntry[]> {
+  if (device.platform === "android") {
+    const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
+    return client.getPreferenceEntries(packageName, fileName);
+  } else if (device.platform === "ios") {
+    const client = IOSCtrlProxyClient.getInstance(device);
+    return client.getPreferenceEntries(packageName, fileName);
+  }
+  throw new Error(`Unsupported platform: ${device.platform}`);
 }
 
 /**
@@ -100,7 +140,7 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
   logger.info(`[StorageResources] getStorageFilesResource: deviceId=${deviceId}, packageName=${decodedPackage}`);
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       logger.warn(`[StorageResources] Device not found: ${deviceId}`);
       return {
@@ -110,9 +150,8 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
       };
     }
 
-    logger.info(`[StorageResources] Found device: ${device.deviceId}, calling listPreferenceFiles`);
-    const client = CtrlProxyClient.getInstance(device);
-    const files = await client.listPreferenceFiles(decodedPackage);
+    logger.info(`[StorageResources] Found device: ${device.deviceId} (${device.platform}), calling listPreferenceFiles`);
+    const files = await listPreferenceFilesForDevice(device, decodedPackage);
     logger.info(`[StorageResources] listPreferenceFiles returned ${files.length} files`);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(files);
@@ -134,6 +173,7 @@ async function getStorageFilesResource(params: Record<string, string>): Promise<
       text: JSON.stringify({
         deviceId,
         packageName: decodedPackage,
+        platform: device.platform,
         files,
         totalCount: files.length,
         lastUpdated
@@ -159,7 +199,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
   const uri = buildEntriesUri(deviceId, decodedPackage, decodedFileName);
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
         uri,
@@ -168,8 +208,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
       };
     }
 
-    const client = CtrlProxyClient.getInstance(device);
-    const entries = await client.getPreferenceEntries(decodedPackage, decodedFileName);
+    const entries = await getPreferenceEntriesForDevice(device, decodedPackage, decodedFileName);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(entries);
 
@@ -191,6 +230,7 @@ async function getStorageEntriesResource(params: Record<string, string>): Promis
         deviceId,
         packageName: decodedPackage,
         fileName: decodedFileName,
+        platform: device.platform,
         entries,
         totalCount: entries.length,
         lastUpdated
@@ -214,7 +254,7 @@ export function registerStorageResources(): void {
   ResourceRegistry.registerTemplate(
     STORAGE_RESOURCE_TEMPLATES.FILES,
     "App Storage Files",
-    "List all SharedPreferences and DataStore files in an Android app. Requires app to have AutoMobile SDK with storage inspection enabled.",
+    "List all storage files in an app (Android SharedPreferences or iOS UserDefaults suites). Requires app to have AutoMobile SDK with storage inspection enabled.",
     "application/json",
     getStorageFilesResource
   );
@@ -223,7 +263,7 @@ export function registerStorageResources(): void {
   ResourceRegistry.registerTemplate(
     STORAGE_RESOURCE_TEMPLATES.ENTRIES,
     "Storage File Entries",
-    "Get all key-value entries from a SharedPreferences or DataStore file.",
+    "Get all key-value entries from a storage file (Android SharedPreferences or iOS UserDefaults suite).",
     "application/json",
     getStorageEntriesResource
   );

@@ -50,6 +50,12 @@ public struct WebSocketRequest: Codable {
     public let id: String?
     public let shape: HighlightShape?
 
+    // Storage parameters
+    public let fileName: String?
+    public let key: String?
+    public let value: String?
+    public let valueType: String?
+
     // Permission/settings
     public let permission: String?
     public let requestPermission: Bool?
@@ -84,6 +90,10 @@ public struct WebSocketRequest: Codable {
         disableAllFiltering: Bool? = nil,
         id: String? = nil,
         shape: HighlightShape? = nil,
+        fileName: String? = nil,
+        key: String? = nil,
+        value: String? = nil,
+        valueType: String? = nil,
         permission: String? = nil,
         requestPermission: Bool? = nil,
         enabled: Bool? = nil
@@ -116,6 +126,10 @@ public struct WebSocketRequest: Codable {
         self.disableAllFiltering = disableAllFiltering
         self.id = id
         self.shape = shape
+        self.fileName = fileName
+        self.key = key
+        self.value = value
+        self.valueType = valueType
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled
@@ -524,6 +538,126 @@ public struct HighlightStyle: Codable {
     }
 }
 
+// MARK: - Storage Models
+
+/// Information about a storage suite (UserDefaults suite)
+public struct StorageSuiteInfo: Codable {
+    public let name: String?
+    public let displayName: String
+    public let entryCount: Int
+
+    public init(name: String?, displayName: String, entryCount: Int) {
+        self.name = name
+        self.displayName = displayName
+        self.entryCount = entryCount
+    }
+}
+
+/// A single key-value storage entry
+public struct StorageEntry: Codable {
+    public let key: String
+    public let value: String?
+    public let type: String
+
+    public init(key: String, value: String?, type: String) {
+        self.key = key
+        self.value = value
+        self.type = type
+    }
+}
+
+// MARK: - Storage Response Models
+
+/// Response for list_preference_files
+public struct StorageFilesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let files: [StorageSuiteInfo]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        files: [StorageSuiteInfo]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        self.type = ResponseType.preferenceFiles.rawValue
+        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.files = files
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+/// Response for get_preferences
+public struct StorageEntriesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let entries: [StorageEntry]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        entries: [StorageEntry]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        self.type = ResponseType.preferences.rawValue
+        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.entries = entries
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+/// Response for get_preference
+public struct StorageEntryResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let found: Bool
+    public let key: String?
+    public let value: String?
+    public let valueType: String?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        found: Bool,
+        key: String? = nil,
+        value: String? = nil,
+        valueType: String? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        self.type = ResponseType.getPreferenceResult.rawValue
+        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.found = found
+        self.key = key
+        self.value = value
+        self.valueType = valueType
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
 // MARK: - Performance Update Response
 
 /// Push notification for performance metrics (FPS, frame time, etc.)
@@ -605,6 +739,14 @@ public enum RequestType: String {
     case getTraversalOrder = "get_traversal_order"
     case addHighlight = "add_highlight"
     case getVoiceOverState = "get_voiceover_state"
+
+    // Storage inspection
+    case listPreferenceFiles = "list_preference_files"
+    case getPreferences = "get_preferences"
+    case getPreference = "get_preference"
+    case setPreference = "set_preference"
+    case removePreference = "remove_preference"
+    case clearPreferences = "clear_preferences"
 }
 
 // MARK: - Response Types (matching Android)
@@ -629,4 +771,12 @@ public enum ResponseType: String {
     case highlightResponse = "highlight_response"
     case voiceOverStateResult = "voiceover_state_result"
     case connected
+
+    // Storage inspection
+    case preferenceFiles = "preference_files"
+    case preferences
+    case getPreferenceResult = "get_preference_result"
+    case setPreferenceResult = "set_preference_result"
+    case removePreferenceResult = "remove_preference_result"
+    case clearPreferencesResult = "clear_preferences_result"
 }

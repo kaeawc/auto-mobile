@@ -20,12 +20,13 @@ public class CtrlProxy {
     #endif
 
     /// Creates the service with specified port
-    public init(port: UInt16 = defaultPort, timer: Timer = SystemTimer()) {
+    public init(port: UInt16 = defaultPort, timer: Timer = SystemTimer(), storageInspector: StorageInspecting? = DefaultStorageInspecting()) {
         elementLocator = ElementLocator()
         gesturePerformer = GesturePerformer(elementLocator: elementLocator)
         commandHandler = CommandHandler(
             elementLocator: elementLocator,
-            gesturePerformer: gesturePerformer
+            gesturePerformer: gesturePerformer,
+            storageInspector: storageInspector
         )
         server = WebSocketServer(port: port, commandHandler: commandHandler)
         hierarchyDebouncer = HierarchyDebouncer(elementLocator: elementLocator, timer: timer)

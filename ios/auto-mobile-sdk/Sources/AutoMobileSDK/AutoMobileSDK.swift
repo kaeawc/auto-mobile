@@ -261,7 +261,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     }
 
     /// The event buffer (for subsystems that need direct access).
-    public func getEventBuffer() -> SdkEventBuffer? {
+    func getEventBuffer() -> SdkEventBuffer? {
         lock.lock()
         defer { lock.unlock() }
         return eventBuffer

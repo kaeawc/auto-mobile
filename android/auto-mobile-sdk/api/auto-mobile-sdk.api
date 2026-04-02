@@ -8,6 +8,7 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileConfiguration$Build
   public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration$Builder sessionTimeoutMs(long);
   public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration$Builder eventProcessors(java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>);
   public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration$Builder maxPendingEvents(int);
+  public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration$Builder backPressureStrategy(dev.jasonpearson.automobile.sdk.events.BackPressureStrategy);
   public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration build();
 }
 Compiled from "AutoMobileConfiguration.kt"
@@ -23,22 +24,24 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileConfiguration {
   public static final int DEFAULT_MAX_BREADCRUMBS;
   public static final long DEFAULT_SESSION_TIMEOUT_MS;
   public static final int DEFAULT_MAX_PENDING_EVENTS;
-  public dev.jasonpearson.automobile.sdk.AutoMobileConfiguration(int, long, int, long, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int);
-  public dev.jasonpearson.automobile.sdk.AutoMobileConfiguration(int, long, int, long, java.util.List, int, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.AutoMobileConfiguration(int, long, int, long, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy);
+  public dev.jasonpearson.automobile.sdk.AutoMobileConfiguration(int, long, int, long, java.util.List, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final int getBufferSize();
   public final long getFlushIntervalMs();
   public final int getMaxBreadcrumbs();
   public final long getSessionTimeoutMs();
   public final java.util.List<dev.jasonpearson.automobile.sdk.events.EventProcessor> getEventProcessors();
   public final int getMaxPendingEvents();
+  public final dev.jasonpearson.automobile.sdk.events.BackPressureStrategy getBackPressureStrategy();
   public final int component1();
   public final long component2();
   public final int component3();
   public final long component4();
   public final java.util.List<dev.jasonpearson.automobile.sdk.events.EventProcessor> component5();
   public final int component6();
-  public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration copy$auto_mobile_sdk(int, long, int, long, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int);
-  public static dev.jasonpearson.automobile.sdk.AutoMobileConfiguration copy$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.AutoMobileConfiguration, int, long, int, long, java.util.List, int, int, java.lang.Object);
+  public final dev.jasonpearson.automobile.sdk.events.BackPressureStrategy component7();
+  public final dev.jasonpearson.automobile.sdk.AutoMobileConfiguration copy$auto_mobile_sdk(int, long, int, long, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy);
+  public static dev.jasonpearson.automobile.sdk.AutoMobileConfiguration copy$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.AutoMobileConfiguration, int, long, int, long, java.util.List, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, int, java.lang.Object);
   public java.lang.String toString();
   public int hashCode();
   public boolean equals(java.lang.Object);
@@ -103,8 +106,6 @@ public final class dev.jasonpearson.automobile.sdk.AutoMobileSDK {
   public final void setEnabled(boolean);
   public final boolean isEnabled();
   public final int getListenerCount();
-  public final void trackEvent(java.lang.String, java.util.Map<java.lang.String, java.lang.String>);
-  public static void trackEvent$default(dev.jasonpearson.automobile.sdk.AutoMobileSDK, java.lang.String, java.util.Map, int, java.lang.Object);
   public final java.lang.String currentSessionId();
   public final void addBreadcrumb(java.lang.String, dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory, java.util.Map<java.lang.String, java.lang.String>);
   public static void addBreadcrumb$default(dev.jasonpearson.automobile.sdk.AutoMobileSDK, java.lang.String, dev.jasonpearson.automobile.sdk.breadcrumbs.BreadcrumbCategory, java.util.Map, int, java.lang.Object);
@@ -643,6 +644,14 @@ public final class dev.jasonpearson.automobile.sdk.database.TableStructureResult
   public int hashCode();
   public boolean equals(java.lang.Object);
 }
+Compiled from "BackPressureStrategy.kt"
+public final class dev.jasonpearson.automobile.sdk.events.BackPressureStrategy extends java.lang.Enum<dev.jasonpearson.automobile.sdk.events.BackPressureStrategy> {
+  public static final dev.jasonpearson.automobile.sdk.events.BackPressureStrategy DROP_OLDEST;
+  public static final dev.jasonpearson.automobile.sdk.events.BackPressureStrategy IGNORE_NEWEST;
+  public static dev.jasonpearson.automobile.sdk.events.BackPressureStrategy[] values();
+  public static dev.jasonpearson.automobile.sdk.events.BackPressureStrategy valueOf(java.lang.String);
+  public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.events.BackPressureStrategy> getEntries();
+}
 Compiled from "DropCounter.kt"
 public final class dev.jasonpearson.automobile.sdk.events.DefaultDropCounter implements dev.jasonpearson.automobile.sdk.events.DropCounter {
   public static final int $stable;
@@ -701,7 +710,6 @@ public final class dev.jasonpearson.automobile.sdk.events.RetryPolicy {
 Compiled from "SdkEventBroadcaster.kt"
 public final class dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster {
   public static final dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster INSTANCE;
-  public static final java.lang.String ACTION_SDK_EVENT_BATCH;
   public static final int MAX_BATCH_BYTES;
   public static final int $stable;
   public final dev.jasonpearson.automobile.sdk.events.RetryPolicy getRetryPolicy$auto_mobile_sdk();
@@ -716,10 +724,14 @@ public final class dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster {
   public static java.util.List splitIntoBatches$auto_mobile_sdk$default(dev.jasonpearson.automobile.sdk.events.SdkEventBroadcaster, java.util.List, java.lang.String, int, int, java.lang.Object);
 }
 Compiled from "SdkEventBuffer.kt"
+public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer$WhenMappings {
+  public static final int[] $EnumSwitchMapping$0;
+}
+Compiled from "SdkEventBuffer.kt"
 public final class dev.jasonpearson.automobile.sdk.events.SdkEventBuffer {
   public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.Unit>, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int);
-  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List, int, int, kotlin.jvm.internal.DefaultConstructorMarker);
+  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1<? super java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>, kotlin.Unit>, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List<? extends dev.jasonpearson.automobile.sdk.events.EventProcessor>, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy);
+  public dev.jasonpearson.automobile.sdk.events.SdkEventBuffer(int, long, kotlin.jvm.functions.Function1, dev.jasonpearson.automobile.sdk.persistence.EventPersistence, java.util.concurrent.ScheduledExecutorService, dev.jasonpearson.automobile.sdk.events.DropCounter, java.util.List, int, dev.jasonpearson.automobile.sdk.events.BackPressureStrategy, int, kotlin.jvm.internal.DefaultConstructorMarker);
   public final boolean isEnabled();
   public final void setEnabled(boolean);
   public final void start();
@@ -842,25 +854,20 @@ Compiled from "AutoMobileClickTracker.kt"
 public final class dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker {
   public static final dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker INSTANCE;
   public static final int $stable;
-  public final void initialize$auto_mobile_sdk(android.app.Application, java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer);
+  public final void initialize$auto_mobile_sdk(android.app.Application, java.lang.String);
   public final void shutdown(android.content.Context);
   public static final java.util.WeakHashMap access$getWrappedActivities$p();
   public static final void access$wrapWindowCallback(dev.jasonpearson.automobile.sdk.interaction.AutoMobileClickTracker, android.app.Activity);
   public static final android.os.Handler access$getHandler$p();
-  public static final dev.jasonpearson.automobile.sdk.events.SdkEventBuffer access$getBuffer$p();
+  public static final boolean access$isInitialized$p();
   public static final long access$getLastTapProcessedAt$p();
   public static final void access$setLastTapProcessedAt$p(long);
-  public static final java.lang.String access$getApplicationId$p();
 }
 Compiled from "AutoMobileLog.kt"
 public final class dev.jasonpearson.automobile.sdk.logging.AutoMobileLog {
   public static final dev.jasonpearson.automobile.sdk.logging.AutoMobileLog INSTANCE;
   public static final int $stable;
-  public final void initialize$auto_mobile_sdk(java.lang.String, dev.jasonpearson.automobile.sdk.events.SdkEventBuffer);
-  public final void addFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
-  public static void addFilter$default(dev.jasonpearson.automobile.sdk.logging.AutoMobileLog, java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, java.lang.Object);
-  public final void removeFilter(java.lang.String);
-  public final void clearFilters();
+  public final void initialize$auto_mobile_sdk();
   public final int v(java.lang.String, java.lang.String);
   public final int v(java.lang.String, java.lang.String, java.lang.Throwable);
   public final int d(java.lang.String, java.lang.String);
@@ -873,26 +880,6 @@ public final class dev.jasonpearson.automobile.sdk.logging.AutoMobileLog {
   public final int e(java.lang.String, java.lang.String, java.lang.Throwable);
   public final int wtf(java.lang.String, java.lang.String);
   public final int wtf(java.lang.String, java.lang.String, java.lang.Throwable);
-}
-Compiled from "CompiledLogFilter.kt"
-public final class dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter {
-  public static final int $stable;
-  public dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
-  public dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, kotlin.jvm.internal.DefaultConstructorMarker);
-  public final java.lang.String getName();
-  public final kotlin.text.Regex getTagPattern();
-  public final kotlin.text.Regex getMessagePattern();
-  public final int getMinLevel();
-  public final boolean matches(java.lang.String, java.lang.String, int);
-  public final java.lang.String component1();
-  public final kotlin.text.Regex component2();
-  public final kotlin.text.Regex component3();
-  public final int component4();
-  public final dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter copy(java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int);
-  public static dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter copy$default(dev.jasonpearson.automobile.sdk.logging.CompiledLogFilter, java.lang.String, kotlin.text.Regex, kotlin.text.Regex, int, int, java.lang.Object);
-  public java.lang.String toString();
-  public int hashCode();
-  public boolean equals(java.lang.Object);
 }
 Compiled from "SdkLogger.kt"
 public final class dev.jasonpearson.automobile.sdk.logging.DefaultSdkLogger implements dev.jasonpearson.automobile.sdk.logging.SdkLogger {
@@ -1077,6 +1064,35 @@ public final class dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore 
   public static final dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore access$getInstance$cp();
   public static final void access$setInstance$cp(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
   public static final kotlinx.serialization.json.Json access$getJson$p(dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore);
+}
+Compiled from "NoOpDropCounter.kt"
+public final class dev.jasonpearson.automobile.sdk.noop.NoOpDropCounter implements dev.jasonpearson.automobile.sdk.events.DropCounter {
+  public static final dev.jasonpearson.automobile.sdk.noop.NoOpDropCounter INSTANCE;
+  public static final int $stable;
+  public void increment(dev.jasonpearson.automobile.sdk.events.DropReason, int);
+  public java.util.Map<dev.jasonpearson.automobile.sdk.events.DropReason, java.lang.Long> snapshot();
+  public void reset();
+}
+Compiled from "NoOpEventPersistence.kt"
+public final class dev.jasonpearson.automobile.sdk.noop.NoOpEventPersistence implements dev.jasonpearson.automobile.sdk.persistence.EventPersistence {
+  public static final dev.jasonpearson.automobile.sdk.noop.NoOpEventPersistence INSTANCE;
+  public static final int $stable;
+  public java.lang.String persist(java.util.List<? extends dev.jasonpearson.automobile.protocol.SdkEvent>);
+  public java.util.List<kotlin.Pair<java.lang.String, java.util.List<dev.jasonpearson.automobile.protocol.SdkEvent>>> loadPending();
+  public void removeBatch(java.lang.String);
+  public void cleanup(int);
+}
+Compiled from "NoOpEventProcessor.kt"
+public final class dev.jasonpearson.automobile.sdk.noop.NoOpEventProcessor implements dev.jasonpearson.automobile.sdk.events.EventProcessor {
+  public static final dev.jasonpearson.automobile.sdk.noop.NoOpEventProcessor INSTANCE;
+  public static final int $stable;
+  public dev.jasonpearson.automobile.protocol.SdkEvent process(dev.jasonpearson.automobile.protocol.SdkEvent);
+}
+Compiled from "NoOpNavigationListener.kt"
+public final class dev.jasonpearson.automobile.sdk.noop.NoOpNavigationListener implements dev.jasonpearson.automobile.sdk.NavigationListener {
+  public static final dev.jasonpearson.automobile.sdk.noop.NoOpNavigationListener INSTANCE;
+  public static final int $stable;
+  public void onNavigationEvent(dev.jasonpearson.automobile.sdk.NavigationEvent);
 }
 Compiled from "AutoMobileBroadcastInterceptor.kt"
 public final class dev.jasonpearson.automobile.sdk.os.AutoMobileBroadcastInterceptor$initialize$broadcastReceiver$1 extends android.content.BroadcastReceiver {

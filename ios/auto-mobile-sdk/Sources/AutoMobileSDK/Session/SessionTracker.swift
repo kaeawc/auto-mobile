@@ -21,10 +21,17 @@ public final class SessionTracker: SessionTracking, @unchecked Sendable {
     private var state: State = .ended
     private var timeoutTimer: (any TimerScheduling)?
 
-    public init(
+    public convenience init(
         timeoutMs: Int = 30_000,
-        uuidProvider: @escaping () -> String = { UUID().uuidString },
-        timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() }
+        uuidProvider: @escaping () -> String = { UUID().uuidString }
+    ) {
+        self.init(timeoutMs: timeoutMs, uuidProvider: uuidProvider, timerFactory: { GCDTimer() })
+    }
+
+    init(
+        timeoutMs: Int,
+        uuidProvider: @escaping () -> String,
+        timerFactory: @escaping () -> any TimerScheduling
     ) {
         self.timeoutMs = timeoutMs
         self.uuidProvider = uuidProvider

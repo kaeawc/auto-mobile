@@ -132,13 +132,13 @@ export class IdentifyMediaViews {
       bounds: el.bounds
     };
 
-    const viewId = el["view-id"] as string | undefined;
+    const viewId = (el["view-id"] ?? el["viewId"]) as string | undefined;
     if (viewId) {view.viewId = viewId;}
 
-    const contentDesc = el["content-desc"] as string | undefined;
+    const contentDesc = (el["content-desc"] ?? el["contentDesc"]) as string | undefined;
     if (contentDesc) {view.contentDescription = contentDesc;}
 
-    const resourceId = el["resource-id"] as string | undefined;
+    const resourceId = (el["resource-id"] ?? el["resourceId"]) as string | undefined;
     if (resourceId) {view.resourceId = resourceId;}
 
     const sourceUrl = extractSourceUrl(el["extras"] as Record<string, string> | undefined);

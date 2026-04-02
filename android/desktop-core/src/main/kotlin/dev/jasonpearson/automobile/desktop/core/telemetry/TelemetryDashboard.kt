@@ -93,6 +93,11 @@ private sealed class EventListItem {
     ) : EventListItem()
 }
 
+private fun EventListItem.representativeEvent(): TelemetryDisplayEvent? = when (this) {
+    is EventListItem.Single -> event
+    is EventListItem.Group -> events.firstOrNull()
+}
+
 /**
  * Processes a flat event list into [EventListItem]s, collapsing runs of 3+
  * consecutive same-category events into groups.
@@ -207,17 +212,28 @@ private const val DETAIL_PANEL_WIDTH_MAX = 600
 internal val MAX_EVENTS_OPTIONS = listOf(500, 1000, 5000, 10_000)
 private const val DEFAULT_MAX_EVENTS = 1000
 
-private enum class CategoryFilter(val label: String, val icon: ImageVector) {
-    All("All", AppIcons.All),
-    Network("Network", AppIcons.Network),
-    Navigation("Nav", AppIcons.Navigation),
-    Logs("Logs", AppIcons.Logs),
-    Os("OS", AppIcons.Os),
-    Failures("Failures", AppIcons.Failures),
-    Storage("Storage", AppIcons.StorageCategory),
-    Layout("Layout", AppIcons.Layout),
-    Performance("Perf", AppIcons.Performance),
-    ToolCalls("Tools", AppIcons.ToolCalls),
+private enum class CategoryFilter(val label: String, val timelineCategoryKey: String?, val icon: ImageVector) {
+    All("All", null, AppIcons.All),
+    Network("Network", "Network", AppIcons.Network),
+    Navigation("Nav", "Navigation", AppIcons.Navigation),
+    Logs("Logs", "Log", AppIcons.Logs),
+    Os("OS", "Os", AppIcons.Os),
+    Failures("Failures", "Failure", AppIcons.Failures),
+    Storage("Storage", "Storage", AppIcons.StorageCategory),
+    Layout("Layout", "Layout", AppIcons.Layout),
+    Performance("Perf", "Performance", AppIcons.Performance),
+    ToolCalls("Tools", "ToolCall", AppIcons.ToolCalls),
+}
+
+private fun groupedRowIndexForTimestamp(
+    groupedItems: List<EventListItem>,
+    timestamp: Long,
+): Int {
+    val nearestRow = groupedItems.indexOfFirst { item ->
+        val event = item.representativeEvent() ?: return@indexOfFirst false
+        event.timestamp >= timestamp
+    }
+    return if (nearestRow >= 0) nearestRow else groupedItems.lastIndex
 }
 
 /**
@@ -375,14 +391,18 @@ fun TelemetryDashboard(
     // Mark current tab as seen when the selected filter changes
     LaunchedEffect(selectedFilter) {
         lastSeenCounts[selectedFilter] = categoryCounts[selectedFilter] ?: 0
-        onFilterChanged?.invoke(if (selectedFilter == CategoryFilter.All) null else selectedFilter.label)
+        onFilterChanged?.invoke(selectedFilter.timelineCategoryKey)
     }
 
     // Sync: when timeline selection changes, scroll to nearest event
     LaunchedEffect(timelineState?.selectedTimestampMs) {
         val ts = timelineState?.selectedTimestampMs ?: return@LaunchedEffect
-        val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
-            .takeIf { it >= 0 } ?: filteredEvents.lastIndex
+        val nearestIndex = if (selectedFilter == CategoryFilter.Network) {
+            filteredEvents.indexOfFirst { it.timestamp >= ts }
+                .takeIf { it >= 0 } ?: filteredEvents.lastIndex
+        } else {
+            groupedRowIndexForTimestamp(groupedItems, ts)
+        }
         if (nearestIndex >= 0) {
             listState.animateScrollToItem(nearestIndex)
         }
@@ -392,8 +412,12 @@ fun TelemetryDashboard(
     LaunchedEffect(Unit) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { index ->
-                if (timelineState == null || filteredEvents.isEmpty()) return@collect
-                val visibleEvent = filteredEvents.getOrNull(index) ?: return@collect
+                if (timelineState == null) return@collect
+                val visibleEvent = if (selectedFilter == CategoryFilter.Network) {
+                    filteredEvents.getOrNull(index)
+                } else {
+                    groupedItems.getOrNull(index)?.representativeEvent()
+                } ?: return@collect
                 val eventTs = visibleEvent.timestamp
                 // Only re-center if the event is outside the visible window
                 if (eventTs < timelineState.visibleStartMs || eventTs > timelineState.visibleEndMs) {

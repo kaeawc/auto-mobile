@@ -18,6 +18,7 @@ data class UIElementInfo(
     @SerialName("text-color") val textColor: String? = null, // Hex color string like "#FF000000"
     @SerialName("content-desc") val contentDesc: String? = null,
     @SerialName("resource-id") val resourceId: String? = null,
+    @SerialName("view-id") val viewId: String? = null,
     val className: String? = null,
     val bounds: ElementBounds? = null,
     val clickable: String? = null, // "true"/"false" to match XML format

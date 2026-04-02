@@ -755,6 +755,52 @@ class ViewHierarchyExtractorTest {
     assertEquals(ViewHierarchyExtractor.NodeRelationship.UNCLE, relationship)
   }
 
+  // MARK: - viewId Generation Tests
+
+  @Test
+  fun `UIElementInfo with resourceId gets viewId equal to resourceId`() {
+    val element = UIElementInfo(resourceId = "com.example:id/my_button", viewId = "com.example:id/my_button")
+    assertEquals("com.example:id/my_button", element.viewId)
+  }
+
+  @Test
+  fun `UIElementInfo without resourceId gets UUID-formatted viewId`() {
+    val uuidRegex = Regex("[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
+    val viewId = extractor.generateDeterministicUuidForTest("0/1/2")
+    assertTrue("viewId should be UUID-formatted but was: $viewId", uuidRegex.matches(viewId))
+  }
+
+  @Test
+  fun `generateDeterministicUuid is stable - same input produces same output`() {
+    val first = extractor.generateDeterministicUuidForTest("some/path/0")
+    val second = extractor.generateDeterministicUuidForTest("some/path/0")
+    assertEquals(first, second)
+  }
+
+  @Test
+  fun `generateDeterministicUuid produces different UUIDs for different paths`() {
+    val uuid1 = extractor.generateDeterministicUuidForTest("0/1/0")
+    val uuid2 = extractor.generateDeterministicUuidForTest("0/1/1")
+    assertTrue("Different paths should produce different UUIDs", uuid1 != uuid2)
+  }
+
+  @Test
+  fun `viewId field is serialized to JSON with correct key`() {
+    val element = UIElementInfo(
+        text = "Hello",
+        resourceId = "com.example:id/text",
+        viewId = "com.example:id/text",
+    )
+    val jsonString = json.encodeToString(UIElementInfo.serializer(), element)
+    assertTrue("JSON should contain view-id field", jsonString.contains("\"view-id\""))
+  }
+
+  private fun ViewHierarchyExtractor.generateDeterministicUuidForTest(path: String): String {
+    val method = this.javaClass.getDeclaredMethod("generateDeterministicUuid", String::class.java)
+    method.isAccessible = true
+    return method.invoke(this, path) as String
+  }
+
   // Helper method to extract children from hierarchy (this would be made public in the actual
   // extractor for testing)
   private fun ViewHierarchyExtractor.extractChildrenFromHierarchy(

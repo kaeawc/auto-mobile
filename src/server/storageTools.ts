@@ -34,49 +34,77 @@ const TYPE_GUIDANCE: Record<string, string> = {
   "android:DICTIONARY": "DICTIONARY is iOS-only. On Android, store JSON objects as STRING.",
 };
 
+const STORAGE_NAME_DESCRIPTION =
+  "Storage name: SharedPreferences file name (without .xml) on Android, " +
+  "UserDefaults suite name on iOS. Use 'Standard' for the default iOS suite.";
+
+const legacyFileNameDescription =
+  "Deprecated alias for `name`. Accepted for backward compatibility.";
+
+function resolveStorageName(args: { name?: string; fileName?: string }): string {
+  return args.name ?? args.fileName!;
+}
+
 // Schema for setKeyValue tool
-const setKeyValueSchema = addDeviceTargetingToSchema(
-  z.object({
+const setKeyValueSchema = z.union([
+  addDeviceTargetingToSchema(z.object({
     appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
-    name: z.string().describe(
-      "Storage name: SharedPreferences file name (without .xml) on Android, " +
-      "UserDefaults suite name on iOS. Use 'Standard' for the default iOS suite."
-    ),
+    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().optional().describe(legacyFileNameDescription),
     key: z.string().describe("The key to set"),
     value: z.string().nullable().describe("The value to set, serialized as a string (null to clear)"),
     type: z.enum(KEY_VALUE_TYPES).describe(
       "Value type. Android: STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET. " +
       "iOS: STRING, INT, DOUBLE, BOOLEAN, DATA, DATE, ARRAY, DICTIONARY."
     ),
-  })
-);
+  })),
+  addDeviceTargetingToSchema(z.object({
+    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().describe(legacyFileNameDescription),
+    key: z.string().describe("The key to set"),
+    value: z.string().nullable().describe("The value to set, serialized as a string (null to clear)"),
+    type: z.enum(KEY_VALUE_TYPES).describe(
+      "Value type. Android: STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET. " +
+      "iOS: STRING, INT, DOUBLE, BOOLEAN, DATA, DATE, ARRAY, DICTIONARY."
+    ),
+  })),
+]);
 
 // Schema for removeKeyValue tool
-const removeKeyValueSchema = addDeviceTargetingToSchema(
-  z.object({
+const removeKeyValueSchema = z.union([
+  addDeviceTargetingToSchema(z.object({
     appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
-    name: z.string().describe(
-      "Storage name: SharedPreferences file name (without .xml) on Android, " +
-      "UserDefaults suite name on iOS. Use 'Standard' for the default iOS suite."
-    ),
+    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().optional().describe(legacyFileNameDescription),
     key: z.string().describe("The key to remove"),
-  })
-);
+  })),
+  addDeviceTargetingToSchema(z.object({
+    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().describe(legacyFileNameDescription),
+    key: z.string().describe("The key to remove"),
+  })),
+]);
 
 // Schema for clearKeyValueFile tool
-const clearKeyValueFileSchema = addDeviceTargetingToSchema(
-  z.object({
+const clearKeyValueFileSchema = z.union([
+  addDeviceTargetingToSchema(z.object({
     appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
-    name: z.string().describe(
-      "Storage name to clear entirely: SharedPreferences file name (without .xml) on Android, " +
-      "UserDefaults suite name on iOS. Use 'Standard' for the default iOS suite."
-    ),
-  })
-);
+    name: z.string().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().optional().describe(legacyFileNameDescription),
+  })),
+  addDeviceTargetingToSchema(z.object({
+    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
+    fileName: z.string().describe(legacyFileNameDescription),
+  })),
+]);
 
 interface SetKeyValueArgs {
   appId: string;
-  name: string;
+  name?: string;
+  fileName?: string;
   key: string;
   value: string | null;
   type: KeyValueType;
@@ -84,13 +112,15 @@ interface SetKeyValueArgs {
 
 interface RemoveKeyValueArgs {
   appId: string;
-  name: string;
+  name?: string;
+  fileName?: string;
   key: string;
 }
 
 interface ClearKeyValueFileArgs {
   appId: string;
-  name: string;
+  name?: string;
+  fileName?: string;
 }
 
 /**
@@ -132,6 +162,7 @@ export function registerStorageTools(): void {
   // setKeyValue handler
   const setKeyValueHandler = async (device: BootedDevice, args: SetKeyValueArgs) => {
     try {
+      const storageName = resolveStorageName(args);
       if (args.value !== null) {
         validateTypeForPlatform(device.platform, args.type);
       }
@@ -139,16 +170,16 @@ export function registerStorageTools(): void {
       if (device.platform === "android") {
         const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
         if (args.value === null) {
-          await client.removePreference(args.appId, args.name, args.key);
+          await client.removePreference(args.appId, storageName, args.key);
         } else {
-          await client.setPreference(args.appId, args.name, args.key, args.value, args.type);
+          await client.setPreference(args.appId, storageName, args.key, args.value, args.type);
         }
       } else if (device.platform === "ios") {
         const client = IOSCtrlProxyClient.getInstance(device);
         if (args.value === null) {
-          await client.removePreference(args.appId, args.name, args.key);
+          await client.removePreference(args.appId, storageName, args.key);
         } else {
-          await client.setPreference(args.appId, args.name, args.key, args.value, args.type);
+          await client.setPreference(args.appId, storageName, args.key, args.value, args.type);
         }
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
@@ -156,13 +187,13 @@ export function registerStorageTools(): void {
 
       // Notify subscribers that entries changed so they re-read fresh data
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, args.name)
+        buildEntriesUri(device.deviceId, args.appId, storageName)
       );
 
       return createJSONToolResponse({
         success: true,
         appId: args.appId,
-        name: args.name,
+        name: storageName,
         key: args.key,
         type: args.type,
       });
@@ -177,24 +208,25 @@ export function registerStorageTools(): void {
   // removeKeyValue handler
   const removeKeyValueHandler = async (device: BootedDevice, args: RemoveKeyValueArgs) => {
     try {
+      const storageName = resolveStorageName(args);
       if (device.platform === "android") {
         const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-        await client.removePreference(args.appId, args.name, args.key);
+        await client.removePreference(args.appId, storageName, args.key);
       } else if (device.platform === "ios") {
         const client = IOSCtrlProxyClient.getInstance(device);
-        await client.removePreference(args.appId, args.name, args.key);
+        await client.removePreference(args.appId, storageName, args.key);
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
       }
 
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, args.name)
+        buildEntriesUri(device.deviceId, args.appId, storageName)
       );
 
       return createJSONToolResponse({
         success: true,
         appId: args.appId,
-        name: args.name,
+        name: storageName,
         key: args.key,
       });
     } catch (error) {
@@ -208,24 +240,25 @@ export function registerStorageTools(): void {
   // clearKeyValueFile handler
   const clearKeyValueFileHandler = async (device: BootedDevice, args: ClearKeyValueFileArgs) => {
     try {
+      const storageName = resolveStorageName(args);
       if (device.platform === "android") {
         const client = AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory);
-        await client.clearPreferenceStore(args.appId, args.name);
+        await client.clearPreferenceStore(args.appId, storageName);
       } else if (device.platform === "ios") {
         const client = IOSCtrlProxyClient.getInstance(device);
-        await client.clearPreferenceStore(args.appId, args.name);
+        await client.clearPreferenceStore(args.appId, storageName);
       } else {
         throw new ActionableError(`Unsupported platform: ${device.platform}`);
       }
 
       void ResourceRegistry.notifyResourceUpdated(
-        buildEntriesUri(device.deviceId, args.appId, args.name)
+        buildEntriesUri(device.deviceId, args.appId, storageName)
       );
 
       return createJSONToolResponse({
         success: true,
         appId: args.appId,
-        name: args.name,
+        name: storageName,
       });
     } catch (error) {
       if (error instanceof ActionableError) {

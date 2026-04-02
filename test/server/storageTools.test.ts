@@ -36,6 +36,22 @@ describe("Storage Tools Registration", () => {
       })).not.toThrow();
     });
 
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("setKeyValue");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+        key: "dark_mode",
+        value: "true",
+        type: "BOOLEAN",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
+    });
+
     test("accepts null value", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("setKeyValue");
@@ -159,6 +175,20 @@ describe("Storage Tools Registration", () => {
       })).not.toThrow();
     });
 
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("removeKeyValue");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+        key: "dark_mode",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
+    });
+
     test("rejects missing required fields", () => {
       registerStorageTools();
       const tool = ToolRegistry.getTool("removeKeyValue");
@@ -183,6 +213,19 @@ describe("Storage Tools Registration", () => {
         appId: "com.example.app",
         name: "user_prefs",
       })).not.toThrow();
+    });
+
+    test("accepts legacy fileName alias", () => {
+      registerStorageTools();
+      const tool = ToolRegistry.getTool("clearKeyValueFile");
+
+      expect(tool!.schema.parse({
+        platform: "android",
+        appId: "com.example.app",
+        fileName: "user_prefs",
+      })).toMatchObject({
+        fileName: "user_prefs",
+      });
     });
 
     test("rejects missing required fields", () => {

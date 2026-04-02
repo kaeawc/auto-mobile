@@ -104,7 +104,7 @@ describe("CtrlProxyStorage (iOS)", function() {
           requestId: sentMsg.requestId,
           success: true,
           files: [
-            { name: null, displayName: "Standard", entryCount: 5 },
+            { name: "Standard", displayName: "Standard", entryCount: 5 },
             { name: "group.com.example", displayName: "group.com.example", entryCount: 3 },
           ],
           totalTimeMs: 10,
@@ -112,6 +112,7 @@ describe("CtrlProxyStorage (iOS)", function() {
 
         const result = await resultPromise;
         expect(result).toHaveLength(2);
+        expect(result[0].name).toBe("Standard");
         expect(result[0].displayName).toBe("Standard");
         expect(result[1].name).toBe("group.com.example");
       } finally {

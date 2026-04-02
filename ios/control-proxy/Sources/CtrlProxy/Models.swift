@@ -542,11 +542,11 @@ public struct HighlightStyle: Codable {
 
 /// Information about a storage suite (UserDefaults suite)
 public struct StorageSuiteInfo: Codable {
-    public let name: String?
+    public let name: String
     public let displayName: String
     public let entryCount: Int
 
-    public init(name: String?, displayName: String, entryCount: Int) {
+    public init(name: String, displayName: String, entryCount: Int) {
         self.name = name
         self.displayName = displayName
         self.entryCount = entryCount

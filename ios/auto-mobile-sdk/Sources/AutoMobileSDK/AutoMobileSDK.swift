@@ -21,6 +21,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
     private var eventPersistence: (any EventPersisting)?
     private var sessionTracker: SessionTracker?
     private var sessionObservers: [NSObjectProtocol] = []
+    private var _breadcrumbTrail: BreadcrumbTrail?
 
     private init() {}
 
@@ -93,6 +94,11 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileLog.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileNetwork.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileFailures.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        let trail = BreadcrumbTrail(maxSize: configuration.maxBreadcrumbs)
+        lock.lock()
+        _breadcrumbTrail = trail
+        lock.unlock()
+
         AutoMobileCrashes.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileHangs.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileHangs.shared.startMonitoring()
@@ -199,6 +205,85 @@ public final class AutoMobileSDK: @unchecked Sendable {
     /// Returns the current session ID, or nil if no session is active.
     public func currentSessionId() -> String? {
         return sessionTracker?.currentSessionId()
+    }
+
+    // MARK: - Breadcrumbs
+
+    /// Add a breadcrumb to the trail. Breadcrumbs are attached to crash reports
+    /// so that recent app activity is visible when diagnosing crashes.
+    ///
+    /// - Parameters:
+    ///   - message: A short description of the breadcrumb.
+    ///   - category: The category (defaults to `.custom`).
+    ///   - metadata: Optional key-value metadata.
+    public func addBreadcrumb(
+        message: String,
+        category: BreadcrumbCategory = .custom,
+        metadata: [String: String] = [:]
+    ) {
+        lock.lock()
+        let trail = _breadcrumbTrail
+        lock.unlock()
+
+        trail?.add(Breadcrumb(
+            category: category,
+            message: message,
+            metadata: metadata
+        ))
+    }
+
+    // MARK: - Shutdown
+
+    /// Shuts down the SDK, releasing all resources.
+    /// After calling this method, `initialize` may be called again to restart the SDK.
+    public func shutdown() {
+        // Reset all subsystems in reverse initialization order
+        SwiftUINavigationAdapter.shared.stop()
+        AutoMobileCrashes.shared.reset()
+        AutoMobileHangs.shared.reset()
+        AutoMobileOsEvents.shared.reset()
+        AutoMobileNotificationObserver.shared.reset()
+        AutoMobileInteractionTracker.shared.reset()
+        ViewBodyTracker.shared.reset()
+        UserDefaultsInspector.shared.reset()
+        DatabaseInspector.shared.reset()
+        AutoMobileNetwork.shared.reset()
+        AutoMobileFailures.shared.reset()
+        AutoMobileBiometrics.shared.reset()
+        AutoMobileLog.shared.reset()
+
+        // Shut down session tracker and remove observers
+        lock.lock()
+        let trackerToShutdown = sessionTracker
+        sessionTracker = nil
+        let observersToRemove = sessionObservers
+        sessionObservers.removeAll()
+        lock.unlock()
+
+        trackerToShutdown?.shutdown()
+        for observer in observersToRemove {
+            NotificationCenter.default.removeObserver(observer)
+        }
+
+        // Extract buffer under lock, then shut it down OUTSIDE the lock
+        // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock
+        lock.lock()
+        let bufferToShutdown = eventBuffer
+        _sdkContext = nil
+        eventBuffer = nil
+        _dropCounter = nil
+        _breadcrumbTrail?.clear()
+        _breadcrumbTrail = nil
+        eventPersistence = nil
+        SdkEventBroadcaster.shared.persistence = nil
+        listeners.removeAll()
+        _isEnabled = true
+        _isInitialized = false
+        _bundleId = nil
+        _configuration = nil
+        lock.unlock()
+
+        bufferToShutdown?.shutdown()
     }
 
     // MARK: - Enable/Disable
@@ -310,50 +395,6 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
     /// Reset the SDK for testing. Not for production use.
     internal func reset() {
-        // Reset all subsystems in reverse initialization order
-        SwiftUINavigationAdapter.shared.stop()
-        AutoMobileCrashes.shared.reset()
-        AutoMobileHangs.shared.reset()
-        AutoMobileOsEvents.shared.reset()
-        AutoMobileNotificationObserver.shared.reset()
-        AutoMobileInteractionTracker.shared.reset()
-        ViewBodyTracker.shared.reset()
-        UserDefaultsInspector.shared.reset()
-        DatabaseInspector.shared.reset()
-        AutoMobileNetwork.shared.reset()
-        AutoMobileFailures.shared.reset()
-        AutoMobileBiometrics.shared.reset()
-        AutoMobileLog.shared.reset()
-
-        // Shut down session tracker and remove observers
-        lock.lock()
-        let trackerToShutdown = sessionTracker
-        sessionTracker = nil
-        let observersToRemove = sessionObservers
-        sessionObservers.removeAll()
-        lock.unlock()
-
-        trackerToShutdown?.shutdown()
-        for observer in observersToRemove {
-            NotificationCenter.default.removeObserver(observer)
-        }
-
-        // Extract buffer under lock, then shut it down OUTSIDE the lock
-        // to prevent deadlock: shutdown() -> onFlush -> bundleId -> lock
-        lock.lock()
-        let bufferToShutdown = eventBuffer
-        _sdkContext = nil
-        eventBuffer = nil
-        _dropCounter = nil
-        eventPersistence = nil
-        SdkEventBroadcaster.shared.persistence = nil
-        listeners.removeAll()
-        _isEnabled = true
-        _isInitialized = false
-        _bundleId = nil
-        _configuration = nil
-        lock.unlock()
-
-        bufferToShutdown?.shutdown()
+        shutdown()
     }
 }

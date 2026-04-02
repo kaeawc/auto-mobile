@@ -378,33 +378,22 @@ fun TelemetryDashboard(
         onFilterChanged?.invoke(if (selectedFilter == CategoryFilter.All) null else selectedFilter.label)
     }
 
-    // Sync: when timeline selection changes, scroll to nearest event.
-    // Non-network tabs render groupedItems (headers + children), so we must
-    // translate the target timestamp into the correct LazyColumn item index.
+    // Sync: when timeline selection changes, scroll to nearest event
     LaunchedEffect(timelineState?.selectedTimestampMs) {
         val ts = timelineState?.selectedTimestampMs ?: return@LaunchedEffect
-        if (selectedFilter == CategoryFilter.Network) {
-            val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
-                .takeIf { it >= 0 } ?: filteredEvents.lastIndex
-            if (nearestIndex >= 0) listState.animateScrollToItem(nearestIndex)
-        } else {
-            val targetIndex = lazyColumnIndexForTimestamp(groupedItems, ts)
-            if (targetIndex >= 0) listState.animateScrollToItem(targetIndex)
+        val nearestIndex = filteredEvents.indexOfFirst { it.timestamp >= ts }
+            .takeIf { it >= 0 } ?: filteredEvents.lastIndex
+        if (nearestIndex >= 0) {
+            listState.animateScrollToItem(nearestIndex)
         }
     }
 
-    // Sync: when telemetry scrolls, update timeline visible window center.
-    // Resolve the visible event from groupedItems on non-network tabs so
-    // collapsed group headers don't cause an index mismatch.
+    // Sync: when telemetry scrolls, update timeline visible window center
     LaunchedEffect(Unit) {
         snapshotFlow { listState.firstVisibleItemIndex }
             .collect { index ->
                 if (timelineState == null || filteredEvents.isEmpty()) return@collect
-                val visibleEvent = if (selectedFilter == CategoryFilter.Network) {
-                    filteredEvents.getOrNull(index)
-                } else {
-                    eventAtLazyColumnIndex(groupedItems, index)
-                } ?: return@collect
+                val visibleEvent = filteredEvents.getOrNull(index) ?: return@collect
                 val eventTs = visibleEvent.timestamp
                 // Only re-center if the event is outside the visible window
                 if (eventTs < timelineState.visibleStartMs || eventTs > timelineState.visibleEndMs) {

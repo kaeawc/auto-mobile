@@ -5,6 +5,10 @@ on:
     branches:
       - "**"
 
+concurrency:
+  group: pull-request-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 permissions:
   actions: read
   checks: write

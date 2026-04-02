@@ -45,10 +45,12 @@ public struct LogFilter: Sendable {
 
 /// Log convenience methods with filter-based log capture.
 ///
-/// Wraps `os.Logger` and optionally buffers matching entries as `SdkLogEvent`.
-/// Filters are registered by name with optional regex patterns for tag and message,
-/// plus a minimum `LogLevel` (`verbose`, `debug`, `info`, `warning`, `error`, `fault`).
-/// Only entries matching at least one active filter are buffered.
+/// Wraps `os.Logger` and applies registered filters to control which entries are
+/// captured by `OSLogReader`. Filters are registered by name with optional regex
+/// patterns for tag and message, plus a minimum `LogLevel` (`verbose`, `debug`,
+/// `info`, `warning`, `error`, `fault`). Filters gate OSLogReader output only —
+/// they do not buffer events into `SdkEventBuffer` (CtrlProxy's `/sdk-events`
+/// endpoint already reads from `OSLogStore`).
 ///
 /// Severity level mapping: Android `wtf` corresponds to iOS `fault`.
 public final class AutoMobileLog: @unchecked Sendable {
@@ -57,15 +59,14 @@ public final class AutoMobileLog: @unchecked Sendable {
     private let logger = os.Logger(subsystem: "dev.jasonpearson.automobile", category: "sdk")
     private let lock = NSLock()
     private var _filters: [String: LogFilter] = [:]
-    private var _buffer: (any EventBuffering)?
 
     private init() {}
 
     /// Called by AutoMobileSDK.initialize; kept for interface compatibility.
     func initialize(bundleId: String?, buffer: some EventBuffering) {
-        lock.lock()
-        _buffer = buffer
-        lock.unlock()
+        // Buffer is intentionally not stored — filters gate OSLogReader output only.
+        // Buffering here would cause double-emit since CtrlProxy's /sdk-events
+        // endpoint already merges SDK-buffered events with OSLogStore output.
     }
 
     // MARK: - Filter API
@@ -117,50 +118,28 @@ public final class AutoMobileLog: @unchecked Sendable {
         return message
     }
 
-    private func bufferIfMatched(tag: String?, message: String, level: LogLevel) {
-        lock.lock()
-        let filters = _filters
-        let buffer = _buffer
-        lock.unlock()
-
-        guard !filters.isEmpty, let buffer = buffer else { return }
-        for (_, filter) in filters {
-            if filter.matches(tag: tag, message: message, level: level) {
-                let event = SdkLogEvent(level: level, tag: tag, message: message)
-                buffer.add(event)
-                return
-            }
-        }
-    }
-
     public func v(_ tag: String? = nil, _ message: String) {
         logger.debug("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .verbose)
     }
 
     public func d(_ tag: String? = nil, _ message: String) {
         logger.debug("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .debug)
     }
 
     public func i(_ tag: String? = nil, _ message: String) {
         logger.info("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .info)
     }
 
     public func w(_ tag: String? = nil, _ message: String) {
         logger.warning("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .warning)
     }
 
     public func e(_ tag: String? = nil, _ message: String) {
         logger.error("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .error)
     }
 
     public func fault(_ tag: String? = nil, _ message: String) {
         logger.fault("\(self.formatted(tag, message), privacy: .public)")
-        bufferIfMatched(tag: tag, message: message, level: .fault)
     }
 
     // MARK: - Testing Support
@@ -169,7 +148,6 @@ public final class AutoMobileLog: @unchecked Sendable {
     internal func reset() {
         lock.lock()
         _filters.removeAll()
-        _buffer = nil
         lock.unlock()
     }
 }

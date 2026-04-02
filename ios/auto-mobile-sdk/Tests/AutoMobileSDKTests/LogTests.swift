@@ -109,38 +109,18 @@ final class AutoMobileLogTests: XCTestCase {
         XCTAssertFalse(filter.matches(tag: "APIClient", message: "connection timeout", level: .debug))
     }
 
-    // MARK: - Buffering integration
+    // MARK: - No buffering (filters gate OSLogReader only)
 
-    func testMatchingLogIsBuffered() {
+    func testLogsAreNotBufferedEvenWithMatchingFilter() {
         let buffer = FakeEventBuffer()
         AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer)
         AutoMobileLog.shared.addFilter(name: "all")
 
         AutoMobileLog.shared.i("Net", "request sent")
+        AutoMobileLog.shared.e("Net", "request failed")
+        AutoMobileLog.shared.fault("Net", "critical")
 
-        XCTAssertEqual(buffer.events.count, 1)
-        let event = buffer.events.first as? SdkLogEvent
-        XCTAssertEqual(event?.level, .info)
-        XCTAssertEqual(event?.tag, "Net")
-        XCTAssertEqual(event?.message, "request sent")
-    }
-
-    func testNonMatchingLogIsNotBuffered() {
-        let buffer = FakeEventBuffer()
-        AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileLog.shared.addFilter(name: "errors-only", minLevel: .error)
-
-        AutoMobileLog.shared.d("t", "debug msg")
-
-        XCTAssertTrue(buffer.events.isEmpty)
-    }
-
-    func testLogWithoutFiltersIsNotBuffered() {
-        let buffer = FakeEventBuffer()
-        AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer)
-
-        AutoMobileLog.shared.e("t", "error msg")
-
+        // Filters do not buffer — CtrlProxy's /sdk-events reads from OSLogStore directly.
         XCTAssertTrue(buffer.events.isEmpty)
     }
 
@@ -148,29 +128,5 @@ final class AutoMobileLogTests: XCTestCase {
         AutoMobileLog.shared.addFilter(name: "all")
         AutoMobileLog.shared.i("t", "msg")
         // No crash = pass
-    }
-
-    func testFaultLevelIsBuffered() {
-        let buffer = FakeEventBuffer()
-        AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileLog.shared.addFilter(name: "all")
-
-        AutoMobileLog.shared.fault("t", "critical")
-
-        XCTAssertEqual(buffer.events.count, 1)
-        let event = buffer.events.first as? SdkLogEvent
-        XCTAssertEqual(event?.level, .fault)
-    }
-
-    func testOnlyFirstMatchingFilterBuffersOnce() {
-        let buffer = FakeEventBuffer()
-        AutoMobileLog.shared.initialize(bundleId: "test", buffer: buffer)
-        AutoMobileLog.shared.addFilter(name: "a")
-        AutoMobileLog.shared.addFilter(name: "b")
-
-        AutoMobileLog.shared.i("t", "msg")
-
-        // Should buffer exactly once even with two matching filters
-        XCTAssertEqual(buffer.events.count, 1)
     }
 }

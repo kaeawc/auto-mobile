@@ -1,7 +1,69 @@
 import Foundation
 
+/// Grouped parameters for recording a network request/response manually.
+///
+/// Use this struct with ``AutoMobileNetwork/recordRequest(_:)`` instead of
+/// passing individual parameters.
+public struct NetworkRequestRecord: Sendable {
+    /// The full request URL (e.g. "https://api.example.com/users?page=1").
+    public let url: String
+    /// HTTP method (e.g. "GET", "POST").
+    public let method: String
+    /// Request headers. Only recorded when header capture is enabled.
+    public var requestHeaders: [String: String]?
+    /// Size of the request body in bytes.
+    public var requestBodySize: Int?
+    /// HTTP status code of the response (e.g. 200, 404).
+    public var statusCode: Int?
+    /// Response headers. Only recorded when header capture is enabled.
+    public var responseHeaders: [String: String]?
+    /// Size of the response body in bytes.
+    public var responseBodySize: Int?
+    /// Round-trip duration in milliseconds.
+    public var durationMs: Double?
+    /// Error description if the request failed.
+    public var error: String?
+    /// Request body text. Only recorded when body capture is enabled and content is text-based.
+    public var requestBody: String?
+    /// Response body text. Only recorded when body capture is enabled and content is text-based.
+    public var responseBody: String?
+    /// Content type of the response (e.g. "application/json").
+    public var contentType: String?
+
+    public init(
+        url: String,
+        method: String,
+        requestHeaders: [String: String]? = nil,
+        requestBodySize: Int? = nil,
+        statusCode: Int? = nil,
+        responseHeaders: [String: String]? = nil,
+        responseBodySize: Int? = nil,
+        durationMs: Double? = nil,
+        error: String? = nil,
+        requestBody: String? = nil,
+        responseBody: String? = nil,
+        contentType: String? = nil
+    ) {
+        self.url = url
+        self.method = method
+        self.requestHeaders = requestHeaders
+        self.requestBodySize = requestBodySize
+        self.statusCode = statusCode
+        self.responseHeaders = responseHeaders
+        self.responseBodySize = responseBodySize
+        self.durationMs = durationMs
+        self.error = error
+        self.requestBody = requestBody
+        self.responseBody = responseBody
+        self.contentType = contentType
+    }
+}
+
 /// Network request/response tracking for URLSession.
 /// iOS equivalent of Android's OkHttp interceptor.
+///
+/// Use ``protocolClass()`` to register automatic interception with `URLSessionConfiguration`,
+/// or call ``recordRequest(_:)`` to record requests manually.
 public final class AutoMobileNetwork: @unchecked Sendable {
     public static let shared = AutoMobileNetwork()
 
@@ -85,28 +147,27 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         lock.unlock()
     }
 
-    /// Create a URLProtocol class that intercepts and records network requests.
-    /// Register it with URLSessionConfiguration.protocolClasses.
+    /// Returns the `URLProtocol` subclass that intercepts and records network requests.
+    ///
+    /// Register the returned class with your `URLSessionConfiguration`:
+    /// ```swift
+    /// let config = URLSessionConfiguration.default
+    /// config.protocolClasses = [AutoMobileNetwork.shared.protocolClass()]
+    /// let session = URLSession(configuration: config)
+    /// ```
+    ///
+    /// - Returns: A `URLProtocol` subclass suitable for `protocolClasses`.
     public func protocolClass() -> AnyClass {
         return AutoMobileURLProtocol.self
     }
 
-    /// Record a network request/response manually.
-    /// Use this when you can't use the URLProtocol approach.
-    public func recordRequest(
-        url: String,
-        method: String,
-        requestHeaders: [String: String]? = nil,
-        requestBodySize: Int? = nil,
-        statusCode: Int? = nil,
-        responseHeaders: [String: String]? = nil,
-        responseBodySize: Int? = nil,
-        durationMs: Double? = nil,
-        error: String? = nil,
-        requestBody: String? = nil,
-        responseBody: String? = nil,
-        contentType: String? = nil
-    ) {
+    /// Record a network request/response manually using a ``NetworkRequestRecord``.
+    ///
+    /// Use this when you cannot use the ``protocolClass()`` approach (e.g. custom
+    /// transport layers, gRPC, or GraphQL clients).
+    ///
+    /// - Parameter record: A ``NetworkRequestRecord`` describing the request and response.
+    public func recordRequest(_ record: NetworkRequestRecord) {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         lock.lock()
@@ -121,29 +182,63 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         lock.unlock()
 
         // Truncate bodies if needed
-        let finalRequestBody: String? = captureBodies ? requestBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
-        let finalResponseBody: String? = captureBodies ? responseBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
+        let finalRequestBody: String? = captureBodies ? record.requestBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
+        let finalResponseBody: String? = captureBodies ? record.responseBody.map { truncateBody($0, maxBytes: maxBytes) } : nil
 
         // Extract host and path from URL
-        let urlComponents = URLComponents(string: url)
+        let urlComponents = URLComponents(string: record.url)
 
         let event = SdkNetworkRequestEvent(
-            url: url,
-            method: method,
-            requestHeaders: captureHeaders ? requestHeaders : nil,
-            requestBodySize: requestBodySize,
-            statusCode: statusCode,
-            responseHeaders: captureHeaders ? responseHeaders : nil,
-            responseBodySize: responseBodySize,
-            durationMs: durationMs,
-            error: error,
+            url: record.url,
+            method: record.method,
+            requestHeaders: captureHeaders ? record.requestHeaders : nil,
+            requestBodySize: record.requestBodySize,
+            statusCode: record.statusCode,
+            responseHeaders: captureHeaders ? record.responseHeaders : nil,
+            responseBodySize: record.responseBodySize,
+            durationMs: record.durationMs,
+            error: record.error,
             host: urlComponents?.host,
             path: urlComponents?.path,
             requestBody: finalRequestBody,
             responseBody: finalResponseBody,
-            contentType: contentType
+            contentType: record.contentType
         )
         currentBuffer?.add(event)
+    }
+
+    /// Record a network request/response manually.
+    ///
+    /// Prefer ``recordRequest(_:)`` with a ``NetworkRequestRecord`` for cleaner call sites.
+    @available(*, deprecated, message: "Use recordRequest(_:) with NetworkRequestRecord instead")
+    public func recordRequest(
+        url: String,
+        method: String,
+        requestHeaders: [String: String]? = nil,
+        requestBodySize: Int? = nil,
+        statusCode: Int? = nil,
+        responseHeaders: [String: String]? = nil,
+        responseBodySize: Int? = nil,
+        durationMs: Double? = nil,
+        error: String? = nil,
+        requestBody: String? = nil,
+        responseBody: String? = nil,
+        contentType: String? = nil
+    ) {
+        recordRequest(NetworkRequestRecord(
+            url: url,
+            method: method,
+            requestHeaders: requestHeaders,
+            requestBodySize: requestBodySize,
+            statusCode: statusCode,
+            responseHeaders: responseHeaders,
+            responseBodySize: responseBodySize,
+            durationMs: durationMs,
+            error: error,
+            requestBody: requestBody,
+            responseBody: responseBody,
+            contentType: contentType
+        ))
     }
 
     private func truncateBody(_ body: String, maxBytes: Int) -> String {
@@ -177,6 +272,12 @@ public final class AutoMobileNetwork: @unchecked Sendable {
     }
 
     /// Record a WebSocket frame event.
+    ///
+    /// - Parameters:
+    ///   - url: The WebSocket URL (e.g. "wss://ws.example.com/feed").
+    ///   - direction: Whether the frame was sent or received.
+    ///   - frameType: The type of WebSocket frame (text, binary, ping, etc.).
+    ///   - payloadSize: Optional payload size in bytes.
     public func recordWebSocketFrame(
         url: String,
         direction: WebSocketFrameDirection,
@@ -218,8 +319,10 @@ public final class AutoMobileNetwork: @unchecked Sendable {
 // MARK: - URLProtocol Implementation
 
 /// A URLProtocol subclass that intercepts network requests for monitoring.
-/// Register with: URLSessionConfiguration.default.protocolClasses = [AutoMobileURLProtocol.self]
-public class AutoMobileURLProtocol: URLProtocol {
+///
+/// This is an implementation detail -- consumers should register it via
+/// ``AutoMobileNetwork/protocolClass()`` rather than referencing this type directly.
+package class AutoMobileURLProtocol: URLProtocol {
     private static let handledKey = "dev.jasonpearson.automobile.sdk.handled"
     private var startTime: Date?
     private var urlSession: URLSession?
@@ -300,12 +403,12 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
         let durationMs = startTime.map { Date().timeIntervalSince($0) * 1000 }
 
         if let error = error {
-            AutoMobileNetwork.shared.recordRequest(
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: request.url?.absoluteString ?? "",
                 method: request.httpMethod ?? "GET",
                 durationMs: durationMs,
                 error: error.localizedDescription
-            )
+            ))
             client?.urlProtocol(self, didFailWithError: error)
         } else {
             let httpResponse = receivedResponse as? HTTPURLResponse
@@ -324,7 +427,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
                 ? AutoMobileNetwork.utf8String(from: receivedData)
                 : nil
 
-            AutoMobileNetwork.shared.recordRequest(
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
                 url: request.url?.absoluteString ?? "",
                 method: request.httpMethod ?? "GET",
                 requestHeaders: request.allHTTPHeaderFields,
@@ -336,7 +439,7 @@ extension AutoMobileURLProtocol: URLSessionDataDelegate {
                 requestBody: requestBody,
                 responseBody: responseBody,
                 contentType: contentType
-            )
+            ))
 
             client?.urlProtocolDidFinishLoading(self)
         }

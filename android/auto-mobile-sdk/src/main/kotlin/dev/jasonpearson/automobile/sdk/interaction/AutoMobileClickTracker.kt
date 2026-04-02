@@ -7,14 +7,13 @@ import android.graphics.Rect
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.util.Log
 import android.view.MotionEvent
 import android.view.View
 import android.view.Window
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.annotation.MainThread
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.sdk.AutoMobileSDK
-import dev.jasonpearson.automobile.sdk.events.SdkEventBuffer
 
 /**
  * Automatic click tracking for all Activities via Window.Callback chaining.
@@ -44,7 +43,7 @@ object AutoMobileClickTracker {
     /** Minimum interval between accessibility tree traversals to avoid piling up work. */
     private const val TAP_DEBOUNCE_MS = 100L
 
-    private var buffer: SdkEventBuffer? = null
+    private var isInitialized = false
     private var applicationId: String? = null
     private val handler = Handler(Looper.getMainLooper())
     private val wrappedActivities = java.util.WeakHashMap<Activity, Boolean>()
@@ -52,8 +51,8 @@ object AutoMobileClickTracker {
     private var lifecycleCallbacks: Application.ActivityLifecycleCallbacks? = null
 
     @MainThread
-    internal fun initialize(application: Application, appId: String?, buffer: SdkEventBuffer) {
-        this.buffer = buffer
+    internal fun initialize(application: Application, appId: String?) {
+        this.isInitialized = true
         this.applicationId = appId
 
         val callbacks = object : Application.ActivityLifecycleCallbacks {
@@ -100,7 +99,7 @@ object AutoMobileClickTracker {
             }
         }
         wrappedActivities.clear()
-        buffer = null
+        isInitialized = false
         applicationId = null
         lastTapProcessedAt = 0L
     }
@@ -155,7 +154,7 @@ object AutoMobileClickTracker {
         }
 
         private fun emitTapEvent(x: Float, y: Float, durationMs: Long) {
-            val buf = buffer ?: return
+            if (!isInitialized) return
             val now = System.currentTimeMillis()
             if (now - lastTapProcessedAt < TAP_DEBOUNCE_MS) return
             lastTapProcessedAt = now
@@ -176,12 +175,8 @@ object AutoMobileClickTracker {
                     info.recycle()
                 }
 
-                buf.add(SdkCustomEvent(
-                    timestamp = System.currentTimeMillis(),
-                    applicationId = applicationId,
-                    name = "_auto_tap",
-                    properties = props,
-                ))
+                // Log to logcat so the CtrlProxy logcat reader captures it
+                Log.d(TAG, "_auto_tap ${props.entries.joinToString(" ") { "${it.key}=${it.value}" }}")
             } catch (e: Exception) {
                 AutoMobileSDK.logger.d(TAG) { "Error tracking tap: ${e.message}" }
             }

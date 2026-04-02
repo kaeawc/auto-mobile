@@ -72,7 +72,8 @@ class TelemetryEventTest {
       level = 4, // INFO
       tag = "OkHttp",
       message = "HTTP 200 GET /users (150ms)",
-      filterName = "http",
+      pid = 1234,
+      tid = 5678,
     )
 
     val encoded = json.encodeToString(SdkEvent.serializer(), event)
@@ -81,7 +82,8 @@ class TelemetryEventTest {
     val decoded = json.decodeFromString<SdkEvent>(encoded)
     assertIs<SdkLogEvent>(decoded)
     assertEquals("OkHttp", decoded.tag)
-    assertEquals("http", decoded.filterName)
+    assertEquals(1234, decoded.pid)
+    assertEquals(5678, decoded.tid)
     assertEquals(4, decoded.level)
   }
 
@@ -121,24 +123,6 @@ class TelemetryEventTest {
   }
 
   @Test
-  fun `serialize and deserialize custom event`() {
-    val event: SdkEvent = SdkCustomEvent(
-      timestamp = 6000L,
-      applicationId = "com.example.app",
-      name = "purchase_completed",
-      properties = mapOf("amount" to "9.99", "currency" to "USD"),
-    )
-
-    val encoded = json.encodeToString(SdkEvent.serializer(), event)
-    assertTrue(encoded.contains(""""type":"custom""""))
-
-    val decoded = json.decodeFromString<SdkEvent>(encoded)
-    assertIs<SdkCustomEvent>(decoded)
-    assertEquals("purchase_completed", decoded.name)
-    assertEquals("9.99", decoded.properties["amount"])
-  }
-
-  @Test
   fun `serialize and deserialize event batch`() {
     val batch: SdkEvent = SdkEventBatch(
       timestamp = 7000L,
@@ -155,12 +139,6 @@ class TelemetryEventTest {
           level = 5,
           tag = "MyTag",
           message = "Warning",
-          filterName = "all",
-        ),
-        SdkCustomEvent(
-          timestamp = 7003L,
-          name = "click",
-          properties = mapOf("button" to "submit"),
         ),
       ),
     )
@@ -170,10 +148,9 @@ class TelemetryEventTest {
 
     val decoded = json.decodeFromString<SdkEvent>(encoded)
     assertIs<SdkEventBatch>(decoded)
-    assertEquals(3, decoded.events.size)
+    assertEquals(2, decoded.events.size)
     assertIs<SdkNetworkRequestEvent>(decoded.events[0])
     assertIs<SdkLogEvent>(decoded.events[1])
-    assertIs<SdkCustomEvent>(decoded.events[2])
   }
 
   @Test
@@ -181,10 +158,9 @@ class TelemetryEventTest {
     val events = listOf<SdkEvent>(
       SdkNetworkRequestEvent(timestamp = 1L, url = "https://x.com", method = "GET"),
       SdkWebSocketFrameEvent(timestamp = 2L, connectionId = "c1", url = "wss://x.com", direction = WebSocketFrameDirection.SENT, frameType = WebSocketFrameType.BINARY),
-      SdkLogEvent(timestamp = 3L, level = 6, tag = "E", message = "err", filterName = "f"),
+      SdkLogEvent(timestamp = 3L, level = 6, tag = "E", message = "err"),
       SdkBroadcastEvent(timestamp = 4L, action = "A"),
       SdkLifecycleEvent(timestamp = 5L, kind = "background"),
-      SdkCustomEvent(timestamp = 6L, name = "ev"),
     )
 
     for (event in events) {
@@ -199,10 +175,9 @@ class TelemetryEventTest {
   fun `getEventType returns correct type for new events`() {
     assertEquals("network_request", SdkEventSerializer.getEventType(SdkNetworkRequestEvent(timestamp = 1L, url = "u", method = "GET")))
     assertEquals("websocket_frame", SdkEventSerializer.getEventType(SdkWebSocketFrameEvent(timestamp = 1L, connectionId = "c", url = "u", direction = WebSocketFrameDirection.SENT, frameType = WebSocketFrameType.TEXT)))
-    assertEquals("log", SdkEventSerializer.getEventType(SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M", filterName = "F")))
+    assertEquals("log", SdkEventSerializer.getEventType(SdkLogEvent(timestamp = 1L, level = 3, tag = "T", message = "M")))
     assertEquals("broadcast", SdkEventSerializer.getEventType(SdkBroadcastEvent(timestamp = 1L, action = "A")))
     assertEquals("lifecycle", SdkEventSerializer.getEventType(SdkLifecycleEvent(timestamp = 1L, kind = "foreground")))
-    assertEquals("custom", SdkEventSerializer.getEventType(SdkCustomEvent(timestamp = 1L, name = "N")))
     assertEquals("event_batch", SdkEventSerializer.getEventType(SdkEventBatch(timestamp = 1L, events = emptyList())))
   }
 }

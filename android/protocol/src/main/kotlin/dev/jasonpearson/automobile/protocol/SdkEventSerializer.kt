@@ -59,7 +59,6 @@ object SdkEventSerializer {
     const val LOG = "log"
     const val BROADCAST = "broadcast"
     const val LIFECYCLE = "lifecycle"
-    const val CUSTOM = "custom"
     const val EVENT_BATCH = "event_batch"
   }
 
@@ -126,7 +125,6 @@ object SdkEventSerializer {
       is SdkLogEvent -> EventTypes.LOG
       is SdkBroadcastEvent -> EventTypes.BROADCAST
       is SdkLifecycleEvent -> EventTypes.LIFECYCLE
-      is SdkCustomEvent -> EventTypes.CUSTOM
       is SdkEventBatch -> EventTypes.EVENT_BATCH
     }
   }
@@ -213,10 +211,6 @@ object SdkEventSerializer {
 
   fun lifecycleEventFromJson(jsonString: String): SdkLifecycleEvent? {
     return fromJson(jsonString) as? SdkLifecycleEvent
-  }
-
-  fun customEventFromJson(jsonString: String): SdkCustomEvent? {
-    return fromJson(jsonString) as? SdkCustomEvent
   }
 
   fun eventBatchFromJson(jsonString: String): SdkEventBatch? {

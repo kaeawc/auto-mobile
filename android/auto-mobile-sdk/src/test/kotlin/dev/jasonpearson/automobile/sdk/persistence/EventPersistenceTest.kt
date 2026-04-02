@@ -4,7 +4,6 @@ import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
 import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
@@ -41,11 +40,11 @@ class EventPersistenceTest {
     uuidProvider = uuidProvider,
   )
 
-  private fun makeCustomEvent(name: String, timestamp: Long = 100L) = SdkCustomEvent(
+  private fun makeLifecycleEvent(name: String, timestamp: Long = 100L) = SdkLifecycleEvent(
     timestamp = timestamp,
     applicationId = "com.test.app",
-    name = name,
-    properties = mapOf("key" to "value"),
+    kind = name,
+    details = mapOf("key" to "value"),
   )
 
   private fun makeNavEvent(destination: String, timestamp: Long = 200L) = SdkNavigationEvent(
@@ -60,7 +59,7 @@ class EventPersistenceTest {
   @Test
   fun `persist returns batch ID on success`() {
     val persistence = createPersistence()
-    val batchId = persistence.persist(listOf(makeCustomEvent("test")))
+    val batchId = persistence.persist(listOf(makeLifecycleEvent("test")))
     assertNotNull(batchId)
     assertEquals("1000_test-uuid", batchId)
   }
@@ -73,17 +72,17 @@ class EventPersistenceTest {
   }
 
   @Test
-  fun `persist and load round-trip for custom events`() {
+  fun `persist and load round-trip for lifecycle events`() {
     val persistence = createPersistence()
-    val original = makeCustomEvent("round-trip", timestamp = 42L)
+    val original = makeLifecycleEvent("round-trip", timestamp = 42L)
     persistence.persist(listOf(original))
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
     val (_, events) = loaded[0]
     assertEquals(1, events.size)
-    val restored = events[0] as SdkCustomEvent
-    assertEquals("round-trip", restored.name)
+    val restored = events[0] as SdkLifecycleEvent
+    assertEquals("round-trip", restored.kind)
     assertEquals(42L, restored.timestamp)
     assertEquals("com.test.app", restored.applicationId)
   }
@@ -114,21 +113,21 @@ class EventPersistenceTest {
       uuidProvider = { "uuid-$counter" },
     )
 
-    persistence.persist(listOf(makeCustomEvent("first")))
-    persistence.persist(listOf(makeCustomEvent("second")))
-    persistence.persist(listOf(makeCustomEvent("third")))
+    persistence.persist(listOf(makeLifecycleEvent("first")))
+    persistence.persist(listOf(makeLifecycleEvent("second")))
+    persistence.persist(listOf(makeLifecycleEvent("third")))
 
     val loaded = persistence.loadPending()
     assertEquals(3, loaded.size)
-    assertEquals("first", (loaded[0].second[0] as SdkCustomEvent).name)
-    assertEquals("second", (loaded[1].second[0] as SdkCustomEvent).name)
-    assertEquals("third", (loaded[2].second[0] as SdkCustomEvent).name)
+    assertEquals("first", (loaded[0].second[0] as SdkLifecycleEvent).kind)
+    assertEquals("second", (loaded[1].second[0] as SdkLifecycleEvent).kind)
+    assertEquals("third", (loaded[2].second[0] as SdkLifecycleEvent).kind)
   }
 
   @Test
   fun `removeBatch deletes the file`() {
     val persistence = createPersistence()
-    val batchId = persistence.persist(listOf(makeCustomEvent("to-remove")))!!
+    val batchId = persistence.persist(listOf(makeLifecycleEvent("to-remove")))!!
 
     assertEquals(1, persistence.loadPending().size)
     persistence.removeBatch(batchId)
@@ -152,7 +151,7 @@ class EventPersistenceTest {
     )
 
     // Persist an old batch (timestamp = 1_000_000_000)
-    persistence.persist(listOf(makeCustomEvent("old")))
+    persistence.persist(listOf(makeLifecycleEvent("old")))
 
     // Advance time by 8 days
     now += 8 * 24 * 60 * 60 * 1000L
@@ -163,20 +162,20 @@ class EventPersistenceTest {
       clock = { now },
       uuidProvider = { "uuid-new" },
     )
-    newPersistence.persist(listOf(makeCustomEvent("new")))
+    newPersistence.persist(listOf(makeLifecycleEvent("new")))
 
     // Cleanup with 7-day max age (using current time)
     newPersistence.cleanup(maxAgeDays = 7)
 
     val remaining = newPersistence.loadPending()
     assertEquals(1, remaining.size)
-    assertEquals("new", (remaining[0].second[0] as SdkCustomEvent).name)
+    assertEquals("new", (remaining[0].second[0] as SdkLifecycleEvent).kind)
   }
 
   @Test
   fun `cleanup keeps recent batches`() {
     val persistence = createPersistence(clock = { 1_000_000_000L })
-    persistence.persist(listOf(makeCustomEvent("recent")))
+    persistence.persist(listOf(makeLifecycleEvent("recent")))
 
     persistence.cleanup(maxAgeDays = 7)
 
@@ -191,11 +190,11 @@ class EventPersistenceTest {
     java.io.File(tempFolder.root, "events_500_corrupt.json").writeText("not valid json{{{")
 
     // Write a valid file
-    persistence.persist(listOf(makeCustomEvent("valid")))
+    persistence.persist(listOf(makeLifecycleEvent("valid")))
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    assertEquals("valid", (loaded[0].second[0] as SdkCustomEvent).name)
+    assertEquals("valid", (loaded[0].second[0] as SdkLifecycleEvent).kind)
 
     // Corrupt file should have been deleted
     val remaining = tempFolder.root.listFiles { f -> f.name.contains("corrupt") }
@@ -212,15 +211,15 @@ class EventPersistenceTest {
   fun `multiple events in a single batch`() {
     val persistence = createPersistence()
     val events = listOf(
-      makeCustomEvent("one", timestamp = 1L),
+      makeLifecycleEvent("one", timestamp = 1L),
       makeNavEvent("home", timestamp = 2L),
-      makeCustomEvent("two", timestamp = 3L),
+      makeLifecycleEvent("two", timestamp = 3L),
     )
     persistence.persist(events)
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    // Custom + Nav + Custom = 3 events (all deserializable types)
+    // Lifecycle + Nav + Lifecycle = 3 events (all deserializable types)
     assertEquals(3, loaded[0].second.size)
   }
 
@@ -228,7 +227,7 @@ class EventPersistenceTest {
   fun `persist creates directory if it does not exist`() {
     val dir = java.io.File(tempFolder.root, "nested/dir")
     val persistence = FileEventPersistence(directory = dir)
-    persistence.persist(listOf(makeCustomEvent("test")))
+    persistence.persist(listOf(makeLifecycleEvent("test")))
     assertTrue(dir.exists())
     assertEquals(1, persistence.loadPending().size)
   }
@@ -242,7 +241,8 @@ class EventPersistenceTest {
       level = 5,
       tag = "MyTag",
       message = "Something happened",
-      filterName = "error-filter",
+      pid = 1234,
+      tid = 5678,
     )
     persistence.persist(listOf(original))
 
@@ -251,7 +251,8 @@ class EventPersistenceTest {
     assertEquals(5, restored.level)
     assertEquals("MyTag", restored.tag)
     assertEquals("Something happened", restored.message)
-    assertEquals("error-filter", restored.filterName)
+    assertEquals(1234, restored.pid)
+    assertEquals(5678, restored.tid)
   }
 
   @Test
@@ -439,9 +440,9 @@ class EventPersistenceTest {
   fun `batch with all event types round-trips`() {
     val persistence = createPersistence()
     val events = listOf(
-      makeCustomEvent("c1", timestamp = 1L),
+      makeLifecycleEvent("c1", timestamp = 1L),
       makeNavEvent("home", timestamp = 2L),
-      SdkLogEvent(timestamp = 3L, level = 4, tag = "T", message = "m", filterName = "f"),
+      SdkLogEvent(timestamp = 3L, level = 4, tag = "T", message = "m"),
       SdkLifecycleEvent(timestamp = 4L, kind = "background"),
       SdkNetworkRequestEvent(timestamp = 5L, url = "https://x.com", method = "POST"),
       SdkCrashEvent(timestamp = 6L, exceptionClass = "E", exceptionMessage = null, stackTrace = "s", threadName = "t"),
@@ -456,7 +457,7 @@ class EventPersistenceTest {
 
     val loaded = persistence.loadPending()
     assertEquals(1, loaded.size)
-    assertEquals(12, loaded[0].second.size, "All 12 event types should round-trip")
+    assertEquals(12, loaded[0].second.size, "All event types should round-trip")
   }
 
   @Test
@@ -474,11 +475,11 @@ class EventPersistenceTest {
   @Test
   fun `type key uses stable string not class name`() {
     val persistence = createPersistence()
-    persistence.persist(listOf(makeCustomEvent("test")))
+    persistence.persist(listOf(makeLifecycleEvent("test")))
 
     val file = tempFolder.root.listFiles()!!.first()
     val json = file.readText()
-    assertTrue(json.contains(""""type":"custom""""), "Should use stable key 'custom', not class simpleName")
-    assertTrue(!json.contains("SdkCustomEvent"), "Should not contain class name")
+    assertTrue(json.contains(""""type":"lifecycle""""), "Should use stable key 'lifecycle', not class simpleName")
+    assertTrue(!json.contains("SdkLifecycleEvent"), "Should not contain class name")
   }
 }

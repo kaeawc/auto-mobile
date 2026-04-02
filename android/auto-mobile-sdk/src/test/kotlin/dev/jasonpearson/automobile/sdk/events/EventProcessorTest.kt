@@ -1,7 +1,7 @@
 package dev.jasonpearson.automobile.sdk.events
 
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
@@ -11,9 +11,9 @@ import org.junit.Test
 
 class EventProcessorTest {
 
-  private fun makeEvent(name: String = "test"): SdkEvent = SdkCustomEvent(
+  private fun makeEvent(name: String = "test"): SdkEvent = SdkLifecycleEvent(
     timestamp = 1L,
-    name = name,
+    kind = name,
   )
 
   private fun drainExecutor(executor: java.util.concurrent.ScheduledExecutorService) {
@@ -69,12 +69,12 @@ class EventProcessorTest {
       processors = listOf(
         EventProcessor { event ->
           // First processor: modify the event
-          SdkCustomEvent(timestamp = event.timestamp, name = "modified")
+          SdkLifecycleEvent(timestamp = event.timestamp, kind = "modified")
         },
         EventProcessor { event ->
           // Second processor: sees modified event
-          val custom = event as SdkCustomEvent
-          if (custom.name == "modified") event else null
+          val lifecycle = event as SdkLifecycleEvent
+          if (lifecycle.kind == "modified") event else null
         },
       ),
     )
@@ -83,8 +83,8 @@ class EventProcessorTest {
     buffer.flush()
 
     assertEquals(1, flushed.size)
-    val result = flushed[0][0] as SdkCustomEvent
-    assertEquals("modified", result.name)
+    val result = flushed[0][0] as SdkLifecycleEvent
+    assertEquals("modified", result.kind)
   }
 
   @Test
@@ -129,7 +129,7 @@ class EventProcessorTest {
 
     buffer.flush()
     assertEquals(1, flushed.size)
-    val names = flushed[0].map { (it as SdkCustomEvent).name }
+    val names = flushed[0].map { (it as SdkLifecycleEvent).kind }
     assertEquals(listOf("b", "c", "d"), names, "Oldest event should have been evicted")
   }
 

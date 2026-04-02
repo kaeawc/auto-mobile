@@ -1,6 +1,6 @@
 package dev.jasonpearson.automobile.sdk.events
 
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
+import dev.jasonpearson.automobile.protocol.SdkLifecycleEvent
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.Executors
@@ -67,9 +67,9 @@ class DropCounterTest {
 
   // -- SdkEventBuffer integration tests --
 
-  private fun makeEvent(i: Int): SdkEvent = SdkCustomEvent(
+  private fun makeEvent(i: Int): SdkEvent = SdkLifecycleEvent(
     timestamp = i.toLong(),
-    name = "event-$i",
+    kind = "event-$i",
   )
 
   @Test

@@ -4,7 +4,6 @@ import dev.jasonpearson.automobile.protocol.NavigationSourceType
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
 import dev.jasonpearson.automobile.protocol.SdkBroadcastEvent
 import dev.jasonpearson.automobile.protocol.SdkCrashEvent
-import dev.jasonpearson.automobile.protocol.SdkCustomEvent
 import dev.jasonpearson.automobile.protocol.SdkDeviceInfo
 import dev.jasonpearson.automobile.protocol.SdkEvent
 import dev.jasonpearson.automobile.protocol.SdkHandledExceptionEvent
@@ -112,10 +111,6 @@ class FileEventPersistence(
           event.arguments?.let { obj.put("arguments", JSONObject(it)) }
           event.metadata?.let { obj.put("metadata", JSONObject(it)) }
         }
-        is SdkCustomEvent -> {
-          obj.put("name", event.name)
-          obj.put("properties", JSONObject(event.properties))
-        }
         is SdkHandledExceptionEvent -> {
           obj.put("exceptionClass", event.exceptionClass)
           obj.put("exceptionMessage", event.exceptionMessage ?: "")
@@ -179,7 +174,8 @@ class FileEventPersistence(
           obj.put("level", event.level)
           obj.put("tag", event.tag)
           obj.put("message", event.message)
-          obj.put("filterName", event.filterName)
+          obj.put("pid", event.pid)
+          obj.put("tid", event.tid)
         }
         is SdkBroadcastEvent -> {
           obj.put("action", event.action)
@@ -198,7 +194,6 @@ class FileEventPersistence(
   }
 
   private fun eventTypeKey(event: SdkEvent): String = when (event) {
-    is SdkCustomEvent -> "custom"
     is SdkNavigationEvent -> "navigation"
     is SdkHandledExceptionEvent -> "handled_exception"
     is SdkNotificationActionEvent -> "notification_action"
@@ -243,12 +238,6 @@ class FileEventPersistence(
     timestamp: Long,
     appId: String?,
   ): SdkEvent? = when (type) {
-    "custom" -> SdkCustomEvent(
-      timestamp = timestamp,
-      applicationId = appId,
-      name = obj.optString("name"),
-      properties = jsonObjectToMap(obj.optJSONObject("properties")),
-    )
     "navigation" -> {
       val sourceName = obj.optString("source")
       val source = try {
@@ -356,7 +345,8 @@ class FileEventPersistence(
       level = obj.optInt("level"),
       tag = obj.optString("tag"),
       message = obj.optString("message"),
-      filterName = obj.optString("filterName"),
+      pid = obj.optInt("pid"),
+      tid = obj.optInt("tid"),
     )
     "broadcast" -> {
       val categories = obj.optJSONArray("categories")?.let { arr ->

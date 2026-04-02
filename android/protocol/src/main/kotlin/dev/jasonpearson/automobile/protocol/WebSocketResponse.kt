@@ -164,7 +164,8 @@ data class LogEventData(
   val level: Int,
   val tag: String,
   val message: String,
-  val filterName: String,
+  val pid: Int = 0,
+  val tid: Int = 0,
   val applicationId: String? = null,
 )
 
@@ -194,20 +195,6 @@ data class LifecycleEventResponse(
 data class LifecycleEventData(
   val kind: String,
   val details: Map<String, String>? = null,
-  val applicationId: String? = null,
-)
-
-@Serializable
-@SerialName("custom_event")
-data class CustomEventResponse(
-  override val timestamp: Long,
-  val event: CustomEventData,
-) : WebSocketResponse()
-
-@Serializable
-data class CustomEventData(
-  val name: String,
-  val properties: Map<String, String> = emptyMap(),
   val applicationId: String? = null,
 )
 

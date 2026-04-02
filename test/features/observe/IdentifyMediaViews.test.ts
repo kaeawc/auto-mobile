@@ -160,6 +160,28 @@ describe("IdentifyMediaViews", () => {
     expect(result[0].className).toBe("CustomImageWidget");
   });
 
+  test("iOS className key (camelCase) used for media classification", () => {
+    // iOS hierarchy nodes use "className" not "class" — build attrs directly
+    const h: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          $: { "class": "root", "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 } },
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+          node: [
+            { $: { "className": "UIImageView", "bounds": defaultBounds }, bounds: defaultBounds },
+            { $: { "className": "AVPlayerView", "bounds": { left: 0, top: 100, right: 100, bottom: 200 } }, bounds: { left: 0, top: 100, right: 100, bottom: 200 } },
+          ]
+        } as any
+      }
+    };
+    const result = classifier.classify(h, "ios");
+    expect(result).toHaveLength(2);
+    expect(result[0].mediaType).toBe("image");
+    expect(result[0].className).toBe("UIImageView");
+    expect(result[1].mediaType).toBe("video");
+    expect(result[1].className).toBe("AVPlayerView");
+  });
+
   test("empty hierarchy returns empty array", () => {
     const h: ViewHierarchyResult = { hierarchy: {} };
     const result = classifier.classify(h, "android");

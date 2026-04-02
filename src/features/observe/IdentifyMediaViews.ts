@@ -101,7 +101,7 @@ export class IdentifyMediaViews {
 
     for (const entry of entries) {
       const el = entry.element;
-      const className = el["class"] ?? "";
+      const className = (el["class"] ?? el["className"] ?? "") as string;
       const role = el["role"] as string | undefined;
 
       const mediaType = matchMediaType(className, patterns);

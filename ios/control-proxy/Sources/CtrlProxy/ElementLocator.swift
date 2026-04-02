@@ -603,7 +603,12 @@ public class ElementLocator: ElementLocating {
 
             // Build deterministic path for viewId generation
             let resId = identifier.isEmpty ? nil : identifier
-            let segment = resId ?? "\(childIndex)"
+            let segment: String
+            if let rid = resId {
+                segment = "\(childIndex):\(rid)"
+            } else {
+                segment = "\(childIndex)"
+            }
             let currentPath = parentPath.isEmpty ? segment : "\(parentPath)/\(segment)"
             let viewId = resId ?? generateDeterministicUuid(from: currentPath)
 

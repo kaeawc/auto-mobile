@@ -12,12 +12,14 @@ public final class ViewBodyTracker: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var snapshotTimer: (any TimerScheduling)?
     private let snapshotIntervalMs: Int = 1000
+    private var dateProvider: DateProvider = SystemDateProvider()
 
     private init() {}
 
-    func initialize(buffer: SdkEventBuffer) {
+    func initialize(buffer: SdkEventBuffer, dateProvider: DateProvider = SystemDateProvider()) {
         lock.lock()
         self.buffer = buffer
+        self.dateProvider = dateProvider
         lock.unlock()
     }
 
@@ -60,9 +62,10 @@ public final class ViewBodyTracker: @unchecked Sendable {
         let entry = entries[id] ?? Entry(id: id, viewName: viewName)
         var updated = entry
         updated.totalCount += 1
-        updated.recentTimestamps.append(Date().timeIntervalSince1970)
+        let now = dateProvider.now().timeIntervalSince1970
+        updated.recentTimestamps.append(now)
         // Keep only timestamps from the last second for rolling average
-        let cutoff = Date().timeIntervalSince1970 - 1.0
+        let cutoff = now - 1.0
         updated.recentTimestamps.removeAll { $0 < cutoff }
         entries[id] = updated
         lock.unlock()
@@ -87,10 +90,11 @@ public final class ViewBodyTracker: @unchecked Sendable {
     public func getSnapshots() -> [ViewBodySnapshot] {
         lock.lock()
         let currentEntries = entries
+        let currentDateProvider = dateProvider
         lock.unlock()
 
         return currentEntries.values.map { entry in
-            let cutoff = Date().timeIntervalSince1970 - 1.0
+            let cutoff = currentDateProvider.now().timeIntervalSince1970 - 1.0
             let recentCount = entry.recentTimestamps.filter { $0 >= cutoff }.count
             let avgDuration = entry.durationCount > 0
                 ? entry.totalDurationMs / Double(entry.durationCount)
@@ -127,6 +131,7 @@ public final class ViewBodyTracker: @unchecked Sendable {
         entries.removeAll()
         _isEnabled = false
         buffer = nil
+        dateProvider = SystemDateProvider()
         lock.unlock()
     }
 }

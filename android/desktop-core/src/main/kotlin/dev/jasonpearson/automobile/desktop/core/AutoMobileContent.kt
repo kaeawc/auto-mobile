@@ -60,6 +60,8 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import dev.jasonpearson.automobile.desktop.core.theme.AppIcons
 import dev.jasonpearson.automobile.desktop.core.theme.SharedTheme
+import dev.jasonpearson.automobile.desktop.core.timeline.EventTimeline
+import dev.jasonpearson.automobile.desktop.core.timeline.rememberTimelineState
 import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
 import dev.jasonpearson.automobile.desktop.core.mcp.BootedDevice
@@ -173,6 +175,7 @@ private val ANDROID_LAUNCHERS = listOf(
     "com.miui.home",                           // Xiaomi MIUI
 )
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
+private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
 /**
  * Select the default app to show in the navigation graph.
@@ -289,6 +292,9 @@ fun AutoMobileContent(
 
   // Shared telemetry event cache for global search (populated from push client)
   val telemetryEventCache = remember { mutableStateListOf<TelemetryDisplayEvent>() }
+
+  val timelineState = rememberTimelineState()
+  var activeFilterCategory by remember { mutableStateOf<String?>(null) }
 
   // Command registry — populated after all state is declared below
 
@@ -776,8 +782,8 @@ fun AutoMobileContent(
       val client = telemetryPushClient ?: return@LaunchedEffect
       client.telemetryEvents.collect { event ->
           telemetryEventCache.add(event)
-          // Cap at 500 events
-          while (telemetryEventCache.size > 500) {
+          // Keep enough history for the timeline to match the dashboard's longer retention options.
+          while (telemetryEventCache.size > TIMELINE_EVENT_CACHE_LIMIT) {
               telemetryEventCache.removeAt(0)
           }
       }
@@ -1123,6 +1129,8 @@ fun AutoMobileContent(
                           selectedTelemetryEvent = event
                           if (event != null && !showRightPane) showRightPane = true
                       },
+                      timelineState = timelineState,
+                      onFilterChanged = { category -> activeFilterCategory = category },
                       modifier = Modifier.weight(1f),
                   )
                   // Bottom tabs for secondary views
@@ -1519,13 +1527,15 @@ fun AutoMobileContent(
           )
       },
       bottomPaneContent = {
-          Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-              Text(
-                  "Event Timeline",
-                  color = colors.text.normal.copy(alpha = 0.5f),
-                  fontSize = 12.sp,
-              )
-          }
+          EventTimeline(
+              events = telemetryEventCache,
+              state = timelineState,
+              activeFilterCategory = activeFilterCategory,
+              onEventClicked = { event ->
+                  selectedTelemetryEvent = event
+                  if (!showRightPane) showRightPane = true
+              },
+          )
       },
   )
 

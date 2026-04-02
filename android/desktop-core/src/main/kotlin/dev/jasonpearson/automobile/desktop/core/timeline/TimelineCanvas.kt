@@ -39,6 +39,7 @@ private fun PointerEvent.isZoomModifierPressed(): Boolean =
     if (IS_MAC) keyboardModifiers.isMetaPressed else keyboardModifiers.isCtrlPressed
 
 private const val TIME_AXIS_HEIGHT = 16f
+private const val LANE_LABEL_WIDTH = 48f
 private const val LABEL_PADDING = 8f
 private const val SPAN_HEIGHT_FRACTION = 0.6f
 private const val MIN_SPAN_WIDTH_PX = 2f
@@ -74,9 +75,10 @@ fun TimelineCanvas(
             .onPointerEvent(PointerEventType.Scroll) { event ->
                 val change = event.changes.firstOrNull() ?: return@onPointerEvent
                 if (event.isZoomModifierPressed()) {
-                    val scrollY = change.scrollDelta.y
-                    val pivotFraction = change.position.x / size.width.toFloat()
-                    state.scrollZoom(scrollY, pivotFraction)
+                    val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
+                    val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
+                    state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
+                    change.consume()
                 }
             }
             .pointerInput(Unit) {

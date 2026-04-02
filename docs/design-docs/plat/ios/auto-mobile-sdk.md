@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `ios/auto-mobile-sdk/` is a Swift Package providing in-app telemetry for iOS applications. Includes navigation tracking (SwiftUI adapter), crash and signal handler capture, main-thread hang detection, handled exception recording, SwiftUI view body evaluation tracking, network request/response monitoring via URLProtocol, log filtering, tap interaction tracking, UserDefaults inspection, SQLite database inspection, biometric test injection, local notification posting, and OS-level event observation. Events flow through a disk-first persistence pipeline with retry delivery to CtrlProxy. 139 unit tests across 19 test files.
+> **Current state:** `ios/auto-mobile-sdk/` is a Swift Package providing in-app telemetry for iOS applications. Includes navigation tracking (SwiftUI adapter), crash and signal handler capture, main-thread hang detection, handled exception recording, SwiftUI view body evaluation tracking, network request/response monitoring via URLProtocol, structured logging via `os.Logger`, tap interaction tracking, UserDefaults inspection, SQLite database inspection, biometric test injection, local notification posting, and OS-level event observation. Events flow through a disk-first persistence pipeline with retry delivery to CtrlProxy. 151 unit tests across 20 test files.
 
 See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -89,7 +89,7 @@ flowchart TB
 | Component | Description | Status |
 |-----------|-------------|--------|
 | `AutoMobileSDK` | Singleton entry point; initializes all subsystems and manages navigation listeners. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileConfiguration` | `Sendable` struct with `bufferSize`, `flushIntervalMs`, `maxBreadcrumbs`, `sessionTimeoutMs`. Static `.default` property. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileConfiguration` | `Sendable` struct with `bufferSize`, `flushIntervalMs`, `maxBreadcrumbs`, `sessionTimeoutMs`, `eventProcessors`, `maxPendingEvents`. Static `.default` property. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `SdkContext` | Thread-safe mutable context (`@unchecked Sendable`) holding `sessionId`, `userId`, `appVersion`, and tags. Produces immutable `SdkContextSnapshot`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `SessionTracker` | Lifecycle-driven session management with configurable timeout. Uses `TimerScheduling` protocol for testability. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `SdkEventBuffer` | Thread-safe ring buffer with capacity-triggered and timer-triggered flush. Integrates `DropCounting`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
@@ -104,7 +104,7 @@ flowchart TB
 | `SwiftUINavigationAdapter` | `NavigationFrameworkAdapter` for SwiftUI `NavigationStack`. Includes `.trackNavigation()` `ViewModifier`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `AutoMobileNetwork` | URLSession monitoring via `AutoMobileURLProtocol`. Supports header/body capture (debug only for bodies), manual recording, and WebSocket frame tracking. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `RetryPolicy` | Exponential backoff with jitter for failed HTTP delivery. Retries on network failure, 408, 429, 5xx. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
-| `AutoMobileLog` | Log filter engine with regex-based tag/message matching and minimum log level. Methods: `v`, `d`, `i`, `w`, `e`, `fault`. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
+| `AutoMobileLog` | Thin wrappers around `os.Logger` for structured logging. Methods: `v`, `d`, `i`, `w`, `e`, `fault`. Logs are captured by OSLogStore in CtrlProxy. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `AutoMobileInteractionTracker` | Tap tracking with 100ms debounce. Records coordinates, accessibility label/identifier, view type, and text. UIKit `UITapGestureRecognizer` convenience method. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `ViewBodyTracker` | Tracks SwiftUI view `body` evaluations with rolling average and duration measurement. Includes `.trackViewBody()` modifier and `MeasureViewBody` wrapper. Periodic snapshot broadcast (1s). | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
 | `UserDefaultsInspector` | Read/write UserDefaults with suite support, change listeners via `UserDefaults.didChangeNotification`, and `SdkStorageChangedEvent` emission. | <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> |
@@ -120,14 +120,16 @@ flowchart TB
 
 ```swift
 AutoMobileConfiguration(
-    bufferSize: 50,        // Max events before flush
-    flushIntervalMs: 500,  // Timer-based flush interval
-    maxBreadcrumbs: 100,   // Ring buffer capacity
-    sessionTimeoutMs: 30_000 // Background timeout before new session
+    bufferSize: 50,          // Max events before flush
+    flushIntervalMs: 500,    // Timer-based flush interval
+    maxBreadcrumbs: 100,     // Ring buffer capacity
+    sessionTimeoutMs: 30_000, // Background timeout before new session
+    eventProcessors: [],     // Pre-buffer event processors (return nil to drop)
+    maxPendingEvents: 500    // Max pending events before oldest are dropped
 )
 ```
 
-All values are clamped to a minimum of 1.
+All values are clamped to a minimum of 1. `eventProcessors` conforms to the `EventProcessing` protocol, allowing events to be transformed or dropped before buffering.
 
 ## Initialization
 
@@ -164,7 +166,7 @@ Events flow through a three-stage pipeline:
 
 ### Event types
 
-All events conform to `SdkEvent` (Codable + Sendable) with a `SdkEventType` discriminator and millisecond-epoch timestamp. Supported types: `navigation`, `handled_exception`, `crash`, `hang`, `network_request`, `websocket_frame`, `log`, `lifecycle`, `custom`, `notification_action`, `view_body_snapshot`, `broadcast`, `interaction`, `storage_changed`.
+All events conform to `SdkEvent` (Codable + Sendable) with a `SdkEventType` discriminator and millisecond-epoch timestamp. Supported types: `navigation`, `handled_exception`, `crash`, `hang`, `network_request`, `websocket_frame`, `log`, `lifecycle`, `notification_action`, `view_body_snapshot`, `broadcast`, `interaction`, `storage_changed`.
 
 ## Context
 
@@ -249,9 +251,11 @@ Body capture is always disabled in release builds to prevent leaking credentials
 
 ## Logging
 
-`AutoMobileLog` provides filter-based log capture. Filters are registered by name with optional regex patterns for tag and message, plus a minimum `LogLevel` (`verbose`, `debug`, `info`, `warning`, `error`, `fault`).
+`AutoMobileLog` provides thin wrappers around Apple's `os.Logger` for structured logging. Logs are written to the unified logging system with `privacy: .public` redaction and are captured by OSLogStore in CtrlProxy for remote observation.
 
-Log methods mirror standard log levels: `v()`, `d()`, `i()`, `w()`, `e()`, `fault()`. Only entries matching at least one active filter are buffered as `SdkLogEvent`.
+Log methods mirror standard log levels: `v()`, `d()`, `i()`, `w()`, `e()`, `fault()`. Each method accepts an optional `tag` parameter that is formatted as a `[tag] message` prefix.
+
+Note: Unlike Android's `AutoMobileLog` which has filter-based capture with regex patterns, the iOS implementation delegates filtering to the OS unified logging system. `LogLevel` and `SdkLogEvent` types exist in the event model for wire compatibility.
 
 ## Interaction Tracking
 
@@ -356,7 +360,7 @@ The SDK uses protocol + fake pattern throughout for testability:
 - `EventPersisting` protocol with `FileEventPersistence`
 - `UserDefaultsDriver` and `DatabaseDriver` protocols with fakeable implementations
 
-139 tests across 19 test files covering all subsystems. Test distribution: SdkContext (16), RetryPolicy (17), DropCounter (9), BreadcrumbTrail (9), Configuration (8), SDK integration (8), Navigation (8), Log (7), Biometrics (7), Storage (7), SessionTracker (6), EventBuffer (5), InteractionTracker (5), ViewBodyTracker (5), OsEvents (4), Concurrency (3), Failures (3), Network (3), EventPersistence (9).
+151 tests across 20 test files covering all subsystems. Test distribution: RetryPolicy (17), SdkContext (16), SetEnabledPropagation (12), DropCounter (10), BreadcrumbTrail (9), EventBuffer (9), EventPersistence (9), Configuration (8), Navigation (8), SDK integration (8), Biometrics (7), Storage (7), SessionTracker (6), InteractionTracker (5), ViewBodyTracker (5), OsEvents (4), Concurrency (3), Failures (3), Network (3), Log (2).
 
 ## Cross-Platform Parity
 
@@ -376,7 +380,7 @@ The SDK uses protocol + fake pattern throughout for testability:
 | Handled exceptions | `AutoMobileFailures` | `AutoMobileFailures` | Same API shape |
 | Network monitoring | OkHttp Interceptor | URLProtocol | Platform-native interception |
 | WebSocket tracking | `AutoMobileWebSocketListener` | `recordWebSocketFrame()` | Manual on iOS |
-| Log filtering | `AutoMobileLog` | `AutoMobileLog` | Regex filters |
+| Log filtering | `AutoMobileLog` | `AutoMobileLog` | Android: regex filters with first-match semantics; iOS: `os.Logger` wrappers (filtering via OSLogStore) |
 | Interaction tracking | `AutoMobileClickTracker` | `AutoMobileInteractionTracker` | Tap with debounce |
 | View rendering tracking | `RecompositionTracker` (Compose) | `ViewBodyTracker` (SwiftUI) | Platform-specific UI framework |
 | Key-value storage | `SharedPreferencesInspector` | `UserDefaultsInspector` | Platform-native storage |

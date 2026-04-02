@@ -25,11 +25,17 @@ public final class AutoMobileBiometrics: @unchecked Sendable {
     private init() {}
 
     /// Override the next biometric authentication result.
-    /// The override expires after `ttlMs` milliseconds.
-    public func overrideResult(_ result: BiometricResult, ttlMs: Double = 5000) {
+    ///
+    /// The override expires after `ttlMs` milliseconds. Any previously stored
+    /// override is replaced.
+    ///
+    /// - Parameters:
+    ///   - result: The result to inject into the next authentication attempt.
+    ///   - ttlMs: Override lifetime in milliseconds (default: 5000).
+    public func overrideResult(_ result: BiometricResult, ttlMs: Int64 = 5000) {
         lock.lock()
         _override = result
-        _overrideExpiry = Date().addingTimeInterval(ttlMs / 1000.0)
+        _overrideExpiry = Date().addingTimeInterval(Double(ttlMs) / 1000.0)
         lock.unlock()
 
         NotificationCenter.default.post(

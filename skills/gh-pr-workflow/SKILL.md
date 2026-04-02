@@ -1,16 +1,17 @@
 ---
 name: gh-pr-workflow
-description: Use this skill when creating or updating GitHub pull requests so PR bodies preserve newlines and formatting, especially when using gh pr create or gh pr edit.
+description: Helper skill for PR creation or editing with gh; use it when another GitHub workflow needs a multiline PR body preserved via --body-file.
 ---
 
 # PR Creation Without Newline Mangling
 
-Preserve PR body formatting by supplying a file to `gh`.
+Preserve PR body formatting by writing the body to a file and passing that file to `gh`.
 
-- Write the PR body to a file (prefer `scratch/pr-body.md` when created in-session).
-- Create the PR with `gh pr create --title "..." --body-file scratch/pr-body.md`.
-- Update an existing PR with `gh pr edit --body-file scratch/pr-body.md`.
-- Avoid `--body "..."` with inline newlines; it often collapses or escapes formatting.
+- Prefer `scratch/pr-body.md` for PR text created in-session.
+- Create PRs with `gh pr create --title "..." --body-file scratch/pr-body.md`.
+- Update PRs with `gh pr edit --body-file scratch/pr-body.md`.
+- Avoid `--body "..."` when multiline formatting matters.
+- Treat this as a supporting skill for `push-pr` or other PR workflows, not as the top-level workflow by itself.
 
 Example:
 

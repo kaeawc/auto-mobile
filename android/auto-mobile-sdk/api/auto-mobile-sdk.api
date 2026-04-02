@@ -180,9 +180,15 @@ public final class dev.jasonpearson.automobile.sdk.NavigationSource extends java
   public static final dev.jasonpearson.automobile.sdk.NavigationSource CUSTOM;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource DEEP_LINK;
   public static final dev.jasonpearson.automobile.sdk.NavigationSource ACTIVITY;
+  public static final dev.jasonpearson.automobile.sdk.NavigationSource$Companion Companion;
+  public final java.lang.String getWireValue();
   public static dev.jasonpearson.automobile.sdk.NavigationSource[] values();
   public static dev.jasonpearson.automobile.sdk.NavigationSource valueOf(java.lang.String);
   public static kotlin.enums.EnumEntries<dev.jasonpearson.automobile.sdk.NavigationSource> getEntries();
+}
+Compiled from "NavigationEvent.kt"
+public final class dev.jasonpearson.automobile.sdk.NavigationSource$Companion {
+  public final dev.jasonpearson.automobile.sdk.NavigationSource fromWireValue(java.lang.String);
 }
 Compiled from "AutoMobileNotifications.kt"
 public final class dev.jasonpearson.automobile.sdk.NotificationAction {

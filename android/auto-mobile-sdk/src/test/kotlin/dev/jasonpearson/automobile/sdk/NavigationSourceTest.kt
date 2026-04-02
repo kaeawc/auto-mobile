@@ -42,6 +42,29 @@ class NavigationSourceTest {
   }
 
   @Test
+  fun `wireValue should produce lowercase snake_case matching iOS rawValue`() {
+    assertEquals("navigation_component", NavigationSource.NAVIGATION_COMPONENT.wireValue)
+    assertEquals("compose_navigation", NavigationSource.COMPOSE_NAVIGATION.wireValue)
+    assertEquals("circuit", NavigationSource.CIRCUIT.wireValue)
+    assertEquals("custom", NavigationSource.CUSTOM.wireValue)
+    assertEquals("deep_link", NavigationSource.DEEP_LINK.wireValue)
+    assertEquals("activity", NavigationSource.ACTIVITY.wireValue)
+  }
+
+  @Test
+  fun `fromWireValue should round-trip all values`() {
+    NavigationSource.entries.forEach { source ->
+      assertEquals(source, NavigationSource.fromWireValue(source.wireValue))
+    }
+  }
+
+  @Test
+  fun `fromWireValue should return null for unknown values`() {
+    assertNull(NavigationSource.fromWireValue("nonexistent"))
+    assertNull(NavigationSource.fromWireValue("DEEP_LINK"))
+  }
+
+  @Test
   fun `NavigationSource should support equality comparison`() {
     val source1 = NavigationSource.COMPOSE_NAVIGATION
     val source2 = NavigationSource.COMPOSE_NAVIGATION

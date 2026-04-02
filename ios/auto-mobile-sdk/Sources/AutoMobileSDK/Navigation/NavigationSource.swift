@@ -12,5 +12,5 @@ public enum NavigationSource: String, Sendable, CaseIterable {
     case deepLink = "deep_link"
 
     /// Custom or unknown navigation framework
-    case custom
+    case custom = "custom"
 }

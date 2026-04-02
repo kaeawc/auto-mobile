@@ -18,22 +18,31 @@ data class NavigationEvent(
 )
 
 /** Identifies the source/framework of a navigation event. */
-enum class NavigationSource {
+enum class NavigationSource(
+    /** Platform-agnostic wire format value (lowercase snake_case, matches iOS rawValue). */
+    val wireValue: String,
+) {
   /** Jetpack Navigation Component (XML-based) */
-  NAVIGATION_COMPONENT,
+  NAVIGATION_COMPONENT("navigation_component"),
 
   /** Jetpack Compose Navigation */
-  COMPOSE_NAVIGATION,
+  COMPOSE_NAVIGATION("compose_navigation"),
 
   /** Circuit navigation library */
-  CIRCUIT,
+  CIRCUIT("circuit"),
 
   /** Custom or unknown navigation framework */
-  CUSTOM,
+  CUSTOM("custom"),
 
   /** Deep link navigation */
-  DEEP_LINK,
+  DEEP_LINK("deep_link"),
 
   /** Activity launch */
-  ACTIVITY,
+  ACTIVITY("activity");
+
+  companion object {
+    /** Look up a [NavigationSource] by its cross-platform wire value. */
+    fun fromWireValue(value: String): NavigationSource? =
+        entries.firstOrNull { it.wireValue == value }
+  }
 }

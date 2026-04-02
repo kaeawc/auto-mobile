@@ -33,6 +33,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -172,6 +173,7 @@ private fun groupedRowIndexForTimestamp(
 fun TelemetryDashboard(
     telemetryPushClient: TelemetryPushClient?,
     dataSourceMode: DataSourceMode,
+    events: SnapshotStateList<TelemetryDisplayEvent>,
     activeDeviceId: String? = null,
     selectedEvent: TelemetryDisplayEvent? = null,
     onEventSelected: (TelemetryDisplayEvent?) -> Unit = {},
@@ -183,7 +185,6 @@ fun TelemetryDashboard(
   // Per-device event + count cache so switching devices preserves state
   val deviceEventCache = remember { mutableMapOf<String, List<TelemetryDisplayEvent>>() }
   val deviceCountCache = remember { mutableMapOf<String, Map<CategoryFilter, Int>>() }
-  val events = remember { mutableStateListOf<TelemetryDisplayEvent>() }
   // Incremental category counts — declared here so device switch can access them
   val categoryCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }
   val lastSeenCounts = remember { mutableStateMapOf<CategoryFilter, Int>() }

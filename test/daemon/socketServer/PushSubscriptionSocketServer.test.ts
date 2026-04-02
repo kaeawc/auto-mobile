@@ -61,6 +61,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
         deviceId: options.deviceId ?? null,
         packageName: options.packageName ?? null,
       },
+      backfilling: false,
     });
 
     return { socket, subscriptionId };

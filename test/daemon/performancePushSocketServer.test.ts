@@ -56,6 +56,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
         deviceId: options.deviceId ?? null,
         packageName: options.packageName ?? null,
       },
+      backfilling: false,
     });
 
     return { socket, subscriptionId };

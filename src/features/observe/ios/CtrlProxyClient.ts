@@ -1454,6 +1454,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     const contentDesc = this.readNodeField<string>(node, "contentDesc", "content-desc");
     const resourceId = this.readNodeField<string>(node, "resourceId", "resource-id");
     const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
+    const viewId = this.readNodeField<string>(node, "viewId", "view-id");
 
     if (node.text) {
       converted.text = node.text;
@@ -1466,6 +1467,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     }
     if (testTag) {
       converted["test-tag"] = testTag;
+    }
+    if (viewId) {
+      converted["view-id"] = viewId;
     }
     if (node.className) {
       converted.className = node.className;

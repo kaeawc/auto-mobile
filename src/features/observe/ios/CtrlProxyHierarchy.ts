@@ -268,7 +268,8 @@ export class CtrlProxyHierarchy {
       (attrs["text"] && attrs["text"] !== "") ||
       (attrs["resource-id"] && attrs["resource-id"] !== "") ||
       (attrs["content-desc"] && attrs["content-desc"] !== "") ||
-      (attrs["test-tag"] && attrs["test-tag"] !== "")
+      (attrs["test-tag"] && attrs["test-tag"] !== "") ||
+      (attrs["view-id"] && attrs["view-id"] !== "")
     );
   }
 

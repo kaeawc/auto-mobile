@@ -90,7 +90,9 @@ nav:
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
       - 'API Surface':
-          - 'Doc Generation': design-docs/api-surface/doc-generation.md      - 'MCP':
+          - 'Doc Generation': design-docs/api-surface/doc-generation.md
+          - 'Navigation Alignment': design-docs/api-surface/navigation-alignment.md
+      - 'MCP':
           - 'Overview': design-docs/mcp/index.md
           - 'Tools': design-docs/mcp/tools.md
           - 'Observe':

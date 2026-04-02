@@ -43,8 +43,24 @@ fi
 
 echo "Looking for iPhone simulator running iOS ${IOS_VERSION}..." >&2
 
-# Runtime identifier uses dashes: iOS-26-2 not iOS-26.2
-RUNTIME_ID="com.apple.CoreSimulator.SimRuntime.iOS-${IOS_VERSION//./-}"
+# Look up the actual runtime identifier from simctl rather than constructing it.
+# The identifier format varies across Xcode versions (e.g. iOS-26-3 vs iOS-26-3-0).
+RUNTIME_ID=$(xcrun simctl list runtimes iOS --json \
+  | jq -r --arg v "${IOS_VERSION}" '
+      .runtimes[]
+      | select(.version | startswith($v))
+      | .identifier
+    ' \
+  | head -1)
+
+if [[ -z "${RUNTIME_ID}" ]]; then
+  echo "error: no simulator runtime found for iOS ${IOS_VERSION}" >&2
+  echo "Available runtimes:" >&2
+  xcrun simctl list runtimes 2>/dev/null | grep iOS >&2 || true
+  exit 1
+fi
+
+echo "Using runtime: ${RUNTIME_ID}" >&2
 
 # Find the first available iPhone device for the requested iOS version
 UDID=$(xcrun simctl list devices available -j \

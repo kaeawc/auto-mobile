@@ -752,12 +752,13 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
 
-    const envSettings = [
-      `CTRL_PROXY_IOS_PORT=${this.servicePort}`,
-      `CTRL_PROXY_IOS_TIMEOUT=${timeout}`,
-    ];
+    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values
+    const childEnv: Record<string, string> = {
+      CTRL_PROXY_IOS_PORT: String(this.servicePort),
+      CTRL_PROXY_IOS_TIMEOUT: timeout,
+    };
     if (bundleId) {
-      envSettings.push(`CTRL_PROXY_IOS_BUNDLE_ID=${bundleId}`);
+      childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
       logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
     }
     const command = [
@@ -766,16 +767,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       `-xctestrun "${xctestrunPath}"`,
       `-destination "platform=iOS Simulator,id=${this.device.deviceId}"`,
       "-only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService",
-      ...envSettings,
       "2>&1"
     ].join(" ");
 
     logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
 
-    // Start in background
+    // Start in background with env vars passed via exec options (not interpolated into the command)
     // Note: exec() is used here intentionally — the command is built from internal constants,
     // not user input, and we need shell features (2>&1 redirection, quoted paths).
-    const child = exec(command, error => {
+    const child = exec(command, { env: { ...process.env, ...childEnv } }, error => {
       if (error) {
         logger.warn(`[IOSCtrlProxy] xcodebuild test exited: ${error.message}`);
         this.handleProcessExit();

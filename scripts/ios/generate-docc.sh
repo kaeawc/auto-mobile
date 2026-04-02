@@ -17,11 +17,19 @@ if swift package plugin generate-documentation --help >/dev/null 2>&1; then
     # tries to move the result to --output-path. On sandboxed environments the
     # move may fail (EPERM) even though the build itself succeeds. We tolerate
     # that error and copy from the intermediate location instead.
-    swift package generate-documentation \
+    if ! swift package generate-documentation \
         --target AutoMobileSDK \
         --transform-for-static-hosting \
-        --hosting-base-path auto-mobile/ios-sdk \
-    || true
+        --hosting-base-path auto-mobile/ios-sdk; then
+        # The plugin may fail with EPERM when moving the archive out of
+        # the sandbox. If the archive was still produced we continue;
+        # otherwise we surface the real failure.
+        if ! find "${DOCC_OUTPUTS}" -name "AutoMobileSDK.doccarchive" -type d 2>/dev/null | grep -q .; then
+            echo "ERROR: DocC generation failed and no archive was produced." >&2
+            exit 1
+        fi
+        echo "WARNING: generate-documentation exited non-zero but archive exists; continuing."
+    fi
 
     # Find the .doccarchive wherever the plugin placed it
     ARCHIVE=$(find "${DOCC_OUTPUTS}" -name "AutoMobileSDK.doccarchive" -type d 2>/dev/null | head -1)

@@ -251,7 +251,7 @@ Body capture is always disabled in release builds to prevent leaking credentials
 
 ## Logging
 
-`AutoMobileLog` provides thin wrappers around Apple's `os.Logger` for structured logging. Logs are written to the unified logging system with `privacy: .public` redaction and are captured by OSLogStore in CtrlProxy for remote observation.
+`AutoMobileLog` provides thin wrappers around Apple's `os.Logger` for structured logging. Logs are written to the unified logging system with `privacy: .public` (non-redacted, visible in Console.app and OSLogStore). Note that `.public` disables redaction — sensitive fields such as PII or credentials must not be passed through these log methods.
 
 Log methods mirror standard log levels: `v()`, `d()`, `i()`, `w()`, `e()`, `fault()`. Each method accepts an optional `tag` parameter that is formatted as a `[tag] message` prefix.
 

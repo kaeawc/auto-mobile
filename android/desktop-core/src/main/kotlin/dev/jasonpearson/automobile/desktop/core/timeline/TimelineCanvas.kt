@@ -74,9 +74,10 @@ fun TimelineCanvas(
             .onPointerEvent(PointerEventType.Scroll) { event ->
                 val change = event.changes.firstOrNull() ?: return@onPointerEvent
                 if (event.isZoomModifierPressed()) {
-                    val scrollY = change.scrollDelta.y
-                    val pivotFraction = change.position.x / size.width.toFloat()
-                    state.scrollZoom(scrollY, pivotFraction)
+                    val chartWidth = (size.width - LANE_LABEL_WIDTH).coerceAtLeast(1f)
+                    val pivotFraction = (change.position.x - LANE_LABEL_WIDTH) / chartWidth
+                    state.scrollZoom(change.scrollDelta.y, pivotFraction.coerceIn(0f, 1f))
+                    change.consume()
                 }
             }
             .pointerInput(Unit) {

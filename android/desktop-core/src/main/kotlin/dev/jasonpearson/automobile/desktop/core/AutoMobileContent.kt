@@ -175,6 +175,7 @@ private val ANDROID_LAUNCHERS = listOf(
     "com.miui.home",                           // Xiaomi MIUI
 )
 private const val IOS_SPRINGBOARD = "com.apple.springboard"
+private const val TIMELINE_EVENT_CACHE_LIMIT = 10_000
 
 /**
  * Select the default app to show in the navigation graph.
@@ -781,8 +782,8 @@ fun AutoMobileContent(
       val client = telemetryPushClient ?: return@LaunchedEffect
       client.telemetryEvents.collect { event ->
           telemetryEventCache.add(event)
-          // Cap at 500 events
-          while (telemetryEventCache.size > 500) {
+          // Keep enough history for the timeline to match the dashboard's longer retention options.
+          while (telemetryEventCache.size > TIMELINE_EVENT_CACHE_LIMIT) {
               telemetryEventCache.removeAt(0)
           }
       }

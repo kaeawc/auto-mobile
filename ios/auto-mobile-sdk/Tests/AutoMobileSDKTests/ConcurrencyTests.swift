@@ -22,7 +22,7 @@ final class ConcurrencyTests: XCTestCase {
         let queue = DispatchQueue(label: "test.concurrent", attributes: .concurrent)
         for i in 0..<10 {
             queue.async {
-                let event = SdkCustomEvent(name: "event_\(i)")
+                let event = SdkInteractionEvent(interactionType: "event_\(i)")
                 buffer.add(event)
                 expectation.fulfill()
             }

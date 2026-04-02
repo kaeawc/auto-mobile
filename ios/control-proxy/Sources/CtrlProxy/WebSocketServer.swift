@@ -396,8 +396,13 @@ class WebSocketConnection {
     }
 
     private func handleSdkEventsGet() {
-        let events = SdkEventBuffer.shared.drain()
-        let combined = "[" + events.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: ",") + "]"
+        // Merge SDK events with OSLogStore-captured log entries
+        var allEvents = SdkEventBuffer.shared.drain()
+        if #available(iOS 15.0, *) {
+            let logEvents = OSLogReaderHolder.shared.drain()
+            allEvents.append(contentsOf: logEvents)
+        }
+        let combined = "[" + allEvents.compactMap { String(data: $0, encoding: .utf8) }.joined(separator: ",") + "]"
         let bodyData = combined.data(using: .utf8) ?? Data()
         let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(bodyData.count)\r\n\r\n"
         var responseData = response.data(using: .utf8) ?? Data()

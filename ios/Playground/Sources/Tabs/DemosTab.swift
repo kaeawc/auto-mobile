@@ -652,20 +652,17 @@ struct SDKStatusDemo: View {
                 }
             }
 
-            Section("Track Custom Event") {
+            Section("Log Message") {
                 TextField("Event Name", text: $eventName)
                 TextField("Property (key=value)", text: $eventProperty)
 
-                Button("Track Event") {
-                    var props: [String: String] = [:]
+                Button("Log Event") {
+                    var message = eventName
                     if eventProperty.contains("=") {
-                        let parts = eventProperty.split(separator: "=", maxSplits: 1)
-                        if parts.count == 2 {
-                            props[String(parts[0])] = String(parts[1])
-                        }
+                        message += " \(eventProperty)"
                     }
-                    AutoMobileSDK.shared.trackEvent(name: eventName, properties: props)
-                    statusMessage = "Tracked: \(eventName)"
+                    AutoMobileLog.shared.i("DemosTab", message)
+                    statusMessage = "Logged: \(eventName)"
                 }
                 .disabled(eventName.isEmpty)
 

@@ -13,11 +13,7 @@ struct PlaygroundApp: App {
         DatabaseInspector.shared.setEnabled(true)
         #endif
 
-        // Add log filter for network and image loading
-        AutoMobileLog.shared.addFilter(name: "network", tagPattern: "URLSession|Network|Coil")
-
-        // Track app launch
-        AutoMobileSDK.shared.trackEvent(name: "app_launched", properties: ["screen": "PlaygroundApp"])
+        AutoMobileLog.shared.i("PlaygroundApp", "app_launched")
     }
 
     var body: some Scene {

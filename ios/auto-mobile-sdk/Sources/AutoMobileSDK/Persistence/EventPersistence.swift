@@ -123,8 +123,6 @@ public final class FileEventPersistence: EventPersisting, @unchecked Sendable {
         switch type {
         case .navigation:
             return try? decoder.decode(SdkNavigationEvent.self, from: data)
-        case .custom:
-            return try? decoder.decode(SdkCustomEvent.self, from: data)
         case .handledException:
             return try? decoder.decode(SdkHandledExceptionEvent.self, from: data)
         case .crash:

@@ -25,11 +25,11 @@ final class SdkEventBufferTests: XCTestCase {
             expectation.fulfill()
         }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
         XCTAssertTrue(collector.events.isEmpty)
 
-        buffer.add(SdkCustomEvent(name: "e3"))
+        buffer.add(SdkInteractionEvent(interactionType: "e3"))
         wait(for: [expectation], timeout: 1.0)
 
         XCTAssertEqual(collector.events.count, 3)
@@ -50,8 +50,8 @@ final class SdkEventBufferTests: XCTestCase {
         }
 
         buffer.start()
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
 
         // Manually fire the timer
         fakeTimer.fire()
@@ -67,8 +67,8 @@ final class SdkEventBufferTests: XCTestCase {
             collector.collect(events)
         }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
         buffer.shutdown()
 
         XCTAssertEqual(collector.events.count, 2)
@@ -108,7 +108,7 @@ final class EventProcessorTests: XCTestCase {
     func testProcessorDropsEventsWithSpecificName() {
         let collector = EventCollector()
         let dropProcessor = FakeEventProcessor { event in
-            if let custom = event as? SdkCustomEvent, custom.name == "drop_me" {
+            if let custom = event as? SdkInteractionEvent, custom.interactionType == "drop_me" {
                 return nil
             }
             return event
@@ -124,13 +124,13 @@ final class EventProcessorTests: XCTestCase {
             collector.collect(events)
         }
 
-        buffer.add(SdkCustomEvent(name: "keep_me"))
-        buffer.add(SdkCustomEvent(name: "drop_me"))
-        buffer.add(SdkCustomEvent(name: "also_keep"))
+        buffer.add(SdkInteractionEvent(interactionType: "keep_me"))
+        buffer.add(SdkInteractionEvent(interactionType: "drop_me"))
+        buffer.add(SdkInteractionEvent(interactionType: "also_keep"))
         buffer.flush()
 
         XCTAssertEqual(collector.events.count, 2)
-        let names = collector.events.compactMap { ($0 as? SdkCustomEvent)?.name }
+        let names = collector.events.compactMap { ($0 as? SdkInteractionEvent)?.interactionType }
         XCTAssertEqual(names, ["keep_me", "also_keep"])
         XCTAssertEqual(dropCounter.snapshot()[.filtered], 1)
     }
@@ -138,12 +138,12 @@ final class EventProcessorTests: XCTestCase {
     func testProcessorEnrichesEvents() {
         let collector = EventCollector()
         let enrichProcessor = FakeEventProcessor { event in
-            if let custom = event as? SdkCustomEvent {
+            if let custom = event as? SdkInteractionEvent {
                 var props = custom.properties
                 props["enriched"] = "true"
-                return SdkCustomEvent(
+                return SdkInteractionEvent(
                     timestamp: custom.timestamp,
-                    name: custom.name,
+                    interactionType: custom.interactionType,
                     properties: props
                 )
             }
@@ -158,11 +158,11 @@ final class EventProcessorTests: XCTestCase {
             collector.collect(events)
         }
 
-        buffer.add(SdkCustomEvent(name: "test"))
+        buffer.add(SdkInteractionEvent(interactionType: "test"))
         buffer.flush()
 
         XCTAssertEqual(collector.events.count, 1)
-        let custom = collector.events.first as? SdkCustomEvent
+        let custom = collector.events.first as? SdkInteractionEvent
         XCTAssertEqual(custom?.properties["enriched"], "true")
     }
 
@@ -170,12 +170,12 @@ final class EventProcessorTests: XCTestCase {
         let collector = EventCollector()
 
         let enrichProcessor = FakeEventProcessor { event in
-            if let custom = event as? SdkCustomEvent {
+            if let custom = event as? SdkInteractionEvent {
                 var props = custom.properties
                 props["level"] = "high"
-                return SdkCustomEvent(
+                return SdkInteractionEvent(
                     timestamp: custom.timestamp,
-                    name: custom.name,
+                    interactionType: custom.interactionType,
                     properties: props
                 )
             }
@@ -183,7 +183,7 @@ final class EventProcessorTests: XCTestCase {
         }
 
         let filterProcessor = FakeEventProcessor { event in
-            if let custom = event as? SdkCustomEvent, custom.name == "secret" {
+            if let custom = event as? SdkInteractionEvent, custom.interactionType == "secret" {
                 return nil
             }
             return event
@@ -199,13 +199,13 @@ final class EventProcessorTests: XCTestCase {
             collector.collect(events)
         }
 
-        buffer.add(SdkCustomEvent(name: "visible"))
-        buffer.add(SdkCustomEvent(name: "secret"))
+        buffer.add(SdkInteractionEvent(interactionType: "visible"))
+        buffer.add(SdkInteractionEvent(interactionType: "secret"))
         buffer.flush()
 
         XCTAssertEqual(collector.events.count, 1)
-        let custom = collector.events.first as? SdkCustomEvent
-        XCTAssertEqual(custom?.name, "visible")
+        let custom = collector.events.first as? SdkInteractionEvent
+        XCTAssertEqual(custom?.interactionType, "visible")
         XCTAssertEqual(custom?.properties["level"], "high")
         XCTAssertEqual(dropCounter.snapshot()[.filtered], 1)
     }
@@ -223,15 +223,15 @@ final class EventProcessorTests: XCTestCase {
             collector.collect(events)
         }
 
-        buffer.add(SdkCustomEvent(name: "e1"))
-        buffer.add(SdkCustomEvent(name: "e2"))
-        buffer.add(SdkCustomEvent(name: "e3"))
+        buffer.add(SdkInteractionEvent(interactionType: "e1"))
+        buffer.add(SdkInteractionEvent(interactionType: "e2"))
+        buffer.add(SdkInteractionEvent(interactionType: "e3"))
         // Buffer is now full (3/3). Next add should drop oldest.
-        buffer.add(SdkCustomEvent(name: "e4"))
-        buffer.add(SdkCustomEvent(name: "e5"))
+        buffer.add(SdkInteractionEvent(interactionType: "e4"))
+        buffer.add(SdkInteractionEvent(interactionType: "e5"))
         buffer.flush()
 
-        let names = collector.events.compactMap { ($0 as? SdkCustomEvent)?.name }
+        let names = collector.events.compactMap { ($0 as? SdkInteractionEvent)?.interactionType }
         XCTAssertEqual(names, ["e3", "e4", "e5"])
         XCTAssertEqual(dropCounter.snapshot()[.bufferOverflow], 2)
     }

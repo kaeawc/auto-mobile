@@ -89,7 +89,7 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable {
             properties["text"] = text
         }
 
-        let event = SdkCustomEvent(name: "_auto_tap", properties: properties)
+        let event = SdkInteractionEvent(interactionType: "_auto_tap", properties: properties)
         currentBuffer?.add(event)
     }
 

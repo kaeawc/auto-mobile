@@ -17,7 +17,6 @@ public enum SdkEventType: String, Codable, Sendable {
     case webSocketFrame = "websocket_frame"
     case log
     case lifecycle
-    case custom
     case notificationAction = "notification_action"
     case viewBodySnapshot = "view_body_snapshot"
     case broadcast
@@ -232,20 +231,17 @@ public struct SdkLogEvent: SdkEvent {
     public let level: LogLevel
     public let tag: String?
     public let message: String
-    public let filterName: String
 
     public init(
         timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
         level: LogLevel,
         tag: String?,
-        message: String,
-        filterName: String
+        message: String
     ) {
         self.timestamp = timestamp
         self.level = level
         self.tag = tag
         self.message = message
-        self.filterName = filterName
     }
 }
 
@@ -279,23 +275,6 @@ public struct SdkLifecycleEvent: SdkEvent {
         self.state = state
         self.bundleId = bundleId
         self.details = details
-    }
-}
-
-public struct SdkCustomEvent: SdkEvent {
-    public let eventType: SdkEventType = .custom
-    public let timestamp: Int64
-    public let name: String
-    public let properties: [String: String]
-
-    public init(
-        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
-        name: String,
-        properties: [String: String] = [:]
-    ) {
-        self.timestamp = timestamp
-        self.name = name
-        self.properties = properties
     }
 }
 

@@ -37,11 +37,11 @@ final class InteractionTrackerTests: XCTestCase {
         tracker.recordTap(x: 100.5, y: 200.3, accessibilityLabel: "Submit", viewType: "UIButton")
 
         buffer.flush()
-        let tapEvents = receivedEvents.compactMap { $0 as? SdkCustomEvent }
+        let tapEvents = receivedEvents.compactMap { $0 as? SdkInteractionEvent }
         XCTAssertEqual(tapEvents.count, 1)
 
         let event = tapEvents[0]
-        XCTAssertEqual(event.name, "_auto_tap")
+        XCTAssertEqual(event.interactionType, "_auto_tap")
         XCTAssertEqual(event.properties["x"], "100.5")
         XCTAssertEqual(event.properties["y"], "200.3")
         XCTAssertEqual(event.properties["accessibilityLabel"], "Submit")
@@ -56,7 +56,7 @@ final class InteractionTrackerTests: XCTestCase {
         tracker.recordTap(x: 50, y: 60) // Should be debounced
 
         buffer.flush()
-        let tapEvents = receivedEvents.compactMap { $0 as? SdkCustomEvent }
+        let tapEvents = receivedEvents.compactMap { $0 as? SdkInteractionEvent }
         // Only first tap should be recorded due to debounce
         XCTAssertEqual(tapEvents.count, 1)
     }
@@ -66,7 +66,7 @@ final class InteractionTrackerTests: XCTestCase {
         tracker.recordTap(x: 10, y: 20, accessibilityLabel: "", text: "")
 
         buffer.flush()
-        let tapEvents = receivedEvents.compactMap { $0 as? SdkCustomEvent }
+        let tapEvents = receivedEvents.compactMap { $0 as? SdkInteractionEvent }
         XCTAssertEqual(tapEvents.count, 1)
         XCTAssertNil(tapEvents[0].properties["accessibilityLabel"])
         XCTAssertNil(tapEvents[0].properties["text"])

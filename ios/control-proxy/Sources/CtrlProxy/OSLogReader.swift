@@ -55,15 +55,31 @@ public final class OSLogReader {
         print("[OSLogReader] Stopped")
     }
 
-    /// Drain all buffered log entries as JSON Data blobs (one per entry).
+    /// Drain buffered log entries as SDK-batch-formatted JSON Data blobs.
+    /// Each blob is a single batch: `{"bundleId":null,"events":[{"eventType":"log","payload":"<base64>"},...]}`.
+    /// This matches the format expected by the TypeScript CtrlProxyClient parser.
     public func drain() -> [Data] {
         lock.lock()
         let entries = buffer
         buffer.removeAll()
         lock.unlock()
 
+        guard !entries.isEmpty else { return [] }
+
         let encoder = JSONEncoder()
-        return entries.compactMap { try? encoder.encode($0) }
+        let envelopes: [[String: Any]] = entries.compactMap { entry in
+            guard let payloadData = try? encoder.encode(entry) else { return nil }
+            let payloadBase64 = payloadData.base64EncodedString()
+            return ["eventType": entry.eventType, "payload": payloadBase64]
+        }
+
+        let batch: [String: Any] = [
+            "bundleId": NSNull(),
+            "events": envelopes,
+        ]
+
+        guard let batchData = try? JSONSerialization.data(withJSONObject: batch) else { return [] }
+        return [batchData]
     }
 
     // MARK: - Private

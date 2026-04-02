@@ -137,7 +137,7 @@ object AutoMobileBiometrics {
         get() {
             val override = pendingOverride.get() ?: return false
             if (System.currentTimeMillis() > override.expiryMs) {
-                pendingOverride.set(null)
+                pendingOverride.compareAndSet(override, null)
                 return false
             }
             return true
@@ -169,7 +169,7 @@ object AutoMobileBiometrics {
     fun consumeOverride(): BiometricResult? {
         val override = pendingOverride.get() ?: return null
         if (System.currentTimeMillis() > override.expiryMs) {
-            pendingOverride.set(null)
+            pendingOverride.compareAndSet(override, null)
             AutoMobileSDK.logger.d(TAG) { "Biometric override expired, discarding" }
             return null
         }

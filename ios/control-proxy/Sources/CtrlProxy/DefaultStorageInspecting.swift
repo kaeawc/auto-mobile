@@ -22,7 +22,7 @@ public final class DefaultStorageInspecting: StorageInspecting {
         // Standard UserDefaults
         let standard = UserDefaults.standard.dictionaryRepresentation()
         suites.append(StorageSuiteInfo(
-            name: nil,
+            name: "Standard",
             displayName: "Standard",
             entryCount: standard.count
         ))
@@ -115,11 +115,19 @@ public final class DefaultStorageInspecting: StorageInspecting {
             if CFGetTypeID(number) == CFBooleanGetTypeID() {
                 return "BOOLEAN"
             }
-            // Check if it's an integer (no fractional part)
-            if number.doubleValue == Double(number.intValue) {
+            // Use CFNumber type ID to distinguish integer vs floating-point.
+            // This avoids intValue truncation (32-bit) and misclassifying
+            // whole-number doubles like 1.0 as INT.
+            let cfNumber = number as CFNumber
+            let cfType = CFNumberGetType(cfNumber)
+            switch cfType {
+            case .sInt8Type, .sInt16Type, .sInt32Type, .sInt64Type,
+                 .charType, .shortType, .intType, .longType, .longLongType,
+                 .cfIndexType, .nsIntegerType:
                 return "INT"
+            default:
+                return "DOUBLE"
             }
-            return "DOUBLE"
         }
         switch value {
         case is String:

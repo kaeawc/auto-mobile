@@ -411,7 +411,7 @@ final class StorageCommandHandlerTests: XCTestCase {
 
     func testListPreferenceFilesReturnsSuites() throws {
         fakeStorage.setSuites([
-            StorageSuiteInfo(name: nil, displayName: "Standard", entryCount: 5),
+            StorageSuiteInfo(name: "Standard", displayName: "Standard", entryCount: 5),
             StorageSuiteInfo(name: "group.com.example", displayName: "group.com.example", entryCount: 3),
         ])
 

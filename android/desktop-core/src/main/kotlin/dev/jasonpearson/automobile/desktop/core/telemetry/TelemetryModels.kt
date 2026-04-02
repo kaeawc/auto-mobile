@@ -121,12 +121,6 @@ sealed class TelemetryDisplayEvent {
         val message: String,
     ) : TelemetryDisplayEvent()
 
-    data class Custom(
-        override val timestamp: Long,
-        val name: String,
-        val properties: Map<String, String>,
-    ) : TelemetryDisplayEvent()
-
     data class Os(
         override val timestamp: Long,
         val category: String,
@@ -304,11 +298,12 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
             message = d.stringOrDefault("message", ""),
         )
         "custom" -> {
+            // Custom events are merged into log events
+            val name = d.stringOrDefault("name", "unknown")
             val props = mutableMapOf<String, String>()
             d["properties"]?.jsonObject?.forEach { (k, v) ->
                 props[k] = v.jsonPrimitive.content
             }
-            // Also check properties_json for serialized form
             val propsJson = d.stringOrNull("properties_json")
             if (props.isEmpty() && propsJson != null) {
                 try {
@@ -316,10 +311,14 @@ fun parseTelemetryEvent(envelope: TelemetryEventEnvelope): TelemetryDisplayEvent
                     parsed.forEach { (k, v) -> props[k] = v.jsonPrimitive.content }
                 } catch (_: Exception) { /* ignore parse failures */ }
             }
-            TelemetryDisplayEvent.Custom(
+            val propsStr = if (props.isNotEmpty()) {
+                " {${props.entries.joinToString(", ") { "${it.key}:${it.value}" }}}"
+            } else ""
+            TelemetryDisplayEvent.Log(
                 timestamp = envelope.timestamp,
-                name = d.stringOrDefault("name", "unknown"),
-                properties = props,
+                level = 4, // INFO
+                tag = "CustomEvent",
+                message = "$name$propsStr",
             )
         }
         "os" -> {
@@ -589,8 +588,6 @@ private inline fun TelemetryDisplayEvent.anyField(predicate: (String) -> Boolean
         is TelemetryDisplayEvent.Os ->
             predicate(category) || predicate(kind) ||
             details?.values?.any(predicate) == true
-        is TelemetryDisplayEvent.Custom ->
-            predicate(name) || properties.keys.any(predicate) || properties.values.any(predicate)
         is TelemetryDisplayEvent.Failure ->
             predicate(type) || predicate(title) ||
             exceptionType?.let(predicate) == true || screen?.let(predicate) == true

@@ -7,7 +7,6 @@ import { PushSubscriptionSocketServer, getSocketPath, SocketServerConfig } from 
 import type { TelemetryEvent } from "../features/telemetry/TelemetryRecorder";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { getLogEvents } from "../db/logEventRepository";
-import { getCustomEvents } from "../db/customEventRepository";
 import { getOsEvents } from "../db/osEventRepository";
 import { getNavigationEvents } from "../db/navigationEventRepository";
 import { getStorageEvents } from "../db/storageEventRepository";
@@ -22,7 +21,7 @@ const SOCKET_CONFIG: SocketServerConfig = {
 };
 
 interface TelemetryFilter {
-  category: string | null; // "network", "log", "custom", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
+  category: string | null; // "network", "log", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
   deviceId: string | null;
   sessionId: string | null;
 }
@@ -86,10 +85,9 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
       filter.category === null || filter.category === category;
 
     // Run independent backfill queries in parallel
-    const [networkRows, logRows, customRows, osRows] = await Promise.all([
+    const [networkRows, logRows, osRows] = await Promise.all([
       shouldInclude("network") ? getNetworkEvents({ deviceId, limit }) : [],
       shouldInclude("log") ? getLogEvents({ deviceId, limit }) : [],
-      shouldInclude("custom") ? getCustomEvents({ deviceId, limit }) : [],
       shouldInclude("os") ? getOsEvents({ deviceId, limit }) : [],
     ]);
     for (const r of networkRows) {
@@ -97,9 +95,6 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
     }
     for (const r of logRows) {
       events.push({ category: "log", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
-    }
-    for (const r of customRows) {
-      events.push({ category: "custom", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });
     }
     for (const r of osRows) {
       events.push({ category: "os", timestamp: r.timestamp, deviceId: r.deviceId, sessionId: r.sessionId ?? null, data: r });

@@ -70,7 +70,6 @@ private fun TelemetryDisplayEvent.categoryKey(): String = when (this) {
     is TelemetryDisplayEvent.Navigation -> "Navigation"
     is TelemetryDisplayEvent.Log -> "Log"
     is TelemetryDisplayEvent.Os -> "OS"
-    is TelemetryDisplayEvent.Custom -> "Custom"
     is TelemetryDisplayEvent.Failure -> "Failure"
     is TelemetryDisplayEvent.Storage -> "Storage"
     is TelemetryDisplayEvent.Layout -> "Layout"
@@ -145,7 +144,6 @@ private enum class CategoryFilter(val label: String, val icon: ImageVector) {
     Navigation("Nav", AppIcons.Navigation),
     Logs("Logs", AppIcons.Logs),
     Os("OS", AppIcons.Os),
-    Custom("Custom", AppIcons.Custom),
     Failures("Failures", AppIcons.Failures),
     Storage("Storage", AppIcons.StorageCategory),
     Layout("Layout", AppIcons.Layout),
@@ -155,7 +153,7 @@ private enum class CategoryFilter(val label: String, val icon: ImageVector) {
 
 /**
  * Telemetry dashboard showing a real-time scrollable event list
- * with category filtering (Network, Logs, OS, Custom).
+ * with category filtering (Network, Logs, OS, etc.).
  */
 @Composable
 fun TelemetryDashboard(
@@ -720,7 +718,6 @@ private fun categoryOf(event: TelemetryDisplayEvent): CategoryFilter? = when (ev
     is TelemetryDisplayEvent.Navigation -> CategoryFilter.Navigation
     is TelemetryDisplayEvent.Log -> CategoryFilter.Logs
     is TelemetryDisplayEvent.Os -> CategoryFilter.Os
-    is TelemetryDisplayEvent.Custom -> CategoryFilter.Custom
     is TelemetryDisplayEvent.Failure -> CategoryFilter.Failures
     is TelemetryDisplayEvent.Storage -> CategoryFilter.Storage
     is TelemetryDisplayEvent.Layout -> CategoryFilter.Layout
@@ -895,7 +892,6 @@ private fun TelemetryEventRow(
                 is TelemetryDisplayEvent.Navigation -> AppIcons.Navigation
                 is TelemetryDisplayEvent.Log -> AppIcons.Logs
                 is TelemetryDisplayEvent.Os -> AppIcons.Os
-                is TelemetryDisplayEvent.Custom -> AppIcons.Custom
                 is TelemetryDisplayEvent.Failure -> when (event.type) {
                     "crash" -> AppIcons.Crash
                     "anr" -> AppIcons.Anr
@@ -919,7 +915,6 @@ private fun TelemetryEventRow(
             is TelemetryDisplayEvent.Network -> NetworkSummary(event, textColor)
             is TelemetryDisplayEvent.Navigation -> NavigationSummary(event, textColor)
             is TelemetryDisplayEvent.Log -> LogSummary(event, textColor)
-            is TelemetryDisplayEvent.Custom -> CustomSummary(event, textColor)
             is TelemetryDisplayEvent.Os -> OsSummary(event, textColor)
             is TelemetryDisplayEvent.Failure -> FailureSummary(event, textColor)
             is TelemetryDisplayEvent.Storage -> StorageSummary(event, textColor)
@@ -1081,23 +1076,6 @@ private fun LogSummary(event: TelemetryDisplayEvent.Log, textColor: Color) {
         fontSize = 11.sp,
         fontFamily = FontFamily.Monospace,
         color = color,
-        maxLines = 1,
-    )
-}
-
-@Composable
-private fun CustomSummary(event: TelemetryDisplayEvent.Custom, textColor: Color) {
-    val propsText = if (event.properties.isNotEmpty()) {
-        " {${event.properties.entries.joinToString(", ") { "${it.key}:${it.value}" }}}"
-    } else {
-        ""
-    }
-
-    Text(
-        "${event.name}$propsText",
-        fontSize = 11.sp,
-        fontFamily = FontFamily.Monospace,
-        color = textColor.copy(alpha = 0.85f),
         maxLines = 1,
     )
 }
@@ -1349,15 +1327,17 @@ private fun generateFakeEvents(): List<TelemetryDisplayEvent> {
             triggeringInteraction = "tap on 'Home'",
             screenshotUri = null,
         ),
-        TelemetryDisplayEvent.Custom(
+        TelemetryDisplayEvent.Log(
             timestamp = now - 6000,
-            name = "button_click",
-            properties = mapOf("screen" to "home", "button" to "refresh"),
+            level = 4,
+            tag = "CustomEvent",
+            message = "button_click {screen:home, button:refresh}",
         ),
-        TelemetryDisplayEvent.Custom(
+        TelemetryDisplayEvent.Log(
             timestamp = now - 7000,
-            name = "purchase_completed",
-            properties = mapOf("item" to "premium", "price" to "9.99"),
+            level = 4,
+            tag = "CustomEvent",
+            message = "purchase_completed {item:premium, price:9.99}",
         ),
         TelemetryDisplayEvent.Network(
             timestamp = now - 8000,

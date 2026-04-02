@@ -497,15 +497,6 @@ interface WsLifecycleEventMessage extends WsMessageBase {
   };
 }
 
-interface WsCustomEventMessage extends WsMessageBase {
-  type: "custom_event";
-  event?: {
-    applicationId?: string;
-    name?: string;
-    properties?: Record<string, unknown>;
-  };
-}
-
 interface WsStorageChangedMessage extends WsMessageBase {
   type: "storage_changed";
   packageName?: string;
@@ -562,7 +553,6 @@ type WebSocketMessage =
   | WsLogEventMessage
   | WsBroadcastEventMessage
   | WsLifecycleEventMessage
-  | WsCustomEventMessage
   | WsStorageChangedMessage;
 
 /**
@@ -2050,11 +2040,17 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           const recorder = TelemetryRecorder.getInstance();
           recorder.setContext(this.device.deviceId, null);
 
-          await recorder.recordCustomEvent({
+          // Custom events are merged into log events
+          const propsStr = event.properties && Object.keys(event.properties).length > 0
+            ? ` ${JSON.stringify(event.properties)}`
+            : "";
+          await recorder.recordLogEvent({
             timestamp: message.timestamp,
             applicationId: event.applicationId ?? null,
-            name: event.name ?? "",
-            properties: event.properties ?? {},
+            level: 4, // INFO
+            tag: "CustomEvent",
+            message: `${event.name ?? ""}${propsStr}`,
+            filterName: "custom",
           });
         }
       }

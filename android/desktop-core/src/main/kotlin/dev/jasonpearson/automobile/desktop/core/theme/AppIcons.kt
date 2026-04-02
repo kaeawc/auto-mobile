@@ -41,7 +41,6 @@ object AppIcons {
     val Navigation: ImageVector get() = Icons.Filled.Explore
     val Logs: ImageVector get() = Icons.Filled.Description
     val Os: ImageVector get() = Icons.Filled.Settings
-    val Custom: ImageVector get() = Icons.Filled.LocalOffer
     val Failures: ImageVector get() = Icons.Filled.ReportProblem
     val StorageCategory: ImageVector get() = Icons.Filled.Storage
     val Layout: ImageVector get() = Icons.Filled.Layers

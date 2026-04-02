@@ -657,12 +657,17 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             }
             break;
           }
-          case "custom":
-            await recorder.recordCustomEvent({
+          case "custom": {
+            // Custom events are merged into log events
+            const customName = (p.name as string) ?? "custom";
+            const customProps = (p.properties as Record<string, string>) ?? {};
+            const propsStr = Object.keys(customProps).length > 0 ? ` ${JSON.stringify(customProps)}` : "";
+            await recorder.recordLogEvent({
               timestamp: ts, applicationId,
-              name: (p.name as string) ?? "custom", properties: (p.properties as Record<string, string>) ?? {},
+              level: 4, tag: "CustomEvent", message: `${customName}${propsStr}`, filterName: "custom",
             });
             break;
+          }
           case "handled_exception": {
             const failureRecorder = getFailureRecorder();
             const exType = (p.exceptionClass as string) ?? (p.errorDomain as string) ?? "unknown";
@@ -716,10 +721,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             });
             break;
           default:
-          // Record unknown types as custom events
-            await recorder.recordCustomEvent({
+          // Record unknown types as log events
+            await recorder.recordLogEvent({
               timestamp: ts, applicationId,
-              name: event.type, properties: { data: JSON.stringify(p).substring(0, 1000) },
+              level: 4, tag: "UnknownEvent", message: `${event.type}: ${JSON.stringify(p).substring(0, 1000)}`, filterName: "custom",
             });
         }
       } finally {

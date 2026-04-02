@@ -171,7 +171,6 @@ fun TelemetryDetailPanel(
                 is TelemetryDisplayEvent.Navigation -> NavigationDetail(event, textColor, screenshotLoader)
                 is TelemetryDisplayEvent.Log -> LogDetail(event, textColor)
                 is TelemetryDisplayEvent.Os -> OsDetail(event, textColor)
-                is TelemetryDisplayEvent.Custom -> CustomDetail(event, textColor)
                 is TelemetryDisplayEvent.Storage -> StorageDetail(event, textColor)
                 is TelemetryDisplayEvent.Layout -> LayoutDetailMetadata(event, textColor)
                 is TelemetryDisplayEvent.Performance -> PerformanceDetail(event, textColor)
@@ -193,7 +192,6 @@ private fun detailTitle(event: TelemetryDisplayEvent): String = when (event) {
     is TelemetryDisplayEvent.Navigation -> "Navigation"
     is TelemetryDisplayEvent.Log -> "Log Entry"
     is TelemetryDisplayEvent.Os -> "OS Event"
-    is TelemetryDisplayEvent.Custom -> "Custom Event"
     is TelemetryDisplayEvent.Failure -> when (event.type) {
         "crash" -> "Crash"
         "anr" -> "ANR"
@@ -349,13 +347,6 @@ private fun serializeEventToJson(event: TelemetryDisplayEvent): String {
                 put("type", JsonPrimitive("os"))
                 put("category", JsonPrimitive(event.category))
                 put("kind", JsonPrimitive(event.kind))
-            }
-            is TelemetryDisplayEvent.Custom -> {
-                put("type", JsonPrimitive("custom"))
-                put("name", JsonPrimitive(event.name))
-                put("properties", buildJsonObject {
-                    event.properties.forEach { (k, v) -> put(k, JsonPrimitive(v)) }
-                })
             }
             is TelemetryDisplayEvent.Storage -> {
                 put("type", JsonPrimitive("storage"))
@@ -1056,12 +1047,6 @@ private fun OsDetail(event: TelemetryDisplayEvent.Os, textColor: Color) {
     DetailRow("Category", event.category, textColor)
     DetailRow("Kind", event.kind, textColor)
     event.details?.forEach { (k, v) -> DetailRow(k, v, textColor) }
-}
-
-@Composable
-private fun CustomDetail(event: TelemetryDisplayEvent.Custom, textColor: Color) {
-    DetailRow("Name", event.name, textColor)
-    event.properties.forEach { (k, v) -> DetailRow(k, v, textColor) }
 }
 
 @Composable

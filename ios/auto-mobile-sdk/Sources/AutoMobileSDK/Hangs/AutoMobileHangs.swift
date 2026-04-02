@@ -68,6 +68,16 @@ public final class AutoMobileHangs: @unchecked Sendable {
         return _isMonitoring
     }
 
+    /// Enable or disable hang detection.
+    /// When disabled, the watchdog thread is stopped. When re-enabled, it restarts.
+    public func setEnabled(_ enabled: Bool) {
+        if enabled {
+            startMonitoring()
+        } else {
+            stopMonitoring()
+        }
+    }
+
     private func watchdogLoop(generation: UInt64) {
         while true {
             lock.lock()

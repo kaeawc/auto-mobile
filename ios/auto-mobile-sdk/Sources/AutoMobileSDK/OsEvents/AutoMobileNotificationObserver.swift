@@ -13,9 +13,27 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     private var buffer: SdkEventBuffer?
     private var bundleId: String?
     private var _isInitialized = false
+    private var _isEnabled = true
     private var observers: [NSObjectProtocol] = []
 
     private init() {}
+
+    // MARK: - Enable/Disable
+
+    /// Whether notification observation is enabled.
+    public var isEnabled: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isEnabled
+    }
+
+    /// Enable or disable notification observation.
+    /// When disabled, notification callbacks short-circuit and no events are recorded.
+    public func setEnabled(_ enabled: Bool) {
+        lock.lock()
+        _isEnabled = enabled
+        lock.unlock()
+    }
 
     // MARK: - Initialization
 
@@ -36,6 +54,7 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
     func shutdown() {
         lock.lock()
         _isInitialized = false
+        _isEnabled = true
         for observer in observers {
             NotificationCenter.default.removeObserver(observer)
         }
@@ -86,6 +105,10 @@ public final class AutoMobileNotificationObserver: @unchecked Sendable {
         guard AutoMobileSDK.shared.isEnabled else { return }
 
         lock.lock()
+        guard _isEnabled else {
+            lock.unlock()
+            return
+        }
         let currentBuffer = buffer
         lock.unlock()
 

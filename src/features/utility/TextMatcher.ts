@@ -1,6 +1,19 @@
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 
 /**
+ * Normalize Unicode quotation marks and apostrophes to their ASCII equivalents.
+ * iOS and Android system dialogs frequently use smart/curly quotes that differ
+ * from the straight quotes users type.
+ */
+export function normalizeQuotes(text: string): string {
+  return text
+    .replace(/[\u2018\u2019\u201A\u201B\u2032\u0060\u00B4]/g, "'")   // single quotes/apostrophes → U+0027
+    .replace(/[\u201C\u201D\u201E\u201F\u2033\u00AB\u00BB]/g, '"')   // double quotes → U+0022
+    .replace(/[\u2010\u2011\u2012\u2013\u2014\u2015]/g, "-")         // dashes → U+002D
+    .replace(/\u2026/g, "...");                                        // ellipsis → three dots
+}
+
+/**
  * Handles text matching algorithms for element search
  */
 export class DefaultTextMatcher implements TextMatcher {
@@ -16,8 +29,8 @@ export class DefaultTextMatcher implements TextMatcher {
       return false;
     }
 
-    const str1 = caseSensitive ? text1 : text1.toLowerCase();
-    const str2 = caseSensitive ? text2 : text2.toLowerCase();
+    const str1 = caseSensitive ? normalizeQuotes(text1) : normalizeQuotes(text1).toLowerCase();
+    const str2 = caseSensitive ? normalizeQuotes(text2) : normalizeQuotes(text2).toLowerCase();
 
     // Check if either string contains the other
     return str1.includes(str2) || str2.includes(str1);
@@ -33,12 +46,12 @@ export class DefaultTextMatcher implements TextMatcher {
   createTextMatcher(text: string, partialMatch: boolean = true, caseSensitive: boolean = false): (input?: string) => boolean {
     if (!text) {return () => false;}
 
-    const searchText = caseSensitive ? text : text.toLowerCase();
+    const searchText = caseSensitive ? normalizeQuotes(text) : normalizeQuotes(text).toLowerCase();
 
     return (input?: string): boolean => {
       if (!input) {return false;}
 
-      const targetText = caseSensitive ? input : input.toLowerCase();
+      const targetText = caseSensitive ? normalizeQuotes(input) : normalizeQuotes(input).toLowerCase();
 
       return partialMatch
         ? targetText.includes(searchText)

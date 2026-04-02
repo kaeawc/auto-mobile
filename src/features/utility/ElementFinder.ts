@@ -5,7 +5,7 @@ import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
-import { DefaultTextMatcher } from "./TextMatcher";
+import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
 import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
 
 /**
@@ -143,7 +143,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches text property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (nodeProperties.text === text) {
+            if (normalizeQuotes(nodeProperties.text) === normalizeQuotes(text)) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
@@ -157,7 +157,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches content-desc property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (nodeProperties["content-desc"] === text) {
+            if (normalizeQuotes(nodeProperties["content-desc"]) === normalizeQuotes(text)) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);
@@ -171,7 +171,7 @@ export class DefaultElementFinder implements ElementFinder {
           logger.debug("[Element] Matches ios-accessibility-label property");
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
-            if (nodeProperties["ios-accessibility-label"] === text) {
+            if (normalizeQuotes(nodeProperties["ios-accessibility-label"]) === normalizeQuotes(text)) {
               exactMatches.push(parsedNode);
             } else {
               partialMatches.push(parsedNode);

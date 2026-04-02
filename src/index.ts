@@ -102,6 +102,7 @@ function parseArgs(): {
   const skipCtrlProxyDownload = args.includes("--skip-ctrl-proxy-download") || args.includes("--skip-accessibility-download");
   const networkMockable = args.includes("--network-mockable");
   const mcpRecording = args.includes("--mcp-recording");
+  const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -294,6 +295,7 @@ function parseArgs(): {
     skipCtrlProxyDownload,
     networkMockable,
     mcpRecording,
+    dismissKeyboardAfterInput,
     noProxy,
     noDaemon,
   };
@@ -363,6 +365,7 @@ async function main() {
       skipCtrlProxyDownload,
       networkMockable,
       mcpRecording,
+      dismissKeyboardAfterInput,
       noProxy,
       noDaemon,
     } = parseArgs();
@@ -371,6 +374,7 @@ async function main() {
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
     serverConfig.setNetworkMockableEnabled(networkMockable);
+    serverConfig.setDismissKeyboardAfterInputEnabled(dismissKeyboardAfterInput);
     if (skipCtrlProxyDownload) {
       logger.info("CtrlProxy APK download disabled (--skip-ctrl-proxy-download)");
     } else {
@@ -464,6 +468,7 @@ async function main() {
         videoFormat: videoRecordingDefaults.format,
         videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
         networkMockable,
+        dismissKeyboardAfterInput,
         noUiPerfMode: !uiPerfMode,
         memPerfAudit: memPerfAuditMode,
         accessibilityAudit: a11yAuditMode,

@@ -329,6 +329,9 @@ export class DaemonManager {
     if (options.networkMockable) {
       args.push("--network-mockable");
     }
+    if (options.dismissKeyboardAfterInput) {
+      args.push("--dismiss-keyboard-after-input");
+    }
     if (options.noUiPerfMode) {
       args.push("--no-ui-perf-mode");
     }
@@ -608,6 +611,8 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       i++;
     } else if (args[i] === "--network-mockable") {
       options.networkMockable = true;
+    } else if (args[i] === "--dismiss-keyboard-after-input") {
+      options.dismissKeyboardAfterInput = true;
     } else if (args[i] === "--no-ui-perf-mode") {
       options.noUiPerfMode = true;
     } else if (args[i] === "--mem-perf-audit") {

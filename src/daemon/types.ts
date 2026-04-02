@@ -92,6 +92,8 @@ export interface DaemonOptions {
   videoMaxArchiveSizeMb?: number;
   /** Enable network mocking */
   networkMockable?: boolean;
+  /** Dismiss keyboard after text input (Android only) */
+  dismissKeyboardAfterInput?: boolean;
   /** Disable UI performance mode */
   noUiPerfMode?: boolean;
   /** Enable memory performance audit */

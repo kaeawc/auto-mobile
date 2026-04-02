@@ -380,7 +380,7 @@ export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
-    .describe("(Android only) Dismiss soft keyboard after input. Overrides server-level --dismiss-keyboard-after-input flag. Ignored on iOS."),
+    .describe("(Android only) Dismiss soft keyboard after input (default: false). Ignored on iOS."),
   platform: platformSchema
 }));
 

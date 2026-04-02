@@ -8,6 +8,7 @@
 import type { ViewHierarchyResult } from "../../../models";
 import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { logger } from "../../../utils/logger";
 import type {
   HierarchyDelegateContext,
   CtrlProxyNode,
@@ -22,6 +23,9 @@ import type {
  */
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
+
+  // Track the last known foreground app to detect stale cache from a different app
+  private lastKnownPackageName: string | null = null;
 
   constructor(context: HierarchyDelegateContext) {
     this.context = context;
@@ -87,6 +91,9 @@ export class CtrlProxyHierarchy {
       const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
 
       if (isFresh && meetsMinTimestamp) {
+        if (cachedHierarchy.hierarchy.packageName) {
+          this.lastKnownPackageName = cachedHierarchy.hierarchy.packageName;
+        }
         return {
           hierarchy: cachedHierarchy.hierarchy,
           fresh: true,
@@ -100,6 +107,9 @@ export class CtrlProxyHierarchy {
     if (!skipWaitForFresh) {
       const result = await this.requestHierarchySync(perf, false, undefined, timeout);
       if (result) {
+        if (result.hierarchy.packageName) {
+          this.lastKnownPackageName = result.hierarchy.packageName;
+        }
         return {
           hierarchy: result.hierarchy,
           fresh: true,
@@ -111,6 +121,13 @@ export class CtrlProxyHierarchy {
 
     // Return cached (stale) data if available
     if (cachedHierarchy) {
+      // Don't serve stale cache if the app has changed
+      if (this.lastKnownPackageName && cachedHierarchy.hierarchy.packageName &&
+          cachedHierarchy.hierarchy.packageName !== this.lastKnownPackageName) {
+        logger.warn(`[CTRL_PROXY] Discarding stale cache: packageName changed from ${cachedHierarchy.hierarchy.packageName} to ${this.lastKnownPackageName}`);
+        this.context.setCachedHierarchy(null);
+        return { hierarchy: null, fresh: false };
+      }
       return {
         hierarchy: cachedHierarchy.hierarchy,
         fresh: false,

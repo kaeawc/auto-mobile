@@ -35,6 +35,9 @@ const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 5000;
 export class CtrlProxyHierarchy {
   private readonly context: HierarchyDelegateContext;
 
+  // Track the last known foreground app to detect stale cache from a different app
+  private lastKnownPackageName: string | null = null;
+
   // Recomposition tracking state
   private recompositionTrackingConfigured: boolean = false;
   private recompositionTrackingEnabled: boolean = false;
@@ -156,6 +159,9 @@ export class CtrlProxyHierarchy {
         const duration = this.context.timer.now() - startTime;
 
         if (freshData) {
+          if (freshData.hierarchy.packageName) {
+            this.lastKnownPackageName = freshData.hierarchy.packageName;
+          }
           logger.debug(`[CTRL_PROXY] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
           return {
             hierarchy: freshData.hierarchy,
@@ -171,6 +177,13 @@ export class CtrlProxyHierarchy {
           // Return cached data if available
           const currentCache = this.context.getCachedHierarchy();
           if (currentCache) {
+            // Don't serve stale cache if the app has changed
+            if (this.lastKnownPackageName && currentCache.hierarchy.packageName &&
+                currentCache.hierarchy.packageName !== this.lastKnownPackageName) {
+              logger.warn(`[CTRL_PROXY] Discarding stale cache: packageName changed from ${currentCache.hierarchy.packageName} to ${this.lastKnownPackageName}`);
+              this.context.setCachedHierarchy(null);
+              return { hierarchy: null, fresh: false };
+            }
             currentCache.fresh = false;
             logger.debug(`[CTRL_PROXY] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
             return {
@@ -255,6 +268,9 @@ export class CtrlProxyHierarchy {
             androidPerfTiming = syncResult.perfTiming;
           }
           isFresh = true;
+          if (hierarchyData.packageName) {
+            this.lastKnownPackageName = hierarchyData.packageName;
+          }
           logger.debug("[CTRL_PROXY] Successfully retrieved hierarchy via sync ADB method");
         } else if (!hierarchyData) {
           logger.warn("[CTRL_PROXY] Both WebSocket and sync methods failed, will use fallback");

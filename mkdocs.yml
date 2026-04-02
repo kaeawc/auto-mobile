@@ -89,7 +89,8 @@ nav:
   - 'Design Docs':
       - 'Overview': design-docs/index.md
       - 'Status Glossary': design-docs/status-glossary.md
-      - 'MCP':
+      - 'API Surface':
+          - 'Doc Generation': design-docs/api-surface/doc-generation.md      - 'MCP':
           - 'Overview': design-docs/mcp/index.md
           - 'Tools': design-docs/mcp/tools.md
           - 'Observe':

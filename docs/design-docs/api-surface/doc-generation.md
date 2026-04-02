@@ -20,7 +20,7 @@ scripts/android/generate-dokka.sh
 Or directly via Gradle:
 
 ```bash
-./gradlew -p android :auto-mobile-sdk:dokkaGeneratePublicationHtml
+cd android && ./gradlew :auto-mobile-sdk:dokkaGeneratePublicationHtml
 ```
 
 Output: `android/auto-mobile-sdk/build/dokka/html/`

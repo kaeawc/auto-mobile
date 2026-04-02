@@ -95,7 +95,8 @@ fun TimelineCanvas(
                             val startFrac = state.timestampToFraction(span.startMs)
                             val endFrac = state.timestampToFraction(span.endMs)
                             val startX = startFrac * size.width
-                            val endX = endFrac * size.width
+                            val rawEndX = endFrac * size.width
+                            val endX = if (rawEndX - startX < MIN_SPAN_WIDTH_PX) startX + MIN_SPAN_WIDTH_PX else rawEndX
                             offset.x in startX..endX
                         }
                         .minByOrNull { abs(it.startMs - clickedTimestamp) }

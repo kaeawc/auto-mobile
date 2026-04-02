@@ -51,6 +51,7 @@ fun buildTimelineSpans(
     val durationMs = when (event) {
         is TelemetryDisplayEvent.Network -> event.durationMs
         is TelemetryDisplayEvent.ToolCall -> event.durationMs
+        is TelemetryDisplayEvent.Layout -> event.durationMs ?: 0L
         else -> 0L
     }
     val effectiveDuration = if (durationMs > 0) durationMs else 50L

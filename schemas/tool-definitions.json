@@ -1633,7 +1633,7 @@
           ]
         },
         "dismissKeyboard": {
-          "description": "(Android only) Dismiss soft keyboard after input. Overrides server-level --dismiss-keyboard-after-input flag. Ignored on iOS.",
+          "description": "(Android only) Dismiss soft keyboard after input (default: false). Ignored on iOS.",
           "type": "boolean"
         },
         "platform": {
@@ -5496,14 +5496,15 @@
           ]
         },
         "action": {
+          "default": "tap",
+          "description": "Action type (default: tap)",
           "type": "string",
           "enum": [
             "tap",
             "doubleTap",
             "longPress",
             "focus"
-          ],
-          "description": "Action type"
+          ]
         },
         "selectionStrategy": {
           "description": "Element selection strategy when multiple matches are found (default: first)",

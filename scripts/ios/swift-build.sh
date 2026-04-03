@@ -76,7 +76,7 @@ for package in "${MACOS_PACKAGES[@]}"; do
     PACKAGE_DIR="${IOS_DIR}/${package}"
     if [ -f "${PACKAGE_DIR}/Package.swift" ]; then
         echo -e "  Building ${package}..."
-        if (cd "${PACKAGE_DIR}" && swift build 2>&1); then
+        if (cd "${PACKAGE_DIR}" && swift build -Xswiftc -warnings-as-errors 2>&1); then
             print_status 0 "${package} built successfully"
         else
             print_status 1 "${package} build failed"
@@ -106,7 +106,7 @@ for package in "${IOS_MACOS_PACKAGES[@]}"; do
     PACKAGE_DIR="${IOS_DIR}/${package}"
     if [ -f "${PACKAGE_DIR}/Package.swift" ]; then
         echo -e "  Building ${package}..."
-        if (cd "${PACKAGE_DIR}" && swift build 2>&1); then
+        if (cd "${PACKAGE_DIR}" && swift build -Xswiftc -warnings-as-errors 2>&1); then
             print_status 0 "${package} built successfully"
         else
             print_status 1 "${package} build failed"

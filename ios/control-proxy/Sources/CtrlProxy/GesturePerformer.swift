@@ -48,6 +48,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func setApplication(_ app: XCUIApplication) {
+            ownedApplication = nil
             application = app
         }
 

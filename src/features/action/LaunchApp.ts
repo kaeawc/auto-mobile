@@ -301,7 +301,7 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady(5000, 100, bundleId)
+          this.waitForIosHierarchyReady(5000, bundleId)
         );
         perf.end();
         return {
@@ -324,7 +324,6 @@ export class LaunchApp extends BaseVisualChange {
 
   private async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
-    _pollIntervalMs: number = 100,
     expectedPackageName?: string
   ): Promise<void> {
     const xcTestClient = CtrlProxyClient.getInstance(this.device);

@@ -86,11 +86,9 @@ export class CtrlProxyHierarchy {
     // Check cache first
     const cachedHierarchy = this.context.getCachedHierarchy();
     if (cachedHierarchy) {
-      const now = this.context.timer.now();
-      const cacheAge = now - cachedHierarchy.receivedAt;
+      const cacheAge = this.context.timer.now() - cachedHierarchy.receivedAt;
       const isFresh = cacheAge < this.context.cacheFreshTtlMs;
       const meetsMinTimestamp = minTimestamp === 0 || cachedHierarchy.hierarchy.updatedAt >= minTimestamp;
-      logger.debug(`[HIERARCHY_CACHE] check: cacheAge=${cacheAge}ms, isFresh=${isFresh}, ttl=${this.context.cacheFreshTtlMs}ms, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, meetsMin=${meetsMinTimestamp}, waitForFresh=${waitForFresh}, skipWait=${skipWaitForFresh}`);
 
       if (isFresh && meetsMinTimestamp) {
         if (cachedHierarchy.hierarchy.packageName) {

@@ -219,7 +219,6 @@ export class LaunchApp extends BaseVisualChange {
 
     logger.info(`executeiOS bundleId ${bundleId}`);
 
-    let observationTimestampMs: number | undefined;
     const isSystemBundleId = bundleId.startsWith("com.apple.");
 
     return this.observedInteraction(
@@ -296,14 +295,9 @@ export class LaunchApp extends BaseVisualChange {
           };
         }
 
-        // Use the hierarchy's updatedAt as the observation timestamp so finalObserve's
-        // minTimestamp check finds the cached hierarchy fresh. Using this.timer.now()
-        // creates a TS-side timestamp that always exceeds the Swift-side updatedAt,
-        // causing a redundant 200ms+ round-trip in finalObserve.
-        const hierarchyUpdatedAt = await perf.track("waitForHierarchy", () =>
+        await perf.track("waitForHierarchy", () =>
           this.waitForIosHierarchyReady()
         );
-        observationTimestampMs = hierarchyUpdatedAt ?? this.timer.now();
         perf.end();
         return {
           success: true,
@@ -315,7 +309,10 @@ export class LaunchApp extends BaseVisualChange {
         changeExpected: false,
         perf,
         skipPreviousObserve: true,
-        observationTimestampProvider: () => observationTimestampMs
+        // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
+        // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
+        // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
+        overrideMinTimestamp: 0
       }
     );
   }
@@ -323,7 +320,7 @@ export class LaunchApp extends BaseVisualChange {
   private async waitForIosHierarchyReady(
     timeoutMs: number = 2000,
     pollIntervalMs: number = 200
-  ): Promise<number | undefined> {
+  ): Promise<void> {
     const viewHierarchy = new ViewHierarchy(this.device, this.adbFactory);
     const startTime = this.timer.now();
     let attempts = 0;
@@ -332,10 +329,10 @@ export class LaunchApp extends BaseVisualChange {
       attempts += 1;
       try {
         const result = await viewHierarchy.getViewHierarchy();
-        const hierarchy = result?.hierarchy as { error?: string; updatedAt?: number } | null | undefined;
+        const hierarchy = result?.hierarchy as { error?: string } | null | undefined;
         if (hierarchy && !hierarchy.error) {
           logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
-          return result?.updatedAt;
+          return;
         }
         logger.debug(`[LaunchApp] iOS hierarchy not ready yet (attempt ${attempts})`);
       } catch (error) {

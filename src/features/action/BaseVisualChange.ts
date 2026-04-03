@@ -30,6 +30,7 @@ interface ObservedChangeOptions {
   skipPreviousObserve?: boolean;
   skipUiStability?: boolean;
   observationTimestampProvider?: () => number | undefined;
+  overrideMinTimestamp?: number;
   signal?: AbortSignal;
   predictionContext?: {
     toolName: string;
@@ -210,7 +211,7 @@ export class BaseVisualChange {
       queryOptions: options.queryOptions,
       gfxMetrics,
       perf,
-      actionStartTime: observationStartTime,
+      actionStartTime: options.overrideMinTimestamp ?? observationStartTime,
       predictionContext
     });
   }

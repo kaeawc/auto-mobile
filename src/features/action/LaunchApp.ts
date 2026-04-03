@@ -6,7 +6,6 @@ import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
-import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
@@ -297,7 +296,7 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady()
+          this.waitForIosHierarchyReady(5000, 100, bundleId)
         );
         perf.end();
         return {
@@ -319,30 +318,40 @@ export class LaunchApp extends BaseVisualChange {
   }
 
   private async waitForIosHierarchyReady(
-    timeoutMs: number = 2000,
-    pollIntervalMs: number = 200
+    timeoutMs: number = 5000,
+    pollIntervalMs: number = 100,
+    expectedPackageName?: string
   ): Promise<void> {
-    const viewHierarchy = new ViewHierarchy(this.device, this.adbFactory);
+    // Use CtrlProxyClient directly with forced fresh snapshots (request_hierarchy)
+    // instead of going through ViewHierarchy which uses request_hierarchy_if_stale.
+    // After activate(), the Swift side's ensureForegroundApp detects the new app
+    // immediately, so a forced snapshot returns the correct hierarchy in ~130ms
+    // vs ~1000ms of polling stale caches.
+    const xcTestClient = CtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
     let attempts = 0;
 
     while (this.timer.now() - startTime < timeoutMs) {
       attempts += 1;
       try {
-        const result = await viewHierarchy.getViewHierarchy();
-        const hierarchy = result?.hierarchy as { error?: string } | null | undefined;
-        if (hierarchy && !hierarchy.error) {
-          logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
-          return;
+        const result = await xcTestClient.requestHierarchySync(undefined, true, undefined, 2000);
+        // The hierarchy object is typed as the CtrlProxyHierarchy class due to a naming
+        // conflict with the CtrlProxyHierarchy interface from types.ts. Cast to access fields.
+        const hierarchy = result?.hierarchy as { packageName?: string } | null | undefined;
+        if (hierarchy) {
+          if (!expectedPackageName || hierarchy.packageName === expectedPackageName) {
+            logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms (pkg=${hierarchy.packageName})`);
+            return;
+          }
+          logger.info(`[LaunchApp] Hierarchy wrong app: ${hierarchy.packageName} (want ${expectedPackageName}), attempt ${attempts}`);
         }
-        logger.debug(`[LaunchApp] iOS hierarchy not ready yet (attempt ${attempts})`);
       } catch (error) {
-        logger.debug(`[LaunchApp] iOS hierarchy fetch failed (attempt ${attempts}): ${error}`);
+        logger.debug(`[LaunchApp] Hierarchy fetch failed (attempt ${attempts}): ${error}`);
       }
       await this.timer.sleep(pollIntervalMs);
     }
 
-    logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms`);
+    logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms (expected=${expectedPackageName})`);
   }
 
   private async detectTargetUserId(

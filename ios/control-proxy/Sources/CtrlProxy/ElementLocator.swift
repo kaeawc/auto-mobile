@@ -457,10 +457,19 @@ public class ElementLocator: ElementLocating {
             // IMPORTANT: Create a FRESH XCUIApplication instance for each snapshot to avoid
             // stale accessibility cache. Cached instances may not reflect system-presented
             // alerts like permission dialogs.
-            let snapshot = try perfProvider.track("snapshot") {
+            let (snapshot, keyboardFocusFrame) = try perfProvider.track("snapshot") {
                 try runOnMainThread {
                     let freshApp = XCUIApplication(bundleIdentifier: bundleId)
-                    return try freshApp.snapshot()
+                    let snap = try freshApp.snapshot()
+
+                    // Query keyboard focus via predicate — snapshot.hasFocus reflects
+                    // UIKit focus (tvOS/iPad), not keyboard input focus on iPhone.
+                    let focused = freshApp.descendants(matching: .any)
+                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                        .firstMatch
+                    let focusFrame: CGRect? = focused.exists ? focused.frame : nil
+
+                    return (snap, focusFrame)
                 }
             }
 
@@ -472,7 +481,8 @@ public class ElementLocator: ElementLocating {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
-                    screenBounds: screenBounds
+                    screenBounds: screenBounds,
+                    keyboardFocusFrame: keyboardFocusFrame
                 )
             }
 
@@ -508,7 +518,7 @@ public class ElementLocator: ElementLocating {
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
             // System permission dialogs may appear in either location depending on iOS version.
             let systemAlerts = perfProvider.track("systemAlerts") {
-                getSystemAlerts(appSnapshot: snapshot)
+                getSystemAlerts(appSnapshot: snapshot, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // If there are system alerts, include them in the hierarchy
@@ -561,14 +571,14 @@ public class ElementLocator: ElementLocating {
         /// Alert elements are extracted separately from the main hierarchy tree to ensure
         /// they are always visible as top-level children and never lost to optimization.
         /// Deduplicates by alert label text to avoid showing the same alert twice.
-        private func getSystemAlerts(appSnapshot: XCUIElementSnapshot) -> [UIElementInfo] {
+        private func getSystemAlerts(appSnapshot: XCUIElementSnapshot, keyboardFocusFrame: CGRect? = nil) -> [UIElementInfo] {
             // Check for alerts in the app's own snapshot tree
             let appAlerts = collectAlertElements(from: appSnapshot).map { snapshot in
-                buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame)
+                buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // Also check SpringBoard for alerts not in the app's tree
-            let springboardAlerts = getAlertsFromSpringboard()
+            let springboardAlerts = getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
 
             // Deduplicate by alert label text
             var seenLabels: Set<String> = []
@@ -603,7 +613,7 @@ public class ElementLocator: ElementLocating {
         /// Uses single snapshot() + tree traversal instead of .alerts query which can hang
         /// indefinitely on system permission dialogs, blocking the main thread.
         /// IMPORTANT: Creates a new XCUIApplication each call to avoid stale cached state.
-        private func getAlertsFromSpringboard() -> [UIElementInfo] {
+        private func getAlertsFromSpringboard(keyboardFocusFrame: CGRect? = nil) -> [UIElementInfo] {
             let alertSnapshots: [XCUIElementSnapshot] = runOnMainThread {
                 let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                 guard let snapshot = try? freshSpringboard.snapshot() else { return [] }
@@ -614,7 +624,8 @@ public class ElementLocator: ElementLocating {
                 buildElementInfoFromSnapshot(
                     snapshot,
                     depth: 0,
-                    screenBounds: snapshot.frame
+                    screenBounds: snapshot.frame,
+                    keyboardFocusFrame: keyboardFocusFrame
                 )
             }
         }
@@ -642,7 +653,8 @@ public class ElementLocator: ElementLocating {
             depth: Int,
             screenBounds: CGRect,
             parentPath: String = "",
-            childIndex: Int = 0
+            childIndex: Int = 0,
+            keyboardFocusFrame: CGRect? = nil
         )
             -> UIElementInfo
         {
@@ -707,7 +719,8 @@ public class ElementLocator: ElementLocating {
                             depth: depth + 1,
                             screenBounds: screenBounds,
                             parentPath: currentPath,
-                            childIndex: idx
+                            childIndex: idx,
+                            keyboardFocusFrame: keyboardFocusFrame
                         )
                     }
                     childNodes = filteredChildren.isEmpty ? nil : filteredChildren
@@ -735,7 +748,22 @@ public class ElementLocator: ElementLocating {
             } else {
                 isChecked = isCheckable && isSelected
             }
-            let hasFocus = snapshot.hasFocus
+            // snapshot.hasFocus reflects UIKit focus (tvOS/iPad), not keyboard input
+            // focus on iPhone. Use the keyboardFocusFrame from the predicate query instead.
+            let hasFocus: Bool
+            if let focusFrame = keyboardFocusFrame, !frame.isEmpty, !focusFrame.isEmpty {
+                let epsilon: CGFloat = 0.5
+                let framesMatch = abs(frame.origin.x - focusFrame.origin.x) < epsilon
+                    && abs(frame.origin.y - focusFrame.origin.y) < epsilon
+                    && abs(frame.width - focusFrame.width) < epsilon
+                    && abs(frame.height - focusFrame.height) < epsilon
+                let isTextInput = snapshot.elementType == .textField
+                    || snapshot.elementType == .textView
+                    || snapshot.elementType == .secureTextField
+                hasFocus = framesMatch && isTextInput
+            } else {
+                hasFocus = snapshot.hasFocus
+            }
             let isPassword = snapshot.elementType == .secureTextField
 
             // Only include actions for text input elements (click is implied by clickable)

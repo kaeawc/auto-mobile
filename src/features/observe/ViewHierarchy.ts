@@ -120,7 +120,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     perf.serial("ios_viewHierarchy");
 
     const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-    const viewHierarchy = await perf.track("xcTestService", async () => {
+    const viewHierarchy = await perf.track("ctrlProxyGetHierarchy", async () => {
       // Use getLatestHierarchy which properly handles skipWaitForFresh and minTimestamp
       const result = await xcTestClient.getLatestHierarchy(
         !skipWaitForFresh, // waitForFresh = opposite of skipWaitForFresh

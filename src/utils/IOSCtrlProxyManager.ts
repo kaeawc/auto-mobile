@@ -121,6 +121,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
   // Cache for status checks
   private cachedAvailability: { isAvailable: boolean; timestamp: number } | null = null;
+  private cachedInstalled: { isInstalled: boolean; timestamp: number } | null = null;
   private cachedRunning: { isRunning: boolean; timestamp: number } | null = null;
   private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
   private static readonly STATUS_CACHE_TTL = 30 * 1000; // 30 seconds
@@ -289,6 +290,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   public clearCaches(): void {
     this.cachedAvailability = null;
+    this.cachedInstalled = null;
     this.cachedRunning = null;
     logger.info("[IOSCtrlProxy] Cleared all caches");
   }
@@ -309,29 +311,43 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * For simulators, this checks if the test bundle can be found
    */
   public async isInstalled(): Promise<boolean> {
+    // Check cache first
+    if (this.cachedInstalled) {
+      const cacheAge = this.timer.now() - this.cachedInstalled.timestamp;
+      if (cacheAge < IOSCtrlProxyManager.STATUS_CACHE_TTL) {
+        return this.cachedInstalled.isInstalled;
+      }
+    }
+
     try {
-      logger.info("[IOSCtrlProxy] Checking if CtrlProxy is installed");
+      logger.debug("[IOSCtrlProxy] Checking if CtrlProxy is installed");
 
       // Check if we're on a simulator
       if (this.isSimulator()) {
         // For simulators, check if we can find the test bundle
         // The test bundle would be installed via xcodebuild test
         // For now, we assume it's available if we can communicate with it
+        this.cachedInstalled = { isInstalled: true, timestamp: this.timer.now() };
         return true;
       } else {
         // For physical devices, check if the test app is installed
         if (this.useHostControl()) {
           const result = await this.hostControl.runIdeviceInstaller(["-u", this.device.deviceId, "-l"]);
           if (!result.success || !result.data) {
+            this.cachedInstalled = { isInstalled: false, timestamp: this.timer.now() };
             return false;
           }
-          return result.data.stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
+          const installed = result.data.stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
+          this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
+          return installed;
         }
 
         const { stdout } = await this.processExecutor.exec(
           `ideviceinstaller -u ${this.device.deviceId} -l 2>/dev/null | grep ${IOSCtrlProxyManager.BUNDLE_ID}`
         );
-        return stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
+        const installed = stdout.includes(IOSCtrlProxyManager.BUNDLE_ID);
+        this.cachedInstalled = { isInstalled: installed, timestamp: this.timer.now() };
+        return installed;
       }
     } catch (error) {
       logger.warn(`[IOSCtrlProxy] Error checking installation: ${error}`);
@@ -453,13 +469,25 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    perf.startOperation("spawnRunner");
+    // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
+    // before spawning our own to avoid conflicting xcodebuild instances.
     if (this.isSimulator()) {
-      await this.startOnSimulator();
+      perf.startOperation("externalProcessCheck");
+      const hasExternal = await this.isExternalCtrlProxyProcessRunning();
+      perf.endOperation("externalProcessCheck");
+      if (hasExternal) {
+        logger.info("[IOSCtrlProxy] External xcodebuild CtrlProxy process detected, skipping spawn — will wait for health endpoint");
+        // Fall through to health polling below instead of spawning
+      } else {
+        perf.startOperation("spawnRunner");
+        await this.startOnSimulator();
+        perf.endOperation("spawnRunner");
+      }
     } else {
+      perf.startOperation("spawnRunner");
       await this.startOnDevice();
+      perf.endOperation("spawnRunner");
     }
-    perf.endOperation("spawnRunner");
 
     // Wait for HTTP health endpoint to be ready
     // XCUITest can take 10+ seconds to fully initialize after xcodebuild starts
@@ -578,9 +606,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   private async uninstallLegacyAppIfPresent(): Promise<void> {
     try {
+      const simulator = this.isSimulator();
       const isInstalled = await this.appInspector.getInstalledAppBundleHash(
         this.device.deviceId,
-        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID
+        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
+        simulator
       );
       if (isInstalled === null) {
         return;
@@ -588,7 +618,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.info(`[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`);
       await this.appInspector.uninstallApp(
         this.device.deviceId,
-        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID
+        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
+        simulator
       );
       logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
@@ -752,13 +783,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
 
-    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values
+    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values.
+    // SIMCTL_CHILD_* prefixed vars are forwarded by simctl (which xcodebuild uses internally
+    // on simulators) to the XCUITest runner process after stripping the prefix.
+    // Keep unprefixed vars for potential physical device support.
     const childEnv: Record<string, string> = {
       CTRL_PROXY_IOS_PORT: String(this.servicePort),
       CTRL_PROXY_IOS_TIMEOUT: timeout,
+      SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: String(this.servicePort),
+      SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT: timeout,
     };
     if (bundleId) {
       childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      childEnv.SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
       logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
     }
     const command = [
@@ -993,6 +1030,51 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // process could have reused the same PID after CtrlProxy exited without
     // its exit being recorded (e.g. clean exit not caught by the exec callback).
     return this.checkHealthEndpoint();
+  }
+
+  /**
+   * Check if an externally-managed xcodebuild process (e.g. from hot-reload)
+   * is already running CtrlProxy tests. Uses `pgrep -x xcodebuild` (exact
+   * binary name match to avoid self-matching shell wrappers) then verifies
+   * CtrlProxy appears in the process args.
+   */
+  private async isExternalCtrlProxyProcessRunning(): Promise<boolean> {
+    if (this.useHostControl()) {
+      return false; // Host-control environments don't have external xcodebuild
+    }
+    try {
+      // pgrep -x matches only processes whose binary name is exactly "xcodebuild"
+      const { stdout: pgrepOut } = await this.processExecutor.exec(
+        "pgrep -x xcodebuild 2>/dev/null"
+      );
+      const pids = pgrepOut.trim().split("\n").filter(line => line.length > 0);
+      if (pids.length === 0) {
+        return false;
+      }
+
+      // Filter to PIDs whose args contain CtrlProxy, excluding our tracked PID
+      for (const pidStr of pids) {
+        const pid = parseInt(pidStr, 10);
+        if (this.xcTestProcessId && pid === this.xcTestProcessId) {
+          continue;
+        }
+        try {
+          const { stdout: argsOut } = await this.processExecutor.exec(
+            `ps -p ${pid} -o args= 2>/dev/null`
+          );
+          if (argsOut.includes("CtrlProxy")) {
+            logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
+            return true;
+          }
+        } catch {
+          // Process may have exited between pgrep and ps
+        }
+      }
+      return false;
+    } catch {
+      // pgrep exits 1 when no process matches
+      return false;
+    }
   }
 
   /**

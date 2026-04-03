@@ -249,25 +249,15 @@ export class LaunchApp extends BaseVisualChange {
             this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
           );
         } else {
-          // Warm/background: use CtrlProxy — it checks app state and uses activate()
-          const xcTestClient = CtrlProxyClient.getInstance(this.device);
-          const xcTestLaunchResult = await perf.track("ctrlProxyLaunch", () =>
-            xcTestClient.requestLaunchApp(bundleId, undefined, perf, coldBoot)
+          // Use simctl for warm launch — simctl launch foregrounds a backgrounded app
+          // and is faster than the CtrlProxy WebSocket round-trip which includes
+          // XCUIApplication.activate() + hierarchy snapshots on the Swift side (~4-5s).
+          launchResult = await perf.track("simctlLaunch", () =>
+            this.simctl.launchApp(bundleId)
           );
-          // Merge Swift-side perf breakdown (checkAppState, activateApp/launchApp, etc.)
-          if (xcTestLaunchResult.perfTiming) {
-            const timings = Array.isArray(xcTestLaunchResult.perfTiming)
-              ? xcTestLaunchResult.perfTiming
-              : [xcTestLaunchResult.perfTiming];
-            perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
-          }
-          launchResult = {
-            success: xcTestLaunchResult.success,
-            error: xcTestLaunchResult.error
-          };
 
-          if (!xcTestLaunchResult.success) {
-            logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
+          if (!launchResult.success) {
+            logger.warn(`[LaunchApp] simctl launch failed: ${launchResult.error ?? "unknown error"}`);
 
             // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
             if (!isSystemBundleId) {
@@ -284,11 +274,25 @@ export class LaunchApp extends BaseVisualChange {
                 };
               }
             }
-
-            launchResult = await perf.track("simctlFallback", () =>
-              this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
-            );
           }
+
+          // CtrlProxy WebSocket launch path (disabled — kept for future comparison):
+          // const xcTestClient = CtrlProxyClient.getInstance(this.device);
+          // perf.serial("ctrlProxyLaunch");
+          // const xcTestLaunchResult = await xcTestClient.requestLaunchApp(
+          //   bundleId, undefined, perf, coldBoot
+          // );
+          // if (xcTestLaunchResult.perfTiming) {
+          //   const timings = Array.isArray(xcTestLaunchResult.perfTiming)
+          //     ? xcTestLaunchResult.perfTiming
+          //     : [xcTestLaunchResult.perfTiming];
+          //   perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
+          // }
+          // perf.end();
+          // launchResult = {
+          //   success: xcTestLaunchResult.success,
+          //   error: xcTestLaunchResult.error
+          // };
         }
 
         if (launchResult.error) {
@@ -301,7 +305,7 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady(5000, bundleId)
+          this.waitForIosHierarchyReady(60000, bundleId)
         );
         perf.end();
         return {
@@ -373,6 +377,7 @@ export class LaunchApp extends BaseVisualChange {
 
       if (winner === "push" || winner === "sync") {
         logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+
         return;
       }
     } else {

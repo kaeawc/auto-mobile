@@ -282,9 +282,12 @@ export class BaseVisualChange {
     }
 
     if (options.changeExpected && latestObservation.viewHierarchy && previousObserveResult && previousObserveResult?.viewHierarchy) {
-      blockResult.success = latestObservation.viewHierarchy !== previousObserveResult.viewHierarchy;
-      if (!blockResult.success) {
-        blockResult.error = "No visual change observed";
+      // Don't override an explicit failure from the inner block — the action itself failed
+      if (blockResult.success !== false) {
+        blockResult.success = latestObservation.viewHierarchy !== previousObserveResult.viewHierarchy;
+        if (!blockResult.success) {
+          blockResult.error = "No visual change observed";
+        }
       }
     } else {
       if (blockResult && "error" in blockResult && blockResult.error !== undefined) {

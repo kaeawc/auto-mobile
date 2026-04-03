@@ -399,8 +399,19 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
     this.isAttemptingAutoSetup = true;
     try {
-      logger.info(`[CtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);
       const manager = this.serviceManagerFactory(this.device);
+
+      // If the service is already running (health endpoint responds), the WebSocket
+      // failure is transient (e.g. service just restarted by hot-reload). Skip the
+      // full setup/download cycle — just reset attempts and retry the connection.
+      const alreadyRunning = await manager.isRunning();
+      if (alreadyRunning) {
+        logger.info(`[CtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
+        this.connectionAttempts = 0;
+        return await super.ensureConnected(perf);
+      }
+
+      logger.info(`[CtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);
       const result = await manager.setup(true, perf);
 
       if (!result.success) {

@@ -305,7 +305,7 @@ export class LaunchApp extends BaseVisualChange {
         }
 
         await perf.track("waitForHierarchy", () =>
-          this.waitForIosHierarchyReady(30000, bundleId)
+          this.waitForIosHierarchyReady(60000, bundleId)
         );
         perf.end();
         return {

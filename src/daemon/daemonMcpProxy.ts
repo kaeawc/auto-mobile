@@ -1,7 +1,7 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
 import { DaemonManager } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS } from "./constants";
+import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS } from "./constants";
 import type { DaemonOptions } from "./types";
 
 /**
@@ -78,7 +78,7 @@ export class DaemonMcpProxy {
     this.config = {
       autoStartDaemon: true,
       socketPath: SOCKET_PATH,
-      connectionTimeoutMs: 30000,
+      connectionTimeoutMs: CONNECTION_TIMEOUT_MS,
       ...config,
     };
     this.daemonManager = config.daemonManager ?? new DaemonManager();

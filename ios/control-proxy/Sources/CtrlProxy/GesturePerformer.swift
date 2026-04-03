@@ -196,19 +196,56 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            // Pre-check keyboard focus via predicate query to avoid XCUITest assertion
+            // failure ("Neither element nor any descendant has keyboard focus") which
+            // tears down the test and kills the CtrlProxy service.
+            // Note: snapshot.hasFocus reflects UIKit's focus system (tvOS/iPad), not
+            // keyboard input focus on iPhone — hasKeyboardFocus is predicate-only.
+            let hasFocus: Bool = runOnMainThread {
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                    .exists
+            }
+            guard hasFocus else {
+                throw GestureError.gestureFailed(
+                    "No element has keyboard focus — ensure a text field is focused before typing"
+                )
+            }
+
             runOnMainThread {
                 app.typeText(text)
             }
         }
 
         public func setText(resourceId: String, text: String) throws {
+            guard let app = application else {
+                throw GestureError.noApplication
+            }
             guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
                 throw GestureError.elementNotFound(resourceId)
             }
 
-            runOnMainThread {
-                // Clear existing text and type new text
+            try runOnMainThread {
                 element.tap()
+
+                // Poll for keyboard focus — appearance is async after tap
+                let deadline = Date().addingTimeInterval(0.2)
+                var hasFocus = false
+                while !hasFocus && Date() < deadline {
+                    hasFocus = app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                        .firstMatch
+                        .exists
+                    if !hasFocus {
+                        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                    }
+                }
+                guard hasFocus else {
+                    throw GestureError.gestureFailed(
+                        "Element '\(resourceId)' did not receive keyboard focus after tap"
+                    )
+                }
 
                 // Select all and delete
                 if let existingText = element.value as? String, !existingText.isEmpty {

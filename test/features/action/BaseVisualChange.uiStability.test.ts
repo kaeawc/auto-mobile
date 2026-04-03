@@ -55,6 +55,37 @@ describe("BaseVisualChange UI stability platform guard", () => {
     expect(fakeAwaitIdle.wasMethodCalled("initializeUiStabilityTracking")).toBe(true);
   });
 
+  test("preserves explicit success:false when changeExpected is true", async () => {
+    const instance = createVisualChange("ios");
+
+    // Set up a factory so each observe call returns a distinct object
+    fakeObserveScreen.setObserveResult(() => createObserveResult());
+
+    const result = await instance.observedInteraction(
+      async () => ({ success: false, error: "Set text timed out after 5000ms" }),
+      { changeExpected: true }
+    );
+
+    // The inner block explicitly failed — observedInteraction must NOT override to success
+    expect(result.success).toBe(false);
+    expect(result.error).toBe("Set text timed out after 5000ms");
+  });
+
+  test("applies visual change check when inner block succeeds with changeExpected", async () => {
+    const instance = createVisualChange("ios");
+
+    // Factory returns distinct objects — visual change detected via reference inequality
+    fakeObserveScreen.setObserveResult(() => createObserveResult());
+
+    const result = await instance.observedInteraction(
+      async () => ({ success: true }),
+      { changeExpected: true }
+    );
+
+    // Inner block succeeded and hierarchies are different objects → success: true
+    expect(result.success).toBe(true);
+  });
+
   test("skips gfxinfo UI stability tracking on iOS", async () => {
     const instance = createVisualChange("ios");
 

@@ -127,7 +127,10 @@ export class CtrlProxyNavigation {
       : await this.context.ensureConnected();
 
     if (!connected) {
-      return errorFactory("", requestType, 0);
+      return {
+        ...errorFactory("", requestType, 0),
+        error: "Not connected to CtrlProxy",
+      } as T;
     }
 
     const requestId = this.context.requestManager.generateId(idPrefix);

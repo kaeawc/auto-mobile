@@ -606,9 +606,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    */
   private async uninstallLegacyAppIfPresent(): Promise<void> {
     try {
+      const simulator = this.isSimulator();
       const isInstalled = await this.appInspector.getInstalledAppBundleHash(
         this.device.deviceId,
-        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID
+        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
+        simulator
       );
       if (isInstalled === null) {
         return;
@@ -616,7 +618,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       logger.info(`[IOSCtrlProxy] Found legacy app ${IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID}, uninstalling`);
       await this.appInspector.uninstallApp(
         this.device.deviceId,
-        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID
+        IOSCtrlProxyManager.LEGACY_APP_BUNDLE_ID,
+        simulator
       );
       logger.info(`[IOSCtrlProxy] Legacy app uninstalled`);
     } catch (error) {
@@ -780,13 +783,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const timeout = process.env.CTRL_PROXY_IOS_TIMEOUT || "86400";
     const bundleId = this.resolveTargetBundleId();
 
-    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values
+    // Pass env vars via exec env option to avoid shell interpolation of user-controlled values.
+    // SIMCTL_CHILD_* prefixed vars are forwarded by simctl (which xcodebuild uses internally
+    // on simulators) to the XCUITest runner process after stripping the prefix.
+    // Keep unprefixed vars for potential physical device support.
     const childEnv: Record<string, string> = {
       CTRL_PROXY_IOS_PORT: String(this.servicePort),
       CTRL_PROXY_IOS_TIMEOUT: timeout,
+      SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: String(this.servicePort),
+      SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT: timeout,
     };
     if (bundleId) {
       childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
+      childEnv.SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
       logger.info(`[IOSCtrlProxy] Passing CTRL_PROXY_IOS_BUNDLE_ID=${bundleId} to xcodebuild`);
     }
     const command = [

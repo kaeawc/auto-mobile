@@ -74,8 +74,8 @@ import {
   ensureSystemTrayOpen,
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
-  tapElementWithAdb,
-  swipeElementWithAdb,
+  tapElement,
+  swipeElement,
   resolveAppLabel,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
@@ -530,14 +530,6 @@ export function registerInteractionTools() {
   // System tray handler
   const systemTrayHandler = async (device: BootedDevice, args: SystemTrayArgs, progress?: ProgressCallback) => {
     try {
-      if (args.platform === "ios") {
-        return createJSONToolResponse({
-          success: false,
-          message: "systemTray is not supported on iOS yet.",
-          action: args.action
-        });
-      }
-
       const awaitTimeoutMs = resolveSystemTrayAwaitTimeout(args.awaitTimeout);
 
       if (args.action === "open") {
@@ -606,7 +598,7 @@ export function registerInteractionTools() {
           throw new ActionableError("No notification tap target was resolved within the matched notification.");
         }
 
-        await tapElementWithAdb(device, tapMatch.element);
+        await tapElement(device, tapMatch.element);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
         const nextObservation = await observeScreen.execute();
@@ -639,12 +631,12 @@ export function registerInteractionTools() {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
         }
 
-        const swipeElement = resolveNotificationSwipeElement(match, notification, appMatchTexts);
-        if (!swipeElement) {
+        const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
+        if (!swipeTarget) {
           throw new ActionableError("No swipeable notification element was resolved within the matched notification.");
         }
 
-        await swipeElementWithAdb(device, swipeElement);
+        await swipeElement(device, swipeTarget);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
         const nextObservation = await observeScreen.execute();
@@ -674,12 +666,12 @@ export function registerInteractionTools() {
             break;
           }
 
-          const swipeElement = resolveNotificationSwipeElement(match, notification, appMatchTexts);
-          if (!swipeElement) {
+          const swipeTarget = resolveNotificationSwipeElement(match, notification, appMatchTexts);
+          if (!swipeTarget) {
             break;
           }
 
-          await swipeElementWithAdb(device, swipeElement);
+          await swipeElement(device, swipeTarget);
           dismissed++;
           await timer.sleep(SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS + 100);
         }

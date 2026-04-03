@@ -9,10 +9,12 @@ import {
   BootedDevice,
   Element,
   ObserveResult,
+  Platform,
   ViewHierarchyResult
 } from "../models";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
+import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
@@ -46,9 +48,20 @@ export interface SystemTrayAdb {
   getDeviceTimestampMs(): Promise<number>;
 }
 
+export interface SystemTrayIosClient {
+  requestSwipe(
+    x1: number, y1: number, x2: number, y2: number,
+    duration?: number
+  ): Promise<{ success: boolean }>;
+  requestTapCoordinates(
+    x: number, y: number
+  ): Promise<{ success: boolean }>;
+}
+
 export interface SystemTrayDependencies {
   observeScreenFactory: (device: BootedDevice) => SystemTrayObserver;
   adbFactory: (device: BootedDevice) => SystemTrayAdb;
+  iosClientFactory?: (device: BootedDevice) => SystemTrayIosClient;
   timer: Timer;
 }
 
@@ -58,11 +71,26 @@ export interface SystemTrayDependencies {
 
 let systemTrayDependencies: SystemTrayDependencies | null = null;
 
+const defaultIosClientFactory: (device: BootedDevice) => SystemTrayIosClient = device => {
+  const client = IOSCtrlProxyClient.getInstance(device);
+  return {
+    requestSwipe: async (x1, y1, x2, y2, duration) => {
+      const result = await client.requestSwipe(x1, y1, x2, y2, duration);
+      return { success: result.success };
+    },
+    requestTapCoordinates: async (x, y) => {
+      const result = await client.requestTapCoordinates(x, y);
+      return { success: result.success };
+    }
+  };
+};
+
 export const getSystemTrayDependencies = (): SystemTrayDependencies => {
   if (!systemTrayDependencies) {
     systemTrayDependencies = {
       observeScreenFactory: device => new RealObserveScreen(device),
       adbFactory: device => defaultAdbClientFactory.create(device),
+      iosClientFactory: defaultIosClientFactory,
       timer: defaultTimer
     };
   }
@@ -74,6 +102,7 @@ export const setSystemTrayDependencies = (overrides: Partial<SystemTrayDependenc
   systemTrayDependencies = {
     observeScreenFactory: overrides.observeScreenFactory ?? current.observeScreenFactory,
     adbFactory: overrides.adbFactory ?? current.adbFactory,
+    iosClientFactory: overrides.iosClientFactory ?? current.iosClientFactory,
     timer: overrides.timer ?? current.timer
   };
 };
@@ -87,6 +116,14 @@ export const resetSystemTrayDependencies = (): void => {
 // ============================================================================
 
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
+const IOS_NOTIFICATION_CENTER_CLASS_HINTS = [
+  "NotificationCenter",
+  "NCNotification",
+  "NotificationList",
+  "NotificationShortLookView",
+  "NotificationLongLookView",
+  "PLPlatterView"
+];
 const SYSTEM_TRAY_RESOURCE_ID_HINTS = [
   "notification_panel",
   "notification_stack",
@@ -211,24 +248,24 @@ const nodeHasSystemTrayHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-const traverseForSystemTray = (node: any): boolean => {
+const traverseForHint = (node: any, predicate: (node: any) => boolean): boolean => {
   if (!node) {
     return false;
   }
 
-  if (nodeHasSystemTrayHint(node)) {
+  if (predicate(node)) {
     return true;
   }
 
   const children = node.node;
   if (Array.isArray(children)) {
     for (const child of children) {
-      if (traverseForSystemTray(child)) {
+      if (traverseForHint(child, predicate)) {
         return true;
       }
     }
   } else if (children && typeof children === "object") {
-    if (traverseForSystemTray(children)) {
+    if (traverseForHint(children, predicate)) {
       return true;
     }
   }
@@ -252,19 +289,41 @@ const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
   return [hierarchy];
 };
 
-const isSystemTrayOpen = (viewHierarchy?: ViewHierarchyResult): boolean => {
+const nodeHasIosNotificationCenterHint = (node: any): boolean => {
+  const props = getNodeProperties(node);
+  if (!props) {
+    return false;
+  }
+
+  const className = String(props.className ?? props.class ?? "");
+  const contentDesc = String(props["content-desc"] ?? props["ios-accessibility-label"] ?? "");
+  const identifier = String(props["resource-id"] ?? props.resourceId ?? props.identifier ?? "");
+
+  return IOS_NOTIFICATION_CENTER_CLASS_HINTS.some(
+    hint => className.includes(hint) || contentDesc.includes(hint) || identifier.includes(hint)
+  );
+};
+
+const isIosNotificationCenterOpen = (viewHierarchy: ViewHierarchyResult): boolean => {
+  const packageName = (viewHierarchy as any).packageName ?? "";
+  if (!packageName.includes("springboard")) {
+    return false;
+  }
+  const rootNodes = getHierarchyRoots(viewHierarchy);
+  return rootNodes.some(root => traverseForHint(root, nodeHasIosNotificationCenterHint));
+};
+
+const isSystemTrayOpen = (viewHierarchy?: ViewHierarchyResult, platform?: Platform): boolean => {
   if (!viewHierarchy) {
     return false;
   }
 
-  const rootNodes = getHierarchyRoots(viewHierarchy);
-  for (const rootNode of rootNodes) {
-    if (traverseForSystemTray(rootNode)) {
-      return true;
-    }
+  if (platform === "ios") {
+    return isIosNotificationCenterOpen(viewHierarchy);
   }
 
-  return false;
+  const rootNodes = getHierarchyRoots(viewHierarchy);
+  return rootNodes.some(root => traverseForHint(root, nodeHasSystemTrayHint));
 };
 
 // ============================================================================
@@ -286,7 +345,28 @@ const resolveSystemTrayObservationTimestamp = async (device: BootedDevice): Prom
   return adb.getDeviceTimestampMs();
 };
 
-const expandSystemTray = async (device: BootedDevice): Promise<void> => {
+const getIosClient = (device: BootedDevice): SystemTrayIosClient => {
+  const { iosClientFactory } = getSystemTrayDependencies();
+  if (!iosClientFactory) {
+    throw new ActionableError("iOS CtrlProxy client not configured for systemTray");
+  }
+  return iosClientFactory(device);
+};
+
+const expandSystemTray = async (device: BootedDevice, screenWidth?: number, screenHeight?: number): Promise<void> => {
+  if (device.platform === "ios") {
+    if (!screenWidth || !screenHeight) {
+      throw new ActionableError("Screen dimensions required to open iOS Notification Center");
+    }
+    const client = getIosClient(device);
+    await client.requestSwipe(
+      Math.floor(screenWidth * 0.5), 5,
+      Math.floor(screenWidth * 0.5), Math.floor(screenHeight * 0.7),
+      300
+    );
+    return;
+  }
+
   if (device.platform !== "android") {
     return;
   }
@@ -870,14 +950,15 @@ const findBestNotificationMatch = (
 const waitForSystemTrayOpen = async (
   observeScreen: SystemTrayObserver,
   minTimestamp: number,
-  awaitTimeoutMs: number
+  awaitTimeoutMs: number,
+  platform?: Platform
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
   let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
 
   while (timer.now() - startTime < awaitTimeoutMs) {
-    if (isSystemTrayOpen(observation.viewHierarchy)) {
+    if (isSystemTrayOpen(observation.viewHierarchy, platform)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
@@ -897,10 +978,31 @@ export const ensureSystemTrayOpen = async (
   skipped: boolean;
   minTimestamp: number;
 }> => {
-  const { observeScreenFactory } = getSystemTrayDependencies();
+  const { observeScreenFactory, timer } = getSystemTrayDependencies();
   const observeScreen = observeScreenFactory(device);
   let observation: ObserveResult | undefined;
   let minTimestamp = 0;
+
+  if (device.platform === "ios") {
+    minTimestamp = timer.now();
+    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    if (isSystemTrayOpen(observation.viewHierarchy, "ios")) {
+      return { observation, opened: false, skipped: true, minTimestamp };
+    }
+    const screenWidth = observation.screenSize?.width;
+    const screenHeight = observation.screenSize?.height;
+    await expandSystemTray(device, screenWidth, screenHeight);
+    minTimestamp = timer.now();
+    const awaitedObservation = await waitForSystemTrayOpen(
+      observeScreen, minTimestamp, awaitTimeoutMs, "ios"
+    );
+    return {
+      observation: awaitedObservation ?? observation,
+      opened: true,
+      skipped: false,
+      minTimestamp
+    };
+  }
 
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
@@ -913,15 +1015,6 @@ export const ensureSystemTrayOpen = async (
   await expandSystemTray(device);
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
-  }
-
-  if (device.platform !== "android") {
-    return {
-      observation,
-      opened: true,
-      skipped: false,
-      minTimestamp
-    };
   }
 
   const awaitedObservation = await waitForSystemTrayOpen(
@@ -962,7 +1055,7 @@ export const waitForNotificationMatch = async (
     }
 
     const viewHierarchy = observation.viewHierarchy;
-    if (viewHierarchy && isSystemTrayOpen(viewHierarchy)) {
+    if (viewHierarchy && isSystemTrayOpen(viewHierarchy, device.platform)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };
@@ -1041,17 +1134,33 @@ export const resolveNotificationSwipeElement = (
   return null;
 };
 
-export const tapElementWithAdb = async (device: BootedDevice, element: Element): Promise<void> => {
+export const tapElement = async (device: BootedDevice, element: Element): Promise<void> => {
   const geometry = new DefaultElementGeometry();
   const center = geometry.getElementCenter(element);
+
+  if (device.platform === "ios") {
+    await getIosClient(device).requestTapCoordinates(center.x, center.y);
+    return;
+  }
+
   const { adbFactory } = getSystemTrayDependencies();
   const adb = adbFactory(device);
   await adb.executeCommand(`shell input tap ${center.x} ${center.y}`);
 };
 
-export const swipeElementWithAdb = async (device: BootedDevice, element: Element): Promise<void> => {
+export const swipeElement = async (device: BootedDevice, element: Element): Promise<void> => {
   const geometry = new DefaultElementGeometry();
   const { startX, startY, endX, endY } = geometry.getSwipeWithinBounds("left", element.bounds);
+
+  if (device.platform === "ios") {
+    await getIosClient(device).requestSwipe(
+      Math.floor(startX), Math.floor(startY),
+      Math.floor(endX), Math.floor(endY),
+      SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS
+    );
+    return;
+  }
+
   const { adbFactory } = getSystemTrayDependencies();
   const adb = adbFactory(device);
   await adb.executeCommand(

@@ -4,10 +4,16 @@ import {
   setSystemTrayDependencies,
   waitForNotificationMatch
 } from "../../src/server/interactionTools";
+import {
+  ensureSystemTrayOpen,
+  tapElement,
+  swipeElement,
+} from "../../src/server/systemTrayHelpers";
+import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../fakes/FakeObserveScreen";
-import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../src/models";
+import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../src/models";
 
 const POLL_INTERVAL_MS = 250;
 const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
@@ -205,5 +211,246 @@ describe("systemTray find", () => {
     expect(result.observation.viewHierarchy?.packageName).toBe("com.google.android.apps.nexuslauncher");
     expect(fakeAdb.wasCommandExecuted("cmd statusbar expand-notifications")).toBe(true);
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
+  });
+});
+
+// ============================================================================
+// iOS tests
+// ============================================================================
+
+const IOS_SPRINGBOARD_PACKAGE = "com.apple.springboard";
+
+class FakeIosClient implements SystemTrayIosClient {
+  swipeCalls: Array<{ x1: number; y1: number; x2: number; y2: number; duration?: number }> = [];
+  tapCalls: Array<{ x: number; y: number }> = [];
+
+  async requestSwipe(x1: number, y1: number, x2: number, y2: number, duration?: number) {
+    this.swipeCalls.push({ x1, y1, x2, y2, duration });
+    return { success: true };
+  }
+
+  async requestTapCoordinates(x: number, y: number) {
+    this.tapCalls.push({ x, y });
+    return { success: true };
+  }
+}
+
+const iosDevice: BootedDevice = {
+  name: "iPhone_15",
+  platform: "ios",
+  deviceId: "ios-device-1",
+  source: "local"
+};
+
+const createIosObservation = (viewHierarchy?: ViewHierarchyResult): ObserveResult => ({
+  updatedAt: 0,
+  screenSize: { width: 390, height: 844 },
+  systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+  viewHierarchy
+});
+
+const createIosAppHierarchy = (): ViewHierarchyResult => ({
+  packageName: "com.example.app",
+  hierarchy: {
+    node: {
+      $: {
+        className: "UIWindow",
+        packageName: "com.example.app",
+        bounds: "[0,0][390,844]"
+      }
+    }
+  }
+});
+
+const createIosNotificationCenterHierarchy = (title: string, body?: string): ViewHierarchyResult => ({
+  packageName: IOS_SPRINGBOARD_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        className: "NotificationCenter",
+        packageName: IOS_SPRINGBOARD_PACKAGE,
+        bounds: "[0,0][390,844]"
+      },
+      node: [{
+        $: {
+          "className": "NCNotificationListCell",
+          "packageName": IOS_SPRINGBOARD_PACKAGE,
+          "text": title,
+          "content-desc": body ?? "",
+          "bounds": "[10,100][380,200]"
+        }
+      }]
+    }
+  }
+});
+
+describe("iOS systemTray open", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("opens notification center via swipe down", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosNotificationCenterHierarchy("Test"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = ensureSystemTrayOpen(iosDevice, 2000);
+
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.opened).toBe(true);
+    expect(result.skipped).toBe(false);
+    expect(fakeIosClient.swipeCalls.length).toBe(1);
+    expect(fakeIosClient.swipeCalls[0].y1).toBe(5);
+    expect(fakeIosClient.swipeCalls[0].y2).toBeGreaterThan(500);
+  });
+
+  test("skips swipe if notification center is already open", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createIosObservation(createIosNotificationCenterHierarchy("Existing"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await ensureSystemTrayOpen(iosDevice, 2000);
+
+    expect(result.opened).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(fakeIosClient.swipeCalls.length).toBe(0);
+  });
+});
+
+describe("iOS systemTray find", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("finds notification by title in notification center", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosNotificationCenterHierarchy("Test Notification")),
+      createIosObservation(createIosNotificationCenterHierarchy("Test Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      iosDevice,
+      { title: "Test Notification" },
+      [],
+      2000
+    );
+
+    // First sleep: waitForSystemTrayOpen polling (NC not yet open after swipe)
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Test Notification");
+    expect(fakeIosClient.swipeCalls.length).toBe(1);
+  });
+
+  test("does not match when notification center is closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosAppHierarchy()),
+      createIosObservation(createIosAppHierarchy())
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      iosDevice,
+      { title: "Test Notification" },
+      [],
+      500
+    );
+
+    await advancePendingSleeps(fakeTimer, 3);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+    expect(fakeIosClient.swipeCalls.length).toBe(1);
+  });
+});
+
+describe("iOS systemTray tap and dismiss", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("tapElement routes through CtrlProxy", async () => {
+    const fakeIosClient = new FakeIosClient();
+
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      iosClientFactory: () => fakeIosClient,
+    });
+
+    const element: Element = {
+      bounds: { left: 10, top: 100, right: 380, bottom: 200 }
+    };
+
+    await tapElement(iosDevice, element);
+
+    expect(fakeIosClient.tapCalls.length).toBe(1);
+    expect(fakeIosClient.tapCalls[0].x).toBe(195);
+    expect(fakeIosClient.tapCalls[0].y).toBe(150);
+  });
+
+  test("swipeElement routes through CtrlProxy swipe left", async () => {
+    const fakeIosClient = new FakeIosClient();
+
+    setSystemTrayDependencies({
+      timer: new FakeTimer(),
+      iosClientFactory: () => fakeIosClient,
+    });
+
+    const element: Element = {
+      bounds: { left: 10, top: 100, right: 380, bottom: 200 }
+    };
+
+    await swipeElement(iosDevice, element);
+
+    expect(fakeIosClient.swipeCalls.length).toBe(1);
+    const swipe = fakeIosClient.swipeCalls[0];
+    // Swipe left: startX > endX
+    expect(swipe.x1).toBeGreaterThan(swipe.x2);
+    expect(swipe.duration).toBe(300);
   });
 });

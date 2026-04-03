@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach, spyOn } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
 import { CtrlProxyClient } from "../../../src/features/observe/ios";
@@ -360,12 +360,12 @@ describe("RecentApps", () => {
   });
 
   describe("iOS platform", () => {
-    let iosDevice: BootedDevice;
     let iosRecentApps: RecentApps;
     let fakeIOSCtrlProxy: FakeIOSCtrlProxy;
+    let getInstanceSpy: ReturnType<typeof spyOn>;
 
     beforeEach(() => {
-      iosDevice = {
+      const iosDevice: BootedDevice = {
         name: "iPhone 15",
         platform: "ios",
         deviceId: "ios-device"
@@ -376,50 +376,36 @@ describe("RecentApps", () => {
       (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
+      getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIOSCtrlProxy as any
+      );
+    });
+
+    afterEach(() => {
+      getInstanceSpy.mockRestore();
     });
 
     test("should use CtrlProxy requestRecentApps on iOS", async () => {
-      const getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any
-      );
-
-      try {
-        const result = await iosRecentApps.execute();
-        expect(result.success).toBe(true);
-        expect(result.method).toBe("ios_swipe");
-        expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
-      } finally {
-        getInstanceSpy.mockRestore();
-      }
+      const result = await iosRecentApps.execute();
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("ios_swipe");
+      expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
     });
 
     test("should return observation on iOS", async () => {
-      const getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any
-      );
-
-      try {
-        const result = await iosRecentApps.execute();
-        expect(result.success).toBe(true);
-        expect(result.observation).toBeDefined();
-      } finally {
-        getInstanceSpy.mockRestore();
-      }
+      const result = await iosRecentApps.execute();
+      expect(result.success).toBe(true);
+      expect(result.observation).toBeDefined();
     });
 
     test("should throw when CtrlProxy recentApps fails on iOS", async () => {
       fakeIOSCtrlProxy.setFailureMode("recentApps", new Error("Connection lost"));
-      const getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        fakeIOSCtrlProxy as any
-      );
 
       try {
         await iosRecentApps.execute();
         throw new Error("Expected an error to be thrown");
       } catch (error) {
         expect((error as Error).message).toContain("Connection lost");
-      } finally {
-        getInstanceSpy.mockRestore();
       }
     });
   });

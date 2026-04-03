@@ -224,6 +224,7 @@ export interface CtrlProxyService {
   verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
   hasCtrlProxyCachedHierarchy(): boolean;
   invalidateCache(): void;
+  clearCache(): void;
   close(): Promise<void>;
 
   onPushUpdate(callback: (hierarchy: CtrlProxyHierarchy) => void): () => void;
@@ -1141,6 +1142,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
   invalidateCache(): void {
     return this.hierarchy.invalidateCache();
+  }
+
+  clearCache(): void {
+    this.cachedHierarchy = null;
   }
 
   // ===========================================================================

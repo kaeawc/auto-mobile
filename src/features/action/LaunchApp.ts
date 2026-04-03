@@ -240,6 +240,11 @@ export class LaunchApp extends BaseVisualChange {
               // App might not be running
             }
           });
+          // Clear cached hierarchy so waitForIosHierarchyReady doesn't return
+          // stale pre-terminate data via the cache fast path. clearCache() nulls
+          // the cache entirely; invalidateCache() only marks it not-fresh but the
+          // time-based freshness check in getLatestHierarchy would still match.
+          CtrlProxyClient.getInstance(this.device).clearCache();
           launchResult = await perf.track("simctlLaunch", () =>
             this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
           );
@@ -319,14 +324,9 @@ export class LaunchApp extends BaseVisualChange {
 
   private async waitForIosHierarchyReady(
     timeoutMs: number = 5000,
-    pollIntervalMs: number = 100,
+    _pollIntervalMs: number = 100,
     expectedPackageName?: string
   ): Promise<void> {
-    // Use CtrlProxyClient directly with forced fresh snapshots (request_hierarchy)
-    // instead of going through ViewHierarchy which uses request_hierarchy_if_stale.
-    // After activate(), the Swift side's ensureForegroundApp detects the new app
-    // immediately, so a forced snapshot returns the correct hierarchy in ~130ms
-    // vs ~1000ms of polling stale caches.
     const xcTestClient = CtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
 
@@ -339,26 +339,44 @@ export class LaunchApp extends BaseVisualChange {
       return;
     }
 
-    let attempts = 0;
+    // Push-based waiting: CtrlProxy pushes hierarchy updates whenever the foreground
+    // app changes. Register a listener and resolve when we see the expected packageName.
+    // This is faster than polling with requestHierarchySync (~130ms each) because push
+    // updates arrive as soon as the Swift side detects the change.
+    if (expectedPackageName) {
+      const pushPromise = new Promise<boolean>((resolve) => {
+        const timeout = setTimeout(() => {
+          unsubscribe();
+          resolve(false);
+        }, timeoutMs);
 
-    while (this.timer.now() - startTime < timeoutMs) {
-      attempts += 1;
-      try {
-        const result = await xcTestClient.requestHierarchySync(undefined, true, undefined, 2000);
-        // The hierarchy object is typed as the CtrlProxyHierarchy class due to a naming
-        // conflict with the CtrlProxyHierarchy interface from types.ts. Cast to access fields.
-        const hierarchy = result?.hierarchy as { packageName?: string } | null | undefined;
-        if (hierarchy) {
-          if (!expectedPackageName || hierarchy.packageName === expectedPackageName) {
-            logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms (pkg=${hierarchy.packageName})`);
-            return;
+        const unsubscribe = xcTestClient.onPushUpdate((hierarchy) => {
+          if (hierarchy.packageName === expectedPackageName) {
+            clearTimeout(timeout);
+            unsubscribe();
+            resolve(true);
           }
-          logger.info(`[LaunchApp] Hierarchy wrong app: ${hierarchy.packageName} (want ${expectedPackageName}), attempt ${attempts}`);
-        }
-      } catch (error) {
-        logger.debug(`[LaunchApp] Hierarchy fetch failed (attempt ${attempts}): ${error}`);
+        });
+      });
+
+      // Also fire a single forced sync request to trigger a hierarchy push if none
+      // is already in-flight. Don't await it — the push listener will resolve first.
+      xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs).catch(() => {});
+
+      const resolved = await pushPromise;
+      if (resolved) {
+        logger.info(`[LaunchApp] iOS hierarchy ready via push after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+        return;
       }
-      await this.timer.sleep(pollIntervalMs);
+    } else {
+      // No expected packageName — just do one forced sync to get any hierarchy
+      try {
+        await xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs);
+        logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
+        return;
+      } catch {
+        // Fall through to warn
+      }
     }
 
     logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms (expected=${expectedPackageName})`);

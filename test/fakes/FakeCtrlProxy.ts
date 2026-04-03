@@ -718,6 +718,10 @@ export class FakeCtrlProxy implements CtrlProxy {
     this.hasCachedHierarchyState = false;
   }
 
+  clearCache(): void {
+    this.hasCachedHierarchyState = false;
+  }
+
   async close(): Promise<void> {
     this.isConnectedState = false;
   }

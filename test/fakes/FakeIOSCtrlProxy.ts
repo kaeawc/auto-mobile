@@ -897,6 +897,10 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
     this.hasCachedHierarchyState = false;
   }
 
+  clearCache(): void {
+    this.hasCachedHierarchyState = false;
+  }
+
   async close(): Promise<void> {
     this.isConnectedState = false;
   }

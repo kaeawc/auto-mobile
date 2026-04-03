@@ -10,6 +10,7 @@ import {
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
   CtrlProxyRecentAppsResult,
+  CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyClipboardResult,
   CtrlProxyHierarchyResponse,
@@ -95,6 +96,8 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
   private hierarchyRequestCount: number = 0;
   private pressHomeRequestCount: number = 0;
   private recentAppsRequestCount: number = 0;
+  private rotateHistory: Array<{ orientation: string }> = [];
+  private currentOrientation: string = "portrait";
   private launchAppHistory: string[] = [];
   private dragResult: CtrlProxyDragResult | null = null;
   private pinchResult: CtrlProxyPinchResult | null = null;
@@ -287,6 +290,13 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
   }
 
   /**
+   * Get the history of rotate requests
+   */
+  getRotateHistory(): Array<{ orientation: string }> {
+    return [...this.rotateHistory];
+  }
+
+  /**
    * Get the history of launch app requests
    */
   getLaunchAppHistory(): string[] {
@@ -402,6 +412,8 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
     this.launchAppHistory = [];
+    this.rotateHistory = [];
+    this.currentOrientation = "portrait";
     this.voiceOverActivateHistory = [];
     this.actionHistory = [];
     this.multiFingerSwipeHistory = [];
@@ -741,6 +753,32 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
     return {
       success: true,
       totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestRotate(
+    orientation: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyRotateResult> {
+    this.rotateHistory.push({ orientation });
+    await this.applyDelay("rotate");
+    this.checkFailure("rotate");
+
+    const previousOrientation = this.currentOrientation;
+    const rotationPerformed = previousOrientation !== orientation;
+    if (rotationPerformed) {
+      this.currentOrientation = orientation;
+    }
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      previousOrientation,
+      currentOrientation: this.currentOrientation,
+      value: orientation === "portrait" ? 0 : 1,
+      rotationPerformed,
       perfTiming: this.performanceTiming || undefined
     };
   }

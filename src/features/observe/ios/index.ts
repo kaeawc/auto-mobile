@@ -39,6 +39,7 @@ export type {
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
   CtrlProxyRecentAppsResult,
+  CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyClipboardResult,
   CtrlProxyActionResult,

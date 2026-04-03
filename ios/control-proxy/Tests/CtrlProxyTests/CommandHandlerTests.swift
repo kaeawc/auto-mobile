@@ -511,6 +511,70 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
+    // MARK: - Rotate Tests
+
+    func testRotateToLandscapeSuccess() {
+        let request = WebSocketRequest(
+            type: "request_rotate",
+            requestId: "rotate-123",
+            orientation: "landscape"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let rotateResponse = response as? RotateResponse else {
+            XCTFail("Expected RotateResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertTrue(rotateResponse.success)
+        XCTAssertEqual(rotateResponse.type, "rotate_result")
+        XCTAssertEqual(rotateResponse.previousOrientation, "portrait")
+        XCTAssertEqual(rotateResponse.currentOrientation, "landscape")
+        XCTAssertEqual(rotateResponse.value, 1)
+        XCTAssertTrue(rotateResponse.rotationPerformed)
+    }
+
+    func testRotateToPortraitWhenAlreadyPortrait() {
+        let request = WebSocketRequest(
+            type: "request_rotate",
+            requestId: "rotate-noop",
+            orientation: "portrait"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let rotateResponse = response as? RotateResponse else {
+            XCTFail("Expected RotateResponse, got \(type(of: response))")
+            return
+        }
+
+        XCTAssertTrue(rotateResponse.success)
+        XCTAssertEqual(rotateResponse.previousOrientation, "portrait")
+        XCTAssertEqual(rotateResponse.currentOrientation, "portrait")
+        XCTAssertEqual(rotateResponse.value, 0)
+        XCTAssertFalse(rotateResponse.rotationPerformed)
+    }
+
+    func testRotateMissingOrientation() {
+        let request = WebSocketRequest(
+            type: "request_rotate",
+            requestId: "rotate-missing"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertEqual(errorResponse.type, "rotate_result")
+        XCTAssertNotNil(errorResponse.error)
+        XCTAssertTrue(errorResponse.error?.contains("orientation") == true)
+    }
+
     // MARK: - Unknown Command Tests
 
     func testUnknownCommand() {

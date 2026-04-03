@@ -106,6 +106,10 @@ export interface WebSocketMessage {
   totalTimeMs?: number;
   error?: string;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
+  previousOrientation?: string;
+  currentOrientation?: string;
+  value?: number;
+  rotationPerformed?: boolean;
 }
 
 /**
@@ -142,6 +146,14 @@ export type CtrlProxySelectAllResult = BaseResult;
 
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;
+
+/** Rotate result from CtrlProxy iOS */
+export interface CtrlProxyRotateResult extends BaseResult {
+  previousOrientation: string;
+  currentOrientation: string;
+  value: number;
+  rotationPerformed: boolean;
+}
 
 /** Launch app result from CtrlProxy iOS */
 export type CtrlProxyLaunchAppResult = BaseResult;

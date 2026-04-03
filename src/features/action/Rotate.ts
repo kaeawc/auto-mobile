@@ -5,6 +5,7 @@ import { logger } from "../../utils/logger";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { CtrlProxyClient } from "../observe/ios";
 
 export class Rotate extends BaseVisualChange {
   constructor(
@@ -68,6 +69,69 @@ export class Rotate extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("rotate");
 
+    switch (this.device.platform) {
+      case "ios":
+        return this.executeIosRotation(orientation, progress, perf);
+      case "android":
+        return this.executeAndroidRotation(orientation, progress, perf);
+      default:
+        throw new Error(`Unsupported platform: ${this.device.platform}`);
+    }
+  }
+
+  private async executeIosRotation(
+    orientation: "portrait" | "landscape",
+    progress: ProgressCallback | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<RotateResult> {
+    return this.observedInteraction(
+      async () => {
+        try {
+          const client = CtrlProxyClient.getInstance(this.device);
+          const result = await perf.track("iOSRotation", () =>
+            client.requestRotate(orientation, 5000, perf)
+          );
+
+          if (!result.success) {
+            return {
+              success: false,
+              orientation,
+              value: orientation === "portrait" ? 0 : 1,
+              error: result.error ?? "Failed to rotate iOS device"
+            };
+          }
+
+          return {
+            success: true,
+            orientation,
+            value: result.value,
+            currentOrientation: result.currentOrientation,
+            previousOrientation: result.previousOrientation,
+            rotationPerformed: result.rotationPerformed,
+            orientationLockHandled: false,
+            message: result.rotationPerformed
+              ? `Successfully rotated from ${result.previousOrientation} to ${result.currentOrientation}`
+              : `Device is already in ${orientation} orientation`
+          };
+        } catch (error) {
+          throw new Error(`Failed to rotate iOS device: ${error}`);
+        }
+      },
+      {
+        changeExpected: true,
+        timeoutMs: 5000,
+        progress,
+        perf,
+        skipUiStability: true
+      }
+    );
+  }
+
+  private async executeAndroidRotation(
+    orientation: "portrait" | "landscape",
+    progress: ProgressCallback | undefined,
+    perf: ReturnType<typeof createGlobalPerformanceTracker>
+  ): Promise<RotateResult> {
     return this.observedInteraction(
       async () => {
 

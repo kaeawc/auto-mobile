@@ -11,6 +11,7 @@ import type {
   CtrlProxyPressHomeResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
+  CtrlProxyRotateResult,
 } from "./types";
 
 /**
@@ -49,6 +50,45 @@ export class CtrlProxyNavigation {
     const message = {
       type: "request_press_home",
       requestId
+    };
+
+    const ws = this.context.getWebSocket();
+    ws?.send(JSON.stringify(message));
+    return promise;
+  }
+
+  /**
+   * Request to rotate device orientation.
+   */
+  async requestRotate(
+    orientation: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyRotateResult> {
+    if (!await this.context.ensureConnected(perf)) {
+      return { success: false, totalTimeMs: 0, error: "Not connected", previousOrientation: "", currentOrientation: "", value: 0, rotationPerformed: false };
+    }
+
+    const requestId = this.context.requestManager.generateId("rotate");
+    const promise = this.context.requestManager.register<CtrlProxyRotateResult>(
+      requestId,
+      "rotate",
+      timeoutMs,
+      (_id, _type, timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Rotate timed out after ${timeout}ms`,
+        previousOrientation: "",
+        currentOrientation: "",
+        value: 0,
+        rotationPerformed: false
+      })
+    );
+
+    const message = {
+      type: "request_rotate",
+      requestId,
+      orientation
     };
 
     const ws = this.context.getWebSocket();

@@ -329,6 +329,16 @@ export class LaunchApp extends BaseVisualChange {
     // vs ~1000ms of polling stale caches.
     const xcTestClient = CtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
+
+    // Fast path: if cache already has the correct app's hierarchy, skip the round-trip.
+    // This makes warm launches (app already foreground) ~0ms instead of ~133ms.
+    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
+    const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
+    if (cachedPkg && (!expectedPackageName || cachedPkg === expectedPackageName)) {
+      logger.info(`[LaunchApp] iOS hierarchy already cached (pkg=${cachedPkg}, ${this.timer.now() - startTime}ms)`);
+      return;
+    }
+
     let attempts = 0;
 
     while (this.timer.now() - startTime < timeoutMs) {

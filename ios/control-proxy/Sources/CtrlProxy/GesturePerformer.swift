@@ -36,6 +36,10 @@ public class GesturePerformer: GesturePerforming {
 
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
+        /// Strong reference to keep the application alive when set via updateApplication.
+        /// Without this, the weak `application` property would immediately deallocate
+        /// freshly created XCUIApplication instances that have no other strong owner.
+        private var ownedApplication: XCUIApplication?
         private let elementLocator: ElementLocating
 
         public init(application: XCUIApplication? = nil, elementLocator: ElementLocating) {
@@ -418,7 +422,9 @@ public class GesturePerformer: GesturePerforming {
 
         public func updateApplication(bundleId: String) {
             runOnMainThread {
-                self.application = XCUIApplication(bundleIdentifier: bundleId)
+                let app = XCUIApplication(bundleIdentifier: bundleId)
+                self.ownedApplication = app
+                self.application = app
             }
         }
 

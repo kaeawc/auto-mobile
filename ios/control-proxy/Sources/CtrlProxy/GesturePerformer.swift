@@ -416,6 +416,12 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func updateApplication(bundleId: String) {
+            runOnMainThread {
+                self.application = XCUIApplication(bundleIdentifier: bundleId)
+            }
+        }
+
     #else
         /// Non-iOS stub implementation
         private let elementLocator: ElementLocating
@@ -520,6 +526,10 @@ public class GesturePerformer: GesturePerforming {
 
         public func activateApp(bundleId _: String) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func updateApplication(bundleId _: String) {
+            // no-op on non-iOS
         }
     #endif
 }

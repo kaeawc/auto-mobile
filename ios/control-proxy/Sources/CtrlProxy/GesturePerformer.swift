@@ -399,7 +399,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func openRecentApps() throws {
-            try runOnMainThread {
+            runOnMainThread {
                 let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                 let screenSize = springboard.frame.size
                 let startCoordinate = springboard.coordinate(withNormalizedOffset: .zero)

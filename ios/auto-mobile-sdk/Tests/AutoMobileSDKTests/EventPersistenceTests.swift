@@ -132,7 +132,7 @@ final class EventPersistenceTests: XCTestCase {
 
         // Create a recent file
         let event = SdkInteractionEvent(interactionType: "recent", properties: [:])
-        persistence.persist([event])
+        _ = persistence.persist([event])
 
         persistence.cleanup(maxAgeDays: 7)
 

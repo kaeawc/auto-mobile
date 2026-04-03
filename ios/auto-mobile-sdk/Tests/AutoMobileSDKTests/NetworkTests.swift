@@ -94,7 +94,7 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
         AutoMobileNetwork.shared.setCaptureHeaders(true)
 
-        AutoMobileNetwork.shared.recordRequest(
+        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
             url: "https://api.example.com/users",
             method: "GET",
             requestHeaders: ["Authorization": "Bearer token"],
@@ -102,7 +102,7 @@ final class AutoMobileNetworkTests: XCTestCase {
             responseHeaders: ["Content-Type": "application/json"],
             responseBodySize: 1024,
             durationMs: 150.0
-        )
+        ))
 
         buffer.flush()
 
@@ -124,11 +124,11 @@ final class AutoMobileNetworkTests: XCTestCase {
         AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
         // captureHeaders is false by default
 
-        AutoMobileNetwork.shared.recordRequest(
+        AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
             url: "https://api.example.com/data",
             method: "POST",
             requestHeaders: ["Authorization": "Bearer secret"]
-        )
+        ))
 
         buffer.flush()
 

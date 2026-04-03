@@ -1107,7 +1107,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       return;
     }
 
-    const expectedHash = this.builder.getExpectedAppHash("device");
+    const simulator = this.isSimulator();
+    const expectedHash = this.builder.getExpectedAppHash(simulator ? "simulator" : "device");
     if (!expectedHash) {
       logger.warn("[IOSCtrlProxy] CtrlProxy app hash verification skipped (no expected hash configured)");
       return;
@@ -1115,7 +1116,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     const deviceHash = await this.appInspector.getInstalledAppBundleHash(
       this.device.deviceId,
-      IOSCtrlProxyManager.APP_BUNDLE_ID
+      IOSCtrlProxyManager.APP_BUNDLE_ID,
+      simulator
     );
     if (!deviceHash) {
       logger.warn("[IOSCtrlProxy] Unable to read installed CtrlProxy app hash from device");
@@ -1128,7 +1130,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         expectedHash
       });
       try {
-        await this.appInspector.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID);
+        await this.appInspector.uninstallApp(this.device.deviceId, IOSCtrlProxyManager.APP_BUNDLE_ID, simulator);
         logger.info("[IOSCtrlProxy] Uninstalled CtrlProxy app to force reinstall");
       } catch (error) {
         logger.warn(`[IOSCtrlProxy] Failed to uninstall CtrlProxy app: ${error instanceof Error ? error.message : String(error)}`);

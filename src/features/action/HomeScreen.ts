@@ -1,7 +1,7 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, HomeScreenResult } from "../../models";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { CtrlProxyClient } from "../observe/ios";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
@@ -28,7 +28,7 @@ export class HomeScreen extends BaseVisualChange {
             await perf.track("homeNavigation", () => this.executeAndroidHome());
             break;
           case "ios":
-            await perf.track("iOSHomeNavigation", () => this.executeIosHomeNavigation());
+            await perf.track("iOSHomeNavigation", () => this.executeIosHomeNavigation(perf));
             break;
           default:
             throw new Error(`Unsupported platform: ${this.device.platform}`);
@@ -63,9 +63,9 @@ export class HomeScreen extends BaseVisualChange {
     await this.adb.executeCommand("shell input keyevent 3");
   }
 
-  private async executeIosHomeNavigation(): Promise<void> {
+  private async executeIosHomeNavigation(perf?: PerformanceTracker): Promise<void> {
     const client = CtrlProxyClient.getInstance(this.device);
-    const result = await client.requestPressHome();
+    const result = await client.requestPressHome(5000, perf);
     if (!result.success) {
       throw new Error(result.error ?? "Failed to press iOS home button");
     }

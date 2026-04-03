@@ -143,6 +143,19 @@ public class ElementLocator: ElementLocating {
             lastExplicitSwitchTime = DispatchTime.now().uptimeNanoseconds
         }
 
+        public func getAppState(bundleId: String) -> ObservedAppState {
+            let stateRaw: UInt = runOnMainThread {
+                XCUIApplication(bundleIdentifier: bundleId).state.rawValue
+            }
+            switch stateRaw {
+            case 0: return .unknown
+            case 1: return .notRunning
+            case 2: return .runningBackgroundSuspended
+            case 3: return .runningBackground
+            default: return .runningForeground  // rawValue >= 4
+            }
+        }
+
         public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
             for _ in 0..<10 {
                 let stateRaw: UInt = runOnMainThread {
@@ -1083,6 +1096,10 @@ public class ElementLocator: ElementLocating {
 
         public func switchForegroundApp(bundleId _: String) {
             // no-op on non-iOS
+        }
+
+        public func getAppState(bundleId _: String) -> ObservedAppState {
+            return .unknown
         }
 
         public func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool {

@@ -332,11 +332,20 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handlePressHome(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        try gesturePerformer.pressHome()
+        perfProvider.serial("handlePressHome")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressHome") {
+            try gesturePerformer.pressHome()
+        }
 
         // Explicit state transition: home screen means springboard is now foreground
-        elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
-        gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+        perfProvider.track("switchForegroundApp") {
+            elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+        }
+        perfProvider.track("updateApplication") {
+            gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.pressHomeResult.rawValue,
@@ -362,18 +371,75 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleLaunchApp(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handleLaunchApp")
+        defer { perfProvider.end() }
+
         guard let bundleId = request.bundleId else {
             throw CommandError.missingParameter("bundleId")
         }
 
-        try gesturePerformer.launchApp(bundleId: bundleId)
+        let coldBoot = request.coldBoot ?? false
+
+        // Check current app state to decide launch strategy
+        let appState = perfProvider.track("checkAppState") {
+            elementLocator.getAppState(bundleId: bundleId)
+        }
+
+        let strategy: String
+        let alreadyForeground = appState == .runningForeground
+        if coldBoot {
+            strategy = appState == .notRunning || appState == .unknown ? "coldBoot:launch" : "coldBoot:terminate+launch"
+        } else {
+            switch appState {
+            case .runningForeground: strategy = "activate(foreground)"
+            case .runningBackground, .runningBackgroundSuspended: strategy = "activate(background)"
+            default: strategy = "launch(notRunning)"
+            }
+        }
+        print("[CtrlProxy] handleLaunchApp bundleId=\(bundleId) appState=\(appState) strategy=\(strategy)")
+
+        if coldBoot {
+            // Cold boot: always terminate then launch fresh
+            if appState == .runningForeground || appState == .runningBackground || appState == .runningBackgroundSuspended {
+                try perfProvider.track("terminateApp") {
+                    try gesturePerformer.terminateApp(bundleId: bundleId)
+                }
+            }
+            try perfProvider.track("launchApp") {
+                try gesturePerformer.launchApp(bundleId: bundleId)
+            }
+        } else if appState == .runningForeground {
+            // Already in foreground — activate is a no-op but ensures XCTest sync
+            try perfProvider.track("activateApp") {
+                try gesturePerformer.activateApp(bundleId: bundleId)
+            }
+        } else if appState == .runningBackground || appState == .runningBackgroundSuspended {
+            // App running but not visible — activate brings to foreground (fast path)
+            try perfProvider.track("activateApp") {
+                try gesturePerformer.activateApp(bundleId: bundleId)
+            }
+        } else {
+            // App not running — must do full launch
+            try perfProvider.track("launchApp") {
+                try gesturePerformer.launchApp(bundleId: bundleId)
+            }
+        }
 
         // Explicit state transition: switch tracking to launched app
-        elementLocator.switchForegroundApp(bundleId: bundleId)
-        gesturePerformer.updateApplication(bundleId: bundleId)
+        perfProvider.track("switchForegroundApp") {
+            elementLocator.switchForegroundApp(bundleId: bundleId)
+        }
+        perfProvider.track("updateApplication") {
+            gesturePerformer.updateApplication(bundleId: bundleId)
+        }
 
-        // Verify app reached foreground (bounded poll, max 500ms)
-        let _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
+        // Skip foreground poll when activate() was called on an already-foreground app —
+        // activate() is synchronous and the app is guaranteed to remain foreground.
+        if !alreadyForeground || coldBoot {
+            perfProvider.track("awaitForeground") {
+                let _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
+            }
+        }
 
         return WebSocketResponse.success(
             type: ResponseType.launchAppResult.rawValue,

@@ -205,16 +205,29 @@ export class IOSCtrlProxyBuilder {
         return null;
       }
 
-      const match = platform
-        ? xctestrunFiles.find(file => platform === "device"
-          ? file.includes("iphoneos")
-          : file.includes("iphonesimulator")
-        )
-        : null;
+      const platformFilter = platform === "device" ? "iphoneos" : "iphonesimulator";
+      const candidates = platform
+        ? xctestrunFiles.filter(file => file.includes(platformFilter))
+        : xctestrunFiles;
 
-      const selected = platform ? match : xctestrunFiles[0];
-      if (!selected) {
+      if (candidates.length === 0) {
         return null;
+      }
+
+      // When multiple xctestrun files exist, prefer the newest by modification time
+      let selected: string;
+      if (candidates.length === 1) {
+        selected = candidates[0];
+      } else {
+        const withStats = await Promise.all(
+          candidates.map(async file => {
+            const filePath = path.join(productsDir, file);
+            const stat = await fs.stat(filePath);
+            return { file, mtime: stat.mtimeMs };
+          })
+        );
+        withStats.sort((a, b) => b.mtime - a.mtime);
+        selected = withStats[0].file;
       }
 
       const fullPath = path.join(productsDir, selected);
@@ -222,6 +235,44 @@ export class IOSCtrlProxyBuilder {
       return fullPath;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Remove stale xctestrun files, keeping only the newest per platform.
+   */
+  public async cleanStaleXctestrunFiles(): Promise<void> {
+    const productsDir = path.join(this.config.derivedDataPath, "Build", "Products");
+    try {
+      const files = await fs.readdir(productsDir);
+      const xctestrunFiles = files.filter(file => file.endsWith(".xctestrun"));
+      if (xctestrunFiles.length <= 1) {
+        return;
+      }
+
+      for (const platformFilter of ["iphonesimulator", "iphoneos"]) {
+        const platformFiles = xctestrunFiles.filter(file => file.includes(platformFilter));
+        if (platformFiles.length <= 1) {
+          continue;
+        }
+
+        const withStats = await Promise.all(
+          platformFiles.map(async file => {
+            const filePath = path.join(productsDir, file);
+            const stat = await fs.stat(filePath);
+            return { file, filePath, mtime: stat.mtimeMs };
+          })
+        );
+        withStats.sort((a, b) => b.mtime - a.mtime);
+
+        // Delete all but the newest
+        for (const stale of withStats.slice(1)) {
+          logger.info(`[IOSCtrlProxyBuilder] Removing stale xctestrun file: ${stale.file}`);
+          await fs.rm(stale.filePath);
+        }
+      }
+    } catch (error) {
+      logger.warn(`[IOSCtrlProxyBuilder] Failed to clean stale xctestrun files: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -299,6 +350,8 @@ export class IOSCtrlProxyBuilder {
       this.cachedBuildProductsPath.clear();
       this.cachedXctestrunPath.clear();
       this.cachedAppBundleHash.clear();
+
+      await this.cleanStaleXctestrunFiles();
 
       const buildPath = await this.getBuildProductsPath(platform ?? "simulator");
       const xctestrunPath = await this.getXctestrunPath(platform);

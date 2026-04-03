@@ -152,7 +152,11 @@ export class DeviceAppInspector {
     this.deps = deps;
   }
 
-  public async getInstalledAppBundleHash(deviceUdid: string, bundleId: string): Promise<string | null> {
+  public async getInstalledAppBundleHash(deviceUdid: string, bundleId: string, isSimulator = false): Promise<string | null> {
+    if (isSimulator) {
+      return this.getSimulatorAppBundleHash(deviceUdid, bundleId);
+    }
+
     const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
     if (useHostControl) {
       const available = await this.deps.hostControl.isAvailable();
@@ -231,7 +235,11 @@ export class DeviceAppInspector {
     }
   }
 
-  public async uninstallApp(deviceUdid: string, bundleId: string): Promise<void> {
+  public async uninstallApp(deviceUdid: string, bundleId: string, isSimulator = false): Promise<void> {
+    if (isSimulator) {
+      return this.uninstallSimulatorApp(deviceUdid, bundleId);
+    }
+
     const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
     if (useHostControl) {
       const available = await this.deps.hostControl.isAvailable();
@@ -261,6 +269,31 @@ export class DeviceAppInspector {
       "--quiet"
     ].join(" ");
     await this.deps.exec(command);
+  }
+
+  private async getSimulatorAppBundleHash(deviceUdid: string, bundleId: string): Promise<string | null> {
+    if (this.deps.platform() !== "darwin") {
+      return null;
+    }
+
+    try {
+      const result = await this.deps.exec(`xcrun simctl get_app_container ${quoteShell(deviceUdid)} ${quoteShell(bundleId)} app`);
+      const appPath = result.trim();
+      if (!appPath) {
+        return null;
+      }
+      return await hashAppBundle(appPath);
+    } catch (error) {
+      logger.warn(`[DeviceAppInspector] Failed to read simulator app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  private async uninstallSimulatorApp(deviceUdid: string, bundleId: string): Promise<void> {
+    if (this.deps.platform() !== "darwin") {
+      return;
+    }
+    await this.deps.exec(`xcrun simctl uninstall ${quoteShell(deviceUdid)} ${quoteShell(bundleId)}`);
   }
 }
 

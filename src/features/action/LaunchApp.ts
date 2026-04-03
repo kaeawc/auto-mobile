@@ -6,7 +6,6 @@ import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
-import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetricsCollector";
@@ -214,58 +213,86 @@ export class LaunchApp extends BaseVisualChange {
     clearAppData: boolean,
     coldBoot: boolean
   ): Promise<LaunchAppResult> {
+    const perf = this.performanceTrackerFactory();
+    perf.serial("launchApp");
+
     logger.info(`executeiOS bundleId ${bundleId}`);
 
-    let observationTimestampMs: number | undefined;
     const isSystemBundleId = bundleId.startsWith("com.apple.");
 
     return this.observedInteraction(
       async () => {
-        // Check if app is installed
-        const installedApps = await this.installedAppsProvider.listInstalledApps();
-        const shouldBlockOnMissing = !isSystemBundleId && installedApps.length > 0;
-        if (shouldBlockOnMissing && !installedApps.includes(bundleId)) {
-          logger.info("App is not installed");
-          return {
-            success: false,
-            packageName: bundleId,
-            error: "App is not installed"
-          };
-        }
-
-        // For iOS, handle coldBoot by terminating first if requested
-        if (coldBoot) {
-          try {
-            // Attempt to terminate the app if it's running
-            await this.simctl.terminateApp(bundleId);
-            // Note: iOS doesn't have direct app data clearing like Android
-            // clearAppData parameter is ignored on iOS
-          } catch (error) {
-            // App might not be running, continue with launch
-            logger.info("App was not running or failed to terminate, continuing with launch");
-          }
-        }
-
         // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
         if (!isSystemBundleId) {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
         }
 
-        const xcTestClient = CtrlProxyClient.getInstance(this.device);
-        const xcTestLaunchResult = await xcTestClient.requestLaunchApp(bundleId);
-        let launchResult: { success: boolean; pid?: number; error?: string } = {
-          success: xcTestLaunchResult.success,
-          error: xcTestLaunchResult.error
-        };
+        let launchResult: { success: boolean; pid?: number; error?: string };
 
-        if (!xcTestLaunchResult.success) {
-          logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
-          launchResult = await this.simctl.launchApp(bundleId, {
-            foregroundIfRunning: !coldBoot
+        if (coldBoot) {
+          // Cold boot: use simctl directly. XCUIApplication.launch() is slow for heavy
+          // apps (10s+ timeout) while simctl launch completes in ~500ms. CtrlProxy's
+          // value is in the activate() fast path, not cold boot.
+          await perf.track("terminateApp", async () => {
+            try {
+              await this.simctl.terminateApp(bundleId);
+            } catch {
+              // App might not be running
+            }
           });
+          // Clear cached hierarchy so waitForIosHierarchyReady doesn't return
+          // stale pre-terminate data via the cache fast path. clearCache() nulls
+          // the cache entirely; invalidateCache() only marks it not-fresh but the
+          // time-based freshness check in getLatestHierarchy would still match.
+          CtrlProxyClient.getInstance(this.device).clearCache();
+          launchResult = await perf.track("simctlLaunch", () =>
+            this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
+          );
+        } else {
+          // Warm/background: use CtrlProxy — it checks app state and uses activate()
+          const xcTestClient = CtrlProxyClient.getInstance(this.device);
+          const xcTestLaunchResult = await perf.track("ctrlProxyLaunch", () =>
+            xcTestClient.requestLaunchApp(bundleId, undefined, perf, coldBoot)
+          );
+          // Merge Swift-side perf breakdown (checkAppState, activateApp/launchApp, etc.)
+          if (xcTestLaunchResult.perfTiming) {
+            const timings = Array.isArray(xcTestLaunchResult.perfTiming)
+              ? xcTestLaunchResult.perfTiming
+              : [xcTestLaunchResult.perfTiming];
+            perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
+          }
+          launchResult = {
+            success: xcTestLaunchResult.success,
+            error: xcTestLaunchResult.error
+          };
+
+          if (!xcTestLaunchResult.success) {
+            logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
+
+            // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
+            if (!isSystemBundleId) {
+              const installedApps = await perf.track("checkInstalled", () =>
+                this.installedAppsProvider.listInstalledApps()
+              );
+              if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
+                logger.info("App is not installed");
+                perf.end();
+                return {
+                  success: false,
+                  packageName: bundleId,
+                  error: "App is not installed"
+                };
+              }
+            }
+
+            launchResult = await perf.track("simctlFallback", () =>
+              this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
+            );
+          }
         }
 
         if (launchResult.error) {
+          perf.end();
           return {
             success: false,
             packageName: bundleId,
@@ -273,8 +300,10 @@ export class LaunchApp extends BaseVisualChange {
           };
         }
 
-        await this.waitForIosHierarchyReady();
-        observationTimestampMs = this.timer.now();
+        await perf.track("waitForHierarchy", () =>
+          this.waitForIosHierarchyReady(5000, bundleId)
+        );
+        perf.end();
         return {
           success: true,
           packageName: bundleId,
@@ -283,36 +312,81 @@ export class LaunchApp extends BaseVisualChange {
       },
       {
         changeExpected: false,
-        observationTimestampProvider: () => observationTimestampMs
+        perf,
+        skipPreviousObserve: true,
+        // Use minTimestamp=0 so finalObserve returns cached hierarchy without a sync fetch.
+        // iOS hierarchy timestamps (Swift Date) and TS timestamps (Date.now) are from
+        // different clocks, causing minTimestamp checks to fail and force ~130ms round-trips.
+        overrideMinTimestamp: 0
       }
     );
   }
 
   private async waitForIosHierarchyReady(
-    timeoutMs: number = 2000,
-    pollIntervalMs: number = 200
+    timeoutMs: number = 5000,
+    expectedPackageName?: string
   ): Promise<void> {
-    const viewHierarchy = new ViewHierarchy(this.device, this.adbFactory);
+    const xcTestClient = CtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
-    let attempts = 0;
 
-    while (this.timer.now() - startTime < timeoutMs) {
-      attempts += 1;
-      try {
-        const result = await viewHierarchy.getViewHierarchy();
-        const hierarchy = result?.hierarchy as { error?: string } | null | undefined;
-        if (hierarchy && !hierarchy.error) {
-          logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
-          return;
-        }
-        logger.debug(`[LaunchApp] iOS hierarchy not ready yet (attempt ${attempts})`);
-      } catch (error) {
-        logger.debug(`[LaunchApp] iOS hierarchy fetch failed (attempt ${attempts}): ${error}`);
-      }
-      await this.timer.sleep(pollIntervalMs);
+    // Fast path: if cache already has the correct app's hierarchy, skip the round-trip.
+    // This makes warm launches (app already foreground) ~0ms instead of ~133ms.
+    const cached = await xcTestClient.getLatestHierarchy(false, 0, undefined, true, 0);
+    const cachedPkg = (cached?.hierarchy as { packageName?: string } | null)?.packageName;
+    if (cachedPkg && (!expectedPackageName || cachedPkg === expectedPackageName)) {
+      logger.info(`[LaunchApp] iOS hierarchy already cached (pkg=${cachedPkg}, ${this.timer.now() - startTime}ms)`);
+      return;
     }
 
-    logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms`);
+    // Race a push listener against a forced sync request. Push notifications only
+    // fire for unsolicited hierarchy_update messages (periodic pushes), while sync
+    // responses go through requestManager.resolve() without notifying push listeners.
+    // By racing both, we resolve as soon as either path delivers the correct app.
+    if (expectedPackageName) {
+      let pushUnsubscribe: (() => void) | undefined;
+      let timeoutHandle: NodeJS.Timeout | undefined;
+
+      const pushPromise = new Promise<string>(resolve => {
+        timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
+        pushUnsubscribe = xcTestClient.onPushUpdate(hierarchy => {
+          if (hierarchy.packageName === expectedPackageName) {
+            resolve("push");
+          }
+        });
+      });
+
+      const syncPromise = xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs)
+        .then(result => {
+          const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
+          return pkg === expectedPackageName ? "sync" : "wrong_app";
+        })
+        .catch(err => {
+          logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
+          return "error" as string;
+        });
+
+      const winner = await Promise.race([pushPromise, syncPromise]);
+
+      // Cleanup
+      pushUnsubscribe?.();
+      if (timeoutHandle) { this.timer.clearTimeout(timeoutHandle); }
+
+      if (winner === "push" || winner === "sync") {
+        logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+        return;
+      }
+    } else {
+      // No expected packageName — just do one forced sync to get any hierarchy
+      try {
+        await xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs);
+        logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
+        return;
+      } catch {
+        // Fall through to warn
+      }
+    }
+
+    logger.warn(`[LaunchApp] Timed out waiting for iOS hierarchy after ${timeoutMs}ms (expected=${expectedPackageName})`);
   }
 
   private async detectTargetUserId(

@@ -793,15 +793,23 @@ export class SimCtlClient implements SimCtl {
         });
       };
 
+      // simctl listapps may return old-style plist instead of JSON (Xcode 26+).
+      // Pipe through plutil to convert plist to JSON.
+      const listAppsJson = async (args: string): Promise<string> => {
+        const result = await this.execAsync(
+          "/bin/sh",
+          ["-c", `xcrun simctl listapps ${args} | plutil -convert json -o - -- -`]
+        );
+        return result.stdout;
+      };
+
       try {
-        const result = await this.executeCommand(`listapps ${targetDevice} --all`);
-        return parseApps(result.stdout);
+        return parseApps(await listAppsJson(`${targetDevice} --all`));
       } catch (error) {
         logger.warn(`Failed to list iOS apps with --all: ${error}`);
       }
 
-      const result = await this.executeCommand(`listapps ${targetDevice}`);
-      return parseApps(result.stdout);
+      return parseApps(await listAppsJson(targetDevice));
     } catch (error) {
       logger.warn(`Failed to list iOS apps: ${error}`);
       return [];

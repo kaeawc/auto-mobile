@@ -244,7 +244,8 @@ describe("LaunchApp", () => {
       const result = await iosLaunchApp.execute(systemBundleId, false, false);
       expect(result.success).toBe(true);
       expect(fakeIOSCtrlProxy.getLaunchAppHistory()).toEqual([systemBundleId]);
-      expect(installedAppsProvider.getCallCount()).toBe(1);
+      // checkInstalled is deferred to fallback path — not called when CtrlProxy succeeds
+      expect(installedAppsProvider.getCallCount()).toBe(0);
     } finally {
       getInstanceSpy.mockRestore();
     }

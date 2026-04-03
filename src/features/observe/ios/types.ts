@@ -146,6 +146,9 @@ export type CtrlProxyPressHomeResult = BaseResult;
 /** Launch app result from CtrlProxy iOS */
 export type CtrlProxyLaunchAppResult = BaseResult;
 
+/** Recent apps result from CtrlProxy iOS */
+export type CtrlProxyRecentAppsResult = BaseResult;
+
 /** Clipboard result from CtrlProxy iOS */
 export interface CtrlProxyClipboardResult {
   success: boolean;

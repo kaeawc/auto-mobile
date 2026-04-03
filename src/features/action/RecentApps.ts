@@ -10,6 +10,7 @@ import { ObserveResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
+import { CtrlProxyClient as IosCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 
 /**
@@ -41,6 +42,21 @@ export class RecentApps extends BaseVisualChange {
   async execute(progress?: ProgressCallback): Promise<RecentAppsResult> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("recentApps");
+
+    if (this.device.platform === "ios") {
+      return this.observedInteraction(
+        async () => {
+          await perf.track("iOSRecentApps", () => this.executeIosRecentApps());
+          return { success: true, method: "ios_swipe" as const };
+        },
+        {
+          changeExpected: true,
+          timeoutMs: 5000,
+          progress,
+          perf
+        }
+      );
+    }
 
     return this.observedInteraction(
       async (observeResult: ObserveResult) => {
@@ -256,5 +272,13 @@ export class RecentApps extends BaseVisualChange {
 
     await this.adb.executeCommand("shell input keyevent 187");
     return { success: true, method: "hardware" };
+  }
+
+  private async executeIosRecentApps(): Promise<void> {
+    const client = IosCtrlProxyClient.getInstance(this.device);
+    const result = await client.requestRecentApps();
+    if (!result.success) {
+      throw new Error(result.error ?? "Failed to open iOS recent apps");
+    }
   }
 }

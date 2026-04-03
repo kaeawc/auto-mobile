@@ -85,6 +85,9 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestPressHome.rawValue:
                 return try handlePressHome(request, startTime: startTime)
 
+            case RequestType.requestRecentApps.rawValue:
+                return try handleRecentApps(request, startTime: startTime)
+
             // Action commands
             case RequestType.requestAction.rawValue:
                 return try handleAction(request, startTime: startTime)
@@ -349,6 +352,29 @@ public class CommandHandler: CommandHandling {
 
         return WebSocketResponse.success(
             type: ResponseType.pressHomeResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleRecentApps(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handleRecentApps")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("openRecentApps") {
+            try gesturePerformer.openRecentApps()
+        }
+
+        // Explicit state transition: app switcher is SpringBoard UI
+        perfProvider.track("switchForegroundApp") {
+            elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+        }
+        perfProvider.track("updateApplication") {
+            gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.recentAppsResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )

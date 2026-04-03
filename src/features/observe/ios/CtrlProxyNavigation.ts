@@ -9,6 +9,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
   CtrlProxyPressHomeResult,
+  CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
 } from "./types";
 
@@ -85,6 +86,39 @@ export class CtrlProxyNavigation {
       requestId,
       bundleId,
       coldBoot
+    };
+
+    const ws = this.context.getWebSocket();
+    ws?.send(JSON.stringify(message));
+    return promise;
+  }
+
+  /**
+   * Request to open recent apps (app switcher).
+   */
+  async requestRecentApps(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyRecentAppsResult> {
+    if (!await this.context.ensureConnected(perf)) {
+      return { success: false, totalTimeMs: 0, error: "Not connected" };
+    }
+
+    const requestId = this.context.requestManager.generateId("recentApps");
+    const promise = this.context.requestManager.register<CtrlProxyRecentAppsResult>(
+      requestId,
+      "recent_apps",
+      timeoutMs,
+      (_id, _type, timeout) => ({
+        success: false,
+        totalTimeMs: timeout,
+        error: `Recent apps timed out after ${timeout}ms`
+      })
+    );
+
+    const message = {
+      type: "request_recent_apps",
+      requestId
     };
 
     const ws = this.context.getWebSocket();

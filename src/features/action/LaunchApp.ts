@@ -344,11 +344,11 @@ export class LaunchApp extends BaseVisualChange {
     // By racing both, we resolve as soon as either path delivers the correct app.
     if (expectedPackageName) {
       let pushUnsubscribe: (() => void) | undefined;
-      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+      let timeoutHandle: NodeJS.Timeout | undefined;
 
-      const pushPromise = new Promise<string>((resolve) => {
-        timeoutHandle = setTimeout(() => resolve("timeout"), timeoutMs);
-        pushUnsubscribe = xcTestClient.onPushUpdate((hierarchy) => {
+      const pushPromise = new Promise<string>(resolve => {
+        timeoutHandle = this.timer.setTimeout(() => resolve("timeout"), timeoutMs);
+        pushUnsubscribe = xcTestClient.onPushUpdate(hierarchy => {
           if (hierarchy.packageName === expectedPackageName) {
             resolve("push");
           }
@@ -356,17 +356,20 @@ export class LaunchApp extends BaseVisualChange {
       });
 
       const syncPromise = xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs)
-        .then((result) => {
+        .then(result => {
           const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
           return pkg === expectedPackageName ? "sync" : "wrong_app";
         })
-        .catch(() => "error" as string);
+        .catch(err => {
+          logger.warn(`[LaunchApp] iOS hierarchy sync failed during race: ${err}`);
+          return "error" as string;
+        });
 
       const winner = await Promise.race([pushPromise, syncPromise]);
 
       // Cleanup
       pushUnsubscribe?.();
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (timeoutHandle) { this.timer.clearTimeout(timeoutHandle); }
 
       if (winner === "push" || winner === "sync") {
         logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);

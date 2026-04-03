@@ -6,6 +6,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { logger } from "../../../utils/logger";
 import type {
   DelegateContext,
   CtrlProxyPressHomeResult,
@@ -105,9 +106,11 @@ export class CtrlProxyNavigation {
     perf?: PerformanceTracker,
     coldBoot: boolean = false
   ): Promise<CtrlProxyLaunchAppResult> {
+    const t0 = Date.now();
     if (!await this.context.ensureConnected(perf)) {
       return { success: false, totalTimeMs: 0, error: "Not connected" };
     }
+    const t1 = Date.now();
 
     const requestId = this.context.requestManager.generateId("launchApp");
     const promise = this.context.requestManager.register<CtrlProxyLaunchAppResult>(
@@ -130,7 +133,11 @@ export class CtrlProxyNavigation {
 
     const ws = this.context.getWebSocket();
     ws?.send(JSON.stringify(message));
-    return promise;
+    const t2 = Date.now();
+    const result = await promise;
+    const t3 = Date.now();
+    logger.info(`[CtrlProxyNav] launchApp timing: ensureConnected=${t1-t0}ms, send=${t2-t1}ms, awaitResponse=${t3-t2}ms, total=${t3-t0}ms`);
+    return result;
   }
 
   /**

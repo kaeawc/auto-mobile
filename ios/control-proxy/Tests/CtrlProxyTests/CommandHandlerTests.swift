@@ -469,6 +469,48 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
+    // MARK: - Recent Apps Tests
+
+    func testRecentAppsSuccess() {
+        let request = WebSocketRequest(
+            type: "request_recent_apps",
+            requestId: "recents-123"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let recentsResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(recentsResponse.success, true)
+        XCTAssertEqual(recentsResponse.type, "recent_apps_result")
+        XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 1)
+    }
+
+    func testRecentAppsSwitchesToSpringboard() {
+        let request = WebSocketRequest(
+            type: "request_recent_apps",
+            requestId: "recents-switch"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, ["com.apple.springboard"])
+    }
+
+    func testRecentAppsUpdatesGesturePerformer() {
+        let request = WebSocketRequest(
+            type: "request_recent_apps",
+            requestId: "recents-gesture"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
+    }
+
     // MARK: - Unknown Command Tests
 
     func testUnknownCommand() {

@@ -5,7 +5,7 @@ import { ObserveResult } from "./ObserveResult";
  */
 export interface RecentAppsResult {
     success: boolean;
-    method: "gesture" | "legacy" | "hardware";
+    method: "gesture" | "legacy" | "hardware" | "ios_swipe";
     observation?: ObserveResult;
     error?: string;
 }

@@ -131,6 +131,9 @@ public protocol GesturePerforming {
     /// Press home button
     func pressHome() throws
 
+    /// Open recent apps (app switcher) via swipe-up-and-hold gesture
+    func openRecentApps() throws
+
     // MARK: - App Control
 
     /// Launch app by bundle ID

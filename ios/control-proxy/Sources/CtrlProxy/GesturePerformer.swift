@@ -398,6 +398,23 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func openRecentApps() throws {
+            try runOnMainThread {
+                let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+                let screenSize = springboard.frame.size
+                let startCoordinate = springboard.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: screenSize.width / 2, dy: screenSize.height - 5))
+                let endCoordinate = springboard.coordinate(withNormalizedOffset: .zero)
+                    .withOffset(CGVector(dx: screenSize.width / 2, dy: screenSize.height * 0.4))
+                startCoordinate.press(
+                    forDuration: 0.05,
+                    thenDragTo: endCoordinate,
+                    withVelocity: .default,
+                    thenHoldForDuration: 1.0
+                )
+            }
+        }
+
         // MARK: - App Control
 
         public func launchApp(bundleId: String) throws {
@@ -520,6 +537,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressHome() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func openRecentApps() throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

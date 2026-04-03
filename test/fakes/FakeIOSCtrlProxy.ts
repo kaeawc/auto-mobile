@@ -9,6 +9,7 @@ import {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyClipboardResult,
   CtrlProxyHierarchyResponse,
@@ -93,6 +94,7 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
   private screenshotRequestCount: number = 0;
   private hierarchyRequestCount: number = 0;
   private pressHomeRequestCount: number = 0;
+  private recentAppsRequestCount: number = 0;
   private launchAppHistory: string[] = [];
   private dragResult: CtrlProxyDragResult | null = null;
   private pinchResult: CtrlProxyPinchResult | null = null;
@@ -278,6 +280,10 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
    */
   getPressHomeRequestCount(): number {
     return this.pressHomeRequestCount;
+  }
+
+  getRecentAppsRequestCount(): number {
+    return this.recentAppsRequestCount;
   }
 
   /**
@@ -716,6 +722,21 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
     this.checkFailure("pressHome");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestRecentApps(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyRecentAppsResult> {
+    this.recentAppsRequestCount++;
+    await this.applyDelay("recentApps");
+    this.checkFailure("recentApps");
 
     return {
       success: true,

@@ -101,6 +101,7 @@ import type {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyPerfTiming,
   CtrlProxyPerformanceSnapshot,
@@ -188,6 +189,10 @@ export interface CtrlProxyService {
   requestPressHome(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyPressHomeResult>;
+
+  requestRecentApps(
+    timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyRecentAppsResult>;
 
   requestLaunchApp(
     bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
@@ -906,6 +911,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         case "set_text_result":
         case "select_all_result":
         case "press_home_result":
+        case "recent_apps_result":
         case "launch_app_result":
           result = {
             success: message.success ?? true,
@@ -1217,6 +1223,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxyPressHomeResult> {
     return this.navigation.requestPressHome(timeoutMs, perf);
+  }
+
+  async requestRecentApps(
+    timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyRecentAppsResult> {
+    return this.navigation.requestRecentApps(timeoutMs, perf);
   }
 
   async requestLaunchApp(

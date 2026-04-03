@@ -1,11 +1,13 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
-import { ExecResult, ObserveResult } from "../../../src/models";
+import { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
+import { CtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 
 describe("RecentApps", () => {
   let recentApps: RecentApps;
@@ -354,6 +356,57 @@ describe("RecentApps", () => {
       const customAdb = new FakeAdbExecutor();
       const recentAppsInstance = new RecentApps("test-device", customAdb, fakeTimer);
       expect(recentAppsInstance).toBeDefined();
+    });
+  });
+
+  describe("iOS platform", () => {
+    let iosRecentApps: RecentApps;
+    let fakeIOSCtrlProxy: FakeIOSCtrlProxy;
+    let getInstanceSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      const iosDevice: BootedDevice = {
+        name: "iPhone 15",
+        platform: "ios",
+        deviceId: "ios-device"
+      };
+      iosRecentApps = new RecentApps(iosDevice, fakeAdb, fakeTimer);
+      (iosRecentApps as any).observeScreen = fakeObserveScreen;
+      (iosRecentApps as any).window = fakeWindow;
+      (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
+
+      fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
+      getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIOSCtrlProxy as any
+      );
+    });
+
+    afterEach(() => {
+      getInstanceSpy.mockRestore();
+    });
+
+    test("should use CtrlProxy requestRecentApps on iOS", async () => {
+      const result = await iosRecentApps.execute();
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("ios_swipe");
+      expect(fakeIOSCtrlProxy.getRecentAppsRequestCount()).toBe(1);
+    });
+
+    test("should return observation on iOS", async () => {
+      const result = await iosRecentApps.execute();
+      expect(result.success).toBe(true);
+      expect(result.observation).toBeDefined();
+    });
+
+    test("should throw when CtrlProxy recentApps fails on iOS", async () => {
+      fakeIOSCtrlProxy.setFailureMode("recentApps", new Error("Connection lost"));
+
+      try {
+        await iosRecentApps.execute();
+        throw new Error("Expected an error to be thrown");
+      } catch (error) {
+        expect((error as Error).message).toContain("Connection lost");
+      }
     });
   });
 });

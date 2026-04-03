@@ -180,6 +180,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var actionHistory: [(action: String, resourceId: String?, label: String?)] = []
     private var screenshotCallCount = 0
     private var pressHomeCallCount = 0
+    private var openRecentAppsCallCount = 0
     private var appLaunchHistory: [String] = []
     private var appTerminateHistory: [String] = []
     private var clipboardHistory: [(action: String, text: String?)] = []
@@ -241,6 +242,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getPressHomeCallCount() -> Int {
         pressHomeCallCount
+    }
+
+    public func getOpenRecentAppsCallCount() -> Int {
+        openRecentAppsCallCount
     }
 
     public func getAppLaunchHistory() -> [String] {
@@ -402,6 +407,11 @@ public class FakeGesturePerformer: GesturePerforming {
     public func pressHome() throws {
         try checkFailure("pressHome")
         pressHomeCallCount += 1
+    }
+
+    public func openRecentApps() throws {
+        try checkFailure("openRecentApps")
+        openRecentAppsCallCount += 1
     }
 
     public func launchApp(bundleId: String) throws {

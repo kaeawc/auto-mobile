@@ -101,9 +101,16 @@ public class FakeElementLocator: ElementLocating {
     public private(set) var switchedBundleIds: [String] = []
     public private(set) var awaitStateCalls: [(bundleId: String, expectedState: AppStateExpectation)] = []
     public var awaitAppStateResult: Bool = true
+    public private(set) var getAppStateCalls: [String] = []
+    public var getAppStateResult: ObservedAppState = .notRunning
 
     public func switchForegroundApp(bundleId: String) {
         switchedBundleIds.append(bundleId)
+    }
+
+    public func getAppState(bundleId: String) -> ObservedAppState {
+        getAppStateCalls.append(bundleId)
+        return getAppStateResult
     }
 
     public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
@@ -407,8 +414,11 @@ public class FakeGesturePerformer: GesturePerforming {
         appTerminateHistory.append(bundleId)
     }
 
-    public func activateApp(bundleId _: String) throws {
+    public private(set) var activateAppHistory: [String] = []
+
+    public func activateApp(bundleId: String) throws {
         try checkFailure("activateApp")
+        activateAppHistory.append(bundleId)
     }
 
     public private(set) var updateApplicationHistory: [String] = []

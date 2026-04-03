@@ -58,3 +58,6 @@ android/ide-plugin/.intellijPlatform/
 /js/
 /packages/
 demo/tmp-home/
+
+# Xcode index-build artifacts
+.build/

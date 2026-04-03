@@ -269,9 +269,21 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(homeResponse.success, true)
         XCTAssertEqual(homeResponse.type, "press_home_result")
         XCTAssertEqual(fakeGesturePerformer.getPressHomeCallCount(), 1)
+
+        // Verify perf timing is collected for press home operations
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data from handlePressHome")
+            return
+        }
+        XCTAssertEqual(perfTimings.count, 1)
+        XCTAssertEqual(perfTimings[0].name, "handlePressHome")
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["pressHome", "switchForegroundApp", "updateApplication"])
     }
 
     func testLaunchAppSuccess() {
+        // Default: app not running, no coldBoot → full launch
+        fakeElementLocator.getAppStateResult = .notRunning
         let request = WebSocketRequest(
             type: "request_launch_app",
             requestId: "launch-123",
@@ -288,11 +300,114 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(launchResponse.success, true)
         XCTAssertEqual(launchResponse.type, "launch_app_result")
         XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), ["com.apple.Preferences"])
+
+        // Verify perf timing is collected for launch operations
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data from handleLaunchApp")
+            return
+        }
+        XCTAssertEqual(perfTimings.count, 1)
+        XCTAssertEqual(perfTimings[0].name, "handleLaunchApp")
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["checkAppState", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+    }
+
+    func testLaunchAppUsesActivateWhenRunningBackground() {
+        fakeElementLocator.getAppStateResult = .runningBackground
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-activate",
+            bundleId: "com.example.app"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let launchResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(launchResponse.success, true)
+        // Should activate, not launch
+        XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), [])
+        XCTAssertEqual(fakeGesturePerformer.activateAppHistory, ["com.example.app"])
+
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data")
+            return
+        }
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+    }
+
+    func testLaunchAppUsesActivateWhenRunningForeground() {
+        fakeElementLocator.getAppStateResult = .runningForeground
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-fg",
+            bundleId: "com.example.app"
+        )
+
+        _ = commandHandler.handle(request)
+
+        // Should activate (no-op), not launch
+        XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), [])
+        XCTAssertEqual(fakeGesturePerformer.activateAppHistory, ["com.example.app"])
+
+        // awaitForeground should be skipped — app was already foreground
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data")
+            return
+        }
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication"])
+        XCTAssertFalse(childNames.contains("awaitForeground"))
+    }
+
+    func testLaunchAppColdBootTerminatesThenLaunches() {
+        fakeElementLocator.getAppStateResult = .runningForeground
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-cold",
+            bundleId: "com.example.app",
+            coldBoot: true
+        )
+
+        _ = commandHandler.handle(request)
+
+        // Cold boot should terminate then launch, not activate
+        XCTAssertEqual(fakeGesturePerformer.getAppTerminateHistory(), ["com.example.app"])
+        XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), ["com.example.app"])
+        XCTAssertEqual(fakeGesturePerformer.activateAppHistory, [])
+
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data")
+            return
+        }
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["checkAppState", "terminateApp", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+    }
+
+    func testLaunchAppColdBootNotRunningSkipsTerminate() {
+        fakeElementLocator.getAppStateResult = .notRunning
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-cold-nr",
+            bundleId: "com.example.app",
+            coldBoot: true
+        )
+
+        _ = commandHandler.handle(request)
+
+        // Not running → no terminate needed, just launch
+        XCTAssertEqual(fakeGesturePerformer.getAppTerminateHistory(), [])
+        XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), ["com.example.app"])
     }
 
     // MARK: - Explicit State Transition Tests
 
     func testLaunchAppSwitchesForegroundApp() {
+        fakeElementLocator.getAppStateResult = .notRunning
         let request = WebSocketRequest(
             type: "request_launch_app",
             requestId: "launch-switch",
@@ -305,6 +420,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testLaunchAppUpdatesGesturePerformer() {
+        fakeElementLocator.getAppStateResult = .notRunning
         let request = WebSocketRequest(
             type: "request_launch_app",
             requestId: "launch-gesture",
@@ -317,6 +433,7 @@ final class CommandHandlerTests: XCTestCase {
     }
 
     func testLaunchAppAwaitsForegroundState() {
+        fakeElementLocator.getAppStateResult = .notRunning
         let request = WebSocketRequest(
             type: "request_launch_app",
             requestId: "launch-await",

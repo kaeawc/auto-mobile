@@ -233,6 +233,51 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(result).toBe(xctestrunFile);
     });
+
+    test("should prefer newest xctestrun file when multiple exist", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+
+      const oldFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun");
+      const newFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      await fs.writeFile(oldFile, "old content");
+      await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
+      await fs.writeFile(newFile, "new content");
+      await fs.utimes(newFile, new Date("2026-04-01"), new Date("2026-04-01"));
+
+      const builder = IOSCtrlProxyBuilder.getInstance({
+        derivedDataPath: tempDir,
+      });
+
+      const result = await builder.getXctestrunPath("simulator");
+
+      expect(result).toBe(newFile);
+    });
+  });
+
+  describe("cleanStaleXctestrunFiles", function() {
+    test("should remove older xctestrun files keeping newest per platform", async function() {
+      const productsDir = path.join(tempDir, "Build", "Products");
+      await fs.mkdir(productsDir, { recursive: true });
+
+      const oldFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.0-arm64-x86_64.xctestrun");
+      const newFile = path.join(productsDir, "CtrlProxyApp_iphonesimulator26.2-arm64-x86_64.xctestrun");
+      await fs.writeFile(oldFile, "old content");
+      await fs.utimes(oldFile, new Date("2026-01-01"), new Date("2026-01-01"));
+      await fs.writeFile(newFile, "new content");
+      await fs.utimes(newFile, new Date("2026-04-01"), new Date("2026-04-01"));
+
+      const builder = IOSCtrlProxyBuilder.getInstance({
+        derivedDataPath: tempDir,
+      });
+
+      await builder.cleanStaleXctestrunFiles();
+
+      const oldExists = await fs.access(oldFile).then(() => true).catch(() => false);
+      const newExists = await fs.access(newFile).then(() => true).catch(() => false);
+      expect(oldExists).toBe(false);
+      expect(newExists).toBe(true);
+    });
   });
 
   describe("cleanBuildArtifacts", function() {

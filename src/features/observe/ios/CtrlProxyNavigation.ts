@@ -8,8 +8,8 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
-  XCTestPressHomeResult,
-  XCTestLaunchAppResult,
+  CtrlProxyPressHomeResult,
+  CtrlProxyLaunchAppResult,
 } from "./types";
 
 /**
@@ -28,13 +28,13 @@ export class CtrlProxyNavigation {
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
-  ): Promise<XCTestPressHomeResult> {
+  ): Promise<CtrlProxyPressHomeResult> {
     if (!await this.context.ensureConnected(perf)) {
       return { success: false, totalTimeMs: 0, error: "Not connected" };
     }
 
     const requestId = this.context.requestManager.generateId("pressHome");
-    const promise = this.context.requestManager.register<XCTestPressHomeResult>(
+    const promise = this.context.requestManager.register<CtrlProxyPressHomeResult>(
       requestId,
       "press_home",
       timeoutMs,
@@ -60,15 +60,16 @@ export class CtrlProxyNavigation {
    */
   async requestLaunchApp(
     bundleId: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker
-  ): Promise<XCTestLaunchAppResult> {
+    timeoutMs: number = 10000,
+    perf?: PerformanceTracker,
+    coldBoot: boolean = false
+  ): Promise<CtrlProxyLaunchAppResult> {
     if (!await this.context.ensureConnected(perf)) {
       return { success: false, totalTimeMs: 0, error: "Not connected" };
     }
 
     const requestId = this.context.requestManager.generateId("launchApp");
-    const promise = this.context.requestManager.register<XCTestLaunchAppResult>(
+    const promise = this.context.requestManager.register<CtrlProxyLaunchAppResult>(
       requestId,
       "launch_app",
       timeoutMs,
@@ -82,7 +83,8 @@ export class CtrlProxyNavigation {
     const message = {
       type: "request_launch_app",
       requestId,
-      bundleId
+      bundleId,
+      coldBoot
     };
 
     const ws = this.context.getWebSocket();

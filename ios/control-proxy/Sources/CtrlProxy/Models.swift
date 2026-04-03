@@ -56,6 +56,9 @@ public struct WebSocketRequest: Codable {
     public let value: String?
     public let valueType: String?
 
+    // App launch parameters
+    public let coldBoot: Bool?
+
     // Permission/settings
     public let permission: String?
     public let requestPermission: Bool?
@@ -94,6 +97,7 @@ public struct WebSocketRequest: Codable {
         key: String? = nil,
         value: String? = nil,
         valueType: String? = nil,
+        coldBoot: Bool? = nil,
         permission: String? = nil,
         requestPermission: Bool? = nil,
         enabled: Bool? = nil
@@ -130,6 +134,7 @@ public struct WebSocketRequest: Codable {
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.coldBoot = coldBoot
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled

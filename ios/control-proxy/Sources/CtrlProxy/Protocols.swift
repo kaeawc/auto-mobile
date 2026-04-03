@@ -12,6 +12,15 @@ public enum AppStateExpectation {
     case background
 }
 
+/// Observed app lifecycle state, mirroring XCUIApplication.State.
+public enum ObservedAppState {
+    case unknown
+    case notRunning
+    case runningBackgroundSuspended
+    case runningBackground
+    case runningForeground
+}
+
 // MARK: - ElementLocator Protocol
 
 /// Protocol for locating UI elements and building view hierarchies
@@ -32,6 +41,9 @@ public protocol ElementLocating {
     /// Explicitly switch the tracked foreground app to the given bundle ID.
     /// Called by CommandHandler after state-changing operations (launch, terminate, home).
     func switchForegroundApp(bundleId: String)
+
+    /// Query the current lifecycle state of the app with the given bundle ID.
+    func getAppState(bundleId: String) -> ObservedAppState
 
     /// Wait for the given bundle ID to reach the expected state.
     /// Uses bounded polling: up to 500ms with 50ms intervals (10 attempts max).

@@ -214,6 +214,9 @@ export class LaunchApp extends BaseVisualChange {
     clearAppData: boolean,
     coldBoot: boolean
   ): Promise<LaunchAppResult> {
+    const perf = this.performanceTrackerFactory();
+    perf.serial("launchApp");
+
     logger.info(`executeiOS bundleId ${bundleId}`);
 
     let observationTimestampMs: number | undefined;
@@ -221,23 +224,13 @@ export class LaunchApp extends BaseVisualChange {
 
     return this.observedInteraction(
       async () => {
-        // Check if app is installed
-        const installedApps = await this.installedAppsProvider.listInstalledApps();
-        const shouldBlockOnMissing = !isSystemBundleId && installedApps.length > 0;
-        if (shouldBlockOnMissing && !installedApps.includes(bundleId)) {
-          logger.info("App is not installed");
-          return {
-            success: false,
-            packageName: bundleId,
-            error: "App is not installed"
-          };
-        }
-
         // For iOS, handle coldBoot by terminating first if requested
         if (coldBoot) {
           try {
             // Attempt to terminate the app if it's running
-            await this.simctl.terminateApp(bundleId);
+            await perf.track("terminateApp", () =>
+              this.simctl.terminateApp(bundleId)
+            );
             // Note: iOS doesn't have direct app data clearing like Android
             // clearAppData parameter is ignored on iOS
           } catch (error) {
@@ -251,8 +244,18 @@ export class LaunchApp extends BaseVisualChange {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
         }
 
+        // Try CtrlProxy first — it checks app state and uses activate() for running apps
         const xcTestClient = CtrlProxyClient.getInstance(this.device);
-        const xcTestLaunchResult = await xcTestClient.requestLaunchApp(bundleId);
+        const xcTestLaunchResult = await perf.track("ctrlProxyLaunch", () =>
+          xcTestClient.requestLaunchApp(bundleId, undefined, perf, coldBoot)
+        );
+        // Merge Swift-side perf breakdown (checkAppState, activateApp/launchApp, etc.)
+        if (xcTestLaunchResult.perfTiming) {
+          const timings = Array.isArray(xcTestLaunchResult.perfTiming)
+            ? xcTestLaunchResult.perfTiming
+            : [xcTestLaunchResult.perfTiming];
+          perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
+        }
         let launchResult: { success: boolean; pid?: number; error?: string } = {
           success: xcTestLaunchResult.success,
           error: xcTestLaunchResult.error
@@ -260,12 +263,32 @@ export class LaunchApp extends BaseVisualChange {
 
         if (!xcTestLaunchResult.success) {
           logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
-          launchResult = await this.simctl.launchApp(bundleId, {
-            foregroundIfRunning: !coldBoot
-          });
+
+          // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
+          if (!isSystemBundleId) {
+            const installedApps = await perf.track("checkInstalled", () =>
+              this.installedAppsProvider.listInstalledApps()
+            );
+            if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
+              logger.info("App is not installed");
+              perf.end();
+              return {
+                success: false,
+                packageName: bundleId,
+                error: "App is not installed"
+              };
+            }
+          }
+
+          launchResult = await perf.track("simctlFallback", () =>
+            this.simctl.launchApp(bundleId, {
+              foregroundIfRunning: !coldBoot
+            })
+          );
         }
 
         if (launchResult.error) {
+          perf.end();
           return {
             success: false,
             packageName: bundleId,
@@ -273,8 +296,15 @@ export class LaunchApp extends BaseVisualChange {
           };
         }
 
-        await this.waitForIosHierarchyReady();
-        observationTimestampMs = this.timer.now();
+        // Use the hierarchy's updatedAt as the observation timestamp so finalObserve's
+        // minTimestamp check finds the cached hierarchy fresh. Using this.timer.now()
+        // creates a TS-side timestamp that always exceeds the Swift-side updatedAt,
+        // causing a redundant 200ms+ round-trip in finalObserve.
+        const hierarchyUpdatedAt = await perf.track("waitForHierarchy", () =>
+          this.waitForIosHierarchyReady()
+        );
+        observationTimestampMs = hierarchyUpdatedAt ?? this.timer.now();
+        perf.end();
         return {
           success: true,
           packageName: bundleId,
@@ -283,6 +313,8 @@ export class LaunchApp extends BaseVisualChange {
       },
       {
         changeExpected: false,
+        perf,
+        skipPreviousObserve: true,
         observationTimestampProvider: () => observationTimestampMs
       }
     );
@@ -291,7 +323,7 @@ export class LaunchApp extends BaseVisualChange {
   private async waitForIosHierarchyReady(
     timeoutMs: number = 2000,
     pollIntervalMs: number = 200
-  ): Promise<void> {
+  ): Promise<number | undefined> {
     const viewHierarchy = new ViewHierarchy(this.device, this.adbFactory);
     const startTime = this.timer.now();
     let attempts = 0;
@@ -300,10 +332,10 @@ export class LaunchApp extends BaseVisualChange {
       attempts += 1;
       try {
         const result = await viewHierarchy.getViewHierarchy();
-        const hierarchy = result?.hierarchy as { error?: string } | null | undefined;
+        const hierarchy = result?.hierarchy as { error?: string; updatedAt?: number } | null | undefined;
         if (hierarchy && !hierarchy.error) {
           logger.info(`[LaunchApp] iOS hierarchy ready after ${this.timer.now() - startTime}ms`);
-          return;
+          return result?.updatedAt;
         }
         logger.debug(`[LaunchApp] iOS hierarchy not ready yet (attempt ${attempts})`);
       } catch (error) {

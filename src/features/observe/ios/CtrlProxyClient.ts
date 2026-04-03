@@ -190,7 +190,7 @@ export interface CtrlProxyService {
   ): Promise<CtrlProxyPressHomeResult>;
 
   requestLaunchApp(
-    bundleId: string, timeoutMs?: number, perf?: PerformanceTracker
+    bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
   ): Promise<CtrlProxyLaunchAppResult>;
 
   requestScreenshot(
@@ -1215,9 +1215,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   }
 
   async requestLaunchApp(
-    bundleId: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+    bundleId: string, timeoutMs: number = 10000, perf?: PerformanceTracker, coldBoot: boolean = false
   ): Promise<CtrlProxyLaunchAppResult> {
-    return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf);
+    return this.navigation.requestLaunchApp(bundleId, timeoutMs, perf, coldBoot);
   }
 
   // ===========================================================================

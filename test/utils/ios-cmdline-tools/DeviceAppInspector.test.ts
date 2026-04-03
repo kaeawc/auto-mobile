@@ -111,6 +111,80 @@ describe("DeviceAppInspector", () => {
     expect(hash).toBe("host-hash");
   });
 
+  test("computes simulator app hash via simctl get_app_container", async () => {
+    const workDir = await createTempDir();
+    const fixtureApp = await createFixtureApp(workDir);
+    const fixtureHash = await hashAppBundle(fixtureApp);
+    const hostControl = new FakeHostControlDeviceAppInspector();
+
+    const exec = async (command: string) => {
+      if (command.includes("simctl get_app_container")) {
+        return {
+          stdout: fixtureApp + "\n",
+          stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        toString() { return this.stdout; },
+        trim() { return this.stdout.trim(); },
+        includes(searchString: string) { return this.stdout.includes(searchString); }
+      };
+    };
+
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec,
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      hostControl
+    });
+
+    const hash = await inspector.getInstalledAppBundleHash("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", bundleId, true);
+    expect(hash).toBe(fixtureHash);
+  });
+
+  test("uninstallApp uses simctl for simulators", async () => {
+    const commands: string[] = [];
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const exec = async (command: string) => {
+      commands.push(command);
+      return {
+        stdout: "",
+        stderr: "",
+        toString() { return this.stdout; },
+        trim() { return this.stdout.trim(); },
+        includes(searchString: string) { return this.stdout.includes(searchString); }
+      };
+    };
+
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec,
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      hostControl
+    });
+
+    await inspector.uninstallApp("AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE", bundleId, true);
+
+    expect(commands.some(command => command.includes("simctl uninstall"))).toBe(true);
+    expect(commands.some(command => command.includes(bundleId))).toBe(true);
+    expect(commands.every(command => !command.includes("devicectl"))).toBe(true);
+  });
+
   test("uninstallApp issues devicectl uninstall command", async () => {
     const commands: string[] = [];
     const hostControl = new FakeHostControlDeviceAppInspector();

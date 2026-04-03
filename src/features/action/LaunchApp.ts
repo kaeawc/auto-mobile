@@ -373,6 +373,7 @@ export class LaunchApp extends BaseVisualChange {
 
       if (winner === "push" || winner === "sync") {
         logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+
         return;
       }
     } else {

@@ -59,6 +59,9 @@ public struct WebSocketRequest: Codable {
     // App launch parameters
     public let coldBoot: Bool?
 
+    // Rotation parameters
+    public let orientation: String?
+
     // Permission/settings
     public let permission: String?
     public let requestPermission: Bool?
@@ -98,6 +101,7 @@ public struct WebSocketRequest: Codable {
         value: String? = nil,
         valueType: String? = nil,
         coldBoot: Bool? = nil,
+        orientation: String? = nil,
         permission: String? = nil,
         requestPermission: Bool? = nil,
         enabled: Bool? = nil
@@ -135,6 +139,7 @@ public struct WebSocketRequest: Codable {
         self.value = value
         self.valueType = valueType
         self.coldBoot = coldBoot
+        self.orientation = orientation
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled
@@ -206,6 +211,42 @@ public struct WebSocketResponse: Codable {
             totalTimeMs: totalTimeMs,
             error: error
         )
+    }
+}
+
+/// Response for rotate commands with orientation details
+public struct RotateResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let totalTimeMs: Int64
+    public let previousOrientation: String
+    public let currentOrientation: String
+    public let value: Int
+    public let rotationPerformed: Bool
+    public let error: String?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        totalTimeMs: Int64,
+        previousOrientation: String,
+        currentOrientation: String,
+        value: Int,
+        rotationPerformed: Bool,
+        error: String? = nil
+    ) {
+        self.type = ResponseType.rotateResult.rawValue
+        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.totalTimeMs = totalTimeMs
+        self.previousOrientation = previousOrientation
+        self.currentOrientation = currentOrientation
+        self.value = value
+        self.rotationPerformed = rotationPerformed
+        self.error = error
     }
 }
 
@@ -749,6 +790,9 @@ public enum RequestType: String {
     case requestAction = "request_action"
     case requestLaunchApp = "request_launch_app"
 
+    // Device control
+    case requestRotate = "request_rotate"
+
     /// Clipboard
     case requestClipboard = "request_clipboard"
 
@@ -784,6 +828,7 @@ public enum ResponseType: String {
     case recentAppsResult = "recent_apps_result"
     case actionResult = "action_result"
     case launchAppResult = "launch_app_result"
+    case rotateResult = "rotate_result"
     case clipboardResult = "clipboard_result"
     case currentFocusResult = "current_focus_result"
     case traversalOrderResult = "traversal_order_result"

@@ -102,6 +102,7 @@ import type {
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
   CtrlProxyRecentAppsResult,
+  CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyPerfTiming,
   CtrlProxyPerformanceSnapshot,
@@ -193,6 +194,10 @@ export interface CtrlProxyService {
   requestRecentApps(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyRecentAppsResult>;
+
+  requestRotate(
+    orientation: string, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyRotateResult>;
 
   requestLaunchApp(
     bundleId: string, timeoutMs?: number, perf?: PerformanceTracker, coldBoot?: boolean
@@ -921,6 +926,19 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
           };
           break;
 
+        case "rotate_result":
+          result = {
+            success: message.success ?? true,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+            perfTiming: message.perfTiming,
+            previousOrientation: message.previousOrientation ?? "",
+            currentOrientation: message.currentOrientation ?? "",
+            value: message.value ?? 0,
+            rotationPerformed: message.rotationPerformed ?? false,
+          };
+          break;
+
         case "ime_action_result":
         case "action_result":
           result = {
@@ -1229,6 +1247,12 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxyRecentAppsResult> {
     return this.navigation.requestRecentApps(timeoutMs, perf);
+  }
+
+  async requestRotate(
+    orientation: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyRotateResult> {
+    return this.navigation.requestRotate(orientation, timeoutMs, perf);
   }
 
   async requestLaunchApp(

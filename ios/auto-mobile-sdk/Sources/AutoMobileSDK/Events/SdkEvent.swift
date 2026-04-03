@@ -28,7 +28,7 @@ public enum SdkEventType: String, Codable, Sendable {
 
 /// A navigation event recording an in-app screen transition.
 public struct SdkNavigationEvent: SdkEvent {
-    public let eventType: SdkEventType = .navigation
+    public private(set) var eventType: SdkEventType = .navigation
     public let timestamp: Int64
     public let destination: String
     public let source: NavigationSourceType
@@ -52,7 +52,7 @@ public struct SdkNavigationEvent: SdkEvent {
 
 /// A handled (non-fatal) exception event with stack trace and device context.
 public struct SdkHandledExceptionEvent: SdkEvent {
-    public let eventType: SdkEventType = .handledException
+    public private(set) var eventType: SdkEventType = .handledException
     public let timestamp: Int64
     public let errorDomain: String
     public let errorMessage: String?
@@ -88,7 +88,7 @@ public struct SdkHandledExceptionEvent: SdkEvent {
 
 /// An unhandled crash event captured by exception or signal handlers.
 public struct SdkCrashEvent: SdkEvent {
-    public let eventType: SdkEventType = .crash
+    public private(set) var eventType: SdkEventType = .crash
     public let timestamp: Int64
     public let errorDomain: String
     public let errorMessage: String?
@@ -121,7 +121,7 @@ public struct SdkCrashEvent: SdkEvent {
 
 /// A main-thread hang event with duration and diagnostic stack trace.
 public struct SdkHangEvent: SdkEvent {
-    public let eventType: SdkEventType = .hang
+    public private(set) var eventType: SdkEventType = .hang
     public let timestamp: Int64
     public let durationMs: Double
     public let stackTrace: String?
@@ -142,7 +142,7 @@ public struct SdkHangEvent: SdkEvent {
 
 /// A network request/response event with URL, status code, timing, and optional body capture.
 public struct SdkNetworkRequestEvent: SdkEvent {
-    public let eventType: SdkEventType = .networkRequest
+    public private(set) var eventType: SdkEventType = .networkRequest
     public let timestamp: Int64
     public let url: String
     public let method: String
@@ -196,7 +196,7 @@ public struct SdkNetworkRequestEvent: SdkEvent {
 
 /// A WebSocket frame event recording direction, type, and payload size.
 public struct SdkWebSocketFrameEvent: SdkEvent {
-    public let eventType: SdkEventType = .webSocketFrame
+    public private(set) var eventType: SdkEventType = .webSocketFrame
     public let timestamp: Int64
     public let url: String
     public let direction: WebSocketFrameDirection
@@ -235,7 +235,7 @@ public enum WebSocketFrameType: String, Codable, Sendable {
 
 /// A log event with level, tag, and message.
 public struct SdkLogEvent: SdkEvent {
-    public let eventType: SdkEventType = .log
+    public private(set) var eventType: SdkEventType = .log
     public let timestamp: Int64
     public let level: LogLevel
     public let tag: String?
@@ -270,7 +270,7 @@ public enum LogLevel: Int, Codable, Sendable, Comparable {
 
 /// An app lifecycle event (foreground, background, terminated, etc.).
 public struct SdkLifecycleEvent: SdkEvent {
-    public let eventType: SdkEventType = .lifecycle
+    public private(set) var eventType: SdkEventType = .lifecycle
     public let timestamp: Int64
     public let state: String
     public let bundleId: String?
@@ -291,7 +291,7 @@ public struct SdkLifecycleEvent: SdkEvent {
 
 /// A notification action tap event.
 public struct SdkNotificationActionEvent: SdkEvent {
-    public let eventType: SdkEventType = .notificationAction
+    public private(set) var eventType: SdkEventType = .notificationAction
     public let timestamp: Int64
     public let actionId: String
     public let notificationTitle: String?
@@ -309,7 +309,7 @@ public struct SdkNotificationActionEvent: SdkEvent {
 
 /// A periodic snapshot of SwiftUI view body evaluation metrics.
 public struct SdkViewBodySnapshotEvent: SdkEvent {
-    public let eventType: SdkEventType = .viewBodySnapshot
+    public private(set) var eventType: SdkEventType = .viewBodySnapshot
     public let timestamp: Int64
     public let snapshots: [ViewBodySnapshot]
 
@@ -386,7 +386,7 @@ public struct SdkEventEnvelope: Codable, Sendable {
 
 /// A system notification broadcast event (locale change, memory warning, etc.).
 public struct SdkBroadcastEvent: SdkEvent {
-    public let eventType: SdkEventType = .broadcast
+    public private(set) var eventType: SdkEventType = .broadcast
     public let timestamp: Int64
     public let action: String
     public let categories: [String]?
@@ -407,7 +407,7 @@ public struct SdkBroadcastEvent: SdkEvent {
 
 /// A user interaction event (tap, gesture) with coordinates and target view info.
 public struct SdkInteractionEvent: SdkEvent {
-    public let eventType: SdkEventType = .interaction
+    public private(set) var eventType: SdkEventType = .interaction
     public let timestamp: Int64
     public let interactionType: String
     public let properties: [String: String]
@@ -425,7 +425,7 @@ public struct SdkInteractionEvent: SdkEvent {
 
 /// A UserDefaults change event with suite, key, and value metadata.
 public struct SdkStorageChangedEvent: SdkEvent {
-    public let eventType: SdkEventType = .storageChanged
+    public private(set) var eventType: SdkEventType = .storageChanged
     public let timestamp: Int64
     public let suiteName: String?
     public let key: String?

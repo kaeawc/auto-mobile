@@ -1007,6 +1007,13 @@ jobs:
       - name: "Run Tests with Coverage"
         run: bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage
 
+      - name: "Recover Coverage if needed"
+        run: |
+          if [ ! -f coverage/lcov.info ]; then
+            tmp=$(find coverage/ -name '.lcov.info.*.tmp' 2>/dev/null | head -1)
+            if [ -n "$tmp" ]; then mv "$tmp" coverage/lcov.info; fi
+          fi
+
       - name: "Generate Coverage Badge"
         run: bash scripts/coverage/generate-badge.sh coverage/lcov.info coverage/ts-coverage-badge.json "TS coverage" "3178C6"
 

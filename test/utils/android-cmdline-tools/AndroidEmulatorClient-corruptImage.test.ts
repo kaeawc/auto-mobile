@@ -122,10 +122,9 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
-    // Emit corrupt image data on stderr then exit with code 1 — matching
-    // real emulator behavior. Use the same process.nextTick-from-spawnFn
-    // pattern as the "exit code" test below, which passes reliably on Linux CI.
-    const spawnFn = (() => {
+    // Must be a real function (not an IIFE) so process.nextTick is scheduled
+    // when startEmulator calls spawnFn, not when the test defines it.
+    const spawnFn = ((_cmd: string, _args: string[]) => {
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
         fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
@@ -164,8 +163,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with exit code when emulator exits non-zero without known error pattern", async () => {
     const fakeChild = createFakeChildProcess();
 
-    const spawnFn = (() => {
-      // Emit some generic error and then exit
+    const spawnFn = ((_cmd: string, _args: string[]) => {
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("some random error\n"));
         fakeChild.emit("exit", 1);

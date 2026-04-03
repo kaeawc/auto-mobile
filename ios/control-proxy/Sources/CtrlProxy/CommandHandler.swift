@@ -95,6 +95,10 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestLaunchApp.rawValue:
                 return try handleLaunchApp(request, startTime: startTime)
 
+            // Device control
+            case RequestType.requestRotate.rawValue:
+                return try handleRotate(request, startTime: startTime)
+
             // Clipboard commands
             case RequestType.requestClipboard.rawValue:
                 return try handleClipboard(request, startTime: startTime)
@@ -474,6 +478,63 @@ public class CommandHandler: CommandHandling {
         )
     }
 
+    // MARK: - Device Control
+
+    private func handleRotate(_ request: WebSocketRequest, startTime: Date) throws -> RotateResponse {
+        guard let orientation = request.orientation else {
+            throw CommandError.missingParameter("orientation")
+        }
+
+        let previousOrientation = gesturePerformer.getOrientation()
+
+        // Map "landscape" to "landscape_left" (standard rotation direction)
+        let iosOrientation: String
+        switch orientation.lowercased() {
+        case "portrait":
+            iosOrientation = "portrait"
+        case "landscape":
+            iosOrientation = "landscape_left"
+        case "portrait_upside_down", "portraitupsidedown":
+            iosOrientation = "portrait_upside_down"
+        case "landscape_left", "landscapeleft":
+            iosOrientation = "landscape_left"
+        case "landscape_right", "landscaperight":
+            iosOrientation = "landscape_right"
+        default:
+            throw CommandError.invalidParameter("orientation", orientation)
+        }
+
+        // Normalize to "portrait" or "landscape" for the result
+        let normalizedPrevious = previousOrientation.hasPrefix("landscape") ? "landscape" : "portrait"
+        let normalizedTarget = iosOrientation.hasPrefix("landscape") ? "landscape" : "portrait"
+        let value = normalizedTarget == "portrait" ? 0 : 1
+
+        // Check if already in the desired orientation
+        if normalizedPrevious == normalizedTarget {
+            return RotateResponse(
+                requestId: request.requestId,
+                success: true,
+                totalTimeMs: totalTimeMs(from: startTime),
+                previousOrientation: normalizedPrevious,
+                currentOrientation: normalizedTarget,
+                value: value,
+                rotationPerformed: false
+            )
+        }
+
+        try gesturePerformer.setOrientation(iosOrientation)
+
+        return RotateResponse(
+            requestId: request.requestId,
+            success: true,
+            totalTimeMs: totalTimeMs(from: startTime),
+            previousOrientation: normalizedPrevious,
+            currentOrientation: normalizedTarget,
+            value: value,
+            rotationPerformed: true
+        )
+    }
+
     // MARK: - Clipboard
 
     private func handleClipboard(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
@@ -736,6 +797,8 @@ public class CommandHandler: CommandHandling {
             return ResponseType.actionResult.rawValue
         case RequestType.requestLaunchApp.rawValue:
             return ResponseType.launchAppResult.rawValue
+        case RequestType.requestRotate.rawValue:
+            return ResponseType.rotateResult.rawValue
         case RequestType.requestClipboard.rawValue:
             return ResponseType.clipboardResult.rawValue
         case RequestType.getVoiceOverState.rawValue:

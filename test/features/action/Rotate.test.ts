@@ -1,9 +1,11 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Rotate } from "../../../src/features/action/Rotate";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { CtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -264,6 +266,90 @@ describe("Rotate", () => {
       const orientation = await rotate.getCurrentOrientation();
 
       expect(orientation).toBe("portrait"); // Should default to portrait
+    });
+  });
+
+  describe("iOS platform", () => {
+    let iosDevice: BootedDevice;
+    let fakeIOSCtrlProxy: FakeIOSCtrlProxy;
+    let getInstanceSpy: ReturnType<typeof spyOn>;
+
+    beforeEach(() => {
+      iosDevice = {
+        name: "iPhone 15",
+        platform: "ios",
+        deviceId: "ios-device",
+        source: "local"
+      };
+
+      fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
+      getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+        fakeIOSCtrlProxy as any
+      );
+    });
+
+    test("should use CtrlProxy to rotate to landscape on iOS", async () => {
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      (iosRotate as any).observeScreen = fakeObserveScreen;
+      (iosRotate as any).window = fakeWindow;
+      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+
+      try {
+        const result = await iosRotate.execute("landscape");
+        expect(result.success).toBe(true);
+        expect(result.orientation).toBe("landscape");
+        expect(result.rotationPerformed).toBe(true);
+        expect(fakeIOSCtrlProxy.getRotateHistory()).toHaveLength(1);
+        expect(fakeIOSCtrlProxy.getRotateHistory()[0].orientation).toBe("landscape");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("should use CtrlProxy to rotate to portrait on iOS", async () => {
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      (iosRotate as any).observeScreen = fakeObserveScreen;
+      (iosRotate as any).window = fakeWindow;
+      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+
+      try {
+        const result = await iosRotate.execute("portrait");
+        expect(result.success).toBe(true);
+        expect(result.orientation).toBe("portrait");
+        expect(fakeIOSCtrlProxy.getRotateHistory()).toHaveLength(1);
+        expect(fakeIOSCtrlProxy.getRotateHistory()[0].orientation).toBe("portrait");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("should throw when iOS rotate fails", async () => {
+      fakeIOSCtrlProxy.setFailureMode("rotate", new Error("Rotation not supported"));
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      (iosRotate as any).observeScreen = fakeObserveScreen;
+      (iosRotate as any).window = fakeWindow;
+      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+
+      try {
+        await expect(iosRotate.execute("landscape")).rejects.toThrow("Rotation not supported");
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("should not call ADB for iOS rotation", async () => {
+      const iosRotate = new Rotate(iosDevice, fakeAdb, fakeTimer);
+      (iosRotate as any).observeScreen = fakeObserveScreen;
+      (iosRotate as any).window = fakeWindow;
+      (iosRotate as any).awaitIdle = fakeAwaitIdle;
+
+      try {
+        await iosRotate.execute("landscape");
+        expect(fakeAdb.wasCommandExecuted("shell settings get system user_rotation")).toBe(false);
+        expect(fakeAdb.wasCommandExecuted("shell settings get system accelerometer_rotation")).toBe(false);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
     });
   });
 });

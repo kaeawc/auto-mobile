@@ -95,6 +95,21 @@ public class FakeElementLocator: ElementLocating {
     public func trackObservedBundleId(_ bundleId: String) {
         trackedBundleIds.append(bundleId)
     }
+
+    // MARK: - Explicit State Transitions
+
+    public private(set) var switchedBundleIds: [String] = []
+    public private(set) var awaitStateCalls: [(bundleId: String, expectedState: AppStateExpectation)] = []
+    public var awaitAppStateResult: Bool = true
+
+    public func switchForegroundApp(bundleId: String) {
+        switchedBundleIds.append(bundleId)
+    }
+
+    public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
+        awaitStateCalls.append((bundleId: bundleId, expectedState: expectedState))
+        return awaitAppStateResult
+    }
 }
 
 // MARK: - FakeGesturePerformer
@@ -394,6 +409,12 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func activateApp(bundleId _: String) throws {
         try checkFailure("activateApp")
+    }
+
+    public private(set) var updateApplicationHistory: [String] = []
+
+    public func updateApplication(bundleId: String) {
+        updateApplicationHistory.append(bundleId)
     }
 }
 

@@ -760,15 +760,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     return null;
   }
 
-  /** Record a layout telemetry event from iOS hierarchy update */
-  private recordLayoutTelemetryEvent(hierarchy: CtrlProxyHierarchy): void {
+  /** Record a layout telemetry event from converted iOS hierarchy (ViewHierarchyResult format) */
+  private recordLayoutTelemetryEvent(hierarchy: ViewHierarchyResult): void {
     try {
       const recorder = TelemetryRecorder.getInstance();
       const prevContext = recorder.getContext();
       recorder.setContext(this.device.deviceId, null);
-      const nodeCount = this.countNodes(hierarchy.hierarchy);
-      // Include the full hierarchy for view tree display in the desktop app
-      // Use the raw hierarchy object which includes all nested children
+      const nodeCount = this.countViewHierarchyNodes(hierarchy.hierarchy);
+      // Use the converted ViewHierarchyResult format — same data as the observation stream
       const hierarchyJson = JSON.stringify({
         nodeCount,
         packageName: hierarchy.packageName,
@@ -794,11 +793,18 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     }
   }
 
-  private countNodes(node: CtrlProxyNode | CtrlProxyNode[] | null): number {
-    if (!node) {return 0;}
-    if (Array.isArray(node)) {return node.reduce((sum, n) => sum + this.countNodes(n), 0);}
-    const children = (node as { children?: CtrlProxyNode[] }).children;
-    return 1 + (children ? children.reduce((sum: number, c: CtrlProxyNode) => sum + this.countNodes(c), 0) : 0);
+  private countViewHierarchyNodes(node: unknown): number {
+    if (!node || typeof node !== "object") { return 0; }
+    const obj = node as Record<string, unknown>;
+    let count = 0;
+    if (obj["$"] || obj["node"]) { count = 1; }
+    const children = obj["node"];
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        count += this.countViewHierarchyNodes(child);
+      }
+    }
+    return count;
   }
 
   /**
@@ -865,8 +871,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
     if (type === "hierarchy_update" && message.data) {
       this.handleHierarchyUpdateForNavigation(message.data, message.perfTiming);
-      // Record layout telemetry event for iOS
-      this.recordLayoutTelemetryEvent(message.data);
+      // Record layout telemetry event using converted hierarchy (same format as observation stream)
+      const converted = this.convertToViewHierarchyResult(message.data);
+      this.recordLayoutTelemetryEvent(converted);
     }
 
     // Handle request/response messages (with requestId) first

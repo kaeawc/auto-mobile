@@ -288,7 +288,68 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(launchResponse.success, true)
         XCTAssertEqual(launchResponse.type, "launch_app_result")
         XCTAssertEqual(fakeGesturePerformer.getAppLaunchHistory(), ["com.apple.Preferences"])
-        XCTAssertEqual(fakeElementLocator.trackedBundleIds, ["com.apple.Preferences"])
+    }
+
+    // MARK: - Explicit State Transition Tests
+
+    func testLaunchAppSwitchesForegroundApp() {
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-switch",
+            bundleId: "com.example.app"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, ["com.example.app"])
+    }
+
+    func testLaunchAppUpdatesGesturePerformer() {
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-gesture",
+            bundleId: "com.example.app"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.example.app"])
+    }
+
+    func testLaunchAppAwaitsForegroundState() {
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-await",
+            bundleId: "com.example.app"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeElementLocator.awaitStateCalls.count, 1)
+        XCTAssertEqual(fakeElementLocator.awaitStateCalls.first?.bundleId, "com.example.app")
+        XCTAssertEqual(fakeElementLocator.awaitStateCalls.first?.expectedState, .foreground)
+    }
+
+    func testPressHomeSwitchesToSpringboard() {
+        let request = WebSocketRequest(
+            type: "request_press_home",
+            requestId: "home-switch"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, ["com.apple.springboard"])
+    }
+
+    func testPressHomeUpdatesGesturePerformer() {
+        let request = WebSocketRequest(
+            type: "request_press_home",
+            requestId: "home-gesture"
+        )
+
+        _ = commandHandler.handle(request)
+
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
     // MARK: - Unknown Command Tests

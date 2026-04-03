@@ -36,6 +36,10 @@ public class GesturePerformer: GesturePerforming {
 
     #if canImport(XCTest) && os(iOS)
         private weak var application: XCUIApplication?
+        /// Strong reference to keep the application alive when set via updateApplication.
+        /// Without this, the weak `application` property would immediately deallocate
+        /// freshly created XCUIApplication instances that have no other strong owner.
+        private var ownedApplication: XCUIApplication?
         private let elementLocator: ElementLocating
 
         public init(application: XCUIApplication? = nil, elementLocator: ElementLocating) {
@@ -44,6 +48,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func setApplication(_ app: XCUIApplication) {
+            ownedApplication = nil
             application = app
         }
 
@@ -416,6 +421,14 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func updateApplication(bundleId: String) {
+            runOnMainThread {
+                let app = XCUIApplication(bundleIdentifier: bundleId)
+                self.ownedApplication = app
+                self.application = app
+            }
+        }
+
     #else
         /// Non-iOS stub implementation
         private let elementLocator: ElementLocating
@@ -520,6 +533,10 @@ public class GesturePerformer: GesturePerforming {
 
         public func activateApp(bundleId _: String) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func updateApplication(bundleId _: String) {
+            // no-op on non-iOS
         }
     #endif
 }

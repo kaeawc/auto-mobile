@@ -1,5 +1,17 @@
 import Foundation
 
+// MARK: - App State Expectations
+
+/// Expected app state for bounded polling after state-changing operations.
+public enum AppStateExpectation {
+    /// App should be in foreground (XCUIApplication.State.rawValue >= 4)
+    case foreground
+    /// App should not be running (XCUIApplication.State.rawValue <= 1)
+    case notRunning
+    /// App should be in background (XCUIApplication.State.rawValue == 3)
+    case background
+}
+
 // MARK: - ElementLocator Protocol
 
 /// Protocol for locating UI elements and building view hierarchies
@@ -16,6 +28,15 @@ public protocol ElementLocating {
 
     /// Track a bundle ID so the foreground app detector can find it
     func trackObservedBundleId(_ bundleId: String)
+
+    /// Explicitly switch the tracked foreground app to the given bundle ID.
+    /// Called by CommandHandler after state-changing operations (launch, terminate, home).
+    func switchForegroundApp(bundleId: String)
+
+    /// Wait for the given bundle ID to reach the expected state.
+    /// Uses bounded polling: up to 500ms with 50ms intervals (10 attempts max).
+    /// Returns true if state was reached, false if timed out.
+    func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool
 }
 
 // MARK: - GesturePerformer Protocol
@@ -108,6 +129,9 @@ public protocol GesturePerforming {
 
     /// Activate app by bundle ID
     func activateApp(bundleId: String) throws
+
+    /// Update the internal application reference for gesture operations.
+    func updateApplication(bundleId: String)
 }
 
 // MARK: - StorageInspecting Protocol

@@ -334,6 +334,10 @@ public class CommandHandler: CommandHandling {
     private func handlePressHome(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
         try gesturePerformer.pressHome()
 
+        // Explicit state transition: home screen means springboard is now foreground
+        elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+        gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+
         return WebSocketResponse.success(
             type: ResponseType.pressHomeResult.rawValue,
             requestId: request.requestId,
@@ -363,7 +367,13 @@ public class CommandHandler: CommandHandling {
         }
 
         try gesturePerformer.launchApp(bundleId: bundleId)
-        elementLocator.trackObservedBundleId(bundleId)
+
+        // Explicit state transition: switch tracking to launched app
+        elementLocator.switchForegroundApp(bundleId: bundleId)
+        gesturePerformer.updateApplication(bundleId: bundleId)
+
+        // Verify app reached foreground (bounded poll, max 500ms)
+        let _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
 
         return WebSocketResponse.success(
             type: ResponseType.launchAppResult.rawValue,

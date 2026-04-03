@@ -86,7 +86,7 @@ for package in "${TESTABLE_PACKAGES[@]}"; do
 
         # Check if the package has test targets
         if grep -q "testTarget" "${PACKAGE_DIR}/Package.swift"; then
-            if (cd "${PACKAGE_DIR}" && swift test 2>&1); then
+            if (cd "${PACKAGE_DIR}" && swift test -Xswiftc -warnings-as-errors 2>&1); then
                 print_status 0 "${package} tests passed"
                 PASSED_PACKAGES+=("${package}")
             else

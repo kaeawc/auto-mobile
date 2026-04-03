@@ -1,5 +1,34 @@
 # Changelog
 
+## [v0.0.16] - 2026-04-03
+### Added
+- IDE Plugin: Implement screen stream display in Layout Inspector ([#1033](https://github.com/kaeawc/auto-mobile/issues/1033)) (android, ios)
+- Server: Implement screen stream receiver and relay to IDE plugins ([#1032](https://github.com/kaeawc/auto-mobile/issues/1032))
+- Feature: iOS UserDefaults Inspection and Management ([#1022](https://github.com/kaeawc/auto-mobile/issues/1022)) (ios, devxp, testing)
+- feat: identify media-displaying views in hierarchy by class and role ([#1013](https://github.com/kaeawc/auto-mobile/issues/1013)) (android, a11y)
+- feat: Android version matrix testing in CI ([#835](https://github.com/kaeawc/auto-mobile/issues/835)) (android, ci, testing)
+### Changed
+- Dead Code Detection: Threshold Exceeded ([#1648](https://github.com/kaeawc/auto-mobile/issues/1648)) (automated, dead-code)
+### Fixed
+- tapOn fails to match text with Unicode curly apostrophe (U+2019) ([#1798](https://github.com/kaeawc/auto-mobile/issues/1798)) (ios)
+- Daemon disconnect cascade causes 6GB+ log flood and crash-restart loop ([#1773](https://github.com/kaeawc/auto-mobile/issues/1773))
+### Other
+- iOS: Add rotate support via CtrlProxy ([#1859](https://github.com/kaeawc/auto-mobile/issues/1859))
+- iOS: Add systemTray support via CtrlProxy ([#1858](https://github.com/kaeawc/auto-mobile/issues/1858))
+- iOS: Add recentApps support via CtrlProxy ([#1857](https://github.com/kaeawc/auto-mobile/issues/1857))
+- iOS inputText fails with dismissKeyboard enabled: isDismissKeyboardAfterInputEnabled is not a function ([#1840](https://github.com/kaeawc/auto-mobile/issues/1840))
+- setActiveDevice should allow launchApp when both platforms are connected ([#1839](https://github.com/kaeawc/auto-mobile/issues/1839))
+- inputText: should not require dismissKeyboard, default to false ([#1836](https://github.com/kaeawc/auto-mobile/issues/1836))
+- tapOn: error message when 'action' is omitted is unclear ([#1835](https://github.com/kaeawc/auto-mobile/issues/1835))
+- Auto-disable stylus handwriting on Android emulators ([#1834](https://github.com/kaeawc/auto-mobile/issues/1834))
+- CtrlProxy iOS broken on Xcode 26: checksum mismatch + simctl spawn failure ([#1833](https://github.com/kaeawc/auto-mobile/issues/1833))
+- startDevice returns generic DEVICE_NOT_FOUND when AVD userdata is corrupt ([#1672](https://github.com/kaeawc/auto-mobile/issues/1672))
+- feat: iOS simulator live locale changes (SpringBoard restart + AppleLanguages) ([#1613](https://github.com/kaeawc/auto-mobile/issues/1613))
+- test: increase Android test coverage for changeLocalization ([#1612](https://github.com/kaeawc/auto-mobile/issues/1612))
+- feat: add setCalendarSystem MCP tool (rename to calendar) ([#1611](https://github.com/kaeawc/auto-mobile/issues/1611))
+- bug: `doctor --ios` always fails with "undefined is not an object (evaluating '...runtimes.filter')" on Xcode 26.2 ([#1448](https://github.com/kaeawc/auto-mobile/issues/1448))
+- ci: run JUnitRunner emulator tests on macOS/Windows/Linux matrix ([#959](https://github.com/kaeawc/auto-mobile/issues/959)) (android, ci, testing)
+
 ## [v0.0.15] - 2026-03-26
 ### Other
 - No changes.

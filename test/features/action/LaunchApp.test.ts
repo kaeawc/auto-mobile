@@ -228,10 +228,15 @@ describe("LaunchApp", () => {
       installedApps: []
     });
 
+    const fakeSimctl = {
+      launchApp: async () => ({ success: true, pid: 123 }),
+      terminateApp: async () => {},
+    };
+
     const iosLaunchApp = new LaunchApp(
       iosDevice,
       fakeAdb as unknown as any,
-      null,
+      fakeSimctl as any,
       fakeTimer,
       { installedAppsProvider }
     );
@@ -243,8 +248,7 @@ describe("LaunchApp", () => {
     try {
       const result = await iosLaunchApp.execute(systemBundleId, false, false);
       expect(result.success).toBe(true);
-      expect(fakeIOSCtrlProxy.getLaunchAppHistory()).toEqual([systemBundleId]);
-      // checkInstalled is deferred to fallback path — not called when CtrlProxy succeeds
+      // Warm launch uses simctl directly — checkInstalled not called on success path
       expect(installedAppsProvider.getCallCount()).toBe(0);
     } finally {
       getInstanceSpy.mockRestore();
@@ -286,44 +290,41 @@ describe("LaunchApp", () => {
         installedApps: [opts.bundleId]
       });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer, { installedAppsProvider: installedApps });
+      const fakeSimctl = {
+        launchApp: async () => opts.launchSuccess === false
+          ? { success: false, error: "simctl launch failed" }
+          : { success: true, pid: 123 },
+        terminateApp: async () => {},
+      };
+
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
       (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
 
-      if (opts.launchSuccess === false) {
-        // CtrlProxy returns success:false → falls back to simctl which also fails
-        spyOn(fakeCtrlProxy, "requestLaunchApp").mockResolvedValue({
-          success: false,
-          error: "ctrlproxy unavailable",
-          totalTimeMs: 10,
-        });
-        (iosLaunchApp as any).simctl = {
-          launchApp: async () => ({ success: false, error: "simctl launch failed" }),
-          terminateApp: async () => {},
-        };
-      }
-
       return { iosLaunchApp, targetBundleIdCalls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
     }
 
-    test("sets targetBundleId BEFORE requestLaunchApp so CtrlProxy targets the app, not SpringBoard", async () => {
+    test("sets targetBundleId BEFORE simctl launch so CtrlProxy targets the app, not SpringBoard", async () => {
       fakeTimer.enableAutoAdvance();
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-order" };
-      const fakeCtrlProxy = new FakeIOSCtrlProxy();
       const callOrder: string[] = [];
 
       const ctrlProxySpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        fakeCtrlProxy as unknown as CtrlProxyClient
+        new FakeIOSCtrlProxy() as unknown as CtrlProxyClient
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: (id: string) => callOrder.push(`setTargetBundleId:${id}`),
       } as unknown as IOSCtrlProxyManager);
-      spyOn(fakeCtrlProxy, "requestLaunchApp").mockImplementation(async id => {
-        callOrder.push(`requestLaunchApp:${id}`);
-        return { success: true, totalTimeMs: 10 };
-      });
+
+      const fakeSimctl = {
+        launchApp: async () => {
+          callOrder.push(`simctlLaunch:${userBundleId}`);
+          return { success: true, pid: 123 };
+        },
+        terminateApp: async () => {},
+      };
 
       const iosObserveScreen = new FakeObserveScreen();
       iosObserveScreen.setObserveResult({
@@ -336,7 +337,7 @@ describe("LaunchApp", () => {
       iosWindow.configureCachedActiveWindow({ appId: userBundleId, activityName: "Main", layoutSeqSum: 1 });
       const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [userBundleId] });
 
-      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, null, fakeTimer, { installedAppsProvider: installedApps });
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
       (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
       (iosLaunchApp as any).observeScreen = iosObserveScreen;
       (iosLaunchApp as any).window = iosWindow;
@@ -344,11 +345,10 @@ describe("LaunchApp", () => {
 
       try {
         await iosLaunchApp.execute(userBundleId, false, false);
-        // setTargetBundleId must fire before requestLaunchApp so CtrlProxy receives the
+        // setTargetBundleId must fire before launch so CtrlProxy receives the
         // bundle ID via SIMCTL_CHILD_CTRL_PROXY_IOS_BUNDLE_ID when it starts.
-        // If reversed, CtrlProxy defaults to observing SpringBoard instead of the app.
         expect(callOrder.indexOf(`setTargetBundleId:${userBundleId}`))
-          .toBeLessThan(callOrder.indexOf(`requestLaunchApp:${userBundleId}`));
+          .toBeLessThan(callOrder.indexOf(`simctlLaunch:${userBundleId}`));
       } finally {
         ctrlProxySpy.mockRestore();
         managerSpy.mockRestore();

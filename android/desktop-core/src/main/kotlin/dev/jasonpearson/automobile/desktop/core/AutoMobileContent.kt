@@ -572,17 +572,23 @@ fun AutoMobileContent(
     }
   }
 
-  // Poll device lists every 5 seconds to detect boot/kill changes
+  // Poll device lists to detect boot/kill changes, with backoff on consecutive failures
   LaunchedEffect(connectedMcpProcess) {
     val process = connectedMcpProcess ?: return@LaunchedEffect
+    var consecutiveFailures = 0
+    val baseDelayMs = 5000L
+    val maxDelayMs = 60000L
     while (true) {
-      kotlinx.coroutines.delay(5000)
+      val delayMs = if (consecutiveFailures <= 1) baseDelayMs
+          else (baseDelayMs * (1L shl (consecutiveFailures - 1).coerceAtMost(4))).coerceAtMost(maxDelayMs)
+      kotlinx.coroutines.delay(delayMs)
       kotlinx.coroutines.withContext(Dispatchers.IO) {
         try {
           val client = McpResourceClientFactory.create(process)
           try {
             when (val result = client.readResource("automobile:devices/booted")) {
               is ResourceReadResult.Success -> {
+                consecutiveFailures = 0
                 val parsed = DeviceResourceParser.parseBootedDevices(result.content)
                 val allDevices = parsed?.devices ?: emptyList()
                 val newDevices =
@@ -610,7 +616,9 @@ fun AutoMobileContent(
                   realDevice = null
                 }
               }
-              is ResourceReadResult.Error -> {}
+              is ResourceReadResult.Error -> {
+                consecutiveFailures++
+              }
             }
             when (val result = client.readResource("automobile:devices/images")) {
               is ResourceReadResult.Success -> {
@@ -622,7 +630,12 @@ fun AutoMobileContent(
           } finally {
             client.close()
           }
-        } catch (_: Exception) {}
+        } catch (e: Exception) {
+          consecutiveFailures++
+          if (consecutiveFailures == 1) {
+            LOG.info("Device polling failed, will retry with backoff: ${e.message}")
+          }
+        }
       }
     }
   }

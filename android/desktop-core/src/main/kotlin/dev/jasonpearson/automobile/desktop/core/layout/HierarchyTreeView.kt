@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -261,6 +262,7 @@ private fun TreeNodeRow(
     Row(
         modifier = Modifier
             .widthIn(min = 200.dp)  // Minimum width to ensure content doesn't wrap
+            .heightIn(min = 18.dp)  // Minimum tap target height
             .background(bgColor)
             .hoverable(rowInteractionSource)
             .pointerInput(Unit) {
@@ -272,7 +274,7 @@ private fun TreeNodeRow(
             .onPointerEvent(PointerEventType.Enter) { onHoverChange(true) }
             .onPointerEvent(PointerEventType.Exit) { onHoverChange(false) }
             .pointerHoverIcon(PointerIcon.Hand)
-            .padding(vertical = 2.dp, horizontal = 4.dp),
+            .padding(vertical = 4.dp, horizontal = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         // Indentation
@@ -280,7 +282,13 @@ private fun TreeNodeRow(
 
         // Expand/collapse chevron
         Box(
-            modifier = Modifier.size(16.dp),
+            modifier = Modifier.size(18.dp)
+                .then(
+                    if (node.hasChildren) Modifier
+                        .clickable(onClick = onToggleExpand)
+                        .pointerHoverIcon(PointerIcon.Hand)
+                    else Modifier
+                ),
             contentAlignment = Alignment.Center,
         ) {
             if (node.hasChildren) {
@@ -289,9 +297,6 @@ private fun TreeNodeRow(
                     fontSize = 8.sp,
                     color = colors.text.normal.copy(alpha = 0.5f),
                     maxLines = 1,
-                    modifier = Modifier
-                        .clickable(onClick = onToggleExpand)
-                        .pointerHoverIcon(PointerIcon.Hand),
                 )
             }
         }
@@ -359,12 +364,13 @@ private fun TreeNodeRow(
             val selector = remember(node.element) { buildElementSelector(node.element) }
             Box(
                 modifier = Modifier
+                    .size(24.dp)
                     .clickable {
                         val clipboard = java.awt.Toolkit.getDefaultToolkit().systemClipboard
                         clipboard.setContents(java.awt.datatransfer.StringSelection(selector), null)
                     }
-                    .pointerHoverIcon(PointerIcon.Hand)
-                    .padding(horizontal = 4.dp, vertical = 1.dp),
+                    .pointerHoverIcon(PointerIcon.Hand),
+                contentAlignment = Alignment.Center,
             ) {
                 Text(
                     "\uD83D\uDCCB", // 📋

@@ -21,6 +21,8 @@ DESKTOP_APP_DIR="${ANDROID_DIR}/desktop-app"
 
 # Runtime state
 DESKTOP_APP_PID=""
+DESKTOP_APP_PID_FILE="${PROJECT_ROOT}/.automobile-desktop-app.pid"
+DESKTOP_APP_LOG="${PROJECT_ROOT}/scratch/desktop-app.log"
 
 # Build the desktop app (compile only, no tests)
 build_desktop_app() {
@@ -44,17 +46,26 @@ install_ide_plugin() {
   return 0
 }
 
-# Launch the desktop app in the background
+# Launch the desktop app in the background, logging to a file
 run_desktop_app() {
   stop_desktop_app
+  mkdir -p "$(dirname "${DESKTOP_APP_LOG}")"
+  : > "${DESKTOP_APP_LOG}"
   log_info "Launching desktop app..."
-  (cd "${ANDROID_DIR}" && ./gradlew :desktop-app:run --quiet) &
+  (cd "${ANDROID_DIR}" && ./gradlew :desktop-app:run --quiet) >> "${DESKTOP_APP_LOG}" 2>&1 &
   DESKTOP_APP_PID=$!
+  echo "${DESKTOP_APP_PID}" > "${DESKTOP_APP_PID_FILE}"
+  disown "${DESKTOP_APP_PID}"
   log_info "Desktop app running (PID ${DESKTOP_APP_PID})."
+  log_info "Desktop app logs: tail -f ${DESKTOP_APP_LOG}"
 }
 
 # Stop the running desktop app
 stop_desktop_app() {
+  # Recover PID from file if not set in memory (e.g. different process)
+  if [[ -z "${DESKTOP_APP_PID}" ]] && [[ -f "${DESKTOP_APP_PID_FILE}" ]]; then
+    DESKTOP_APP_PID=$(cat "${DESKTOP_APP_PID_FILE}" 2>/dev/null || true)
+  fi
   if [[ -n "${DESKTOP_APP_PID}" ]] && kill -0 "${DESKTOP_APP_PID}" 2>/dev/null; then
     log_info "Stopping desktop app (PID ${DESKTOP_APP_PID})..."
     kill "${DESKTOP_APP_PID}" 2>/dev/null || true
@@ -68,6 +79,7 @@ stop_desktop_app() {
     fi
     DESKTOP_APP_PID=""
   fi
+  rm -f "${DESKTOP_APP_PID_FILE}"
   # Also kill any orphaned desktop-app Gradle run processes
   local pids
   pids=$(pgrep -f "desktop-app:run" 2>/dev/null; pgrep -f "dev.jasonpearson.automobile.desktop.MainKt" 2>/dev/null) || true

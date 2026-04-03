@@ -152,6 +152,8 @@ public class ElementLocator: ElementLocating {
                     }
                 }
 
+            print("[ElementLocator] ensureForegroundApp: current=\(stateInfo.currentBundleId ?? "nil") state=\(stateInfo.currentAppState.map { String($0) } ?? "nil") springboard=\(stateInfo.springboardState) observed=\(observedBundleIds)")
+
             let isCurrentAppInForeground = (stateInfo.currentAppState ?? 0) >=
                 4 // .runningForeground only (3 = .runningBackground)
             let isCurrentAppSpringboard = stateInfo.currentBundleId == "com.apple.springboard"
@@ -170,6 +172,7 @@ public class ElementLocator: ElementLocating {
                 }
                 didFallbackToSpringboard = false
             } else if !isCurrentAppInForeground {
+                print("[ElementLocator] Detection failed, retrying after delay...")
                 // Retry once after a brief delay to handle race conditions during app launch
                 Thread.sleep(forTimeInterval: 0.05)
                 if let retryBundleId = detectForegroundAppBundleId() {
@@ -268,6 +271,8 @@ public class ElementLocator: ElementLocating {
                     var candidateBundleIds: [String] = []
                     collectBundleIdsFromElement(snapshot, into: &candidateBundleIds)
 
+                    print("[ElementLocator] Springboard candidates: \(candidateBundleIds)")
+
                     for bundleId in candidateBundleIds {
                         if bundleId == "com.apple.springboard" {
                             continue
@@ -277,6 +282,7 @@ public class ElementLocator: ElementLocating {
                             let testApp = XCUIApplication(bundleIdentifier: bundleId)
                             return testApp.state.rawValue
                         }
+                        print("[ElementLocator] Candidate \(bundleId) state=\(stateRawValue)")
                         if stateRawValue >= 4 { // .runningForeground only
                             print("[ElementLocator] Found foreground app from springboard: \(bundleId)")
                             return bundleId
@@ -287,10 +293,13 @@ public class ElementLocator: ElementLocating {
                 if let foundBundleId = result {
                     return foundBundleId
                 }
+            } else {
+                print("[ElementLocator] WARNING: Failed to snapshot springboard")
             }
 
             // Fallback: Check observed bundle IDs first (apps we've seen before)
             let observedResult: String? = perfProvider.track("checkObserved") {
+                print("[ElementLocator] Checking observed bundle IDs: \(observedBundleIds)")
                 for bundleId in observedBundleIds {
                     // Skip current app (we already know it's not in foreground)
                     if bundleId == foregroundBundleId {
@@ -301,6 +310,7 @@ public class ElementLocator: ElementLocating {
                         let testApp = XCUIApplication(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
                     }
+                    print("[ElementLocator] Observed \(bundleId) state=\(stateRawValue)")
                     if stateRawValue >= 4 { // .runningForeground only
                         return bundleId
                     }
@@ -330,9 +340,11 @@ public class ElementLocator: ElementLocating {
                         return testApp.state.rawValue
                     }
                     if stateRawValue >= 4 { // .runningForeground only
+                        print("[ElementLocator] Found foreground app from system apps: \(bundleId)")
                         return bundleId
                     }
                 }
+                print("[ElementLocator] No foreground app found from any source")
                 return nil
             }
         }
@@ -345,16 +357,20 @@ public class ElementLocator: ElementLocating {
         ) {
             let identifier = element.identifier
 
-            // Many springboard elements have identifiers like "com.apple.AppName-window"
-            // or just the bundle ID directly
-            // Also handle formats like "@card:dev.jasonpearson.automobile.Playground:sceneID:..."
+            // Springboard elements use "card:<bundleId>:sceneID:<sceneId>" format
+            // e.g., "card:com.tinyspeck.chatlyio:sceneID:com.tinyspeck.chatlyio-default"
+            // Also seen: "@card:<bundleId>:sceneID:..." and suffixes like "-window", "-sceneID"
             if !identifier.isEmpty {
                 var cleanId = identifier
 
-                // Handle @card: prefix format (e.g., "@card:dev.jasonpearson.automobile.Playground:sceneID:...")
+                // Handle @card:*:sceneID:* and card:*:sceneID:* formats
                 if identifier.hasPrefix("@card:") {
                     cleanId = String(identifier.dropFirst(6)) // Remove "@card:"
-                    // Take just the bundle ID part (before :sceneID: or similar)
+                    if let colonIndex = cleanId.firstIndex(of: ":") {
+                        cleanId = String(cleanId[..<colonIndex])
+                    }
+                } else if identifier.hasPrefix("card:") {
+                    cleanId = String(identifier.dropFirst(5)) // Remove "card:"
                     if let colonIndex = cleanId.firstIndex(of: ":") {
                         cleanId = String(cleanId[..<colonIndex])
                     }
@@ -367,7 +383,6 @@ public class ElementLocator: ElementLocating {
 
                 // Check if it looks like a bundle ID
                 if cleanId.contains(".") && !cleanId.contains(" ") {
-                    // Accept more bundle ID prefixes (including dev.)
                     if cleanId.hasPrefix("com.") || cleanId.hasPrefix("io.") || cleanId.hasPrefix("org.") ||
                         cleanId.hasPrefix("net.") || cleanId.hasPrefix("me.") || cleanId.hasPrefix("dev.")
                     {
@@ -399,6 +414,7 @@ public class ElementLocator: ElementLocating {
 
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
+            print("[ElementLocator] getViewHierarchy: using bundleId=\(bundleId) fallback=\(didFallbackToSpringboard)")
 
             // Use snapshot() for fast hierarchy extraction - single IPC call captures everything
             // snapshot() captures all element data in ONE IPC call (fast!)

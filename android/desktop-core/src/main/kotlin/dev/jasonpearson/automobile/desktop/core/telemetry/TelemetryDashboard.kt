@@ -112,7 +112,7 @@ private fun groupEvents(
       runEnd++
     }
     if (runEnd - runStart >= GROUP_THRESHOLD) {
-      val groupId = "${key}_${events[runStart].timestamp}"
+      val groupId = key
       val expanded = groupId in expandedGroups
       result.add(
           EventListItem.Group(
@@ -320,11 +320,13 @@ fun TelemetryDashboard(
   }
 
   // Track whether user has scrolled away from the bottom (disables auto-scroll)
-  LaunchedEffect(listState.isScrollInProgress) {
-    if (listState.isScrollInProgress) {
+  LaunchedEffect(Unit) {
+    snapshotFlow {
       val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: 0
       val totalItems = listState.layoutInfo.totalItemsCount
-      autoScrollEnabled = totalItems - lastVisible <= 3
+      totalItems - lastVisible <= 3
+    }.collect { nearBottom ->
+      autoScrollEnabled = nearBottom
     }
   }
 
@@ -582,7 +584,15 @@ fun TelemetryDashboard(
                       coroutineScope.launch { listState.animateScrollToItem(lastVisibleRow) }
                     }
                   }
-                  .then(buttonModifier),
+                  .then(buttonModifier)
+                  .then(
+                      if (autoScrollEnabled)
+                          Modifier.background(
+                              Color(0xFF74C0FC).copy(alpha = 0.15f),
+                              RoundedCornerShape(4.dp),
+                          )
+                      else Modifier
+                  ),
       ) {
         Icon(
             AppIcons.ScrollDown,
@@ -831,14 +841,14 @@ fun TelemetryDashboard(
               }
             }
 
-            groupedItems.forEach { listItem: EventListItem ->
+            groupedItems.forEachIndexed { index, listItem: EventListItem ->
               when (listItem) {
                 is EventListItem.Single -> {
                   emitEventRow(listItem.event, "single")
                 }
                 is EventListItem.Group -> {
-                  val groupId = "${listItem.categoryKey}_${listItem.events.first().timestamp}"
-                  item(key = "group_header_$groupId") {
+                  val groupId = listItem.categoryKey
+                  item(key = "group_header_${groupId}_$index") {
                     GroupHeader(
                         categoryKey = listItem.categoryKey,
                         count = listItem.events.size,

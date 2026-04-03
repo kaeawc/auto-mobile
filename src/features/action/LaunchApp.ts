@@ -223,67 +223,68 @@ export class LaunchApp extends BaseVisualChange {
 
     return this.observedInteraction(
       async () => {
-        // For iOS, handle coldBoot by terminating first if requested
-        if (coldBoot) {
-          try {
-            // Attempt to terminate the app if it's running
-            await perf.track("terminateApp", () =>
-              this.simctl.terminateApp(bundleId)
-            );
-            // Note: iOS doesn't have direct app data clearing like Android
-            // clearAppData parameter is ignored on iOS
-          } catch (error) {
-            // App might not be running, continue with launch
-            logger.info("App was not running or failed to terminate, continuing with launch");
-          }
-        }
-
         // Set bundle ID before starting CtrlProxy so it targets the app, not SpringBoard
         if (!isSystemBundleId) {
           IOSCtrlProxyManager.getInstance(this.device).setTargetBundleId(bundleId);
         }
 
-        // Try CtrlProxy first — it checks app state and uses activate() for running apps
-        const xcTestClient = CtrlProxyClient.getInstance(this.device);
-        const xcTestLaunchResult = await perf.track("ctrlProxyLaunch", () =>
-          xcTestClient.requestLaunchApp(bundleId, undefined, perf, coldBoot)
-        );
-        // Merge Swift-side perf breakdown (checkAppState, activateApp/launchApp, etc.)
-        if (xcTestLaunchResult.perfTiming) {
-          const timings = Array.isArray(xcTestLaunchResult.perfTiming)
-            ? xcTestLaunchResult.perfTiming
-            : [xcTestLaunchResult.perfTiming];
-          perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
-        }
-        let launchResult: { success: boolean; pid?: number; error?: string } = {
-          success: xcTestLaunchResult.success,
-          error: xcTestLaunchResult.error
-        };
+        let launchResult: { success: boolean; pid?: number; error?: string };
 
-        if (!xcTestLaunchResult.success) {
-          logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
-
-          // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
-          if (!isSystemBundleId) {
-            const installedApps = await perf.track("checkInstalled", () =>
-              this.installedAppsProvider.listInstalledApps()
-            );
-            if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
-              logger.info("App is not installed");
-              perf.end();
-              return {
-                success: false,
-                packageName: bundleId,
-                error: "App is not installed"
-              };
+        if (coldBoot) {
+          // Cold boot: use simctl directly. XCUIApplication.launch() is slow for heavy
+          // apps (10s+ timeout) while simctl launch completes in ~500ms. CtrlProxy's
+          // value is in the activate() fast path, not cold boot.
+          await perf.track("terminateApp", async () => {
+            try {
+              await this.simctl.terminateApp(bundleId);
+            } catch {
+              // App might not be running
             }
-          }
-
-          launchResult = await perf.track("simctlFallback", () =>
-            this.simctl.launchApp(bundleId, {
-              foregroundIfRunning: !coldBoot
-            })
+          });
+          launchResult = await perf.track("simctlLaunch", () =>
+            this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
           );
+        } else {
+          // Warm/background: use CtrlProxy — it checks app state and uses activate()
+          const xcTestClient = CtrlProxyClient.getInstance(this.device);
+          const xcTestLaunchResult = await perf.track("ctrlProxyLaunch", () =>
+            xcTestClient.requestLaunchApp(bundleId, undefined, perf, coldBoot)
+          );
+          // Merge Swift-side perf breakdown (checkAppState, activateApp/launchApp, etc.)
+          if (xcTestLaunchResult.perfTiming) {
+            const timings = Array.isArray(xcTestLaunchResult.perfTiming)
+              ? xcTestLaunchResult.perfTiming
+              : [xcTestLaunchResult.perfTiming];
+            perf.addExternalTiming("ctrlProxySwiftBreakdown", timings);
+          }
+          launchResult = {
+            success: xcTestLaunchResult.success,
+            error: xcTestLaunchResult.error
+          };
+
+          if (!xcTestLaunchResult.success) {
+            logger.warn(`[LaunchApp] CtrlProxy iOS launch failed: ${xcTestLaunchResult.error ?? "unknown error"}`);
+
+            // Only check installed apps on the fallback path — simctl listapps is slow (~2s)
+            if (!isSystemBundleId) {
+              const installedApps = await perf.track("checkInstalled", () =>
+                this.installedAppsProvider.listInstalledApps()
+              );
+              if (installedApps.length > 0 && !installedApps.includes(bundleId)) {
+                logger.info("App is not installed");
+                perf.end();
+                return {
+                  success: false,
+                  packageName: bundleId,
+                  error: "App is not installed"
+                };
+              }
+            }
+
+            launchResult = await perf.track("simctlFallback", () =>
+              this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
+            );
+          }
         }
 
         if (launchResult.error) {

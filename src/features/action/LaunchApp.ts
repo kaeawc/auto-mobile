@@ -339,33 +339,38 @@ export class LaunchApp extends BaseVisualChange {
       return;
     }
 
-    // Push-based waiting: CtrlProxy pushes hierarchy updates whenever the foreground
-    // app changes. Register a listener and resolve when we see the expected packageName.
-    // This is faster than polling with requestHierarchySync (~130ms each) because push
-    // updates arrive as soon as the Swift side detects the change.
+    // Race a push listener against a forced sync request. Push notifications only
+    // fire for unsolicited hierarchy_update messages (periodic pushes), while sync
+    // responses go through requestManager.resolve() without notifying push listeners.
+    // By racing both, we resolve as soon as either path delivers the correct app.
     if (expectedPackageName) {
-      const pushPromise = new Promise<boolean>((resolve) => {
-        const timeout = setTimeout(() => {
-          unsubscribe();
-          resolve(false);
-        }, timeoutMs);
+      let pushUnsubscribe: (() => void) | undefined;
+      let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 
-        const unsubscribe = xcTestClient.onPushUpdate((hierarchy) => {
+      const pushPromise = new Promise<string>((resolve) => {
+        timeoutHandle = setTimeout(() => resolve("timeout"), timeoutMs);
+        pushUnsubscribe = xcTestClient.onPushUpdate((hierarchy) => {
           if (hierarchy.packageName === expectedPackageName) {
-            clearTimeout(timeout);
-            unsubscribe();
-            resolve(true);
+            resolve("push");
           }
         });
       });
 
-      // Also fire a single forced sync request to trigger a hierarchy push if none
-      // is already in-flight. Don't await it — the push listener will resolve first.
-      xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs).catch(() => {});
+      const syncPromise = xcTestClient.requestHierarchySync(undefined, true, undefined, timeoutMs)
+        .then((result) => {
+          const pkg = (result?.hierarchy as { packageName?: string } | null)?.packageName;
+          return pkg === expectedPackageName ? "sync" : "wrong_app";
+        })
+        .catch(() => "error" as string);
 
-      const resolved = await pushPromise;
-      if (resolved) {
-        logger.info(`[LaunchApp] iOS hierarchy ready via push after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
+      const winner = await Promise.race([pushPromise, syncPromise]);
+
+      // Cleanup
+      pushUnsubscribe?.();
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+
+      if (winner === "push" || winner === "sync") {
+        logger.info(`[LaunchApp] iOS hierarchy ready via ${winner} after ${this.timer.now() - startTime}ms (pkg=${expectedPackageName})`);
         return;
       }
     } else {

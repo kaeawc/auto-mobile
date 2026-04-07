@@ -1229,7 +1229,9 @@ public class ElementLocator: ElementLocating {
 
     /// Deduplicate sibling elements that share the same elementType, identical bounds,
     /// and carry no unique identifying properties (no id, text, contentDesc, hintText).
-    /// Keeps only the first occurrence.
+    /// Only deduplicates leaf elements (no children) — elements with distinct subtrees
+    /// are always preserved to avoid discarding valid controls.
+    /// Keeps only the first occurrence of each duplicate.
     static func deduplicateSiblings(_ children: [UIElementInfo]) -> [UIElementInfo] {
         var seen: Set<String> = []
         var result: [UIElementInfo] = []
@@ -1237,6 +1239,12 @@ public class ElementLocator: ElementLocating {
         for child in children {
             if hasUniqueIdentifyingProperties(child) {
                 // Has unique info — always keep
+                result.append(child)
+                continue
+            }
+
+            // Elements with children have distinct subtrees — always keep
+            if child.node != nil && !(child.node!.isEmpty) {
                 result.append(child)
                 continue
             }

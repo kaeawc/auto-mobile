@@ -289,6 +289,22 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(result.count, 2)
     }
 
+    func testDedup_preservesElementsWithDistinctChildren() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let child1 = UIElementInfo(text: "Button A", className: "UIButton")
+        let child2 = UIElementInfo(text: "Button B", className: "UIButton")
+        // Two UIViews at same bounds, no unique props, but different children
+        let a = UIElementInfo(className: "UIView", bounds: bounds, node: [child1])
+        let b = UIElementInfo(className: "UIView", bounds: bounds, node: [child2])
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Both kept — distinct subtrees must not be discarded
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].node?[0].text, "Button A")
+        XCTAssertEqual(result[1].node?[0].text, "Button B")
+    }
+
     func testDedup_emptyInput() {
         let result = ElementLocator.deduplicateSiblings([])
         XCTAssertEqual(result.count, 0)

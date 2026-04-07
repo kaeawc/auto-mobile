@@ -260,7 +260,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             try runOnMainThread {
-                try tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
+                try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
 
                 // Select all and delete existing text via Cmd+A, Delete (O(1))
                 if let existingText = element.value as? String, !existingText.isEmpty {
@@ -283,7 +283,7 @@ public class GesturePerformer: GesturePerforming {
                 }
 
                 try runOnMainThread {
-                    try tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
+                    try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
 
                     // Select all and delete via Cmd+A, Delete (O(1))
                     app.typeKey("a", modifierFlags: .command)

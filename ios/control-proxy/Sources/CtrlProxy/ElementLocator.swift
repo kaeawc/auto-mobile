@@ -1253,6 +1253,16 @@ public class ElementLocator: ElementLocating {
                 continue
             }
 
+            // Elements with any state flags are considered distinct — don't discard
+            // a focused/selected/checked/password element as a duplicate
+            let hasState = child.focused != nil || child.selected != nil
+                || child.checked != nil || child.password != nil
+                || child.clickable != nil || child.scrollable != nil
+            if hasState {
+                result.append(child)
+                continue
+            }
+
             // Build key from className + bounds
             let key: String
             if let cls = child.className, let b = child.bounds {

@@ -394,27 +394,28 @@ final class ElementLocatorTests: XCTestCase {
 
     // MARK: - Dedup edge cases
 
-    func testDedup_focusedElementKeptWhenNoUniqueTextProps() {
+    func testDedup_focusedElementPreservedNotDeduped() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
         let a = UIElementInfo(className: "UIView", bounds: bounds, focused: "true")
         let b = UIElementInfo(className: "UIView", bounds: bounds)
 
         let result = ElementLocator.deduplicateSiblings([a, b])
 
-        // Neither has text/id/contentDesc/hintText → both are non-unique
-        // First kept, second deduped
-        XCTAssertEqual(result.count, 1)
+        // Focused element has state — always preserved, not deduped
+        // b has no state and no unique props — deduped against other stateless elements
+        XCTAssertEqual(result.count, 2)
         XCTAssertEqual(result[0].focused, "true")
     }
 
-    func testDedup_passwordElementKeptWhenNoUniqueTextProps() {
+    func testDedup_passwordElementPreservedNotDeduped() {
         let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
         let a = UIElementInfo(className: "UISecureTextField", bounds: bounds, password: "true")
         let b = UIElementInfo(className: "UISecureTextField", bounds: bounds)
 
         let result = ElementLocator.deduplicateSiblings([a, b])
 
-        XCTAssertEqual(result.count, 1)
+        // Password element has state — preserved
+        XCTAssertEqual(result.count, 2)
         XCTAssertEqual(result[0].password, "true")
     }
 

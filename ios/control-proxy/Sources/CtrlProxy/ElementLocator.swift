@@ -494,7 +494,8 @@ public class ElementLocator: ElementLocating {
                     snapshot,
                     depth: 0,
                     screenBounds: screenBounds,
-                    keyboardFocusFrame: keyboardFocusFrame
+                    keyboardFocusFrame: keyboardFocusFrame,
+                    disableAllFiltering: disableAllFiltering
                 )
             }
 
@@ -666,7 +667,8 @@ public class ElementLocator: ElementLocating {
             screenBounds: CGRect,
             parentPath: String = "",
             childIndex: Int = 0,
-            keyboardFocusFrame: CGRect? = nil
+            keyboardFocusFrame: CGRect? = nil,
+            disableAllFiltering: Bool = false
         )
             -> UIElementInfo
         {
@@ -733,19 +735,22 @@ public class ElementLocator: ElementLocating {
                             screenBounds: screenBounds,
                             parentPath: currentPath,
                             childIndex: idx,
-                            keyboardFocusFrame: keyboardFocusFrame
+                            keyboardFocusFrame: keyboardFocusFrame,
+                            disableAllFiltering: disableAllFiltering
                         )
                     }
 
-                    // Collapse same-type text-input children (e.g. UITextField inside UITextField)
-                    // that are internal UIKit subviews with no unique identifying properties.
-                    filteredChildren = ElementLocator.collapseSameTypeTextInputChildren(
-                        parentClassName: parentClassName,
-                        children: filteredChildren
-                    )
+                    if !disableAllFiltering {
+                        // Collapse same-type text-input children (e.g. UITextField inside UITextField)
+                        // that are internal UIKit subviews with no unique identifying properties.
+                        filteredChildren = ElementLocator.collapseSameTypeTextInputChildren(
+                            parentClassName: parentClassName,
+                            children: filteredChildren
+                        )
 
-                    // Deduplicate siblings with identical type + bounds + no unique properties.
-                    filteredChildren = ElementLocator.deduplicateSiblings(filteredChildren)
+                        // Deduplicate siblings with identical type + bounds + no unique properties.
+                        filteredChildren = ElementLocator.deduplicateSiblings(filteredChildren)
+                    }
 
                     childNodes = filteredChildren.isEmpty ? nil : filteredChildren
                 }

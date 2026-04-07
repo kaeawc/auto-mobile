@@ -76,6 +76,9 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestSetText.rawValue:
                 return try handleSetText(request, startTime: startTime)
 
+            case RequestType.requestClearText.rawValue:
+                return try handleClearText(request, startTime: startTime)
+
             case RequestType.requestImeAction.rawValue:
                 return try handleImeAction(request, startTime: startTime)
 
@@ -309,6 +312,16 @@ public class CommandHandler: CommandHandling {
 
         return WebSocketResponse.success(
             type: ResponseType.setTextResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleClearText(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        try gesturePerformer.clearText(resourceId: request.resourceId)
+
+        return WebSocketResponse.success(
+            type: ResponseType.clearTextResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )
@@ -787,6 +800,8 @@ public class CommandHandler: CommandHandling {
             return ResponseType.pinchResult.rawValue
         case RequestType.requestSetText.rawValue:
             return ResponseType.setTextResult.rawValue
+        case RequestType.requestClearText.rawValue:
+            return ResponseType.clearTextResult.rawValue
         case RequestType.requestImeAction.rawValue:
             return ResponseType.imeActionResult.rawValue
         case RequestType.requestSelectAll.rawValue:

@@ -925,6 +925,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         case "drag_result":
         case "pinch_result":
         case "set_text_result":
+        case "clear_text_result":
         case "select_all_result":
         case "press_home_result":
         case "recent_apps_result":

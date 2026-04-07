@@ -176,6 +176,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var typeTextHistory: [String] = []
     private var setTextHistory: [TextCall] = []
     private var clearTextHistory: [String?] = []
+    private var selectAllCallCount: Int = 0
     private var imeActionHistory: [String] = []
     private var actionHistory: [(action: String, resourceId: String?, label: String?)] = []
     private var screenshotCallCount = 0
@@ -228,6 +229,14 @@ public class FakeGesturePerformer: GesturePerforming {
         setTextHistory
     }
 
+    public func getClearTextHistory() -> [String?] {
+        clearTextHistory
+    }
+
+    public func getSelectAllCallCount() -> Int {
+        selectAllCallCount
+    }
+
     public func getImeActionHistory() -> [String] {
         imeActionHistory
     }
@@ -274,6 +283,7 @@ public class FakeGesturePerformer: GesturePerforming {
         typeTextHistory.removeAll()
         setTextHistory.removeAll()
         clearTextHistory.removeAll()
+        selectAllCallCount = 0
         imeActionHistory.removeAll()
         actionHistory.removeAll()
         screenshotCallCount = 0
@@ -358,6 +368,7 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func selectAll() throws {
         try checkFailure("selectAll")
+        selectAllCallCount += 1
     }
 
     public func performImeAction(_ action: String) throws {

@@ -68,9 +68,11 @@ final class SetEnabledPropagationTests: XCTestCase {
             collector.append(events)
         }
         buffer.start()
-        AutoMobileOsEvents.shared.initialize(bundleId: "test.osevents", buffer: buffer)
 
+        // Disable before initializing to avoid racing with NWPathMonitor's
+        // immediate connectivity_change callback on a background queue.
         AutoMobileOsEvents.shared.setEnabled(false)
+        AutoMobileOsEvents.shared.initialize(bundleId: "test.osevents", buffer: buffer)
 
         // Post a notification that OsEvents normally tracks
         NotificationCenter.default.post(

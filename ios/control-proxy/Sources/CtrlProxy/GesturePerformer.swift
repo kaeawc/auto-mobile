@@ -42,9 +42,57 @@ public class GesturePerformer: GesturePerforming {
         private var ownedApplication: XCUIApplication?
         private let elementLocator: ElementLocating
 
+        /// Cached SpringBoard app reference for system alert handling.
+        private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+
         public init(application: XCUIApplication? = nil, elementLocator: ElementLocating) {
             self.application = application
             self.elementLocator = elementLocator
+        }
+
+        // MARK: - Keyboard Focus Helpers
+
+        /// Check that some element in the app has keyboard focus.
+        /// Throws with a contextual error message if no focus is detected.
+        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
+            let hasFocus: Bool = runOnMainThread {
+                app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                    .exists
+            }
+            guard hasFocus else {
+                throw GestureError.gestureFailed(
+                    "No element has keyboard focus — \(context)"
+                )
+            }
+        }
+
+        /// Tap an element and poll for keyboard focus (200ms timeout, 20ms intervals).
+        /// Throws if the element does not receive focus after the tap.
+        private func tapAndAwaitKeyboardFocus(
+            app: XCUIApplication,
+            element: XCUIElement,
+            resourceId: String
+        ) throws {
+            element.tap()
+
+            let deadline = Date().addingTimeInterval(0.2)
+            var hasFocus = false
+            while !hasFocus && Date() < deadline {
+                hasFocus = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                    .exists
+                if !hasFocus {
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                }
+            }
+            guard hasFocus else {
+                throw GestureError.gestureFailed(
+                    "Element '\(resourceId)' did not receive keyboard focus after tap"
+                )
+            }
         }
 
         public func setApplication(_ app: XCUIApplication) {
@@ -196,22 +244,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            // Pre-check keyboard focus via predicate query to avoid XCUITest assertion
-            // failure ("Neither element nor any descendant has keyboard focus") which
-            // tears down the test and kills the CtrlProxy service.
-            // Note: snapshot.hasFocus reflects UIKit's focus system (tvOS/iPad), not
-            // keyboard input focus on iPhone — hasKeyboardFocus is predicate-only.
-            let hasFocus: Bool = runOnMainThread {
-                app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    .firstMatch
-                    .exists
-            }
-            guard hasFocus else {
-                throw GestureError.gestureFailed(
-                    "No element has keyboard focus — ensure a text field is focused before typing"
-                )
-            }
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before typing")
 
             runOnMainThread {
                 app.typeText(text)
@@ -227,30 +260,12 @@ public class GesturePerformer: GesturePerforming {
             }
 
             try runOnMainThread {
-                element.tap()
+                try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
 
-                // Poll for keyboard focus — appearance is async after tap
-                let deadline = Date().addingTimeInterval(0.2)
-                var hasFocus = false
-                while !hasFocus && Date() < deadline {
-                    hasFocus = app.descendants(matching: .any)
-                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                        .firstMatch
-                        .exists
-                    if !hasFocus {
-                        RunLoop.current.run(until: Date().addingTimeInterval(0.02))
-                    }
-                }
-                guard hasFocus else {
-                    throw GestureError.gestureFailed(
-                        "Element '\(resourceId)' did not receive keyboard focus after tap"
-                    )
-                }
-
-                // Select all and delete
+                // Select all and delete existing text via Cmd+A, Delete (O(1))
                 if let existingText = element.value as? String, !existingText.isEmpty {
-                    let deleteString = String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingText.count)
-                    element.typeText(deleteString)
+                    app.typeKey("a", modifierFlags: .command)
+                    app.typeKey(.delete, modifierFlags: [])
                 }
 
                 element.typeText(text)
@@ -258,26 +273,28 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func clearText(resourceId: String? = nil) throws {
+            guard let app = application else {
+                throw GestureError.noApplication
+            }
+
             if let resourceId = resourceId {
                 guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
                     throw GestureError.elementNotFound(resourceId)
                 }
 
-                runOnMainThread {
-                    element.tap()
+                try runOnMainThread {
+                    try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
 
-                    if let existingText = element.value as? String, !existingText.isEmpty {
-                        let deleteString = String(repeating: XCUIKeyboardKey.delete.rawValue, count: existingText.count)
-                        element.typeText(deleteString)
-                    }
+                    // Select all and delete via Cmd+A, Delete (O(1))
+                    app.typeKey("a", modifierFlags: .command)
+                    app.typeKey(.delete, modifierFlags: [])
                 }
             } else {
-                guard let app = application else {
-                    throw GestureError.noApplication
-                }
+                try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+
                 runOnMainThread {
-                    // Clear focused element
-                    app.typeText(XCUIKeyboardKey.delete.rawValue)
+                    app.typeKey("a", modifierFlags: .command)
+                    app.typeKey(.delete, modifierFlags: [])
                 }
             }
         }
@@ -287,9 +304,10 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before selecting")
+
             runOnMainThread {
-                // Try Cmd+A (select all)
-                app.typeText("a") // Note: This is simplified, real select all would need modifier keys
+                app.typeKey("a", modifierFlags: .command)
             }
         }
 
@@ -302,6 +320,10 @@ public class GesturePerformer: GesturePerforming {
             case "done", "go", "search", "send", "next":
                 runOnMainThread {
                     app.typeText("\n")
+                }
+            case "previous":
+                runOnMainThread {
+                    app.typeKey(.tab, modifierFlags: .shift)
                 }
             default:
                 throw GestureError.notSupported("IME action: \(action)")
@@ -415,17 +437,43 @@ public class GesturePerformer: GesturePerforming {
                 return nil
 
             case "paste":
+                guard let app = application else {
+                    throw GestureError.noApplication
+                }
                 let clipboardText: String? = runOnMainThread {
                     UIPasteboard.general.string
                 }
                 guard let pasteText = clipboardText, !pasteText.isEmpty else {
                     throw GestureError.clipboardEmpty
                 }
-                try typeText(text: pasteText)
+
+                try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pasting")
+
+                // Use Cmd+V for real paste — handles emoji, Unicode, and is a single operation
+                runOnMainThread {
+                    app.typeKey("v", modifierFlags: .command)
+                }
+
+                // iOS 16+ may show "Allow Paste" system alert (label is English-only;
+                // no reliable cross-locale alternative exists without button index)
+                handlePasteAlert()
                 return nil
 
             default:
                 throw GestureError.unsupportedAction(action)
+            }
+        }
+
+        /// Handle iOS 16+ "Allow Paste" system alert that appears when pasting
+        /// content set by another process. Checks SpringBoard for the alert button
+        /// and taps it if present. No-op on iOS 15 or if already permitted.
+        private func handlePasteAlert() {
+            runOnMainThread {
+                let allowButton = self.springboard.buttons["Allow Paste"]
+                // Quick existence check avoids full 0.5s wait when no alert is present
+                if allowButton.exists || allowButton.waitForExistence(timeout: 0.3) {
+                    allowButton.tap()
+                }
             }
         }
 

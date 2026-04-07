@@ -1,0 +1,537 @@
+@testable import CtrlProxy
+import XCTest
+
+final class ElementLocatorTests: XCTestCase {
+    // MARK: - hasUniqueIdentifyingProperties
+
+    func testHasUniqueProperties_withText() {
+        let element = UIElementInfo(text: "Hello")
+        XCTAssertTrue(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    func testHasUniqueProperties_withResourceId() {
+        let element = UIElementInfo(resourceId: "my_field")
+        XCTAssertTrue(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    func testHasUniqueProperties_withContentDesc() {
+        let element = UIElementInfo(contentDesc: "Description")
+        XCTAssertTrue(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    func testHasUniqueProperties_withHintText() {
+        let element = UIElementInfo(hintText: "Enter name")
+        XCTAssertTrue(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    func testHasUniqueProperties_emptyElement() {
+        let element = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        XCTAssertFalse(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    func testHasUniqueProperties_onlyBooleanFlags() {
+        let element = UIElementInfo(clickable: "true", focused: "true")
+        XCTAssertFalse(ElementLocator.hasUniqueIdentifyingProperties(element))
+    }
+
+    // MARK: - collapseSameTypeTextInputChildren
+
+    func testCollapse_textFieldInTextField_noUniqueProps() {
+        let grandchild = UIElementInfo(text: "Cursor", className: "UIView")
+        let innerTextField = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            node: [grandchild]
+        )
+        let sibling = UIElementInfo(text: "Label", className: "UILabel")
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [innerTextField, sibling]
+        )
+
+        // Inner UITextField collapsed — its grandchild promoted, sibling kept
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].text, "Cursor")
+        XCTAssertEqual(result[0].className, "UIView")
+        XCTAssertEqual(result[1].text, "Label")
+    }
+
+    func testCollapse_textFieldInTextField_emptyInner() {
+        let innerTextField = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [innerTextField]
+        )
+
+        // Empty inner UITextField discarded entirely
+        XCTAssertEqual(result.count, 0)
+    }
+
+    func testCollapse_preserves_childWithUniqueId() {
+        let innerWithId = UIElementInfo(
+            resourceId: "search_input",
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [innerWithId]
+        )
+
+        // Child has a resourceId — it's a distinct element, not collapsed
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].resourceId, "search_input")
+    }
+
+    func testCollapse_preserves_childWithText() {
+        let innerWithText = UIElementInfo(
+            text: "Search",
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [innerWithText]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].text, "Search")
+    }
+
+    func testCollapse_secureTextField() {
+        let inner = UIElementInfo(
+            className: "UISecureTextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UISecureTextField",
+            children: [inner]
+        )
+
+        XCTAssertEqual(result.count, 0)
+    }
+
+    func testCollapse_textView() {
+        let grandchild = UIElementInfo(text: "Content", className: "UILabel")
+        let inner = UIElementInfo(
+            className: "UITextView",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 200),
+            node: [grandchild]
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextView",
+            children: [inner]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].text, "Content")
+    }
+
+    func testCollapse_searchBar() {
+        let inner = UIElementInfo(
+            className: "UISearchBar",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UISearchBar",
+            children: [inner]
+        )
+
+        XCTAssertEqual(result.count, 0)
+    }
+
+    func testCollapse_skipsNonTextInputParent() {
+        // UIButton parent with UIButton child — should NOT collapse
+        let innerButton = UIElementInfo(
+            className: "UIButton",
+            bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UIButton",
+            children: [innerButton]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UIButton")
+    }
+
+    func testCollapse_differentClassName_notCollapsed() {
+        // UILabel child inside UITextField parent — different type, keep it
+        let label = UIElementInfo(
+            className: "UILabel",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [label]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UILabel")
+    }
+
+    func testCollapse_multipleNestedLevels() {
+        // UITextField > UITextField (no props) > UITextField (no props) > UILabel
+        let label = UIElementInfo(text: "Deep", className: "UILabel")
+        let innermost = UIElementInfo(
+            className: "UITextField",
+            node: [label]
+        )
+        let middle = UIElementInfo(
+            className: "UITextField",
+            node: [innermost]
+        )
+
+        // First pass collapses middle → promotes innermost
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [middle]
+        )
+
+        // Middle collapsed, innermost (still UITextField with no unique props) promoted
+        // But collapseSameTypeTextInputChildren is single-level — the innermost
+        // would be collapsed when buildElementInfoFromSnapshot processes it as a child
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UITextField")
+        XCTAssertEqual(result[0].node?.count, 1)
+        XCTAssertEqual(result[0].node?[0].text, "Deep")
+    }
+
+    // MARK: - deduplicateSiblings
+
+    func testDedup_identicalBoundsAndType_noUniqueProps() {
+        let bounds = ElementBounds(left: 10, top: 20, right: 310, bottom: 64)
+        let a = UIElementInfo(className: "UIView", bounds: bounds)
+        let b = UIElementInfo(className: "UIView", bounds: bounds)
+        let c = UIElementInfo(className: "UIView", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([a, b, c])
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UIView")
+    }
+
+    func testDedup_sameType_differentBounds_kept() {
+        let a = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        let b = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 50, right: 100, bottom: 100))
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        XCTAssertEqual(result.count, 2)
+    }
+
+    func testDedup_sameBounds_differentType_kept() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let a = UIElementInfo(className: "UIView", bounds: bounds)
+        let b = UIElementInfo(className: "UIImageView", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        XCTAssertEqual(result.count, 2)
+    }
+
+    func testDedup_preservesElementsWithUniqueProperties() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let a = UIElementInfo(text: "First", className: "UIView", bounds: bounds)
+        let b = UIElementInfo(text: "Second", className: "UIView", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Both have unique text — both kept even with same bounds
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].text, "First")
+        XCTAssertEqual(result[1].text, "Second")
+    }
+
+    func testDedup_mixedUniqueAndNonUnique() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let unique = UIElementInfo(resourceId: "my_id", className: "UIView", bounds: bounds)
+        let dup1 = UIElementInfo(className: "UIView", bounds: bounds)
+        let dup2 = UIElementInfo(className: "UIView", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([unique, dup1, dup2])
+
+        // unique always kept, dup1 kept (first occurrence), dup2 deduped
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].resourceId, "my_id")
+        XCTAssertNil(result[1].resourceId)
+    }
+
+    func testDedup_noBounds_sameClassName() {
+        let a = UIElementInfo(className: "UIView")
+        let b = UIElementInfo(className: "UIView")
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Same className, no bounds → deduped via "UIView|nobounds" key
+        XCTAssertEqual(result.count, 1)
+    }
+
+    func testDedup_noClassName_alwaysKept() {
+        let a = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        let b = UIElementInfo(bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // No className — can't meaningfully dedup, both kept
+        XCTAssertEqual(result.count, 2)
+    }
+
+    func testDedup_preservesElementsWithDistinctChildren() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let child1 = UIElementInfo(text: "Button A", className: "UIButton")
+        let child2 = UIElementInfo(text: "Button B", className: "UIButton")
+        // Two UIViews at same bounds, no unique props, but different children
+        let a = UIElementInfo(className: "UIView", bounds: bounds, node: [child1])
+        let b = UIElementInfo(className: "UIView", bounds: bounds, node: [child2])
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Both kept — distinct subtrees must not be discarded
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].node?[0].text, "Button A")
+        XCTAssertEqual(result[1].node?[0].text, "Button B")
+    }
+
+    func testDedup_emptyInput() {
+        let result = ElementLocator.deduplicateSiblings([])
+        XCTAssertEqual(result.count, 0)
+    }
+
+    // MARK: - Integration: collapse + dedup together
+
+    // MARK: - Collapse edge cases
+
+    func testCollapse_preserves_childWithHintText() {
+        let inner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            hintText: "Enter email"
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [inner]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].hintText, "Enter email")
+    }
+
+    func testCollapse_preserves_childWithContentDesc() {
+        let inner = UIElementInfo(
+            contentDesc: "Email input",
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [inner]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].contentDesc, "Email input")
+    }
+
+    func testCollapse_mixOfCollapsibleAndNonCollapsible() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        // Collapsible: same type, no unique props, has grandchild
+        let grandchild = UIElementInfo(text: "Icon", className: "UIImageView")
+        let collapsible = UIElementInfo(className: "UITextField", bounds: bounds, node: [grandchild])
+        // Not collapsible: has resourceId
+        let withId = UIElementInfo(resourceId: "inner_field", className: "UITextField", bounds: bounds)
+        // Not collapsible: different type
+        let label = UIElementInfo(text: "Label", className: "UILabel", bounds: bounds)
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [collapsible, withId, label]
+        )
+
+        // collapsible → grandchild promoted; withId kept; label kept
+        XCTAssertEqual(result.count, 3)
+        XCTAssertEqual(result[0].text, "Icon")
+        XCTAssertEqual(result[0].className, "UIImageView")
+        XCTAssertEqual(result[1].resourceId, "inner_field")
+        XCTAssertEqual(result[2].text, "Label")
+    }
+
+    func testCollapse_nilParentClassName_noOp() {
+        let child = UIElementInfo(className: "UITextField")
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: nil,
+            children: [child]
+        )
+        XCTAssertEqual(result.count, 1)
+    }
+
+    func testCollapse_preserves_childWithFocusedState() {
+        let focusedInner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            focused: "true"
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [focusedInner]
+        )
+
+        // Focused child is preserved even though it has no text/id/desc
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].focused, "true")
+    }
+
+    func testCollapse_preserves_childWithPasswordState() {
+        let passwordInner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            password: "true"
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [passwordInner]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].password, "true")
+    }
+
+    func testCollapse_searchFieldContainsTextField_notCollapsed() {
+        // searchField (UISearchBar) containing a textField — different className, kept
+        let inner = UIElementInfo(className: "UITextField", bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44))
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UISearchBar",
+            children: [inner]
+        )
+
+        // UITextField != UISearchBar → not collapsed
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UITextField")
+    }
+
+    // MARK: - Dedup edge cases
+
+    func testDedup_focusedElementPreservedNotDeduped() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let a = UIElementInfo(className: "UIView", bounds: bounds, focused: "true")
+        let b = UIElementInfo(className: "UIView", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Focused element has state — always preserved, not deduped
+        // b has no state and no unique props — deduped against other stateless elements
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].focused, "true")
+    }
+
+    func testDedup_passwordElementPreservedNotDeduped() {
+        let bounds = ElementBounds(left: 0, top: 0, right: 300, bottom: 44)
+        let a = UIElementInfo(className: "UISecureTextField", bounds: bounds, password: "true")
+        let b = UIElementInfo(className: "UISecureTextField", bounds: bounds)
+
+        let result = ElementLocator.deduplicateSiblings([a, b])
+
+        // Password element has state — preserved
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].password, "true")
+    }
+
+    func testDedup_singleElement_noop() {
+        let element = UIElementInfo(className: "UIView", bounds: ElementBounds(left: 0, top: 0, right: 100, bottom: 50))
+        let result = ElementLocator.deduplicateSiblings([element])
+        XCTAssertEqual(result.count, 1)
+    }
+
+    func testDedup_multipleGroupsDedupIndependently() {
+        let bounds1 = ElementBounds(left: 0, top: 0, right: 100, bottom: 50)
+        let bounds2 = ElementBounds(left: 0, top: 50, right: 100, bottom: 100)
+
+        let a1 = UIElementInfo(className: "UIView", bounds: bounds1)
+        let a2 = UIElementInfo(className: "UIView", bounds: bounds1)
+        let b1 = UIElementInfo(className: "UIView", bounds: bounds2)
+        let b2 = UIElementInfo(className: "UIView", bounds: bounds2)
+
+        let result = ElementLocator.deduplicateSiblings([a1, a2, b1, b2])
+
+        // Two distinct groups, each deduped to 1
+        XCTAssertEqual(result.count, 2)
+    }
+
+    // MARK: - textInputClassNames coverage
+
+    func testTextInputClassNames_containsExpectedTypes() {
+        let expected: Set<String> = ["UITextField", "UISecureTextField", "UITextView", "UISearchBar"]
+        XCTAssertEqual(ElementLocator.textInputClassNames, expected)
+    }
+
+    // MARK: - Integration: collapse + dedup together
+
+    func testCollapseAndDedup_secureTextFieldWithInternalSubviews() {
+        let bounds = ElementBounds(left: 16, top: 200, right: 359, bottom: 244)
+        let innerSecure = UIElementInfo(className: "UISecureTextField", bounds: bounds)
+        let bg = UIElementInfo(className: "UIView", bounds: bounds)
+
+        var result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UISecureTextField",
+            children: [innerSecure, bg]
+        )
+
+        // innerSecure collapsed (empty), bg kept
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].className, "UIView")
+
+        result = ElementLocator.deduplicateSiblings(result)
+        XCTAssertEqual(result.count, 1)
+    }
+
+    func testCollapseAndDedup_textFieldWithDuplicateInternalSubviews() {
+        // Simulates a real UITextField hierarchy:
+        // UITextField (parent)
+        //   ├── UITextField (internal, no props, same bounds) — collapsed
+        //   ├── UITextField (internal, no props, same bounds) — collapsed
+        //   ├── UIView (background, same bounds) — deduped after first
+        //   ├── UIView (background, same bounds) — deduped
+        //   └── UILabel (placeholder text)
+        let bounds = ElementBounds(left: 16, top: 100, right: 359, bottom: 144)
+        let innerTF1 = UIElementInfo(className: "UITextField", bounds: bounds)
+        let innerTF2 = UIElementInfo(className: "UITextField", bounds: bounds)
+        let bg1 = UIElementInfo(className: "UIView", bounds: bounds)
+        let bg2 = UIElementInfo(className: "UIView", bounds: bounds)
+        let placeholder = UIElementInfo(text: "Enter name", className: "UILabel", bounds: bounds)
+
+        // Step 1: collapse same-type text input children
+        var result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [innerTF1, innerTF2, bg1, bg2, placeholder]
+        )
+
+        // Both UITextField children collapsed (empty → discarded)
+        // bg1, bg2, placeholder remain
+        XCTAssertEqual(result.count, 3)
+
+        // Step 2: dedup remaining siblings
+        result = ElementLocator.deduplicateSiblings(result)
+
+        // bg1 and bg2 are identical UIView at same bounds → deduped to 1
+        // placeholder has text → kept
+        XCTAssertEqual(result.count, 2)
+        XCTAssertEqual(result[0].className, "UIView")
+        XCTAssertEqual(result[1].text, "Enter name")
+    }
+}

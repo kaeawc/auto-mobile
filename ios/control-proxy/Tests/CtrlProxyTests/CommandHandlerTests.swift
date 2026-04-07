@@ -251,6 +251,296 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(setTextHistory.first?.resourceId, "input_field")
     }
 
+    func testSetTextMissingText() {
+        let request = WebSocketRequest(
+            type: "request_set_text",
+            requestId: "text-err-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertTrue(errorResponse.error?.contains("text") == true)
+    }
+
+    func testSetTextTypeTextFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "typeText",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No keyboard focus"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_set_text",
+            requestId: "text-fail-1",
+            text: "Hello"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
+    func testSetTextSetTextFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "setText",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Element not found"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_set_text",
+            requestId: "text-fail-2",
+            text: "Hello",
+            resourceId: "missing_field"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
+    func testImeActionSuccess() {
+        let request = WebSocketRequest(
+            type: "request_ime_action",
+            requestId: "ime-1",
+            action: "done"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let imeResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(imeResponse.success, true)
+        XCTAssertEqual(imeResponse.type, "ime_action_result")
+        XCTAssertEqual(fakeGesturePerformer.getImeActionHistory(), ["done"])
+    }
+
+    func testImeActionMissingAction() {
+        let request = WebSocketRequest(
+            type: "request_ime_action",
+            requestId: "ime-err-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertTrue(errorResponse.error?.contains("action") == true)
+    }
+
+    func testImeActionFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "imeAction",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Unsupported"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_ime_action",
+            requestId: "ime-fail-1",
+            action: "previous"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
+    func testSelectAllSuccess() {
+        let request = WebSocketRequest(
+            type: "request_select_all",
+            requestId: "sel-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let selResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(selResponse.success, true)
+        XCTAssertEqual(selResponse.type, "select_all_result")
+        XCTAssertEqual(fakeGesturePerformer.getSelectAllCallCount(), 1)
+    }
+
+    func testSelectAllFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "selectAll",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focus"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_select_all",
+            requestId: "sel-fail-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
+    func testClearTextWithoutResourceId() {
+        let request = WebSocketRequest(
+            type: "request_clear_text",
+            requestId: "clear-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let clearResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(clearResponse.success, true)
+        XCTAssertEqual(clearResponse.type, "clear_text_result")
+
+        let clearHistory = fakeGesturePerformer.getClearTextHistory()
+        XCTAssertEqual(clearHistory.count, 1)
+        XCTAssertNil(clearHistory[0])
+    }
+
+    func testClearTextWithResourceId() {
+        let request = WebSocketRequest(
+            type: "request_clear_text",
+            requestId: "clear-2",
+            resourceId: "text_input"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let clearResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(clearResponse.success, true)
+
+        let clearHistory = fakeGesturePerformer.getClearTextHistory()
+        XCTAssertEqual(clearHistory.count, 1)
+        XCTAssertEqual(clearHistory[0], "text_input")
+    }
+
+    func testClearTextFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "clearText",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "No focus"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_clear_text",
+            requestId: "clear-fail-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
+    func testClipboardGetSuccess() {
+        fakeGesturePerformer.setClipboardContents("Copied text")
+
+        let request = WebSocketRequest(
+            type: "request_clipboard",
+            requestId: "clip-1",
+            action: "get"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let clipResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(clipResponse.success, true)
+        XCTAssertEqual(clipResponse.type, "clipboard_result")
+        XCTAssertEqual(clipResponse.text, "Copied text")
+    }
+
+    func testClipboardCopySuccess() {
+        let request = WebSocketRequest(
+            type: "request_clipboard",
+            requestId: "clip-2",
+            text: "To copy",
+            action: "copy"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let clipResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(clipResponse.success, true)
+
+        let history = fakeGesturePerformer.getClipboardHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history[0].action, "copy")
+        XCTAssertEqual(history[0].text, "To copy")
+    }
+
+    func testClipboardMissingAction() {
+        let request = WebSocketRequest(
+            type: "request_clipboard",
+            requestId: "clip-err-1"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertTrue(errorResponse.error?.contains("action") == true)
+    }
+
+    func testClipboardFailure() {
+        fakeGesturePerformer.setFailure(
+            for: "clipboard",
+            error: NSError(domain: "test", code: 1, userInfo: [NSLocalizedDescriptionKey: "Clipboard error"])
+        )
+
+        let request = WebSocketRequest(
+            type: "request_clipboard",
+            requestId: "clip-fail-1",
+            action: "get"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+        XCTAssertEqual(errorResponse.success, false)
+    }
+
     // MARK: - Device Control Tests
 
     func testPressHomeSuccess() {

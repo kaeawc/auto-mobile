@@ -143,15 +143,14 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
+    // Auto-advance lets the 5s startup timeout fire via the real event loop,
+    // avoiding a race between process.nextTick (stderr/exit) and manual
+    // advanceTime that caused intermittent 5s test timeouts.
+    fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
-    const promise = client.startEmulator("Pixel_9_Pro");
-    promise.catch(() => {});
-    await new Promise(resolve => setImmediate(resolve));
-    fakeTimer.advanceTime(6000);
-
     try {
-      await promise;
+      await client.startEmulator("Pixel_9_Pro");
       expect(true).toBe(false); // Should not reach here
     } catch (error: any) {
       expect(error.message).toContain("corrupt");
@@ -178,16 +177,11 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
+    fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
-    const promise = client.startEmulator("Pixel_9_Pro");
-    // Suppress unhandled rejection while async setup completes
-    promise.catch(() => {});
-    await new Promise(resolve => setImmediate(resolve));
-    fakeTimer.advanceTime(6000);
-
     try {
-      await promise;
+      await client.startEmulator("Pixel_9_Pro");
       expect(true).toBe(false);
     } catch (error: any) {
       expect(error.message).toContain("exited with code: 1");

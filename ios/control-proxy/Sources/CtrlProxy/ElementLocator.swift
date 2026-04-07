@@ -751,8 +751,6 @@ public class ElementLocator: ElementLocating {
                 }
             }
 
-            let className = parentClassName
-
             // Determine boolean properties - only set to "true", leave nil for false
             // This significantly reduces JSON size
             let isEnabled = snapshot.isEnabled
@@ -805,7 +803,7 @@ public class ElementLocator: ElementLocating {
                 textSize: nil,
                 contentDesc: nil, // Don't duplicate - label is in text
                 resourceId: resId,
-                className: className,
+                className: parentClassName,
                 bounds: hasZeroArea ? nil : bounds, // Don't include bounds for zero-area elements
                 // Only include boolean fields when true (nil = false)
                 clickable: isClickable ? "true" : nil,
@@ -1093,21 +1091,25 @@ public class ElementLocator: ElementLocating {
             }
 
             let app = currentApplication
-            // For text-input element types, prefer the outermost (parent) element when
-            // multiple elements share the same identifier. iOS UIKit internal subviews
-            // (e.g. _UITextFieldRoundedRectBackgroundViewNeue) inherit the parent's
-            // accessibility identifier, so .firstMatch may return an inner subview that
-            // doesn't properly handle tap/focus. We query specifically for text-input
-            // types first, falling back to .any if no text-input match exists.
+            // Query .any first (1 IPC call). If the match is a text-input type,
+            // re-query with the specific type to get the outermost (parent) element
+            // instead of an internal UIKit subview that shares the same identifier.
             let element: XCUIElement = runOnMainThread {
-                for elementType in Self.textInputElementTypes {
-                    let match = app.descendants(matching: elementType)
+                let anyMatch = app.descendants(matching: .any)
+                    .matching(identifier: resourceId).firstMatch
+                guard anyMatch.exists else { return anyMatch }
+
+                // Check if the match is a text-input type that may have nested subviews
+                let matchedType = anyMatch.elementType
+                if Self.textInputElementTypes.contains(matchedType) {
+                    // Re-query with the specific type to prefer parent over internal subview
+                    let typedMatch = app.descendants(matching: matchedType)
                         .matching(identifier: resourceId).firstMatch
-                    if match.exists {
-                        return match
+                    if typedMatch.exists {
+                        return typedMatch
                     }
                 }
-                return app.descendants(matching: .any).matching(identifier: resourceId).firstMatch
+                return anyMatch
             }
             let exists = runOnMainThread { element.exists }
             if exists {
@@ -1176,6 +1178,8 @@ public class ElementLocator: ElementLocating {
 
     /// Class name strings for text-input element types whose UIKit internal subviews
     /// produce same-type nested children in the XCUITest accessibility tree.
+    /// NOTE: Must stay in sync with `textInputElementTypes` (the XCUIElement.ElementType set
+    /// inside #if os(iOS)). Note that .searchField maps to "UISearchBar" (not "UISearchField").
     static let textInputClassNames: Set<String> = [
         "UITextField",
         "UISecureTextField",
@@ -1244,7 +1248,7 @@ public class ElementLocator: ElementLocating {
             }
 
             // Elements with children have distinct subtrees — always keep
-            if child.node != nil && !(child.node!.isEmpty) {
+            if let node = child.node, !node.isEmpty {
                 result.append(child)
                 continue
             }

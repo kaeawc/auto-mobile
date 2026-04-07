@@ -1218,7 +1218,7 @@ public class ElementLocator: ElementLocating {
 
         var result: [UIElementInfo] = []
         for child in children {
-            if child.className == parentClass && !hasUniqueIdentifyingProperties(child) {
+            if child.className == parentClass && !hasUniqueIdentifyingProperties(child) && !hasStateFlags(child) {
                 // Collapse: absorb this child's children into the parent level
                 if let grandchildren = child.node {
                     result.append(contentsOf: grandchildren)
@@ -1229,6 +1229,14 @@ public class ElementLocator: ElementLocating {
             }
         }
         return result
+    }
+
+    /// Whether the element carries any state flags (focused, selected, checked,
+    /// password, clickable, scrollable) that make it semantically distinct.
+    private static func hasStateFlags(_ element: UIElementInfo) -> Bool {
+        return element.focused != nil || element.selected != nil
+            || element.checked != nil || element.password != nil
+            || element.clickable != nil || element.scrollable != nil
     }
 
     /// Deduplicate sibling elements that share the same elementType, identical bounds,
@@ -1255,10 +1263,7 @@ public class ElementLocator: ElementLocating {
 
             // Elements with any state flags are considered distinct — don't discard
             // a focused/selected/checked/password element as a duplicate
-            let hasState = child.focused != nil || child.selected != nil
-                || child.checked != nil || child.password != nil
-                || child.clickable != nil || child.scrollable != nil
-            if hasState {
+            if hasStateFlags(child) {
                 result.append(child)
                 continue
             }

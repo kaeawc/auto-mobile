@@ -378,6 +378,39 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(result.count, 1)
     }
 
+    func testCollapse_preserves_childWithFocusedState() {
+        let focusedInner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            focused: "true"
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [focusedInner]
+        )
+
+        // Focused child is preserved even though it has no text/id/desc
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].focused, "true")
+    }
+
+    func testCollapse_preserves_childWithPasswordState() {
+        let passwordInner = UIElementInfo(
+            className: "UITextField",
+            bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44),
+            password: "true"
+        )
+
+        let result = ElementLocator.collapseSameTypeTextInputChildren(
+            parentClassName: "UITextField",
+            children: [passwordInner]
+        )
+
+        XCTAssertEqual(result.count, 1)
+        XCTAssertEqual(result[0].password, "true")
+    }
+
     func testCollapse_searchFieldContainsTextField_notCollapsed() {
         // searchField (UISearchBar) containing a textField — different className, kept
         let inner = UIElementInfo(className: "UITextField", bounds: ElementBounds(left: 0, top: 0, right: 300, bottom: 44))

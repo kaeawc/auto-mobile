@@ -19,6 +19,18 @@ public class ElementLocator: ElementLocating {
         "UIImageView",
         "UIWindow",
     ]
+
+    #if canImport(XCTest) && os(iOS)
+        /// Element types whose internal UIKit subviews produce same-type nested children
+        /// in the XCUITest accessibility tree. These are collapsed during hierarchy building
+        /// to avoid exposing non-interactive internal subviews (e.g. _UITextFieldRoundedRectBackgroundViewNeue).
+        private static let textInputElementTypes: Set<XCUIElement.ElementType> = [
+            .textField,        // UITextField internal subviews
+            .secureTextField,  // Same internals as UITextField with isSecureTextEntry
+            .textView,         // TextKit 2 internal views (_UITextLayoutCanvasView)
+            .searchField,      // UISearchTextField inside UISearchBar (iOS 16+)
+        ]
+    #endif
     public enum LocatorError: LocalizedError {
         case noApplication
         case elementNotFound(String)
@@ -689,11 +701,12 @@ public class ElementLocator: ElementLocating {
             // Alert-type elements are SKIPPED here because they are extracted separately
             // by collectAlertElements() and added as top-level system alerts. This ensures
             // permission dialogs are always visible and never lost to hierarchy optimization.
+            let parentClassName = mapElementType(snapshot.elementType)
             var childNodes: [UIElementInfo]?
             if depth < ElementLocator.maxDepth {
                 let children = snapshot.children
                 if !children.isEmpty {
-                    let filteredChildren = children.enumerated().compactMap { (idx, child) -> UIElementInfo? in
+                    var filteredChildren = children.enumerated().compactMap { (idx, child) -> UIElementInfo? in
                         // Skip alert elements - they are extracted separately as system alerts
                         // to ensure they're always visible as top-level children
                         if child.elementType == .alert {
@@ -723,12 +736,22 @@ public class ElementLocator: ElementLocating {
                             keyboardFocusFrame: keyboardFocusFrame
                         )
                     }
+
+                    // Collapse same-type text-input children (e.g. UITextField inside UITextField)
+                    // that are internal UIKit subviews with no unique identifying properties.
+                    filteredChildren = ElementLocator.collapseSameTypeTextInputChildren(
+                        parentClassName: parentClassName,
+                        children: filteredChildren
+                    )
+
+                    // Deduplicate siblings with identical type + bounds + no unique properties.
+                    filteredChildren = ElementLocator.deduplicateSiblings(filteredChildren)
+
                     childNodes = filteredChildren.isEmpty ? nil : filteredChildren
                 }
             }
 
-            // Map element type to className
-            let className = mapElementType(snapshot.elementType)
+            let className = parentClassName
 
             // Determine boolean properties - only set to "true", leave nil for false
             // This significantly reduces JSON size
@@ -1070,9 +1093,21 @@ public class ElementLocator: ElementLocating {
             }
 
             let app = currentApplication
-            // Run on main thread since XCUITest APIs require it
+            // For text-input element types, prefer the outermost (parent) element when
+            // multiple elements share the same identifier. iOS UIKit internal subviews
+            // (e.g. _UITextFieldRoundedRectBackgroundViewNeue) inherit the parent's
+            // accessibility identifier, so .firstMatch may return an inner subview that
+            // doesn't properly handle tap/focus. We query specifically for text-input
+            // types first, falling back to .any if no text-input match exists.
             let element: XCUIElement = runOnMainThread {
-                app.descendants(matching: .any).matching(identifier: resourceId).firstMatch
+                for elementType in Self.textInputElementTypes {
+                    let match = app.descendants(matching: elementType)
+                        .matching(identifier: resourceId).firstMatch
+                    if match.exists {
+                        return match
+                    }
+                }
+                return app.descendants(matching: .any).matching(identifier: resourceId).firstMatch
             }
             let exists = runOnMainThread { element.exists }
             if exists {
@@ -1134,4 +1169,96 @@ public class ElementLocator: ElementLocating {
             return true
         }
     #endif
+
+    // MARK: - Same-Type Child Collapsing & Sibling Dedup
+    // These are platform-independent (operate on UIElementInfo only) so they
+    // live outside the #if os(iOS) block and are testable on macOS.
+
+    /// Class name strings for text-input element types whose UIKit internal subviews
+    /// produce same-type nested children in the XCUITest accessibility tree.
+    static let textInputClassNames: Set<String> = [
+        "UITextField",
+        "UISecureTextField",
+        "UITextView",
+        "UISearchBar",
+    ]
+
+    /// Check whether a UIElementInfo carries any unique identifying information
+    /// (text, resourceId, contentDesc, hintText). Elements without these are
+    /// considered internal UIKit subviews that should be collapsed/deduped.
+    static func hasUniqueIdentifyingProperties(_ element: UIElementInfo) -> Bool {
+        return element.text != nil
+            || element.resourceId != nil
+            || element.contentDesc != nil
+            || element.hintText != nil
+    }
+
+    /// Collapse same-type text-input children into their parent.
+    ///
+    /// iOS UIKit exposes internal subviews (e.g. _UITextFieldRoundedRectBackgroundViewNeue)
+    /// as accessibility elements with the *same* elementType as the parent text field.
+    /// These are non-interactive noise that confuse element targeting.
+    ///
+    /// For text-input parent types, any child with the same className that carries no
+    /// unique identifying properties is collapsed: its children are absorbed into the
+    /// parent's child list, and the duplicate wrapper is removed.
+    static func collapseSameTypeTextInputChildren(
+        parentClassName: String?,
+        children: [UIElementInfo]
+    ) -> [UIElementInfo] {
+        guard let parentClass = parentClassName,
+              textInputClassNames.contains(parentClass)
+        else {
+            return children
+        }
+
+        var result: [UIElementInfo] = []
+        for child in children {
+            if child.className == parentClass && !hasUniqueIdentifyingProperties(child) {
+                // Collapse: absorb this child's children into the parent level
+                if let grandchildren = child.node {
+                    result.append(contentsOf: grandchildren)
+                }
+                // else: empty same-type wrapper — discard entirely
+            } else {
+                result.append(child)
+            }
+        }
+        return result
+    }
+
+    /// Deduplicate sibling elements that share the same elementType, identical bounds,
+    /// and carry no unique identifying properties (no id, text, contentDesc, hintText).
+    /// Keeps only the first occurrence.
+    static func deduplicateSiblings(_ children: [UIElementInfo]) -> [UIElementInfo] {
+        var seen: Set<String> = []
+        var result: [UIElementInfo] = []
+
+        for child in children {
+            if hasUniqueIdentifyingProperties(child) {
+                // Has unique info — always keep
+                result.append(child)
+                continue
+            }
+
+            // Build key from className + bounds
+            let key: String
+            if let cls = child.className, let b = child.bounds {
+                key = "\(cls)|\(b.left),\(b.top),\(b.right),\(b.bottom)"
+            } else if let cls = child.className {
+                key = "\(cls)|nobounds"
+            } else {
+                // No className — can't meaningfully dedup, keep it
+                result.append(child)
+                continue
+            }
+
+            if seen.contains(key) {
+                continue
+            }
+            seen.insert(key)
+            result.append(child)
+        }
+        return result
+    }
 }

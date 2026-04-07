@@ -781,6 +781,7 @@ public enum RequestType: String {
 
     // Text input
     case requestSetText = "request_set_text"
+    case requestClearText = "request_clear_text"
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
     case requestPressHome = "request_press_home"
@@ -822,6 +823,7 @@ public enum ResponseType: String {
     case dragResult = "drag_result"
     case pinchResult = "pinch_result"
     case setTextResult = "set_text_result"
+    case clearTextResult = "clear_text_result"
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
     case pressHomeResult = "press_home_result"

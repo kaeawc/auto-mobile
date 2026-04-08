@@ -5,7 +5,7 @@ import type { ExecResult } from "../../models";
 import { hashAppBundle } from "./AppBundleHasher";
 import { logger } from "../logger";
 import { isRunningInDocker } from "../dockerEnv";
-import { getDeviceAppBundleHash, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
+import { getDeviceAppBundleHash, installDeviceApp, isHostControlAvailable, shouldUseHostControl, uninstallDeviceApp } from "../hostControlClient";
 
 interface DeviceAppInspectorDependencies {
   platform: () => NodeJS.Platform;
@@ -22,6 +22,7 @@ interface DeviceAppInspectorDependencies {
     isAvailable: () => Promise<boolean>;
     getAppBundleHash: (deviceId: string, bundleId: string) => Promise<{ success: boolean; error?: string; data?: { hash: string | null } }>;
     uninstallApp: (deviceId: string, bundleId: string) => Promise<{ success: boolean; error?: string }>;
+    installApp: (deviceId: string, artifactPath: string) => Promise<{ success: boolean; error?: string; data?: { message: string } }>;
   };
 }
 
@@ -52,7 +53,8 @@ const defaultDependencies: DeviceAppInspectorDependencies = {
     isRunningInDocker,
     isAvailable: () => isHostControlAvailable(),
     getAppBundleHash: async (deviceId: string, bundleId: string) => getDeviceAppBundleHash({ deviceId, bundleId }),
-    uninstallApp: async (deviceId: string, bundleId: string) => uninstallDeviceApp({ deviceId, bundleId })
+    uninstallApp: async (deviceId: string, bundleId: string) => uninstallDeviceApp({ deviceId, bundleId }),
+    installApp: async (deviceId: string, artifactPath: string) => installDeviceApp({ deviceId, artifactPath })
   }
 };
 
@@ -266,6 +268,38 @@ export class DeviceAppInspector {
       "app",
       "--device", deviceUdid,
       quoteShell(bundleId),
+      "--quiet"
+    ].join(" ");
+    await this.deps.exec(command);
+  }
+
+  public async installApp(deviceUdid: string, artifactPath: string): Promise<void> {
+    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+    if (useHostControl) {
+      const available = await this.deps.hostControl.isAvailable();
+      if (!available) {
+        logger.warn("[DeviceAppInspector] Host control not available for devicectl install");
+        throw new Error("Host control not available for physical device app installation");
+      }
+
+      const result = await this.deps.hostControl.installApp(deviceUdid, artifactPath);
+      if (!result.success) {
+        throw new Error(result.error || "Host control devicectl install failed");
+      }
+      return;
+    }
+
+    if (this.deps.platform() !== "darwin") {
+      throw new Error("Physical device app installation requires macOS");
+    }
+    const command = [
+      "xcrun",
+      "devicectl",
+      "device",
+      "install",
+      "app",
+      "--device", deviceUdid,
+      quoteShell(artifactPath),
       "--quiet"
     ].join(" ");
     await this.deps.exec(command);

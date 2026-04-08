@@ -53,7 +53,7 @@ export const launchAppSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 export const installAppSchema = addDeviceTargetingToSchema(z.object({
-  apkPath: z.string().describe("APK file path"),
+  artifactPath: z.string().describe("Path to app artifact (.apk for Android, .app bundle for iOS simulator, .ipa for iOS physical device)"),
 }));
 
 export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
@@ -75,7 +75,7 @@ export interface LaunchAppActionArgs {
 }
 
 export interface InstallAppArgs {
-  apkPath: string;
+  artifactPath: string;
 }
 
 export interface UninstallAppArgs {
@@ -165,10 +165,10 @@ export function registerAppTools(
   const installAppHandler = async (device: BootedDevice, args: InstallAppArgs, _progress?: unknown, signal?: AbortSignal) => {
     try {
       const installApp = new InstallApp(device);
-      const result = await installApp.execute(args.apkPath, undefined, signal);
+      const result = await installApp.execute(args.artifactPath, undefined, signal);
       const message = result.warning
-        ? `Installed app from ${args.apkPath}. Warning: ${result.warning}`
-        : `Installed app from ${args.apkPath}`;
+        ? `Installed app from ${args.artifactPath}. Warning: ${result.warning}`
+        : `Installed app from ${args.artifactPath}`;
 
       return createJSONToolResponse({
         message,
@@ -234,7 +234,7 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "installApp",
-    "Install APK file",
+    "Install app on device (.apk for Android, .app for iOS simulator, .ipa for iOS physical device)",
     installAppSchema,
     installAppHandler
   );

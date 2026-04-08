@@ -131,7 +131,7 @@ AutoMobile automatically installs to the work profile if it exists:
 
 ```typescript
 // Using MCP tool
-const result = await installApp({ apkPath: "/path/to/app.apk" });
+const result = await installApp({ artifactPath: "/path/to/app.apk" });
 console.log(result.userId); // 10 (work profile)
 ```
 

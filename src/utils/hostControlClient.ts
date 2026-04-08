@@ -491,6 +491,13 @@ export async function uninstallDeviceApp(params: {
   return sendCommand("devicectl-uninstall", params);
 }
 
+export async function installDeviceApp(params: {
+  deviceId: string;
+  artifactPath: string;
+}): Promise<HostControlResult<{ message: string }>> {
+  return sendCommand("devicectl-install", params);
+}
+
 export async function startCtrlProxyIOS(params: {
   deviceId: string;
   port: number;

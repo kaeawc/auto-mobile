@@ -7,6 +7,11 @@ import { DefaultHostCommandExecutor, type HostCommandExecutor } from "../../util
 import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "../../utils/android-cmdline-tools/AndroidBuildToolsLocator";
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+
+export interface DeviceAppInstaller {
+  installApp(deviceUdid: string, artifactPath: string): Promise<void>;
+}
 
 export class InstallApp {
   private adb: AdbExecutor;
@@ -15,22 +20,18 @@ export class InstallApp {
   private createPerformanceTracker: () => PerformanceTracker;
   private simctl: SimCtlClient;
   private device: BootedDevice;
+  private deviceAppInstaller: DeviceAppInstaller;
 
-  /**
-   * Create an InstallApp instance
-   * @param device - Optional device
-   * @param adbFactory - Optional AdbClientFactory instance for testing
-   * @param hostExecutor - Optional host command executor for testing
-   * @param buildToolsLocator - Optional build tools locator for testing
-   * @param performanceTrackerFactory - Optional performance tracker factory for testing
-   */
+  private static readonly SIMULATOR_UUID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+
   constructor(
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     hostExecutor: HostCommandExecutor | null = null,
     buildToolsLocator: AndroidBuildToolsLocator | null = null,
     performanceTrackerFactory: () => PerformanceTracker = createGlobalPerformanceTracker,
-    simctl: SimCtlClient | null = null
+    simctl: SimCtlClient | null = null,
+    deviceAppInstaller: DeviceAppInstaller | null = null
   ) {
     this.device = device;
     this.adb = adbFactory.create(device);
@@ -38,39 +39,48 @@ export class InstallApp {
     this.buildToolsLocator = buildToolsLocator || new DefaultAndroidBuildToolsLocator();
     this.createPerformanceTracker = performanceTrackerFactory;
     this.simctl = simctl || new SimCtlClient(device);
+    this.deviceAppInstaller = deviceAppInstaller || new DeviceAppInspector();
   }
 
-  /**
-   * Install an APK file
-   * @param apkPath - Path to the APK file
-   * @param userId - Optional Android user ID (auto-detected if not provided)
-   */
+  private isSimulator(): boolean {
+    return InstallApp.SIMULATOR_UUID_PATTERN.test(this.device.deviceId);
+  }
+
   async execute(
-    apkPath: string,
+    artifactPath: string,
     userId?: number,
     signal?: AbortSignal
   ): Promise<{ success: boolean; upgrade: boolean; userId: number; packageName?: string; warning?: string }> {
     const perf = this.createPerformanceTracker();
     perf.serial("installApp");
 
-    if (!path.isAbsolute(apkPath)) {
-      apkPath = path.resolve(process.cwd(), apkPath);
+    if (!path.isAbsolute(artifactPath)) {
+      artifactPath = path.resolve(process.cwd(), artifactPath);
     }
 
+    const ext = path.extname(artifactPath).toLowerCase();
+
     if (this.device.platform === "ios") {
-      const result = await perf.track("iOSInstall", () => this.executeiOS(apkPath, perf, signal));
+      this.validateiOSArtifact(ext);
+      if (ext === ".ipa") {
+        const result = await perf.track("iOSPhysicalInstall", () => this.executeiOSPhysical(artifactPath, perf, signal));
+        perf.end();
+        return { ...result, userId: 0 };
+      }
+      const result = await perf.track("iOSInstall", () => this.executeiOSSimulator(artifactPath, perf, signal));
       perf.end();
-      return {
-        ...result,
-        userId: 0
-      };
+      return { ...result, userId: 0 };
+    }
+
+    if (ext !== ".apk") {
+      throw new Error(`Android devices only support .apk files, but got "${ext}" file. Use an .apk file for Android installation.`);
     }
 
     const warnings: string[] = [];
 
     // Extract package name from APK
     const packageNameResult = await perf.track("extractPackageName", async () => {
-      return this.extractPackageName(apkPath, signal);
+      return this.extractPackageName(artifactPath, signal);
     });
     if (packageNameResult.warning) {
       warnings.push(packageNameResult.warning);
@@ -122,7 +132,7 @@ export class InstallApp {
     }
 
     const success = await perf.track("adbInstall", async () => {
-      const installOutput = await this.adb.executeCommand(`install --user ${targetUserId} -r "${apkPath}"`, undefined, undefined, undefined, signal);
+      const installOutput = await this.adb.executeCommand(`install --user ${targetUserId} -r "${artifactPath}"`, undefined, undefined, undefined, signal);
       return installOutput.includes("Success");
     });
 
@@ -153,7 +163,20 @@ export class InstallApp {
     };
   }
 
-  private async executeiOS(
+  private validateiOSArtifact(ext: string): void {
+    const isSimulator = this.isSimulator();
+    if (isSimulator && ext === ".ipa") {
+      throw new Error("iOS simulators do not support .ipa files. Use a .app bundle built for the simulator instead.");
+    }
+    if (!isSimulator && ext === ".app") {
+      throw new Error("iOS physical devices do not support .app bundles. Use a signed .ipa file instead.");
+    }
+    if (ext !== ".app" && ext !== ".ipa") {
+      throw new Error(`iOS devices only support .app bundles (simulator) and .ipa files (physical device), but got "${ext}" file.`);
+    }
+  }
+
+  private async executeiOSSimulator(
     appPath: string,
     perf: PerformanceTracker,
     signal?: AbortSignal
@@ -196,6 +219,24 @@ export class InstallApp {
       upgrade,
       packageName,
       warning: warnings.length > 0 ? warnings.join(" ") : undefined
+    };
+  }
+
+  private async executeiOSPhysical(
+    ipaPath: string,
+    perf: PerformanceTracker,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; upgrade: boolean; packageName?: string; warning?: string }> {
+    if (signal?.aborted) {
+      throw new Error(OPERATION_CANCELLED_MESSAGE);
+    }
+
+    await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+
+    return {
+      success: true,
+      upgrade: false,
+      warning: "Bundle ID detection is not available for physical device installations via devicectl."
     };
   }
 

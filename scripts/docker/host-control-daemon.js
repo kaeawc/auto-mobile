@@ -978,6 +978,36 @@ const handlers = {
   },
 
   /**
+   * Install an app via devicectl on the host
+   */
+  async "devicectl-install"(params) {
+    if (!IS_MACOS) {
+      return { success: false, error: "devicectl is only available on macOS" };
+    }
+
+    const { deviceId, artifactPath } = params || {};
+    if (!deviceId || !artifactPath) {
+      return { success: false, error: "deviceId and artifactPath are required" };
+    }
+
+    try {
+      await execFileAsync("xcrun", [
+        "devicectl",
+        "device",
+        "install",
+        "app",
+        "--device",
+        deviceId,
+        artifactPath,
+        "--quiet"
+      ], { timeout: COMMAND_TIMEOUT_MS });
+      return { success: true, message: "App installed" };
+    } catch (error) {
+      return { success: false, error: error.message };
+    }
+  },
+
+  /**
    * Start CtrlProxy iOS via xcodebuild on the host
    */
   async "xctest-start"(params) {
@@ -1278,6 +1308,7 @@ iOS Commands (macOS only):
   - iproxy-status          Check iproxy status (params: pid or deviceId, localPort, devicePort)
   - devicectl-app-hash     Compute device app hash (params: deviceId, bundleId)
   - devicectl-uninstall    Uninstall device app (params: deviceId, bundleId)
+  - devicectl-install      Install device app (params: deviceId, artifactPath)
   - xctest-start           Start CtrlProxy iOS (params: deviceId, port, xctestrunPath, bundleId, timeoutSeconds)
   - xctest-stop            Stop CtrlProxy iOS (params: deviceId or pid)
   - xctest-status          Check CtrlProxy iOS status (params: deviceId, pid, port)

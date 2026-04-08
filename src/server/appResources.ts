@@ -1,15 +1,23 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
 import { ListInstalledApps } from "../features/observe/ListInstalledApps";
+import { GetAppMetadata, IosAppMetadataSource } from "../features/observe/GetAppMetadata";
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
+import { findBundleEntry } from "../utils/ios-cmdline-tools/DeviceAppInspector";
 import { BootedDevice, InstalledApp, InstalledAppsByProfile, Platform, SystemInstalledApp } from "../models";
 import { logger } from "../utils/logger";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
+import { promises as nodeFs } from "fs";
+import { tmpdir as nodeTmpdir } from "os";
+import { join as nodeJoin } from "path";
+import { execFile as nodeExecFile } from "child_process";
+import { promisify } from "util";
 
 // Resource URI templates
 export const APP_RESOURCE_TEMPLATES = {
   DEVICE_APPS: "automobile:devices/{deviceId}/apps",
-  DEVICE_APP: "automobile:devices/{deviceId}/apps/{packageName}"
+  DEVICE_APP: "automobile:devices/{deviceId}/apps/{packageName}",
+  DEVICE_APP_METADATA: "automobile:devices/{deviceId}/apps/{appId}/metadata"
 } as const;
 
 export const APPS_RESOURCE_URIS = {
@@ -701,9 +709,118 @@ export async function notifyInstalledAppResourceUpdated(deviceId: string): Promi
 export function invalidateInstalledAppsCache(deviceId?: string): void {
   if (deviceId) {
     appCacheByDeviceId.delete(deviceId);
+    const prefix = `${deviceId}:`;
+    for (const key of appMetadataCacheByKey.keys()) {
+      if (key.startsWith(prefix)) {
+        appMetadataCacheByKey.delete(key);
+      }
+    }
     return;
   }
   appCacheByDeviceId.clear();
+  appMetadataCacheByKey.clear();
+}
+
+// --- App Metadata Resource ---
+
+interface AppMetadataCacheEntry {
+  expiresAt: number;
+  content: ResourceContent;
+}
+
+const APP_METADATA_CACHE_TTL_MS = 60000;
+const appMetadataCacheByKey = new Map<string, AppMetadataCacheEntry>();
+
+function metadataCacheKey(deviceId: string, appId: string): string {
+  return `${deviceId}:${appId}`;
+}
+
+const execFileAsync = promisify(nodeExecFile);
+
+function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
+  const simctl = new SimCtlClient(device);
+  return {
+    listApps: (deviceId?: string) => simctl.listApps(deviceId),
+    getPhysicalDeviceAppInfo: async (deviceId: string, bundleId: string) => {
+      const tempDir = await nodeFs.mkdtemp(nodeJoin(nodeTmpdir(), "automobile-metadata-"));
+      const jsonPath = nodeJoin(tempDir, "apps.json");
+      try {
+        await execFileAsync("xcrun", [
+          "devicectl", "device", "info", "apps",
+          "--device", deviceId,
+          "--bundle-id", bundleId,
+          "--json-output", jsonPath,
+          "--quiet"
+        ]);
+        const raw = await nodeFs.readFile(jsonPath, "utf-8");
+        const data = JSON.parse(raw);
+        return findBundleEntry(data, bundleId);
+      } catch (error) {
+        logger.warn(`[AppResources] Failed to get physical device app info for ${bundleId}: ${error}`);
+        return null;
+      } finally {
+        await nodeFs.rm(tempDir, { recursive: true, force: true });
+      }
+    }
+  };
+}
+
+async function getAppMetadataResource(
+  deviceId: string,
+  appId: string,
+  timer: Timer = defaultTimer
+): Promise<ResourceContent> {
+  const uri = `automobile:devices/${deviceId}/apps/${appId}/metadata`;
+
+  // Check cache
+  const cacheKey = metadataCacheKey(deviceId, appId);
+  const cached = appMetadataCacheByKey.get(cacheKey);
+  if (cached && cached.expiresAt > timer.now()) {
+    return cached.content;
+  }
+
+  const device = await findBootedDevice(deviceId);
+  if (!device) {
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify({ error: `Device not found or not booted: ${deviceId}` }, null, 2)
+    };
+  }
+
+  try {
+    const iosSource = device.platform === "ios" ? createIosMetadataSource(device) : null;
+    const getMetadata = new GetAppMetadata(device, undefined, iosSource);
+    const metadata = await getMetadata.execute(appId);
+
+    if (!metadata) {
+      return {
+        uri,
+        mimeType: "application/json",
+        text: JSON.stringify({ error: `App not found: ${appId}` }, null, 2)
+      };
+    }
+
+    const content: ResourceContent = {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify(metadata, null, 2)
+    };
+
+    appMetadataCacheByKey.set(cacheKey, {
+      expiresAt: timer.now() + APP_METADATA_CACHE_TTL_MS,
+      content
+    });
+
+    return content;
+  } catch (error) {
+    logger.error(`[AppResources] Failed to get app metadata for ${appId}: ${error}`);
+    return {
+      uri,
+      mimeType: "application/json",
+      text: JSON.stringify({ error: `Failed to get app metadata: ${error}` }, null, 2)
+    };
+  }
 }
 
 function registerAppsQueryTemplates(
@@ -769,6 +886,15 @@ export function registerAppResources(): void {
       "System apps: use automobile:apps?deviceId=DEVICE_ID&type=system&search=PACKAGE_NAME.",
     "application/json",
     async params => getAppResource(params.deviceId, params.packageName)
+  );
+
+  ResourceRegistry.registerTemplate(
+    APP_RESOURCE_TEMPLATES.DEVICE_APP_METADATA,
+    "App Metadata",
+    "Version, build number, install path, and timestamps for an installed app. " +
+      "Returns normalized metadata for both Android (package name) and iOS (bundle ID).",
+    "application/json",
+    async params => getAppMetadataResource(params.deviceId, params.appId)
   );
 
   void syncInstalledAppResources();

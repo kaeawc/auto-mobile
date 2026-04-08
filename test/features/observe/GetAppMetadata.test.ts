@@ -52,8 +52,8 @@ describe("GetAppMetadata (Android)", () => {
     expect(result!.versionName).toBe("1.2.3");
     expect(result!.buildNumber).toBe("42");
     expect(result!.installPath).toBe("/data/app/~~random/com.example.app-xyz==");
-    expect(result!.firstInstallTime).toBeDefined();
-    expect(result!.lastUpdateTime).toBeDefined();
+    expect(result!.firstInstallTime).toBe("2024-01-15 10:30:00");
+    expect(result!.lastUpdateTime).toBe("2024-06-20 14:45:00");
   });
 
   test("returns null when package not found", async () => {

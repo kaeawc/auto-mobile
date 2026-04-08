@@ -128,11 +128,9 @@ function extractTimestamp(text: string, pattern: RegExp): string | undefined {
   if (!raw) {
     return undefined;
   }
-  const parsed = Date.parse(raw);
-  if (Number.isNaN(parsed)) {
-    return undefined;
-  }
-  return new Date(parsed).toISOString();
+  // Return raw device-local timestamp as-is — dumpsys emits without timezone
+  // offset, so Date.parse would silently apply host timezone and skew the value.
+  return raw;
 }
 
 function readStringField(value: unknown): string | undefined {

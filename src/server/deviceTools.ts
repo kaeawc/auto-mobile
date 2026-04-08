@@ -76,6 +76,13 @@ export interface ListDevicesArgs {
 export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
+  notifyResourcesChanged: () => Promise<void>;
+}
+
+async function defaultNotifyResourcesChanged(): Promise<void> {
+  await notifyBootedDeviceResourcesUpdated();
+  await notifyDeviceImageResourcesUpdated();
+  await syncInstalledAppResources();
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;
@@ -85,6 +92,7 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
     moduleDependencies = {
       deviceManagerFactory: () => new MultiPlatformDeviceManager(),
       deviceMatcherFactory: () => new DefaultDeviceMatcher(),
+      notifyResourcesChanged: defaultNotifyResourcesChanged,
     };
   }
   return moduleDependencies;
@@ -95,6 +103,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
   moduleDependencies = {
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
+    notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
   };
 }
 
@@ -287,6 +296,10 @@ export function registerDeviceTools() {
       await progress(100, 100, "Device is ready for use");
     }
 
+    perf.startOperation("notifyResources");
+    await getDeviceToolsDependencies().notifyResourcesChanged();
+    perf.endOperation("notifyResources");
+
     return await buildBootedResponse(
       { ...readyDevice, osVersion: image.osVersion, formFactor: image.formFactor, screenWidth: image.screenWidth, screenHeight: image.screenHeight },
       "cold-boot",
@@ -303,15 +316,6 @@ export function registerDeviceTools() {
     args: StartDeviceArgs,
     processId?: number,
   ) {
-    // Only notify resources when state actually changed (cold boot)
-    if (source === "cold-boot") {
-      perf.startOperation("notifyResources");
-      await notifyBootedDeviceResourcesUpdated();
-      await notifyDeviceImageResourcesUpdated();
-      await syncInstalledAppResources();
-      perf.endOperation("notifyResources");
-    }
-
     // Always generate a session ID for consistent device interactions.
     // When autolock is enabled, the session ID is enforced for all subsequent tool calls.
     // When disabled, AutoMobile assumes a single agent and the session ID is advisory.

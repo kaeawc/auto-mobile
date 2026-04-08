@@ -16,6 +16,7 @@ describe("startDevice handler", () => {
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
+      notifyResourcesChanged: async () => {},
     });
 
     registerDeviceTools();

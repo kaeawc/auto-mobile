@@ -287,21 +287,45 @@ internal object DaemonSocketPaths {
       val entryPoint = File(localPath, "dist/src/index.js")
       if (entryPoint.exists()) {
         val runtime = resolveRuntimePath()
-        return listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
+        return withDismissKeyboardAfterInput(
+            listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand),
+        )
       }
     }
 
     // Prefer bunx, fall back to npx, then the global binary.
     val runner = resolvePackageRunner()
-    return if (runner != null) {
-      if (runner.endsWith("npx")) {
-        listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      } else {
-        listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      }
-    } else {
-      listOf("auto-mobile", "--daemon", subCommand)
+    val base =
+        if (runner != null) {
+          if (runner.endsWith("npx")) {
+            listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+          } else {
+            listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+          }
+        } else {
+          listOf("auto-mobile", "--daemon", subCommand)
+        }
+    return withDismissKeyboardAfterInput(base)
+  }
+
+  /**
+   * When true, the spawned daemon passes `--dismiss-keyboard-after-input` so every `inputText` call
+   * hides the soft keyboard after injection (Android emulator CI often leaves it open otherwise).
+   */
+  private fun dismissKeyboardAfterInputRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)) {
+      return true
     }
+    val env =
+        System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withDismissKeyboardAfterInput(command: List<String>): List<String> {
+    if (!dismissKeyboardAfterInputRequested()) {
+      return command
+    }
+    return command + "--dismiss-keyboard-after-input"
   }
 
   private fun resolveLocalProjectPath(): String? {

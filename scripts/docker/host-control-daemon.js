@@ -1000,7 +1000,7 @@ const handlers = {
         deviceId,
         artifactPath,
         "--quiet"
-      ], { timeout: COMMAND_TIMEOUT_MS });
+      ], { timeout: COMMAND_TIMEOUT_MS * 10 }); // IPA installs can be slow over USB
       return { success: true, message: "App installed" };
     } catch (error) {
       return { success: false, error: error.message };

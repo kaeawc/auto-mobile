@@ -97,7 +97,7 @@ let requestId = 0;
 /**
  * Send a command to the host control daemon
  */
-async function sendCommand<T>(method: string, params?: Record<string, unknown>): Promise<HostControlResult<T>> {
+async function sendCommand<T>(method: string, params?: Record<string, unknown>, timeoutMs: number = COMMAND_TIMEOUT_MS): Promise<HostControlResult<T>> {
   return new Promise(resolve => {
     const socket = createConnection({
       host: HOST_CONTROL_HOST,
@@ -125,7 +125,7 @@ async function sendCommand<T>(method: string, params?: Record<string, unknown>):
     const timeout = defaultTimer.setTimeout(() => {
       cleanup();
       resolve({ success: false, error: "Command timed out" });
-    }, COMMAND_TIMEOUT_MS);
+    }, timeoutMs);
 
     // Set timeout for initial connection only
     socket.setTimeout(CONNECT_TIMEOUT_MS);
@@ -495,7 +495,7 @@ export async function installDeviceApp(params: {
   deviceId: string;
   artifactPath: string;
 }): Promise<HostControlResult<{ message: string }>> {
-  return sendCommand("devicectl-install", params);
+  return sendCommand("devicectl-install", params, COMMAND_TIMEOUT_MS * 10);
 }
 
 export async function startCtrlProxyIOS(params: {

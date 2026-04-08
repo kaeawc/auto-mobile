@@ -491,7 +491,9 @@ Use this when you need a **fixed or unreleased** AutoMobile build (for example a
 
 The JUnit runner can start the daemon from a **local checkout** instead of `bunx @kaeawc/auto-mobile@latest` when **`dist/src/index.js`** exists in that tree.
 
-**Branch with the loopback fix (until merge + npm release):** clone **`https://github.com/kaeawc/auto-mobile.git`** at **`ryebread/connection_refused_in_ci_fix`**. After that lands on **`main`** and is published, switch the clone to **`--branch main`** (or drop this section and use npm only).
+**Branch with the loopback + keyboard CI wiring (until merge + npm release):** clone **`https://github.com/kaeawc/auto-mobile.git`** at **`ryebread/connection_refused_in_ci_fix`**. After that lands on **`main`** and is published, switch the clone to **`--branch main`** (or drop this section and use npm only).
+
+**Commit pin (reproducible CI):** use at least **`721c2577e31e787dbbe1b4ac7105afa5624205b5`** (includes the daemon loopback fix and JUnit runner support for appending **`--dismiss-keyboard-after-input`** via env). Prefer **branch tip** when you pull this branch so you also get follow-up doc commits. To checkout that exact revision after a full clone: `git checkout 721c2577e31e787dbbe1b4ac7105afa5624205b5`.
 
 ### 1. Add the AutoMobile repo to your pipeline
 
@@ -500,7 +502,7 @@ Pick one:
 | Approach | Outline |
 |----------|---------|
 | **Git submodule** | Add the repo as a submodule pinned to the commit you need; clone recursively in CI. |
-| **Clone step** | `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp` (or another branch / SHA once merged). |
+| **Clone step** | Shallow branch: `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp`. To pin the known-good revision: full clone (or unshallow), then `git checkout 721c2577e31e787dbbe1b4ac7105afa5624205b5` (or newer on the same branch). |
 | **CI job artifact** | Another pipeline builds AutoMobile and passes `dist/` + `package.json` + lockfile as an artifact; extract beside your app. |
 
 The path you will pass to the runner must be the **repository root** (the directory that contains **`dist/src/index.js`** after build).
@@ -531,6 +533,8 @@ Use an **absolute** path in CI so Gradle workers do not depend on a fragile work
 ```yaml
 variables:
   AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH: "${CI_PROJECT_DIR}/auto-mobile-mcp"
+  # Optional: hide soft keyboard after each inputText on Android CI emulators (requires checkout ≥ 721c2577 on this branch).
+  AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT: "true"
 
 android-ui-tests:
   before_script:

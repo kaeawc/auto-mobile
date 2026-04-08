@@ -6594,6 +6594,44 @@
     }
   },
   {
+    "name": "uninstallApp",
+    "description": "Uninstall app by package name or bundle identifier",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "App package ID or bundle identifier to uninstall"
+        },
+        "keepData": {
+          "description": "Keep app data after uninstall (Android only, default false)",
+          "type": "boolean"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "videoRecording",
     "description": "Start or stop a low-overhead video recording for the active device.",
     "inputSchema": {

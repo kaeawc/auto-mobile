@@ -63,7 +63,7 @@ This is a high-level summary of core MCP tools exposed by the server.
 - `inputText`, `clearText`, `pressButton`, `pressKey`
 
 ## App Management
-- `launchApp`, `terminateApp`, `installApp`
+- `launchApp`, `terminateApp`, `installApp`, `uninstallApp`
 
 ## Device Management
 - `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`

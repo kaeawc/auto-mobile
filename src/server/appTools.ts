@@ -4,6 +4,7 @@ import { ActionableError, BootedDevice } from "../models";
 import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
+import { UninstallApp } from "../features/action/UninstallApp";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import {
@@ -55,6 +56,11 @@ export const installAppSchema = addDeviceTargetingToSchema(z.object({
   apkPath: z.string().describe("APK file path"),
 }));
 
+export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("App package ID or bundle identifier to uninstall"),
+  keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
+}));
+
 export const listAppsSchema = z.object({}).passthrough();
 
 // Export interfaces for type safety
@@ -70,6 +76,11 @@ export interface LaunchAppActionArgs {
 
 export interface InstallAppArgs {
   apkPath: string;
+}
+
+export interface UninstallAppArgs {
+  appId: string;
+  keepData?: boolean;
 }
 
 // Register tools
@@ -175,6 +186,37 @@ export function registerAppTools(
     }
   };
 
+  // Uninstall app handler
+  const uninstallAppHandler = async (device: BootedDevice, args: UninstallAppArgs) => {
+    try {
+      const uninstallApp = new UninstallApp(device);
+      const result = await uninstallApp.execute(args.appId, args.keepData ?? false);
+
+      if (!result.success) {
+        throw new ActionableError(result.error || `Failed to uninstall app ${args.appId}`);
+      }
+
+      const message = result.wasInstalled
+        ? `Uninstalled app ${args.appId}${result.keepData ? " (data preserved)" : ""}`
+        : `App ${args.appId} was not installed`;
+
+      return createJSONToolResponse({
+        message,
+        ...result
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {throw error;}
+      throw new ActionableError(`Failed to uninstall app: ${error}`);
+    } finally {
+      try {
+        invalidateInstalledAppsCache(device.deviceId);
+        await notifyInstalledAppResourceUpdated(device.deviceId);
+      } catch (error) {
+        logger.warn(`[AppTools] Failed to refresh app resources after uninstall: ${error}`);
+      }
+    }
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -195,6 +237,13 @@ export function registerAppTools(
     "Install APK file",
     installAppSchema,
     installAppHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "uninstallApp",
+    "Uninstall app by package name or bundle identifier",
+    uninstallAppSchema,
+    uninstallAppHandler
   );
 
   ToolRegistry.register(

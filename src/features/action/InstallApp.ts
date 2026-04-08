@@ -140,7 +140,7 @@ export class InstallApp {
       const afterPackages = success ? await perf.track("listPackagesAfter", async () => {
         return this.listPackagesForUser(targetUserId, signal);
       }) : beforePackages;
-      const newPackages = this.diffPackages(beforePackages, afterPackages);
+      const newPackages = this.diffSets(beforePackages, afterPackages);
 
       if (newPackages.length === 1) {
         packageName = newPackages[0];
@@ -197,7 +197,7 @@ export class InstallApp {
     const afterApps = await perf.track("listAppsAfter", () => this.simctl.listApps(this.device.deviceId));
     const afterBundleIds = this.extractBundleIds(afterApps);
 
-    const newBundles = this.diffBundles(beforeBundleIds, afterBundleIds);
+    const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
     let packageName = this.findBundleIdByPath(afterApps, appPath);
 
     const warnings: string[] = [];
@@ -292,14 +292,14 @@ export class InstallApp {
     return packages;
   }
 
-  private diffPackages(before: Set<string>, after: Set<string>): string[] {
-    const newPackages: string[] = [];
-    for (const packageName of after) {
-      if (!before.has(packageName)) {
-        newPackages.push(packageName);
+  private diffSets(before: Set<string>, after: Set<string>): string[] {
+    const added: string[] = [];
+    for (const item of after) {
+      if (!before.has(item)) {
+        added.push(item);
       }
     }
-    return newPackages.sort();
+    return added.sort();
   }
 
   private extractBundleIds(apps: any[]): Set<string> {
@@ -311,16 +311,6 @@ export class InstallApp {
       }
     }
     return bundleIds;
-  }
-
-  private diffBundles(before: Set<string>, after: Set<string>): string[] {
-    const newBundles: string[] = [];
-    for (const bundleId of after) {
-      if (!before.has(bundleId)) {
-        newBundles.push(bundleId);
-      }
-    }
-    return newBundles.sort();
   }
 
   private getBundleId(app: any): string | undefined {

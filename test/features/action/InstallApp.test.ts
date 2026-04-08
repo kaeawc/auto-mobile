@@ -17,6 +17,18 @@ const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   includes: (searchString: string) => stdout.includes(searchString)
 });
 
+class SequencedFakeSimctl extends FakeSimctl {
+  private listResponses: any[][] = [];
+
+  setListResponses(responses: any[][]): void {
+    this.listResponses = [...responses];
+  }
+
+  override async listApps(deviceId?: string): Promise<any[]> {
+    return this.listResponses.shift() ?? super.listApps(deviceId);
+  }
+}
+
 class FakeDeviceAppInstaller implements DeviceAppInstaller {
   public calls: Array<{ deviceUdid: string; artifactPath: string }> = [];
   public shouldThrow: Error | null = null;
@@ -183,22 +195,6 @@ describe("InstallApp", () => {
   });
 
   test("installs iOS .app on simulator via simctl and detects new bundle id", async () => {
-    class SequencedFakeSimctl extends FakeSimctl {
-      private listResponses: any[][] = [];
-
-      setListResponses(responses: any[][]): void {
-        this.listResponses = [...responses];
-      }
-
-      override async listApps(deviceId?: string): Promise<any[]> {
-        const response = this.listResponses.shift();
-        if (response) {
-          return response;
-        }
-        return super.listApps(deviceId);
-      }
-    }
-
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
     const sequencedSimctl = new SequencedFakeSimctl();
@@ -352,14 +348,6 @@ describe("InstallApp", () => {
   });
 
   test("detects iOS simulator upgrade when bundle already installed", async () => {
-    class SequencedFakeSimctl extends FakeSimctl {
-      private listResponses: any[][] = [];
-      setListResponses(responses: any[][]): void { this.listResponses = [...responses]; }
-      override async listApps(deviceId?: string): Promise<any[]> {
-        return this.listResponses.shift() ?? super.listApps(deviceId);
-      }
-    }
-
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
     const sequencedSimctl = new SequencedFakeSimctl();
@@ -378,14 +366,6 @@ describe("InstallApp", () => {
   });
 
   test("detects iOS simulator bundle ID via path match", async () => {
-    class SequencedFakeSimctl extends FakeSimctl {
-      private listResponses: any[][] = [];
-      setListResponses(responses: any[][]): void { this.listResponses = [...responses]; }
-      override async listApps(deviceId?: string): Promise<any[]> {
-        return this.listResponses.shift() ?? super.listApps(deviceId);
-      }
-    }
-
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
     const sequencedSimctl = new SequencedFakeSimctl();
@@ -403,14 +383,6 @@ describe("InstallApp", () => {
   });
 
   test("warns when multiple new bundle IDs detected on iOS simulator", async () => {
-    class SequencedFakeSimctl extends FakeSimctl {
-      private listResponses: any[][] = [];
-      setListResponses(responses: any[][]): void { this.listResponses = [...responses]; }
-      override async listApps(deviceId?: string): Promise<any[]> {
-        return this.listResponses.shift() ?? super.listApps(deviceId);
-      }
-    }
-
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
     const sequencedSimctl = new SequencedFakeSimctl();
@@ -428,14 +400,6 @@ describe("InstallApp", () => {
   });
 
   test("warns when no bundle ID can be determined on iOS simulator", async () => {
-    class SequencedFakeSimctl extends FakeSimctl {
-      private listResponses: any[][] = [];
-      setListResponses(responses: any[][]): void { this.listResponses = [...responses]; }
-      override async listApps(deviceId?: string): Promise<any[]> {
-        return this.listResponses.shift() ?? super.listApps(deviceId);
-      }
-    }
-
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
     const sequencedSimctl = new SequencedFakeSimctl();

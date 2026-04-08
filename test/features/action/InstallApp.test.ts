@@ -8,6 +8,7 @@ import { FakeHostCommandExecutor } from "../../fakes/FakeHostCommandExecutor";
 import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsLocator";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
+import path from "path";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -336,12 +337,11 @@ describe("InstallApp", () => {
     fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
     fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
 
-    const cwd = process.cwd();
-    const expectedAbsolute = `${cwd}/relative/path/app.apk`;
+    const expectedAbsolute = path.resolve(process.cwd(), "relative", "path", "app.apk");
     fakeAdb.setCommandResponse(`install --user 0 -r "${expectedAbsolute}"`, createExecResult("Success"));
 
     const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
-    const result = await installApp.execute("relative/path/app.apk");
+    const result = await installApp.execute(path.join("relative", "path", "app.apk"));
 
     expect(result.success).toBe(true);
     expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${expectedAbsolute}"`)).toBe(true);

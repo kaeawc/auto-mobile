@@ -302,6 +302,13 @@ function normalizeIosVersion(runtimeId: string | undefined, osVersion: string | 
   return match[1].replace(/_/g, ".").replace(/-/g, ".");
 }
 
+function inferIosFormFactor(deviceTypeId: string | undefined): "phone" | "tablet" | undefined {
+  if (!deviceTypeId) {return undefined;}
+  if (deviceTypeId.includes("iPad")) {return "tablet";}
+  if (deviceTypeId.includes("iPhone")) {return "phone";}
+  return undefined;
+}
+
 /**
  * This file provides an interface to interact with iOS simulators using simctl.
  * It allows you to list, create, boot, and delete simulators.
@@ -592,6 +599,7 @@ export class SimCtlClient implements SimCtl {
       for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
         for (const device of runtimeDevices) {
           logger.debug(`Found iOS simulator: ${device.name} (${device.udid}) state=${device.state}`);
+          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
           devices.push({
             name: device.name,
             platform: "ios",
@@ -600,7 +608,9 @@ export class SimCtlClient implements SimCtl {
             state: device.state,
             isAvailable: device.isAvailable,
             availabilityError: device.availabilityError,
-            iosVersion: normalizeIosVersion(runtimeId, device.os_version),
+            iosVersion,
+            osVersion: iosVersion,
+            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
             deviceType: device.deviceTypeIdentifier,
             runtime: runtimeId,
             model: device.model,
@@ -637,11 +647,14 @@ export class SimCtlClient implements SimCtl {
       for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
         for (const device of runtimeDevices) {
           if (device.isAvailable && device.state === "Booted") {
+            const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
             bootedDevices.push({
               name: device.name,
               platform: "ios",
               deviceId: device.udid,
-              iosVersion: normalizeIosVersion(runtimeId, device.os_version)
+              iosVersion,
+              osVersion: iosVersion,
+              formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
             } as BootedDevice);
           }
         }

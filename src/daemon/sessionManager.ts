@@ -88,7 +88,8 @@ export class SessionManager {
   async createSession(
     sessionId: string,
     assignedDevice: string,
-    platform: Platform
+    platform: Platform,
+    timeoutMs?: number,
   ): Promise<Session> {
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
@@ -102,7 +103,7 @@ export class SessionManager {
       platform,
       createdAt: now,
       lastUsedAt: now,
-      expiresAt: now + this.SESSION_TIMEOUT_MS,
+      expiresAt: now + (timeoutMs ?? this.SESSION_TIMEOUT_MS),
       cacheData: {},
       lastHeartbeat: now,
       heartbeatTimeoutMs: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,

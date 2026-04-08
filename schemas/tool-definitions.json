@@ -4299,48 +4299,68 @@
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "device": {
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "minOsVersion": {
+          "description": "Minimum OS version, inclusive (e.g., '14', '17.2')",
+          "type": "string"
+        },
+        "maxOsVersion": {
+          "description": "Maximum OS version, inclusive (e.g., '15', '18.0')",
+          "type": "string"
+        },
+        "name": {
+          "description": "Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')",
+          "type": "string"
+        },
+        "formFactor": {
+          "description": "Device form factor",
+          "type": "string",
+          "enum": [
+            "phone",
+            "tablet"
+          ]
+        },
+        "screenSize": {
+          "description": "Desired screen dimensions",
           "type": "object",
           "properties": {
-            "name": {
-              "type": "string",
-              "description": "Device name"
+            "width": {
+              "type": "number",
+              "description": "Screen width in pixels"
             },
-            "platform": {
-              "type": "string",
-              "enum": [
-                "android",
-                "ios"
-              ],
-              "description": "Target platform"
-            },
-            "deviceId": {
-              "description": "Device ID",
-              "type": "string"
-            },
-            "isRunning": {
-              "description": "Running status",
-              "type": "boolean"
-            },
-            "source": {
-              "description": "Source (local/remote)",
-              "type": "string"
+            "height": {
+              "type": "number",
+              "description": "Screen height in pixels"
             }
           },
           "required": [
-            "name",
-            "platform"
+            "width",
+            "height"
           ],
-          "additionalProperties": false,
-          "description": "Device to start"
+          "additionalProperties": false
+        },
+        "deviceId": {
+          "description": "Specific device ID (bypasses matching)",
+          "type": "string"
+        },
+        "preferRunning": {
+          "description": "Prefer already-booted device (default true)",
+          "type": "boolean"
         },
         "timeoutMs": {
-          "description": "Readiness timeout ms",
+          "description": "Boot timeout in ms",
           "type": "number"
         }
       },
       "required": [
-        "device"
+        "platform"
       ],
       "additionalProperties": false
     }

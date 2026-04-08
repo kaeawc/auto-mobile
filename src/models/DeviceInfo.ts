@@ -1,4 +1,5 @@
 import { Platform } from "./Platform";
+import { FormFactor } from "./DeviceMatchCriteria";
 
 export interface DeviceInfo {
   name: string;
@@ -6,6 +7,11 @@ export interface DeviceInfo {
   isRunning: boolean;
   deviceId?: string;
   source?: "local";
+  osVersion?: string;
+  formFactor?: FormFactor;
+  screenWidth?: number;
+  screenHeight?: number;
+  screenDensity?: number;
   // iOS-only metadata (optional)
   state?: string;
   isAvailable?: boolean;
@@ -23,4 +29,8 @@ export interface BootedDevice {
   deviceId: string;
   source?: "local";
   iosVersion?: string;
+  osVersion?: string;
+  formFactor?: FormFactor;
+  screenWidth?: number;
+  screenHeight?: number;
 }

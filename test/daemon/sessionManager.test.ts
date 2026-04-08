@@ -40,6 +40,12 @@ describe("SessionManager", () => {
       const expectedExpiry = beforeCreate + 30 * 60 * 1000; // 30 minutes
       expect(session.expiresAt).toBe(expectedExpiry);
     });
+
+    test("should persist custom timeout on the session", async () => {
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      expect(session.sessionTimeoutMs).toBe(5000);
+      expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
+    });
   });
 
   describe("getOrCreateSession", () => {
@@ -58,6 +64,15 @@ describe("SessionManager", () => {
       const session2 = await sessionManager.getOrCreateSession("session-1");
       expect(session2.lastUsedAt).toBe(initialLastUsed + 10);
       expect(session2.expiresAt).toBe(initialExpiry + 10);
+    });
+
+    test("should preserve custom timeout when getting existing session", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      fakeTimer.advanceTime(4000);
+
+      const session = await sessionManager.getOrCreateSession("session-1");
+
+      expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
     });
 
     test("should throw error for non-existent session without device pool", async () => {
@@ -143,6 +158,20 @@ describe("SessionManager", () => {
     test("should return null for non-existent session", async () => {
       const deviceId = await sessionManager.releaseSession("non-existent");
       expect(deviceId).toBeNull();
+    });
+  });
+
+  describe("recordHeartbeat", () => {
+    test("should extend expiry using the session's custom timeout", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
+      fakeTimer.advanceTime(4000);
+
+      sessionManager.recordHeartbeat("session-1");
+      fakeTimer.advanceTime(4000);
+      expect(sessionManager.getSession("session-1")).not.toBeNull();
+
+      fakeTimer.advanceTime(1500);
+      expect(sessionManager.getSession("session-1")).toBeNull();
     });
   });
 

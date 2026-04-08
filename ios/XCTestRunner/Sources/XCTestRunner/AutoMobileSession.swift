@@ -19,4 +19,14 @@ public final class AutoMobileSession {
         threadDict[AutoMobileSession.sessionKey] = uuid
         return uuid
     }
+
+    /// Override the session UUID for this thread.
+    /// Used when startDevice returns a sessionId (autolock or default).
+    public func setSessionUuid(_ uuid: String) {
+        Thread.current.threadDictionary[AutoMobileSession.sessionKey] = uuid
+    }
+
+    public static func setCurrentSessionUuid(_ uuid: String) {
+        shared.setSessionUuid(uuid)
+    }
 }

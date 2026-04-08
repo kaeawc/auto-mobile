@@ -1,8 +1,10 @@
 import { z } from "zod";
+import { randomUUID } from "node:crypto";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { MultiPlatformDeviceManager, PlatformDeviceManager } from "../utils/deviceUtils";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { ActionableError, BootedDevice, DeviceInfo, SomePlatform } from "../models";
+import type { DeviceMatchCriteria, FormFactor, MatchingStrategy, StartDeviceResult } from "../models/DeviceMatchCriteria";
 import { BOOTED_DEVICE_RESOURCE_URIS, notifyBootedDeviceResourcesUpdated } from "./bootedDeviceResources";
 import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from "./deviceImageResources";
 import { syncInstalledAppResources } from "./appResources";
@@ -11,6 +13,8 @@ import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
+import { DefaultDeviceMatcher, type DeviceMatcher } from "./deviceMatcher";
+import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -21,16 +25,39 @@ export const listDevicesSchema = z.object({
   platform: platformSchema.optional()
 });
 
-export const startDeviceSchema = z.object({
-  device: z.object({
-    name: z.string().describe("Device name"),
-    platform: platformSchema,
-    deviceId: z.string().optional().describe("Device ID"),
-    isRunning: z.boolean().optional().describe("Running status"),
-    source: z.string().optional().describe("Source (local/remote)")
-  }).describe("Device to start"),
-  timeoutMs: z.number().optional().describe("Readiness timeout ms")
+const startDeviceParametersSchema = z.object({
+  platform: platformSchema,
+  minOsVersion: z.string().optional().describe("Minimum OS version, inclusive (e.g., '14', '17.2')"),
+  maxOsVersion: z.string().optional().describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
+  name: z.string().optional().describe("Device name to match (e.g., 'iPhone 16e', 'Pixel_9_Pro')"),
+  formFactor: z.enum(["phone", "tablet"]).optional().describe("Device form factor"),
+  screenSize: z.object({
+    width: z.number().describe("Screen width in pixels"),
+    height: z.number().describe("Screen height in pixels"),
+  }).optional().describe("Desired screen dimensions"),
+  deviceId: z.string().optional().describe("Specific device ID (bypasses matching)"),
+  preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
+  timeoutMs: z.number().optional().describe("Boot timeout in ms"),
 });
+
+export const startDeviceSchema = z.preprocess((input) => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+
+  const parsed = input as Record<string, unknown>;
+  const legacyDevice = parsed.device;
+  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+    return input;
+  }
+
+  // Accept both the legacy { device: {...} } payload and the new top-level shape.
+  // Top-level fields win so mixed callers can override nested values intentionally.
+  return {
+    ...legacyDevice as Record<string, unknown>,
+    ...parsed,
+  };
+}, startDeviceParametersSchema);
 
 export const killDeviceSchema = z.object({
   device: z.object({
@@ -42,7 +69,14 @@ export const killDeviceSchema = z.object({
 
 // Export interfaces for type safety
 export interface StartDeviceArgs {
-  device: DeviceInfo;
+  platform: "android" | "ios";
+  minOsVersion?: string;
+  maxOsVersion?: string;
+  name?: string;
+  formFactor?: FormFactor;
+  screenSize?: { width: number; height: number };
+  deviceId?: string;
+  preferRunning?: boolean;
   timeoutMs?: number;
 }
 
@@ -60,6 +94,14 @@ export interface ListDevicesArgs {
 
 export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
+  deviceMatcherFactory: () => DeviceMatcher;
+  notifyResourcesChanged: () => Promise<void>;
+}
+
+async function defaultNotifyResourcesChanged(): Promise<void> {
+  await notifyBootedDeviceResourcesUpdated();
+  await notifyDeviceImageResourcesUpdated();
+  await syncInstalledAppResources();
 }
 
 let moduleDependencies: DeviceToolsDependencies | null = null;
@@ -67,7 +109,9 @@ let moduleDependencies: DeviceToolsDependencies | null = null;
 function getDeviceToolsDependencies(): DeviceToolsDependencies {
   if (!moduleDependencies) {
     moduleDependencies = {
-      deviceManagerFactory: () => new MultiPlatformDeviceManager()
+      deviceManagerFactory: () => new MultiPlatformDeviceManager(),
+      deviceMatcherFactory: () => new DefaultDeviceMatcher(),
+      notifyResourcesChanged: defaultNotifyResourcesChanged,
     };
   }
   return moduleDependencies;
@@ -76,7 +120,9 @@ function getDeviceToolsDependencies(): DeviceToolsDependencies {
 export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies>): void {
   const currentDeps = getDeviceToolsDependencies();
   moduleDependencies = {
-    deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory
+    deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
+    deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
+    notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
   };
 }
 
@@ -132,61 +178,214 @@ export function registerDeviceTools() {
     });
   };
 
-  // Start emulator handler
+  // Start device handler — matches criteria against booted devices and images
   const startDeviceHandler = async (args: StartDeviceArgs, progress?: ProgressCallback) => {
     const perf = createPerformanceTracker(true);
     perf.serial("startDevice");
+    const deps = getDeviceToolsDependencies();
+    const deviceUtils = deps.deviceManagerFactory();
+    const deviceMatcher = deps.deviceMatcherFactory();
+    const strategy: MatchingStrategy = DEVICE_POOL_MATCHING;
+    const preferRunning = args.preferRunning !== false;
+
     try {
-      if (args.device.platform === "ios" && !args.device.deviceId) {
-        throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
+      // --- Direct deviceId lookup ---
+      if (args.deviceId) {
+        perf.startOperation("directLookup");
+        // Check booted devices first
+        const booted = await deviceUtils.getBootedDevices(args.platform);
+        const found = booted.find(d => d.deviceId === args.deviceId);
+        perf.endOperation("directLookup");
+
+        if (found) {
+          return await buildBootedResponse(found, "booted", perf, args);
+        }
+
+        // Check images — need to boot
+        const images = await deviceUtils.listDeviceImages(args.platform);
+        const image = images.find(d => d.deviceId === args.deviceId || d.name === args.deviceId);
+        if (image) {
+          return await bootAndRespond(image, deviceUtils, perf, progress, args);
+        }
+
+        throw new ActionableError(
+          `Device '${args.deviceId}' not found. ` +
+          `Available booted: ${booted.map(d => d.deviceId).join(", ") || "none"}. ` +
+          `Available images: ${images.map(d => d.name).join(", ") || "none"}.`
+        );
       }
 
-      const deviceUtils = getDeviceToolsDependencies().deviceManagerFactory();
-      perf.startOperation("launchProcess");
-      const childProcess = await deviceUtils.startDevice(args.device);
-      perf.endOperation("launchProcess");
+      // --- Criteria-based matching ---
+      const criteria: DeviceMatchCriteria = {
+        platform: args.platform,
+        minOsVersion: args.minOsVersion,
+        maxOsVersion: args.maxOsVersion,
+        name: args.name,
+        formFactor: args.formFactor,
+        screenSize: args.screenSize,
+      };
 
-      if (progress) {
-        await progress(60, 100, "Device started, waiting for readiness...");
+      // Fetch images upfront — needed for both booted enrichment and fallback matching
+      perf.startOperation("listImages");
+      const images = await deviceUtils.listDeviceImages(args.platform);
+      perf.endOperation("listImages");
+
+      // Try booted devices first (if preferRunning)
+      if (preferRunning) {
+        perf.startOperation("matchBooted");
+        const booted = await deviceUtils.getBootedDevices(args.platform);
+        // Enrich booted devices with metadata from images (config.ini data)
+        const enrichedBooted = enrichBootedDevicesFromImages(booted, images);
+        const match = deviceMatcher.matchBootedDevice(criteria, enrichedBooted, strategy);
+        perf.endOperation("matchBooted");
+
+        if (match) {
+          if (progress) {
+            await progress(100, 100, "Found matching running device");
+          }
+          return await buildBootedResponse(match, "booted", perf, args);
+        }
       }
 
-      // Wait for device to be ready, passing child process for crash monitoring
-      perf.startOperation("waitForReady");
-      const readyDevice = await deviceUtils.waitForDeviceReady(args.device, args.timeoutMs, childProcess);
-      perf.endOperation("waitForReady");
+      // Fall back to images — boot one
+      perf.startOperation("matchImage");
+      const imageMatch = deviceMatcher.matchDeviceImage(criteria, images, strategy);
+      perf.endOperation("matchImage");
 
-      if (progress) {
-        await progress(100, 100, "Device is ready for use");
+      if (imageMatch) {
+        // If the matched image is already running, return it as booted
+        if (imageMatch.isRunning) {
+          const booted = await deviceUtils.getBootedDevices(args.platform);
+          const running = booted.find(d => d.name === imageMatch.name || d.deviceId === imageMatch.deviceId);
+          if (running) {
+            return await buildBootedResponse(
+              { ...running, osVersion: imageMatch.osVersion, formFactor: imageMatch.formFactor, screenWidth: imageMatch.screenWidth, screenHeight: imageMatch.screenHeight },
+              "booted",
+              perf,
+              args,
+            );
+          }
+        }
+        return await bootAndRespond(imageMatch, deviceUtils, perf, progress, args);
       }
 
-      // Notify that booted device resources have changed
-      perf.startOperation("notifyResources");
-      await notifyBootedDeviceResourcesUpdated();
-      await notifyDeviceImageResourcesUpdated();
-      await syncInstalledAppResources();
-      perf.endOperation("notifyResources");
-
-      perf.end();
-      const timing = perf.getTimings();
-
-      return createJSONToolResponse({
-        message: `${args.device.platform} '${args.device.name}' started and is ready`,
-        name: readyDevice.name,
-        processId: childProcess.pid,
-        isReady: true,
-        deviceId: readyDevice.deviceId,
-        source: args.device.source,
-        platform: args.device.platform,
-        timing,
-      });
+      // No match at all
+      throw new ActionableError(
+        `No ${args.platform} device matching criteria found. ` +
+        (args.minOsVersion ? `minOsVersion>=${args.minOsVersion} ` : "") +
+        (args.maxOsVersion ? `maxOsVersion<=${args.maxOsVersion} ` : "") +
+        (args.name ? `name=${args.name} ` : "") +
+        (args.formFactor ? `formFactor=${args.formFactor} ` : "") +
+        (args.screenSize ? `screenSize=${args.screenSize.width}x${args.screenSize.height} ` : "") +
+        `\nAvailable images: ${images.map(d => `${d.name}${d.osVersion ? " (v" + d.osVersion + ")" : ""}`).join(", ") || "none"}.`
+      );
     } catch (error) {
       perf.end();
       if (error instanceof ActionableError) {
         throw error;
       }
-      throw new ActionableError(`Failed to start ${args.device.platform} device: ${error}`);
+      throw new ActionableError(`Failed to start ${args.platform} device: ${error}`);
     }
   };
+
+  async function bootAndRespond(
+    image: DeviceInfo,
+    deviceUtils: PlatformDeviceManager,
+    perf: ReturnType<typeof createPerformanceTracker>,
+    progress: ProgressCallback | undefined,
+    args: StartDeviceArgs,
+  ) {
+    if (image.platform === "ios" && !image.deviceId) {
+      throw new ActionableError("iOS simulator deviceId (UDID) is required to start a simulator.");
+    }
+
+    perf.startOperation("launchProcess");
+    const childProcess = await deviceUtils.startDevice(image);
+    perf.endOperation("launchProcess");
+
+    if (progress) {
+      await progress(60, 100, "Device started, waiting for readiness...");
+    }
+
+    perf.startOperation("waitForReady");
+    const readyDevice = await deviceUtils.waitForDeviceReady(image, args.timeoutMs, childProcess);
+    perf.endOperation("waitForReady");
+
+    if (progress) {
+      await progress(100, 100, "Device is ready for use");
+    }
+
+    perf.startOperation("notifyResources");
+    await getDeviceToolsDependencies().notifyResourcesChanged();
+    perf.endOperation("notifyResources");
+
+    return await buildBootedResponse(
+      { ...readyDevice, osVersion: image.osVersion, formFactor: image.formFactor, screenWidth: image.screenWidth, screenHeight: image.screenHeight },
+      "cold-boot",
+      perf,
+      args,
+      childProcess.pid,
+    );
+  }
+
+  async function buildBootedResponse(
+    device: BootedDevice,
+    source: "booted" | "cold-boot",
+    perf: ReturnType<typeof createPerformanceTracker>,
+    args: StartDeviceArgs,
+    processId?: number,
+  ) {
+    // Always generate a session ID for consistent device interactions.
+    // When autolock is enabled, the session ID is enforced for all subsequent tool calls.
+    // When disabled, AutoMobile assumes a single agent and the session ID is advisory.
+    const sessionId = randomUUID();
+
+    perf.end();
+    const timing = perf.getTimings();
+
+    const result: StartDeviceResult = {
+      deviceId: device.deviceId,
+      name: device.name,
+      platform: device.platform,
+      osVersion: device.osVersion ?? device.iosVersion,
+      formFactor: device.formFactor,
+      screenSize: device.screenWidth && device.screenHeight
+        ? { width: device.screenWidth, height: device.screenHeight }
+        : undefined,
+      sessionId,
+      processId,
+      isReady: true,
+      source,
+      timing,
+    };
+
+    return createJSONToolResponse({
+      message: `${device.platform} '${device.name}' is ready (${source})`,
+      ...result,
+    });
+  }
+
+  /**
+   * Enrich booted devices with metadata from image list (config.ini / simctl data).
+   * Booted devices lack osVersion/formFactor/screen data; images have it from enrichment.
+   */
+  function enrichBootedDevicesFromImages(booted: BootedDevice[], images: DeviceInfo[]): BootedDevice[] {
+    if (images.length === 0) {return booted;}
+    const imageById = new Map(images.filter(i => i.deviceId).map(i => [i.deviceId!, i]));
+    const imageByName = new Map(images.map(i => [i.name, i]));
+
+    return booted.map(device => {
+      const image = (device.deviceId ? imageById.get(device.deviceId) : undefined) ?? imageByName.get(device.name);
+      if (!image) {return device;}
+      return {
+        ...device,
+        osVersion: device.osVersion ?? image.osVersion,
+        formFactor: device.formFactor ?? image.formFactor,
+        screenWidth: device.screenWidth ?? image.screenWidth,
+        screenHeight: device.screenHeight ?? image.screenHeight,
+      };
+    });
+  }
 
   const killDeviceHandler = async (args: KillDeviceArgs) => {
     const perf = createPerformanceTracker(true);

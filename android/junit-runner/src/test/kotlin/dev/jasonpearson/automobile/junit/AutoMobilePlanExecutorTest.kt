@@ -216,7 +216,7 @@ class AutoMobilePlanExecutorTest {
 
 private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
-  override val sessionUuid: String = "test-session"
+  override var sessionUuid: String = "test-session"
 
   fun setResponse(toolName: String, response: DaemonResponse) {
     responses[toolName] = response

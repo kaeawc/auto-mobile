@@ -7,6 +7,9 @@ import { arch } from "os";
 import { detectAndroidCommandLineTools, getBestAndroidToolsLocation } from "./detection";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
+import type { AvdConfigReader } from "./AvdConfigReader";
+import { FileAvdConfigReader } from "./AvdConfigReader";
+import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
 /**
  * Interface for Android Emulator (AVD) management
@@ -71,6 +74,23 @@ interface AndroidEmulator {
   waitForEmulatorReady(avdName: string, timeoutMs?: number, childProcess?: ChildProcess | null): Promise<BootedDevice>;
 }
 
+/**
+ * Infer form factor from AVD device name.
+ * Tablet device names typically contain "tab", "pad", or "nexus_9/10".
+ */
+export function inferAndroidFormFactor(deviceName?: string): FormFactor | undefined {
+  if (!deviceName) {return undefined;}
+  const lower = deviceName.toLowerCase();
+  if (lower.includes("tab") || lower.includes("pad")) {return "tablet";}
+  // Nexus 9 and 10 are tablets
+  if (lower.includes("nexus_9") || lower.includes("nexus_10") || lower.includes("nexus 9") || lower.includes("nexus 10")) {return "tablet";}
+  // Pixel Tablet
+  if (lower.includes("pixel_tablet") || lower.includes("pixel tablet")) {return "tablet";}
+  // Most other devices (pixel, nexus 5/6, etc.) are phones
+  if (lower.includes("pixel") || lower.includes("phone") || lower.includes("nexus")) {return "phone";}
+  return undefined;
+}
+
 const execAsync = async (command: string): Promise<ExecResult> => {
   const result = await promisify(exec)(command);
 
@@ -99,6 +119,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private emulatorPath: string;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
+  private avdConfigReader: AvdConfigReader;
 
   /**
    * Create an AndroidEmulatorClient instance
@@ -106,17 +127,20 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @param spawnFn - spawn function (for testing)
    * @param timer - Timer for delays
    * @param adbFactory - Factory for creating AdbClient instances (for testing)
+   * @param avdConfigReader - Reader for AVD config.ini files (for testing)
    */
   constructor(
     execAsyncFn: ((command: string) => Promise<ExecResult>) | null = null,
     spawnFn: typeof spawn | null = null,
     timer: Timer = defaultTimer,
-    adbFactory: AdbClientFactory = defaultAdbClientFactory
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    avdConfigReader?: AvdConfigReader
   ) {
     this.execAsync = execAsyncFn || execAsync;
     this.spawnFn = spawnFn || spawn;
     this.timer = timer;
     this.adbFactory = adbFactory;
+    this.avdConfigReader = avdConfigReader ?? new FileAvdConfigReader();
     // Only set a fallback emulator path here; proper detection happens lazily
     this.emulatorPath = this.getFallbackEmulatorPath();
   }
@@ -214,6 +238,32 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
     logger.debug(`Emulator not found in any of these paths:\n${potentialPaths.join("\n")}`);
     return null;
+  }
+
+  /**
+   * Enrich a list of DeviceInfo with config.ini metadata (osVersion, screen size, form factor)
+   */
+  private async enrichDeviceInfoList(devices: DeviceInfo[]): Promise<DeviceInfo[]> {
+    const enriched = await Promise.all(
+      devices.map(async device => {
+        try {
+          const config = await this.avdConfigReader.readConfig(device.name);
+          if (!config) {return device;}
+          return {
+            ...device,
+            osVersion: config.osVersion ?? device.osVersion,
+            screenWidth: config.screenWidth ?? device.screenWidth,
+            screenHeight: config.screenHeight ?? device.screenHeight,
+            screenDensity: config.screenDensity ?? device.screenDensity,
+            formFactor: inferAndroidFormFactor(config.deviceName) ?? device.formFactor,
+          };
+        } catch (error) {
+          logger.debug(`Failed to enrich AVD ${device.name}: ${error}`);
+          return device;
+        }
+      })
+    );
+    return enriched;
   }
 
   private isExternalEmulatorMode(): boolean {
@@ -453,17 +503,18 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       const avds = this.listAvdsFromConfig();
       if (avds.length > 0) {
         logger.info(`Loaded ${avds.length} AVDs from config (external emulator mode).`);
-        return avds;
+        return this.enrichDeviceInfoList(avds);
       }
     }
 
     try {
       const result = await this.executeCommand("-list-avds");
-      return result.stdout
+      const devices = result.stdout
         .split("\n")
         .map(line => line.trim())
         .filter(line => line.length > 0)
         .map(name => ({ name, platform: "android", isRunning: false, source: "local" } as DeviceInfo));
+      return this.enrichDeviceInfoList(devices);
     } catch (error) {
       logger.error("Failed to list AVDs:", error);
 
@@ -474,7 +525,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         const avds = this.listAvdsFromConfig();
         if (avds.length > 0) {
           logger.warn("Emulator binary not found; using AVD config fallback.");
-          return avds;
+          return this.enrichDeviceInfoList(avds);
         }
       }
       if (missingEmulator) {

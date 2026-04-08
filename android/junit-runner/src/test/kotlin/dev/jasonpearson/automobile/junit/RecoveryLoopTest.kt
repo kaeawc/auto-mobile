@@ -276,7 +276,7 @@ private class RecoveryFakeDaemonToolClient : DaemonToolClient {
   val responses = mutableListOf<DaemonResponse>()
   val callArgs = mutableListOf<JsonObject>()
   private var callIndex = 0
-  override val sessionUuid: String = "recovery-test-session"
+  override var sessionUuid: String = "recovery-test-session"
 
   override fun callTool(
       toolName: String,

@@ -445,7 +445,7 @@ class TwoDeviceCriticalSectionTestTarget {
 // Shared test infrastructure
 
 private class MultiDeviceCapturingFakeDaemonToolClient : DaemonToolClient {
-  override val sessionUuid: String = "test-session-multidevice"
+  override var sessionUuid: String = "test-session-multidevice"
   var capturedToolName: String? = null
   var capturedArguments: JsonObject? = null
   private val responses = mutableMapOf<String, DaemonResponse>()

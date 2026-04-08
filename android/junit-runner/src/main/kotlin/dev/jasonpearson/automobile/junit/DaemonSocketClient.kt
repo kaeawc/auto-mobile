@@ -385,8 +385,9 @@ internal class DaemonSocketClient(private val socketPath: String) : Closeable, D
   private val writeLock = Any()
   @Volatile private var closed = false
 
-  // Unique session UUID for this client/thread to enable per-thread plan execution locking
-  override val sessionUuid: String = UUID.randomUUID().toString()
+  // Session UUID for per-thread plan execution locking.
+  // Defaults to a random UUID but can be overridden by autolock session ID from startDevice.
+  override var sessionUuid: String = UUID.randomUUID().toString()
 
   private val channel: SocketChannel = connect()
   private val reader: BufferedReader
@@ -621,7 +622,7 @@ internal interface DaemonToolClient {
 
   fun readResource(uri: String, timeoutMs: Long): DaemonResponse
 
-  val sessionUuid: String
+  var sessionUuid: String
 }
 
 internal class DaemonUnavailableException(message: String) : Exception(message)

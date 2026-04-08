@@ -371,11 +371,11 @@ export function registerDeviceTools() {
    */
   function enrichBootedDevicesFromImages(booted: BootedDevice[], images: DeviceInfo[]): BootedDevice[] {
     if (images.length === 0) {return booted;}
-    const imageByName = new Map(images.map(i => [i.name, i]));
     const imageById = new Map(images.filter(i => i.deviceId).map(i => [i.deviceId!, i]));
+    const imageByName = new Map(images.map(i => [i.name, i]));
 
     return booted.map(device => {
-      const image = imageByName.get(device.name) ?? (device.deviceId ? imageById.get(device.deviceId) : undefined);
+      const image = (device.deviceId ? imageById.get(device.deviceId) : undefined) ?? imageByName.get(device.name);
       if (!image) {return device;}
       return {
         ...device,

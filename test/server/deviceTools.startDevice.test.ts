@@ -214,4 +214,39 @@ describe("startDevice handler", () => {
     expect(parsed.platform).toBe("ios");
     expect(parsed.name).toBe("Pixel_7_API_34");
   });
+
+  it("prefers deviceId over name when enriching booted device metadata", async () => {
+    const bootedDuplicateName: BootedDevice = {
+      name: "iPhone 15",
+      platform: "ios",
+      deviceId: "UDID-17-2",
+    };
+
+    fakeDeviceUtils.setBootedDevices("ios", [bootedDuplicateName]);
+    fakeDeviceUtils.setDeviceImages("ios", [
+      {
+        name: "iPhone 15",
+        platform: "ios",
+        deviceId: "UDID-18-0",
+        isRunning: false,
+        osVersion: "18.0",
+      },
+      {
+        name: "iPhone 15",
+        platform: "ios",
+        deviceId: "UDID-17-2",
+        isRunning: true,
+        osVersion: "17.2",
+      },
+    ]);
+    fakeMatcher.setBootedResult({
+      ...bootedDuplicateName,
+      osVersion: "17.2",
+    });
+
+    const result = await callStartDevice({ platform: "ios" });
+
+    expect(result.deviceId).toBe("UDID-17-2");
+    expect(result.osVersion).toBe("17.2");
+  });
 });

@@ -122,10 +122,11 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
-    // Must be a real function (not an IIFE) so process.nextTick is scheduled
-    // when startEmulator calls spawnFn, not when the test defines it.
+    // Use setImmediate so stderr events fire after startEmulator attaches
+    // its listeners (which happens synchronously after spawnFn returns).
+    // No autoAdvance needed: corruption detection rejects before the 5s timeout.
     const spawnFn = ((_cmd: string, _args: string[]) => {
-      process.nextTick(() => {
+      setImmediate(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
         fakeChild.stderr!.emit("data", Buffer.from("WARNING | QEMU main loop exits abnormally with code 1\n"));
         fakeChild.emit("exit", 1);
@@ -143,10 +144,6 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       return createExecResult("");
     };
 
-    // Auto-advance lets the 5s startup timeout fire via the real event loop,
-    // avoiding a race between process.nextTick (stderr/exit) and manual
-    // advanceTime that caused intermittent 5s test timeouts.
-    fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
 
     try {

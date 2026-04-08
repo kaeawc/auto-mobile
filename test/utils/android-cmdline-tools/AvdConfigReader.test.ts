@@ -114,13 +114,14 @@ describe("apiLevelToVersion", () => {
 
 describe("FileAvdConfigReader", () => {
   it("reads config from correct path", async () => {
+    const matchesConfigPath = (p: string) => p.includes("TestAvd.avd") && p.endsWith("config.ini");
     const readFileFn = async (path: string, _encoding: string) => {
-      if (path.includes("TestAvd.avd/config.ini")) {
+      if (matchesConfigPath(path)) {
         return "hw.lcd.width=1080\nimage.sysdir.1=system-images/android-34/google_apis/arm64-v8a/";
       }
       throw new Error("File not found");
     };
-    const existsFn = (path: string) => path.includes("TestAvd.avd/config.ini");
+    const existsFn = (path: string) => matchesConfigPath(path);
 
     const reader = new FileAvdConfigReader(readFileFn, existsFn, "/fake/avd");
     const config = await reader.readConfig("TestAvd");

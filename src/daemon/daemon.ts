@@ -79,7 +79,9 @@ export class Daemon {
 
   constructor(options: DaemonOptions = {}, installedAppsRepository?: InstalledAppsStore, timer: Timer = defaultTimer) {
     this.port = options.port || DEFAULT_DAEMON_PORT;
-    this.host = options.host || "localhost";
+    // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
+    // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
+    this.host = options.host || "127.0.0.1";
     this.debug = options.debug || false;
     this.daemonSessionId = randomUUID();
     this.timer = timer;
@@ -840,21 +842,26 @@ export class Daemon {
    * Waits for device discovery with configurable timeout
    */
   private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<void>(resolve => {
-      const timer = defaultTimer.setTimeout(() => {
+      timeoutHandle = defaultTimer.setTimeout(() => {
         logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
         resolve();
       }, timeoutMs);
-      // Allow process to exit even if this timer is pending
-      if (typeof (timer as { unref?: () => void }).unref === "function") {
-        (timer as { unref: () => void }).unref();
+      if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
+        (timeoutHandle as { unref: () => void }).unref();
       }
     });
 
     const initPromise = this.initializeDevicePool();
 
-    // Race between initialization and timeout
-    await Promise.race([initPromise, timeoutPromise]);
+    try {
+      await Promise.race([initPromise, timeoutPromise]);
+    } finally {
+      if (timeoutHandle !== undefined) {
+        defaultTimer.clearTimeout(timeoutHandle);
+      }
+    }
 
     // Log final device pool status
     const deviceCount = this.devicePool.getTotalDeviceCount();

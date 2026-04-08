@@ -655,6 +655,7 @@ function unregisterDeviceAppResource(deviceId: string): void {
   registeredDeviceResources.delete(deviceId);
   appCacheByDeviceId.delete(deviceId);
   appsQueryUrisByDeviceId.delete(deviceId);
+  invalidateMetadataCacheForDevice(deviceId);
 }
 
 export async function syncInstalledAppResources(): Promise<void> {
@@ -706,15 +707,19 @@ export async function notifyInstalledAppResourceUpdated(deviceId: string): Promi
   ]);
 }
 
+function invalidateMetadataCacheForDevice(deviceId: string): void {
+  const prefix = `${deviceId}:`;
+  for (const key of appMetadataCacheByKey.keys()) {
+    if (key.startsWith(prefix)) {
+      appMetadataCacheByKey.delete(key);
+    }
+  }
+}
+
 export function invalidateInstalledAppsCache(deviceId?: string): void {
   if (deviceId) {
     appCacheByDeviceId.delete(deviceId);
-    const prefix = `${deviceId}:`;
-    for (const key of appMetadataCacheByKey.keys()) {
-      if (key.startsWith(prefix)) {
-        appMetadataCacheByKey.delete(key);
-      }
-    }
+    invalidateMetadataCacheForDevice(deviceId);
     return;
   }
   appCacheByDeviceId.clear();
@@ -742,6 +747,12 @@ function createIosMetadataSource(device: BootedDevice): IosAppMetadataSource {
   return {
     listApps: (deviceId?: string) => simctl.listApps(deviceId),
     getPhysicalDeviceAppInfo: async (deviceId: string, bundleId: string) => {
+      // devicectl requires macOS — in Docker/Linux containers physical device
+      // metadata is not available (host control only exposes bundle hash, not
+      // full app info). Match DeviceAppInspector's platform guard.
+      if (process.platform !== "darwin") {
+        return null;
+      }
       const tempDir = await nodeFs.mkdtemp(nodeJoin(nodeTmpdir(), "automobile-metadata-"));
       const jsonPath = nodeJoin(tempDir, "apps.json");
       try {

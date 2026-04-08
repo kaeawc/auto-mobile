@@ -29,6 +29,11 @@ const mockExecAsync = async (_command: string): Promise<ExecResult> => {
   return createExecResult("", "");
 };
 
+/** Prevent ensureEmulatorPath from running real filesystem/shell detection */
+function skipEmulatorPathDetection(client: AndroidEmulatorClient): void {
+  (client as any).ensureEmulatorPath = async () => "emulator";
+}
+
 describe("AndroidEmulatorClient detectCorruptImage", () => {
   let client: AndroidEmulatorClient;
 
@@ -122,8 +127,6 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
   test("rejects with actionable error when qcow2 corruption detected in stderr during startup", async () => {
     const fakeChild = createFakeChildProcess();
 
-    // Must be a real function (not an IIFE) so process.nextTick is scheduled
-    // when startEmulator calls spawnFn, not when the test defines it.
     const spawnFn = ((_cmd: string, _args: string[]) => {
       process.nextTick(() => {
         fakeChild.stderr!.emit("data", Buffer.from("qcow2: Image is corrupt; cannot be opened read/write\n"));
@@ -137,17 +140,12 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
       if (command.includes("-list-avds")) {
         return createExecResult("Pixel_9_Pro\n");
       }
-      if (command.includes("adb")) {
-        return createExecResult("");
-      }
       return createExecResult("");
     };
 
-    // Auto-advance lets the 5s startup timeout fire via the real event loop,
-    // avoiding a race between process.nextTick (stderr/exit) and manual
-    // advanceTime that caused intermittent 5s test timeouts.
     fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -179,6 +177,7 @@ describe("AndroidEmulatorClient startEmulator corrupt image integration", () => 
 
     fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, spawnFn, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
 
     try {
       await client.startEmulator("Pixel_9_Pro");
@@ -223,6 +222,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
 
     fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
 
     // Schedule exit event after waitForEmulatorReady registers its handlers
     setImmediate(() => {
@@ -251,6 +251,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
 
     fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
 
     setImmediate(() => {
       fakeChild.stderr!.emit("data", Buffer.from("unknown error\n"));
@@ -275,6 +276,7 @@ describe("AndroidEmulatorClient waitForEmulatorReady with child process monitori
 
     fakeTimer.enableAutoAdvance();
     const client = new AndroidEmulatorClient(execAsync, null, fakeTimer, fakeFactory);
+    skipEmulatorPathDetection(client);
 
     // Without child process, should just timeout normally
     try {

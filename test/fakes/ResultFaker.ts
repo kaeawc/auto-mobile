@@ -295,7 +295,7 @@ export class ResultFaker {
   static installAppResult(overrides: Partial<InstallAppResult> = {}): InstallAppResult {
     return {
       success: overrides.success ?? true,
-      apkPath: overrides.apkPath ?? `/path/to/${faker.system.fileName({ extensionCount: 0 })}.apk`,
+      artifactPath: overrides.artifactPath ?? `/path/to/${faker.system.fileName({ extensionCount: 0 })}.apk`,
       observation: overrides.observation ?? this.observeResult(),
       error: overrides.error
     };

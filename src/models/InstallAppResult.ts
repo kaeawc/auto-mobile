@@ -5,10 +5,10 @@ import { ObserveResult } from "./ObserveResult";
  */
 export interface InstallAppResult {
   success: boolean;
-  apkPath: string;
+  artifactPath: string;
   /** Android user ID where the app was installed (0 for primary user, 10+ for work profiles) */
   userId?: number;
-  /** Package name detected for the installed APK, when available */
+  /** Package name or bundle ID detected for the installed app, when available */
   packageName?: string;
   /** True if installation replaced an existing package */
   upgrade?: boolean;

@@ -1670,14 +1670,14 @@
   },
   {
     "name": "installApp",
-    "description": "Install APK file",
+    "description": "Install app on device (.apk for Android, .app for iOS simulator, .ipa for iOS physical device)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
-        "apkPath": {
+        "artifactPath": {
           "type": "string",
-          "description": "APK file path"
+          "description": "Path to app artifact (.apk for Android, .app bundle for iOS simulator, .ipa for iOS physical device)"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -1697,7 +1697,7 @@
         }
       },
       "required": [
-        "apkPath"
+        "artifactPath"
       ],
       "additionalProperties": false
     }

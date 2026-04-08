@@ -79,7 +79,7 @@ const normalizeDevicePath = (rawPath: string): string => {
   return rawPath;
 };
 
-const findBundleEntry = (data: unknown, bundleId: string): Record<string, unknown> | null => {
+export const findBundleEntry = (data: unknown, bundleId: string): Record<string, unknown> | null => {
   if (!data || typeof data !== "object") {
     return null;
   }
@@ -94,7 +94,7 @@ const findBundleEntry = (data: unknown, bundleId: string): Record<string, unknow
   }
 
   const record = data as Record<string, unknown>;
-  const idValue = record.bundleIdentifier ?? record.bundleID ?? record.bundleId ?? record.BUNDLE_IDENTIFIER;
+  const idValue = record.bundleIdentifier ?? record.bundleID ?? record.bundleId ?? record.CFBundleIdentifier ?? record.BUNDLE_IDENTIFIER;
   if (typeof idValue === "string" && idValue === bundleId) {
     return record;
   }

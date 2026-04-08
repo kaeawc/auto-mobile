@@ -25,7 +25,7 @@ export const listDevicesSchema = z.object({
   platform: platformSchema.optional()
 });
 
-export const startDeviceSchema = z.object({
+const startDeviceParametersSchema = z.object({
   platform: platformSchema,
   minOsVersion: z.string().optional().describe("Minimum OS version, inclusive (e.g., '14', '17.2')"),
   maxOsVersion: z.string().optional().describe("Maximum OS version, inclusive (e.g., '15', '18.0')"),
@@ -39,6 +39,25 @@ export const startDeviceSchema = z.object({
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
   timeoutMs: z.number().optional().describe("Boot timeout in ms"),
 });
+
+export const startDeviceSchema = z.preprocess((input) => {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    return input;
+  }
+
+  const parsed = input as Record<string, unknown>;
+  const legacyDevice = parsed.device;
+  if (!legacyDevice || typeof legacyDevice !== "object" || Array.isArray(legacyDevice)) {
+    return input;
+  }
+
+  // Accept both the legacy { device: {...} } payload and the new top-level shape.
+  // Top-level fields win so mixed callers can override nested values intentionally.
+  return {
+    ...legacyDevice as Record<string, unknown>,
+    ...parsed,
+  };
+}, startDeviceParametersSchema);
 
 export const killDeviceSchema = z.object({
   device: z.object({

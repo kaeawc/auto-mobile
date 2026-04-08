@@ -31,6 +31,7 @@ export interface Session {
   expiresAt: number;           // When session will expire (for cleanup)
   cacheData: SessionCacheData; // Cached data for this session
   lastHeartbeat: number;       // Timestamp of last heartbeat
+  sessionTimeoutMs: number;    // Idle timeout used when extending this session
   heartbeatTimeoutMs: number;  // Heartbeat timeout for this session
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
 }
@@ -97,15 +98,17 @@ export class SessionManager {
     }
 
     const now = this.timer.now();
+    const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
     const session: Session = {
       sessionId,
       assignedDevice,
       platform,
       createdAt: now,
       lastUsedAt: now,
-      expiresAt: now + (timeoutMs ?? this.SESSION_TIMEOUT_MS),
+      expiresAt: now + sessionTimeoutMs,
       cacheData: {},
       lastHeartbeat: now,
+      sessionTimeoutMs,
       heartbeatTimeoutMs: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
       hasReceivedHeartbeat: false,
     };
@@ -158,8 +161,9 @@ export class SessionManager {
     if (existing) {
       logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
       // Update last used time
-      existing.lastUsedAt = this.timer.now();
-      existing.expiresAt = this.timer.now() + this.SESSION_TIMEOUT_MS;
+      const now = this.timer.now();
+      existing.lastUsedAt = now;
+      existing.expiresAt = now + existing.sessionTimeoutMs;
       return existing;
     }
 
@@ -284,7 +288,7 @@ export class SessionManager {
     const now = this.timer.now();
     session.lastHeartbeat = now;
     session.lastUsedAt = now;
-    session.expiresAt = now + this.SESSION_TIMEOUT_MS;
+    session.expiresAt = now + session.sessionTimeoutMs;
     session.hasReceivedHeartbeat = true;
   }
 

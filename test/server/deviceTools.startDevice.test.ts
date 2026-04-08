@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { setDeviceToolsDependencies, resetDeviceToolsDependencies, registerDeviceTools } from "../../src/server/deviceTools";
+import { setDeviceToolsDependencies, resetDeviceToolsDependencies, registerDeviceTools, startDeviceSchema } from "../../src/server/deviceTools";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { ToolRegistry } from "../../src/server/toolRegistry";
@@ -185,5 +185,33 @@ describe("startDevice handler", () => {
     await expect(
       callStartDevice({ platform: "ios" })
     ).rejects.toThrow(/UDID/);
+  });
+
+  it("accepts legacy nested device payloads", async () => {
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({
+      device: {
+        name: "Pixel_7_API_34",
+        platform: "android",
+      },
+    });
+
+    expect(result.deviceId).toBe("emulator-5554");
+    expect(result.source).toBe("booted");
+  });
+
+  it("prefers top-level values over legacy nested device payload values", () => {
+    const parsed = startDeviceSchema.parse({
+      platform: "ios",
+      device: {
+        platform: "android",
+        name: "Pixel_7_API_34",
+      },
+    });
+
+    expect(parsed.platform).toBe("ios");
+    expect(parsed.name).toBe("Pixel_7_API_34");
   });
 });

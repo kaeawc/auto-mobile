@@ -4,19 +4,36 @@ import { UninstallAppResult } from "../../models/UninstallAppResult";
 import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
 
-// TODO: Create MCP tool call that exposes this functionality
+export interface DeviceAppUninstaller {
+  uninstallApp(deviceUdid: string, bundleId: string, isSimulator?: boolean): Promise<void>;
+}
+
 export class UninstallApp {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private simctl: SimCtlClient;
+  private deviceAppUninstaller: DeviceAppUninstaller;
 
-  constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory, simctl: SimCtlClient | null = null) {
+  private static readonly SIMULATOR_UUID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+
+  constructor(
+    device: BootedDevice,
+    adbFactory: AdbClientFactory = defaultAdbClientFactory,
+    simctl: SimCtlClient | null = null,
+    deviceAppUninstaller: DeviceAppUninstaller | null = null
+  ) {
     this.device = device;
     this.adb = adbFactory.create(device);
     this.simctl = simctl || new SimCtlClient(device);
+    this.deviceAppUninstaller = deviceAppUninstaller || new DeviceAppInspector();
+  }
+
+  private isSimulator(): boolean {
+    return UninstallApp.SIMULATOR_UUID_PATTERN.test(this.device.deviceId);
   }
 
   /**
@@ -62,8 +79,10 @@ export class UninstallApp {
    */
   private async executeiOS(bundleId: string): Promise<UninstallAppResult> {
     try {
+      const simulator = this.isSimulator();
+
       // Check if app is installed
-      const listApps = new ListInstalledApps(this.device);
+      const listApps = new ListInstalledApps(this.device, null, this.simctl);
       const installed = (await listApps.execute()).find(app => app === bundleId) !== undefined;
 
       if (!installed) {
@@ -76,15 +95,16 @@ export class UninstallApp {
       }
 
       // Terminate app if it's running before uninstalling
-      // TODO: query if the app was running
-      try {
-        await this.simctl.terminateApp(bundleId, this.device.deviceId);
-      } catch (error) {
-        logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+      if (simulator) {
+        try {
+          await this.simctl.terminateApp(bundleId, this.device.deviceId);
+        } catch (error) {
+          logger.warn(`[UninstallApp] Failed to terminate iOS app before uninstall: ${error}`);
+        }
       }
 
-      // Uninstall the app
-      await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      // Uninstall the app via simctl (simulator) or devicectl (physical)
+      await this.deviceAppUninstaller.uninstallApp(this.device.deviceId, bundleId, simulator);
 
       // Verify the app was uninstalled
       const isStillInstalled = (await listApps.execute()).find(app => app === bundleId) !== undefined;
@@ -146,8 +166,8 @@ export class UninstallApp {
         }
       }
 
-      // Check if app is running and terminate if needed
-      const listApps = new ListInstalledApps(this.device);
+      // Check if app is installed
+      const listApps = new ListInstalledApps(this.device, this.adb);
 
       const installed = (await listApps.execute()).find(app => app === packageName) !== undefined;
 

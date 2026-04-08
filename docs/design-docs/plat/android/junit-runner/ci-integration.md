@@ -487,9 +487,11 @@ replace the `adb wait-for-device` block with a step that starts your emulator. E
 
 ## Pre-release AutoMobile daemon (consumer app / GitLab CI)
 
-Use this when you need a **fixed or unreleased** auto-mobile-mcp build (for example a daemon **loopback / `ConnectionRefused`** fix) **before** it appears on npm as `@kaeawc/auto-mobile`.
+Use this when you need a **fixed or unreleased** AutoMobile build (for example a daemon **loopback / `ConnectionRefused`** fix) **before** it appears on npm as `@kaeawc/auto-mobile`.
 
 The JUnit runner can start the daemon from a **local checkout** instead of `bunx @kaeawc/auto-mobile@latest` when **`dist/src/index.js`** exists in that tree.
+
+**Branch with the loopback fix (until merge + npm release):** clone **`https://github.com/kaeawc/auto-mobile.git`** at **`ryebread/connection_refused_in_ci_fix`**. After that lands on **`main`** and is published, switch the clone to **`--branch main`** (or drop this section and use npm only).
 
 ### 1. Add the AutoMobile repo to your pipeline
 
@@ -497,8 +499,8 @@ Pick one:
 
 | Approach | Outline |
 |----------|---------|
-| **Git submodule** | Add `auto-mobile-mcp` as a submodule at a fixed commit; clone recursively in CI. |
-| **Clone step** | `git clone --depth 1 --branch <branch> <url> ../auto-mobile-mcp` (or a known SHA). |
+| **Git submodule** | Add the repo as a submodule pinned to the commit you need; clone recursively in CI. |
+| **Clone step** | `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp` (or another branch / SHA once merged). |
 | **CI job artifact** | Another pipeline builds AutoMobile and passes `dist/` + `package.json` + lockfile as an artifact; extract beside your app. |
 
 The path you will pass to the runner must be the **repository root** (the directory that contains **`dist/src/index.js`** after build).
@@ -533,13 +535,13 @@ variables:
 android-ui-tests:
   before_script:
     # Omit if you use a submodule and fetch it before this job.
-    - test -d auto-mobile-mcp || git clone --depth 1 --branch main https://github.com/kaeawc/auto-mobile-mcp.git auto-mobile-mcp
+    - test -d auto-mobile-mcp || git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp
     - cd "${CI_PROJECT_DIR}/auto-mobile-mcp" && bun install && bun run build
   script:
     - ./gradlew :your-module:connectedCheck   # or your AutoMobile JUnit task
 ```
 
-Adjust branch/URL, paths, Gradle task name, and image (Bun + Android SDK + emulator or ADB session) to match your project.
+Use **`main`** instead of **`ryebread/connection_refused_in_ci_fix`** after the fix is merged. Adjust paths, Gradle task name, and image (Bun + Android SDK + emulator or ADB session) to match your project.
 
 ### 4. Run your existing UI test task
 

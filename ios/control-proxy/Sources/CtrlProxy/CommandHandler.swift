@@ -12,17 +12,23 @@ public class CommandHandler: CommandHandling {
     private let gesturePerformer: GesturePerforming
     private let perfProvider: PerfProvider
     private let storageInspector: StorageInspecting?
+    private let sdkHierarchyClient: (any SdkHierarchyFetching)?
+    private let sdkHierarchyCache: (any SdkHierarchyCaching)?
 
     public init(
         elementLocator: ElementLocating,
         gesturePerformer: GesturePerforming,
         perfProvider: PerfProvider = PerfProvider.instance,
-        storageInspector: StorageInspecting? = nil
+        storageInspector: StorageInspecting? = nil,
+        sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
         self.perfProvider = perfProvider
         self.storageInspector = storageInspector
+        self.sdkHierarchyClient = sdkHierarchyClient
+        self.sdkHierarchyCache = sdkHierarchyCache
     }
 
     /// Factory for testing - allows injecting fakes
@@ -30,7 +36,9 @@ public class CommandHandler: CommandHandling {
         elementLocator: ElementLocating,
         gesturePerformer: GesturePerforming,
         perfProvider: PerfProvider,
-        storageInspector: StorageInspecting? = nil
+        storageInspector: StorageInspecting? = nil,
+        sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
     )
         -> CommandHandler
     {
@@ -38,7 +46,9 @@ public class CommandHandler: CommandHandling {
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
             perfProvider: perfProvider,
-            storageInspector: storageInspector
+            storageInspector: storageInspector,
+            sdkHierarchyClient: sdkHierarchyClient,
+            sdkHierarchyCache: sdkHierarchyCache
         )
     }
 
@@ -178,12 +188,17 @@ public class CommandHandler: CommandHandling {
             throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")
         }
 
+        // Merge with SDK hierarchy: prefer cached (fast), fall back to fresh pull if no cache
+        let sdkHierarchy: SdkViewHierarchy? = sdkHierarchyCache?.latest
+            ?? sdkHierarchyClient?.fetchFreshHierarchy()
+        let enriched = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+
         // Get accumulated timing for this operation
         let perfTimings = perfProvider.flush()
 
         return HierarchyUpdateResponse(
             requestId: request.requestId,
-            data: hierarchy,
+            data: enriched,
             perfTiming: perfTimings?.first
         )
     }

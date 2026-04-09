@@ -196,3 +196,25 @@ public protocol CommandHandling {
     /// Handle a request and return response
     func handle(_ request: WebSocketRequest) -> Any
 }
+
+// MARK: - SDK Hierarchy Protocols
+
+/// Protocol for fetching SDK view hierarchy on demand from the target app.
+public protocol SdkHierarchyFetching {
+    /// Fetch the latest cached hierarchy (fast).
+    func fetchHierarchy() -> SdkViewHierarchy?
+    /// Request a fresh hierarchy walk (slower).
+    func fetchFreshHierarchy() -> SdkViewHierarchy?
+    /// Whether the SDK hierarchy server is reachable.
+    func isAvailable() -> Bool
+}
+
+/// Protocol for accessing the cached SDK hierarchy.
+public protocol SdkHierarchyCaching {
+    /// The latest cached SDK view hierarchy, or nil if none received yet.
+    var latest: SdkViewHierarchy? { get }
+    /// Update the cached hierarchy.
+    func update(_ hierarchy: SdkViewHierarchy)
+    /// Clear the cached hierarchy.
+    func clear()
+}

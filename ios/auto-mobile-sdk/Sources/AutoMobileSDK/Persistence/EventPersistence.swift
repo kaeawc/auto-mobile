@@ -147,6 +147,8 @@ final class FileEventPersistence: EventPersisting, @unchecked Sendable {
             return try? decoder.decode(SdkInteractionEvent.self, from: data)
         case .storageChanged:
             return try? decoder.decode(SdkStorageChangedEvent.self, from: data)
+        case .viewHierarchy:
+            return try? decoder.decode(SdkViewHierarchyEvent.self, from: data)
         }
     }
 }

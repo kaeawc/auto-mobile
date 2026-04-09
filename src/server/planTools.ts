@@ -73,7 +73,8 @@ const executePlanResultSchema = z.object({
     stepIndex: z.number().int(),
     tool: z.string(),
     error: z.string(),
-    device: z.string().optional()
+    device: z.string().optional(),
+    failureObservation: z.any().optional()
   }).optional(),
   error: z.string().optional(),
   platform: z.enum(["android", "ios"]).describe("Target platform").optional(),

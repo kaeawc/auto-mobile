@@ -1,3 +1,5 @@
+import type { FailureObservationSummary } from "./FailureObservation";
+
 export interface ExecutePlanStepDebugInfo {
   step: string;
   status: "completed" | "failed" | "skipped";
@@ -22,6 +24,8 @@ export interface ExecutePlanResult {
     stepIndex: number;
     tool: string;
     error: string;
+    device?: string;
+    failureObservation?: FailureObservationSummary;
   };
   error?: string;
   platform?: "android" | "ios";

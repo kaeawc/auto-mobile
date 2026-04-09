@@ -14,6 +14,8 @@ import { throwIfAborted } from "../toolUtils";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
+import type { FailureObservationSummary } from "../../models/FailureObservation";
+import { summarizeObserveResultForFailure } from "./summarizeFailureObservation";
 
 /**
  * Interface for plan execution
@@ -92,6 +94,97 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
 
     return response;
+  }
+
+  private parseStructuredToolPayload(response: unknown): Record<string, unknown> | null {
+    if (!response || typeof response !== "object") {
+      return null;
+    }
+    const r = response as Record<string, unknown>;
+    if (r.structuredContent && typeof r.structuredContent === "object") {
+      return r.structuredContent as Record<string, unknown>;
+    }
+    const content = r.content;
+    if (Array.isArray(content) && content.length > 0) {
+      const first = content[0] as Record<string, unknown>;
+      if (first?.type === "text" && typeof first.text === "string") {
+        try {
+          const parsed = JSON.parse(first.text) as unknown;
+          if (parsed && typeof parsed === "object") {
+            return parsed as Record<string, unknown>;
+          }
+        } catch {
+          return null;
+        }
+      }
+    }
+    return null;
+  }
+
+  private async captureFailureObservation(
+    platform: string,
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<FailureObservationSummary | undefined> {
+    throwIfAborted(signal);
+    const observeTool = ToolRegistry.getTool("observe");
+    if (!observeTool) {
+      return undefined;
+    }
+    try {
+      const enhancedParams: Record<string, unknown> = { platform };
+      const shouldSuppressDeviceId = !!(sessionUuid && DaemonState.getInstance().isInitialized());
+      if (deviceId && !shouldSuppressDeviceId) {
+        enhancedParams.deviceId = deviceId;
+      }
+      if (sessionUuid) {
+        enhancedParams.sessionUuid = sessionUuid;
+      }
+      const parsedParams = observeTool.schema.parse(enhancedParams);
+      const response = await observeTool.handler(parsedParams, undefined, signal);
+      const raw = this.parseStructuredToolPayload(response);
+      if (!raw) {
+        return { capturedAtMs: Date.now(), observeError: "observe returned empty payload" };
+      }
+      return summarizeObserveResultForFailure(raw);
+    } catch (error) {
+      return {
+        capturedAtMs: Date.now(),
+        observeError: error instanceof Error ? error.message : String(error)
+      };
+    }
+  }
+
+  private async buildFailureObservationContext(
+    failedTool: string,
+    failureToolResponse: unknown | undefined,
+    platform: string | undefined,
+    deviceId: string | undefined,
+    sessionUuid: string | undefined,
+    signal: AbortSignal | undefined
+  ): Promise<FailureObservationSummary | undefined> {
+    try {
+      if (failedTool === "observe" && failureToolResponse !== undefined) {
+        const raw = this.parseStructuredToolPayload(failureToolResponse);
+        if (raw) {
+          return summarizeObserveResultForFailure(raw);
+        }
+        return {
+          capturedAtMs: Date.now(),
+          observeError: "Could not parse observe tool response"
+        };
+      }
+      if (!platform) {
+        return undefined;
+      }
+      return await this.captureFailureObservation(platform, deviceId, sessionUuid, signal);
+    } catch (error) {
+      return {
+        capturedAtMs: Date.now(),
+        observeError: error instanceof Error ? error.message : String(error)
+      };
+    }
   }
 
   /**
@@ -263,6 +356,14 @@ export class DefaultPlanExecutor implements PlanExecutor {
           if (toolResult && typeof toolResult === "object" && "success" in toolResult && toolResult.success === false) {
             const errorMsg = toolResult.error || "Unknown error";
             logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
+            const failureObservation = await this.buildFailureObservationContext(
+              step.tool,
+              response,
+              platform,
+              deviceId,
+              sessionUuid,
+              signal
+            );
             debugSteps.push({
               step: `Execute step ${i + 1}: ${step.tool}`,
               status: "failed",
@@ -271,7 +372,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 params: step.params,
                 error: String(errorMsg),
                 // Include debug info from tool response if available
-                ...(toolResult.debug ? { toolDebug: toolResult.debug } : {})
+                ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
+                ...(failureObservation ? { failureObservation } : {})
               }
             });
 
@@ -282,7 +384,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
               failedStep: {
                 stepIndex: i,
                 tool: step.tool,
-                error: String(errorMsg)
+                error: String(errorMsg),
+                ...(failureObservation ? { failureObservation } : {})
               },
               debug: {
                 executionTimeMs: this.timer.now() - startTime,
@@ -304,13 +407,22 @@ export class DefaultPlanExecutor implements PlanExecutor {
           logger.info(`[PLAN_STEP_${i + 1}] Successfully completed. Total executed: ${executedSteps}/${plan.steps.length}`);
         } catch (error) {
           logger.error(`[PLAN_STEP_${i + 1}] EXCEPTION in ${step.tool}: ${error}`);
+          const failureObservation = await this.buildFailureObservationContext(
+            step.tool,
+            undefined,
+            platform,
+            deviceId,
+            sessionUuid,
+            signal
+          );
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,
             status: "failed",
             durationMs: this.timer.now() - stepStartTime,
             details: {
               params: step.params,
-              error: `${error}`
+              error: `${error}`,
+              ...(failureObservation ? { failureObservation } : {})
             }
           });
 
@@ -321,7 +433,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
             failedStep: {
               stepIndex: i,
               tool: step.tool,
-              error: `${error}`
+              error: `${error}`,
+              ...(failureObservation ? { failureObservation } : {})
             },
             debug: {
               executionTimeMs: this.timer.now() - startTime,
@@ -404,6 +517,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           stepIndex: number;
           tool: string;
           error: string;
+          failureObservation?: FailureObservationSummary;
         }
       | undefined;
 
@@ -439,6 +553,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               trackIndex: result.failedStep.trackIndex,
               tool: result.failedStep.tool,
               error: result.failedStep.error,
+              failureObservation: result.failedStep.failureObservation,
             }
             : undefined,
         };
@@ -457,6 +572,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               stepIndex: result.failedStep.stepIndex,
               tool: result.failedStep.tool,
               error: result.failedStep.error,
+              failureObservation: result.failedStep.failureObservation,
             };
           }
 
@@ -557,6 +673,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           tool: firstFailure.tool,
           error: firstFailure.error,
           device: firstFailure.device,
+          failureObservation: firstFailure.failureObservation,
         }
         : undefined,
       perDeviceResults,
@@ -583,6 +700,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       trackIndex: number;
       tool: string;
       error: string;
+      failureObservation?: FailureObservationSummary;
     };
   }> {
     let executedSteps = 0;
@@ -666,6 +784,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
             const errorMsg = "error" in checkResult ? String(checkResult.error) : "Tool execution failed";
             logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
 
+            const failureObservation = await this.buildFailureObservationContext(
+              step.tool,
+              response,
+              platform,
+              deviceId,
+              sessionUuid,
+              signal
+            );
+
             return {
               success: false,
               executedSteps,
@@ -675,6 +802,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 trackIndex,
                 tool: step.tool,
                 error: errorMsg,
+                ...(failureObservation ? { failureObservation } : {}),
               },
             };
           }
@@ -687,6 +815,15 @@ export class DefaultPlanExecutor implements PlanExecutor {
           const errorMessage = error instanceof Error ? error.message : String(error);
           logger.error(`[PARALLEL_EXEC][${device}] Step execution error: ${errorMessage}`);
 
+          const failureObservation = await this.buildFailureObservationContext(
+            step.tool,
+            undefined,
+            platform,
+            deviceId,
+            sessionUuid,
+            signal
+          );
+
           return {
             success: false,
             executedSteps,
@@ -696,6 +833,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               trackIndex,
               tool: step.tool,
               error: errorMessage,
+              ...(failureObservation ? { failureObservation } : {}),
             },
           };
         }

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { HybridVideoCaptureBackend } from "../../../src/features/video/HybridVideoCaptureBackend";
 import type {
   RecordingHandle,
@@ -45,7 +45,12 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
   let backend: HybridVideoCaptureBackend;
   let baseConfig: VideoCaptureConfig;
 
+  afterEach(function() {
+    delete process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE;
+  });
+
   beforeEach(function() {
+    delete process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE;
     ffmpegBackend = new FakeBackend("ffmpeg");
     platformBackend = new FakeBackend("platform");
     backend = new HybridVideoCaptureBackend(ffmpegBackend, platformBackend);
@@ -82,6 +87,19 @@ describe("HybridVideoCaptureBackend - Unit Tests", function() {
 
     expect(platformBackend.stopCalls.length).toBe(1);
     expect(ffmpegBackend.stopCalls.length).toBe(0);
+  });
+
+  test("routes Android recording to ffmpeg backend when AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE=1", async function() {
+    process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE = "1";
+    const handle = await backend.start(baseConfig);
+
+    expect(ffmpegBackend.startCalls.length).toBe(1);
+    expect(platformBackend.startCalls.length).toBe(0);
+
+    await backend.stop(handle);
+
+    expect(ffmpegBackend.stopCalls.length).toBe(1);
+    expect(platformBackend.stopCalls.length).toBe(0);
   });
 
   test("routes iOS recording to ffmpeg backend", async function() {

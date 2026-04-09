@@ -1,4 +1,5 @@
 import { ActionableError, type BootedDevice } from "../../models";
+import { logger } from "../../utils/logger";
 import type {
   RecordingHandle,
   RecordingResult,
@@ -61,6 +62,18 @@ export class HybridVideoCaptureBackend implements VideoCaptureBackend {
   private selectBackend(device: BootedDevice): VideoCaptureBackend {
     if (device.platform === "ios") {
       return this.ffmpegBackend;
+    }
+
+    if (device.platform === "android") {
+      const useFfmpegPipe =
+        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "1" ||
+        process.env.AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE === "true";
+      if (useFfmpegPipe) {
+        logger.info(
+          "[VideoCapture] Android: using exec-out screenrecord → ffmpeg (AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE)"
+        );
+        return this.ffmpegBackend;
+      }
     }
 
     return this.platformBackend;

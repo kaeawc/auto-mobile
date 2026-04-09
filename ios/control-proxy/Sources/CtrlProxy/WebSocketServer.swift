@@ -42,6 +42,7 @@ public class WebSocketServer: WebSocketServing {
     private let port: UInt16
     private let commandHandler: CommandHandler
     private let perfProvider: PerfProvider
+    private let sdkHierarchyCache: SdkHierarchyCache?
     private let queue = DispatchQueue(label: "com.ctrlproxy.server")
 
     public var isRunning: Bool {
@@ -51,11 +52,13 @@ public class WebSocketServer: WebSocketServing {
     public init(
         port: UInt16 = 8765,
         commandHandler: CommandHandler,
-        perfProvider: PerfProvider = PerfProvider.instance
+        perfProvider: PerfProvider = PerfProvider.instance,
+        sdkHierarchyCache: SdkHierarchyCache? = nil
     ) {
         self.port = port
         self.commandHandler = commandHandler
         self.perfProvider = perfProvider
+        self.sdkHierarchyCache = sdkHierarchyCache
     }
 
     /// Starts the server
@@ -115,7 +118,8 @@ public class WebSocketServer: WebSocketServing {
         let connection = WebSocketConnection(
             id: connectionId,
             connection: nwConnection,
-            queue: queue
+            queue: queue,
+            sdkHierarchyCache: sdkHierarchyCache
         ) { [weak self] message in
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
@@ -288,18 +292,21 @@ class WebSocketConnection {
     private let queue: DispatchQueue
     private let onMessage: (Data) -> Void
     private let onClose: () -> Void
+    private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private var isWebSocketUpgraded = false
 
     init(
         id: Int,
         connection: NWConnection,
         queue: DispatchQueue,
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
         onMessage: @escaping (Data) -> Void,
         onClose: @escaping () -> Void
     ) {
         self.id = id
         self.connection = connection
         self.queue = queue
+        self.sdkHierarchyCache = sdkHierarchyCache
         self.onMessage = onMessage
         self.onClose = onClose
     }
@@ -382,6 +389,9 @@ class WebSocketConnection {
             let body = String(request[bodyRange.upperBound...])
             if let bodyData = body.data(using: .utf8), !bodyData.isEmpty {
                 SdkEventBuffer.shared.append(bodyData)
+                if let cache = sdkHierarchyCache {
+                    SdkHierarchyExtractor.extractIfPresent(from: bodyData, into: cache)
+                }
                 print("[CtrlProxy] Received SDK event batch (\(bodyData.count) bytes)")
             } else {
                 print("[CtrlProxy] POST /sdk-events: empty body after headers")

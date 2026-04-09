@@ -22,6 +22,7 @@ public enum SdkEventType: String, Codable, Sendable {
     case broadcast
     case interaction
     case storageChanged = "storage_changed"
+    case viewHierarchy = "view_hierarchy"
 }
 
 // MARK: - Event Types
@@ -319,6 +320,21 @@ public struct SdkViewBodySnapshotEvent: SdkEvent {
     ) {
         self.timestamp = timestamp
         self.snapshots = snapshots
+    }
+}
+
+/// A view hierarchy snapshot event pushed when the in-process UIView tree changes.
+public struct SdkViewHierarchyEvent: SdkEvent {
+    public private(set) var eventType: SdkEventType = .viewHierarchy
+    public let timestamp: Int64
+    public let hierarchy: SdkViewHierarchy
+
+    public init(
+        timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000),
+        hierarchy: SdkViewHierarchy
+    ) {
+        self.timestamp = timestamp
+        self.hierarchy = hierarchy
     }
 }
 

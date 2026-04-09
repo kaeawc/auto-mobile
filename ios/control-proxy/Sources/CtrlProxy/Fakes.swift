@@ -613,6 +613,143 @@ public class FakeWebSocketServer: WebSocketServing {
     }
 }
 
+// MARK: - FakeSdkHierarchyFetcher
+
+/// Fake implementation of SdkHierarchyFetching for testing
+public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
+    private let lock = NSLock()
+    private var _cachedHierarchy: SdkViewHierarchy?
+    private var _freshHierarchy: SdkViewHierarchy?
+    private var _isAvailable: Bool = false
+    private var _fetchCallCount = 0
+    private var _fetchFreshCallCount = 0
+    private var _isAvailableCallCount = 0
+
+    public init() {}
+
+    // MARK: - Configuration
+
+    public func setCachedHierarchy(_ hierarchy: SdkViewHierarchy?) {
+        lock.lock()
+        _cachedHierarchy = hierarchy
+        lock.unlock()
+    }
+
+    public func setFreshHierarchy(_ hierarchy: SdkViewHierarchy?) {
+        lock.lock()
+        _freshHierarchy = hierarchy
+        lock.unlock()
+    }
+
+    public func setIsAvailable(_ available: Bool) {
+        lock.lock()
+        _isAvailable = available
+        lock.unlock()
+    }
+
+    // MARK: - Assertions
+
+    public var fetchCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _fetchCallCount
+    }
+
+    public var fetchFreshCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _fetchFreshCallCount
+    }
+
+    public var isAvailableCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _isAvailableCallCount
+    }
+
+    public func clearHistory() {
+        lock.lock()
+        _fetchCallCount = 0
+        _fetchFreshCallCount = 0
+        _isAvailableCallCount = 0
+        lock.unlock()
+    }
+
+    // MARK: - SdkHierarchyFetching
+
+    public func fetchHierarchy() -> SdkViewHierarchy? {
+        lock.lock()
+        _fetchCallCount += 1
+        let result = _cachedHierarchy
+        lock.unlock()
+        return result
+    }
+
+    public func fetchFreshHierarchy() -> SdkViewHierarchy? {
+        lock.lock()
+        _fetchFreshCallCount += 1
+        let result = _freshHierarchy
+        lock.unlock()
+        return result
+    }
+
+    public func isAvailable() -> Bool {
+        lock.lock()
+        _isAvailableCallCount += 1
+        let result = _isAvailable
+        lock.unlock()
+        return result
+    }
+}
+
+// MARK: - FakeSdkHierarchyCache
+
+/// Fake implementation of SdkHierarchyCaching for testing
+public class FakeSdkHierarchyCache: SdkHierarchyCaching {
+    private let lock = NSLock()
+    private var _latest: SdkViewHierarchy?
+    private var _updateCallCount = 0
+    private var _clearCallCount = 0
+
+    public init() {}
+
+    // MARK: - Assertions
+
+    public var updateCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _updateCallCount
+    }
+
+    public var clearCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _clearCallCount
+    }
+
+    // MARK: - SdkHierarchyCaching
+
+    public var latest: SdkViewHierarchy? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _latest
+    }
+
+    public func update(_ hierarchy: SdkViewHierarchy) {
+        lock.lock()
+        _latest = hierarchy
+        _updateCallCount += 1
+        lock.unlock()
+    }
+
+    public func clear() {
+        lock.lock()
+        _latest = nil
+        _clearCallCount += 1
+        lock.unlock()
+    }
+}
+
 // MARK: - FakePerfProvider
 
 /// Fake implementation of PerfProvider for testing

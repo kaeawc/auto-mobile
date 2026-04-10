@@ -332,6 +332,14 @@ internal object AutoMobilePlanExecutor {
         args["testMetadata"] = buildTestMetadata(testContext)
       }
 
+      val cleanupAppId = options.cleanupAppId?.trim().orEmpty()
+      if (cleanupAppId.isNotEmpty()) {
+        args["cleanupAppId"] = JsonPrimitive(cleanupAppId)
+        if (options.cleanupClearAppData) {
+          args["cleanupClearAppData"] = JsonPrimitive(true)
+        }
+      }
+
       if (options.debugMode) {
         println("Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)")
       }

@@ -6,6 +6,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonPrimitive
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -86,6 +87,64 @@ class AutoMobilePlanExecutorTest {
     assertTrue(result.success)
     assertEquals(1, result.toolResults.size)
     assertEquals("Test Channel", result.getSelection(0))
+  }
+
+  @Test
+  fun `executePlan passes cleanupAppId and cleanupClearAppData to daemon`() {
+    fakeDaemonClient.setResponse(
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
+                mapOf(
+                    "success" to JsonPrimitive(true),
+                    "toolResults" to JsonArray(emptyList()),
+                )
+            )
+        ),
+    )
+
+    AutoMobilePlanExecutor.execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(
+            cleanupAppId = " com.example.app ",
+            cleanupClearAppData = true,
+        ),
+    )
+
+    val args = fakeDaemonClient.lastExecutePlanArgs
+    assertNotNull(args)
+    assertEquals("com.example.app", args!!["cleanupAppId"]!!.jsonPrimitive.content)
+    assertEquals(true, args["cleanupClearAppData"]!!.jsonPrimitive.content.toBoolean())
+  }
+
+  @Test
+  fun `executePlan passes cleanupAppId without cleanupClearAppData when false`() {
+    fakeDaemonClient.setResponse(
+        "executePlan",
+        buildDaemonResponse(
+            JsonObject(
+                mapOf(
+                    "success" to JsonPrimitive(true),
+                    "toolResults" to JsonArray(emptyList()),
+                )
+            )
+        ),
+    )
+
+    AutoMobilePlanExecutor.execute(
+        "test-plans/launch-clock-app.yaml",
+        emptyMap(),
+        AutoMobilePlanExecutionOptions(
+            cleanupAppId = "com.example.app",
+            cleanupClearAppData = false,
+        ),
+    )
+
+    val args = fakeDaemonClient.lastExecutePlanArgs
+    assertNotNull(args)
+    assertEquals("com.example.app", args!!["cleanupAppId"]!!.jsonPrimitive.content)
+    assertNull(args["cleanupClearAppData"])
   }
 
   @Test
@@ -218,6 +277,8 @@ private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
   override var sessionUuid: String = "test-session"
 
+  var lastExecutePlanArgs: JsonObject? = null
+
   fun setResponse(toolName: String, response: DaemonResponse) {
     responses[toolName] = response
   }
@@ -227,6 +288,9 @@ private class FakeDaemonToolClient : DaemonToolClient {
       arguments: JsonObject,
       timeoutMs: Long,
   ): DaemonResponse {
+    if (toolName == "executePlan") {
+      lastExecutePlanArgs = arguments
+    }
     return responses[toolName]
         ?: throw IllegalStateException("No response configured for tool: $toolName")
   }

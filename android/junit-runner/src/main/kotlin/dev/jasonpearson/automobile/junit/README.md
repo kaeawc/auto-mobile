@@ -139,6 +139,23 @@ By default, tests with `appId` set will terminate the app after execution to red
 To fully reset app state between tests, set `clearAppData = true` (Android only). If `cleanupAfter`
 is enabled but `appId` is blank, cleanup is skipped and a warning is logged.
 
+### Post-plan cleanup (`AutoMobilePlanExecutionOptions`)
+
+The runner also supports the daemon’s **`executePlan`** cleanup parameters (wired on the socket):
+
+- **`cleanupAppId`**: non-blank package → after each `executePlan`, the daemon either clears data or
+  force-stops the app (see AutoMobile server `AppCleanupService`).
+- **`cleanupClearAppData`**: `true` → clear app data after the plan (wipes **runtime permissions**).
+  `false` → terminate only.
+
+Use **`cleanupAppId` + `cleanupClearAppData = false`** to avoid `launchApp` + `clearAppData` at the
+start of every plan while still stopping the app after each run—pair with **`pm grant` (or similar)
+once per class** so permissions persist. Use **`cleanupClearAppData = true`** when you need a full
+reset after the plan.
+
+**Note:** cleanup runs after every `executePlan` completion, including failures and each JVM retry
+when `maxRetries > 0`; prefer **`maxRetries = 0`** when using data-clear cleanup.
+
 #### Generated Plans Directory Structure
 
 ```

@@ -13,6 +13,23 @@ data class AutoMobilePlanExecutionOptions(
     val aiAssistance: Boolean = true,
     val maxRetries: Int = 0,
     val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
+    /**
+     * When non-blank, the daemon runs post-execution cleanup after `executePlan` finishes (server
+     * `toolRegistry` `finally`): either clear app data (if [cleanupClearAppData]) or force-stop only.
+     *
+     * Use this to avoid `launchApp` + `clearAppData` at the start of every plan so runtime permission
+     * grants can survive across tests; clear or stop the app once after the plan instead.
+     *
+     * **Caveat:** cleanup runs after every `executePlan` invocation, including failed runs and each
+     * JVM retry when [maxRetries] is greater than zero. Prefer `cleanupClearAppData = true` with
+     * [maxRetries] = 0, or use terminate-only cleanup if you rely on retries.
+     */
+    val cleanupAppId: String? = null,
+    /**
+     * When true (with non-blank [cleanupAppId]), daemon clears app data after the plan; when false,
+     * daemon only force-stops the app. Clearing wipes permissions and local state (same as `pm clear`).
+     */
+    val cleanupClearAppData: Boolean = false,
 )
 
 /** Result of AutoMobile plan execution. */

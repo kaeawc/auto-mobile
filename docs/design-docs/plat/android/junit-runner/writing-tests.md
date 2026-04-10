@@ -48,6 +48,21 @@ pass/fail event based on the daemon's response.
 | `cleanupAfter` | `Boolean` | `true` | Terminate the app after the test completes (requires `appId`). |
 | `clearAppData` | `Boolean` | `false` | Clear app data in addition to terminating (requires `appId`). |
 
+### `AutoMobilePlanExecutionOptions` (implemented API)
+
+The runner passes these through to the daemon’s `executePlan` tool (alongside the YAML body). They are
+the supported way to run **post-plan** cleanup without putting `clearAppData` on the opening
+`launchApp` step (so you can grant permissions once and keep them across tests).
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `cleanupAppId` | `String?` | `null` | When non-blank, the daemon runs cleanup after `executePlan` finishes (server `toolRegistry` `finally`). |
+| `cleanupClearAppData` | `Boolean` | `false` | If `true` with `cleanupAppId`, clears app data after the plan (same class of reset as `pm clear`, **including runtime permissions**). If `false`, **force-stops** the app only. |
+
+**Retry caveat:** cleanup runs after **every** `executePlan` invocation, including failures and each
+JVM retry when `maxRetries > 0`. Prefer **`cleanupClearAppData = true` only with `maxRetries = 0`**, or
+use terminate-only cleanup (`cleanupClearAppData = false`) if you rely on retries.
+
 ### Choosing `aiAssistance`
 
 - Set `aiAssistance = false` for stable plans in CI. This removes the dependency on an AI provider

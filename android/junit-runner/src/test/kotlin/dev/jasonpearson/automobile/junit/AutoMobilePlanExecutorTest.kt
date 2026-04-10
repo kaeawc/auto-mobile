@@ -90,7 +90,7 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
-  fun `executePlan passes cleanupAppId and cleanupClearAppData to daemon`() {
+  fun `executePlan passes cleanupAppId and cleanupClearAppData from system properties`() {
     fakeDaemonClient.setResponse(
         "executePlan",
         buildDaemonResponse(
@@ -103,14 +103,18 @@ class AutoMobilePlanExecutorTest {
         ),
     )
 
-    AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(
-            cleanupAppId = " com.example.app ",
-            cleanupClearAppData = true,
-        ),
-    )
+    System.setProperty("automobile.junit.executePlan.cleanupAppId", " com.example.app ")
+    System.setProperty("automobile.junit.executePlan.cleanupClearAppData", "true")
+    try {
+      AutoMobilePlanExecutor.execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(),
+      )
+    } finally {
+      System.clearProperty("automobile.junit.executePlan.cleanupAppId")
+      System.clearProperty("automobile.junit.executePlan.cleanupClearAppData")
+    }
 
     val args = fakeDaemonClient.lastExecutePlanArgs
     assertNotNull(args)
@@ -119,7 +123,7 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
-  fun `executePlan passes cleanupAppId without cleanupClearAppData when false`() {
+  fun `executePlan passes cleanupAppId without cleanupClearAppData when property false`() {
     fakeDaemonClient.setResponse(
         "executePlan",
         buildDaemonResponse(
@@ -132,14 +136,18 @@ class AutoMobilePlanExecutorTest {
         ),
     )
 
-    AutoMobilePlanExecutor.execute(
-        "test-plans/launch-clock-app.yaml",
-        emptyMap(),
-        AutoMobilePlanExecutionOptions(
-            cleanupAppId = "com.example.app",
-            cleanupClearAppData = false,
-        ),
-    )
+    System.setProperty("automobile.junit.executePlan.cleanupAppId", "com.example.app")
+    System.setProperty("automobile.junit.executePlan.cleanupClearAppData", "false")
+    try {
+      AutoMobilePlanExecutor.execute(
+          "test-plans/launch-clock-app.yaml",
+          emptyMap(),
+          AutoMobilePlanExecutionOptions(),
+      )
+    } finally {
+      System.clearProperty("automobile.junit.executePlan.cleanupAppId")
+      System.clearProperty("automobile.junit.executePlan.cleanupClearAppData")
+    }
 
     val args = fakeDaemonClient.lastExecutePlanArgs
     assertNotNull(args)

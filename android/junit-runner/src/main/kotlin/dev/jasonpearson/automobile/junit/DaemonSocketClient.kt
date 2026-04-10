@@ -283,42 +283,47 @@ internal object DaemonSocketPaths {
 
   private fun buildDaemonCommand(subCommand: String): List<String> {
     val localPath = resolveLocalProjectPath()
-    if (localPath != null) {
-      val entryPoint = File(localPath, "dist/src/index.js")
-      if (entryPoint.exists()) {
-        val runtime = resolveRuntimePath()
-        return withDismissKeyboardAfterInput(
-            listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand),
-        )
-      }
-    }
-
-    // Prefer bunx, fall back to npx, then the global binary.
-    val runner = resolvePackageRunner()
     val base =
-        if (runner != null) {
-          if (runner.endsWith("npx")) {
-            listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+        if (localPath != null) {
+          val entryPoint = File(localPath, "dist/src/index.js")
+          if (entryPoint.exists()) {
+            val runtime = resolveRuntimePath()
+            listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
           } else {
-            listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+            null
           }
         } else {
-          listOf("auto-mobile", "--daemon", subCommand)
+          null
         }
-    return withDismissKeyboardAfterInput(base)
+
+    val command =
+        base
+            ?: run {
+              val runner = resolvePackageRunner()
+              if (runner != null) {
+                if (runner.endsWith("npx")) {
+                  listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+                } else {
+                  listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+                }
+              } else {
+                listOf("auto-mobile", "--daemon", subCommand)
+              }
+            }
+
+    return withNoUiPerfMode(withDismissKeyboardAfterInput(command))
   }
 
   /**
    * When true, the spawned daemon passes `--dismiss-keyboard-after-input` so every `inputText` call
    * hides the soft keyboard after injection (Android emulator CI often leaves it open otherwise).
+   *
+   * Configured only via JVM system property `automobile.daemon.dismiss.keyboard.after.input` (e.g.
+   * `./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true` or
+   * `testOptions { systemProperty(...) }` for unit test workers).
    */
   private fun dismissKeyboardAfterInputRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)) {
-      return true
-    }
-    val env =
-        System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
+    return SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)
   }
 
   private fun withDismissKeyboardAfterInput(command: List<String>): List<String> {
@@ -326,6 +331,26 @@ internal object DaemonSocketPaths {
       return command
     }
     return command + "--dismiss-keyboard-after-input"
+  }
+
+  /**
+   * When true, the spawned daemon passes `--no-ui-perf-mode` so CI / emulator runs skip UI performance
+   * audit paths (avoids `PerformanceAudit` / screenshot noise). Matches manual
+   * `bun … --daemon start --no-ui-perf-mode` when the runner performs `--daemon restart`.
+   */
+  private fun noUiPerfModeRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.no.ui.perf.mode", false)) {
+      return true
+    }
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_UI_PERF")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withNoUiPerfMode(command: List<String>): List<String> {
+    if (!noUiPerfModeRequested()) {
+      return command
+    }
+    return command + "--no-ui-perf-mode"
   }
 
   private fun resolveLocalProjectPath(): String? {

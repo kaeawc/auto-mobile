@@ -524,7 +524,12 @@ Set **one** of:
 - **Environment:** `AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH=/absolute/path/to/auto-mobile-mcp`
 - **Gradle (e.g. `build.gradle.kts` on the `test` task):** `systemProperty("automobile.daemon.local.project.path", "/absolute/path/to/auto-mobile-mcp")`
 
-Optional (Android CI emulators where the soft keyboard blocks taps after text entry): set **`AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT=true`** (or **`automobile.daemon.dismiss.keyboard.after.input=true`**) so the JUnit runner appends **`--dismiss-keyboard-after-input`** when it spawns the daemon. See the JUnit runner README for details.
+Optional for Android CI:
+
+- **Soft keyboard:** JVM system property **`automobile.daemon.dismiss.keyboard.after.input=true`** so the runner appends **`--dismiss-keyboard-after-input`** on daemon **`start` / `restart`** (e.g. `-D…` on `./gradlew`, or `systemProperty` for unit test workers).
+- **UI perf audit noise (`PerformanceAudit`, `J.create`, screenshot cancel):** **`AUTOMOBILE_DAEMON_NO_UI_PERF=true`** (or **`automobile.daemon.no.ui.perf.mode=true`**) so the runner appends **`--no-ui-perf-mode`** on **`start` / `restart`** (same as a manual pre-start).
+
+See the JUnit runner README for details.
 
 Use an **absolute** path in CI so Gradle workers do not depend on a fragile working directory.
 
@@ -533,8 +538,8 @@ Use an **absolute** path in CI so Gradle workers do not depend on a fragile work
 ```yaml
 variables:
   AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH: "${CI_PROJECT_DIR}/auto-mobile-mcp"
-  # Optional: dismiss soft keyboard after inputText on Android emulators (see JUnit runner README).
-  AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT: "true"
+  # Optional: no-ui-perf via env (see JUnit runner README). Dismiss-keyboard uses -D on Gradle below.
+  AUTOMOBILE_DAEMON_NO_UI_PERF: "true"
 
 android-ui-tests:
   before_script:
@@ -542,7 +547,7 @@ android-ui-tests:
     - test -d auto-mobile-mcp || git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp
     - cd "${CI_PROJECT_DIR}/auto-mobile-mcp" && bun install && bun run build
   script:
-    - ./gradlew :your-module:connectedCheck   # or your AutoMobile JUnit task
+    - ./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true :your-module:connectedCheck   # or your AutoMobile JUnit task
 ```
 
 Use **`main`** instead of **`ryebread/connection_refused_in_ci_fix`** after the fix is merged. Adjust paths, Gradle task name, and image (Bun + Android SDK + emulator or ADB session) to match your project.
@@ -563,4 +568,6 @@ Remove the env var / system property and rely on **`bunx @kaeawc/auto-mobile@lat
 
 - [Project Setup](project-setup.md) — Gradle config, SNAPSHOT dependency, local dev
 - [Writing Tests](writing-tests.md) — `@AutoMobileTest` parameters, YAML plan reference
+- [CI daemon logs](ci-daemon-logs.md) — finding and capturing `daemon.log` in CI
+- [CI app launch troubleshooting](ci-troubleshooting-app-launch.md) — adb, CtrlProxy, daemon flags, plan assertions
 - [CtrlProxy](../control-proxy.md) — Accessibility service setup and version management

@@ -2,7 +2,7 @@ import { createServer as createHttpServer, Server as HttpServer } from "node:htt
 import { randomUUID } from "node:crypto";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { createMcpServer } from "../server";
-import { logger } from "../utils/logger";
+import { applyAutomobileLogLevelFromEnvironment, logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
@@ -129,6 +129,8 @@ export class Daemon {
    * Start the daemon
    */
   async start(): Promise<void> {
+    // CI: set AUTOMOBILE_LOG_LEVEL=warn (or error) to drop INFO chatter in daemon.log / job output.
+    applyAutomobileLogLevelFromEnvironment();
     // Enable stdout logging in daemon mode so logs appear in daemon.log file
     // (daemon's stdout/stderr are redirected to /tmp/auto-mobile-daemon-XXXXXX/daemon.log)
     logger.enableStdoutLogging();

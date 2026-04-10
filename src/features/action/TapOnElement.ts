@@ -21,7 +21,7 @@ import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { logger } from "../../utils/logger";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
-import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { DEFAULT_VISION_CONFIG, getVisionEnrichedError, type VisionFallbackConfig, type VisionAnalyzer } from "../../vision/index";
 import { buildElementSearchDebugContext } from "../../utils/DebugContextBuilder";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -84,6 +84,11 @@ export class TapOnElement extends BaseVisualChange {
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
+
+  /** Duration passed to AccessibilityService.dispatchGesture for a normal tap (matches TalkBack fallback). */
+  private static readonly CTRL_PROXY_TAP_DURATION_MS = 50;
+
+  private static readonly CTRL_PROXY_TAP_TIMEOUT_MS = 5000;
 
   constructor(
     device: BootedDevice,
@@ -917,7 +922,40 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   /**
-   * Execute tap using coordinate-based input commands (standard mode)
+   * Try a coordinate tap via the Android accessibility service (dispatchGesture).
+   * Prefer this over `adb shell input tap` when CtrlProxy is connected: it follows the same
+   * injection path as the hierarchy source and is less likely to miss overlaid / focused UI.
+   */
+  private async tryAndroidCtrlProxyCoordinateTap(
+    x: number,
+    y: number,
+    signal?: AbortSignal
+  ): Promise<boolean> {
+    throwIfAborted(signal);
+    try {
+      const result = await this.accessibilityService.requestTapCoordinates(
+        x,
+        y,
+        TapOnElement.CTRL_PROXY_TAP_DURATION_MS,
+        TapOnElement.CTRL_PROXY_TAP_TIMEOUT_MS,
+        new NoOpPerformanceTracker()
+      );
+      if (!result.success) {
+        logger.warn(
+          `[TapOnElement] CtrlProxy coordinate tap failed at (${x}, ${y}): ${result.error ?? "unknown"}`
+        );
+      }
+      return result.success;
+    } catch (error) {
+      logger.warn(
+        `[TapOnElement] CtrlProxy coordinate tap threw: ${error instanceof Error ? error.message : String(error)}`
+      );
+      return false;
+    }
+  }
+
+  /**
+   * Execute tap in standard (non-TalkBack) mode: try CtrlProxy dispatchGesture first, then ADB.
    */
   private async executeAndroidTapWithCoordinates(
     action: string,
@@ -928,10 +966,30 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal
   ): Promise<void> {
     if (action === "tap") {
+      if (await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal)) {
+        return;
+      }
+      logger.info(`[TapOnElement] Falling back to ADB input tap at (${x}, ${y})`);
       await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
-    } else if (action === "longPress") {
+      return;
+    }
+
+    if (action === "longPress") {
       await this.executeAndroidLongPress(x, y, durationMs, element?.["resource-id"], signal);
-    } else if (action === "doubleTap") {
+      return;
+    }
+
+    if (action === "doubleTap") {
+      const firstProxyTap = await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal);
+      if (firstProxyTap) {
+        await this.timer.sleep(200);
+        throwIfAborted(signal);
+        const secondProxyTap = await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal);
+        if (secondProxyTap) {
+          return;
+        }
+      }
+      logger.info(`[TapOnElement] Falling back to ADB double tap at (${x}, ${y})`);
       await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
       await this.timer.sleep(200);
       await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);

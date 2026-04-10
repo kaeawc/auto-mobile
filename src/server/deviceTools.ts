@@ -40,7 +40,7 @@ const startDeviceParametersSchema = z.object({
   timeoutMs: z.number().optional().describe("Boot timeout in ms"),
 });
 
-export const startDeviceSchema = z.preprocess((input) => {
+export const startDeviceSchema = z.preprocess(input => {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return input;
   }

@@ -129,6 +129,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
     return null;
   }
 
+  /**
+   * Observe with waitFor returns awaitTimeout: true when the condition is not met within the timeout.
+   * The handler does not set success: false, so the executor must treat that as a failed step.
+   */
+  private observeWaitForTimedOut(response: unknown): { awaitDuration?: number } | null {
+    const payload = this.parseStructuredToolPayload(response);
+    if (!payload || payload.awaitTimeout !== true) {
+      return null;
+    }
+    return {
+      awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined
+    };
+  }
+
   private async captureFailureObservation(
     platform: string,
     deviceId: string | undefined,
@@ -383,6 +397,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           const toolResult = this.extractToolResult(response);
           logger.info(`[PLAN_STEP_${i + 1}] ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`);
 
+          const observeTimedOut = step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+
           // Check if the response indicates failure
           if (toolResult && typeof toolResult === "object" && "success" in toolResult && toolResult.success === false) {
             const errorMsg = toolResult.error || "Unknown error";
@@ -416,6 +432,45 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 stepIndex: i,
                 tool: step.tool,
                 error: String(errorMsg),
+                ...(failureObservation ? { failureObservation } : {})
+              },
+              debug: {
+                executionTimeMs: this.timer.now() - startTime,
+                steps: debugSteps
+              }
+            };
+          }
+
+          if (observeTimedOut) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
+            const failureObservation = await this.buildFailureObservationContext(
+              step.tool,
+              response,
+              platform,
+              deviceId,
+              sessionUuid,
+              signal
+            );
+            debugSteps.push({
+              step: `Execute step ${i + 1}: ${step.tool}`,
+              status: "failed",
+              durationMs: this.timer.now() - stepStartTime,
+              details: {
+                params: step.params,
+                error: errorMsg,
+                ...(failureObservation ? { failureObservation } : {})
+              }
+            });
+
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: plan.steps.length,
+              failedStep: {
+                stepIndex: i,
+                tool: step.tool,
+                error: errorMsg,
                 ...(failureObservation ? { failureObservation } : {})
               },
               debug: {
@@ -838,6 +893,33 @@ export class DefaultPlanExecutor implements PlanExecutor {
               signal
             );
 
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: track.length,
+              failedStep: {
+                stepIndex: planIndex,
+                trackIndex,
+                tool: step.tool,
+                error: errorMsg,
+                ...(failureObservation ? { failureObservation } : {}),
+              },
+            };
+          }
+
+          const observeTimedOutParallel =
+            step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+          if (observeTimedOutParallel) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
+            const failureObservation = await this.buildFailureObservationContext(
+              step.tool,
+              response,
+              platform,
+              deviceId,
+              sessionUuid,
+              signal
+            );
             return {
               success: false,
               executedSteps,

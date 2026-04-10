@@ -46,7 +46,14 @@ const executePlanSchema = z.object({
   abortStrategy: z.enum(["immediate", "finish-current-step"]).default("immediate").describe("Abort strategy: immediate (default) or finish-current-step"),
   testMetadata: testMetadataSchema.optional().describe("Test metadata for timing history"),
   cleanupAppId: z.string().optional().describe("App ID to terminate after execution"),
-  cleanupClearAppData: z.boolean().optional().describe("Clear app data on cleanup")
+  cleanupClearAppData: z.boolean().optional().describe("Clear app data on cleanup"),
+  captureObserveSteps: z
+    .enum(["summary", "full"])
+    .optional()
+    .describe(
+      "Single-device plans only: attach each successful observe step snapshot to executePlan result `debug.steps[n].details.stepObservation` " +
+        "(`summary` = metadata + element samples; `full` = includes viewHierarchy). Ignored for multi-device plans."
+    )
 });
 
 const executePlanDebugStepSchema = z.object({
@@ -148,6 +155,7 @@ const executePlanTool = async (device: BootedDevice, params: {
   testMetadata?: TestExecutionMetadata;
   cleanupAppId?: string;
   cleanupClearAppData?: boolean;
+  captureObserveSteps?: "summary" | "full";
 }, _progress?: unknown, signal?: AbortSignal): Promise<any> => {
   const startTime = defaultTimer.now();
   const recordTestExecution = async (
@@ -379,7 +387,18 @@ const executePlanTool = async (device: BootedDevice, params: {
     let videoFilePath: string | undefined;
     try {
       logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Starting plan execution on device ${device.deviceId} (${device.platform})`);
-      result = await executePlan(plan, startStep, params.platform, device.deviceId, params.sessionUuid, signal, params.abortStrategy);
+      result = await executePlan(
+        plan,
+        startStep,
+        params.platform,
+        device.deviceId,
+        params.sessionUuid,
+        signal,
+        params.abortStrategy,
+        params.captureObserveSteps
+          ? { captureObserveSteps: params.captureObserveSteps }
+          : undefined
+      );
       const execDuration = defaultTimer.now() - perfStart;
       logger.info(`[PERF +${execDuration}ms] Plan execution completed: ${result.success ? "SUCCESS" : "FAILED"} (${result.executedSteps}/${result.totalSteps} steps)`);
     } finally {
@@ -415,7 +434,8 @@ const executePlanTool = async (device: BootedDevice, params: {
       error: result.failedStep ? result.failedStep.error : undefined,
       platform: device.platform,
       deviceId: device.deviceId,
-      deviceMapping
+      deviceMapping,
+      ...(result.debug ? { debug: result.debug } : {})
     };
 
     logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Returning from executePlanTool (deviceId=${device.deviceId})`);

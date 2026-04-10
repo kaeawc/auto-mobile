@@ -1,5 +1,6 @@
 import { Platform } from "./Platform";
 import type { FailureObservationSummary } from "./FailureObservation";
+import type { ExecutePlanDebugInfo } from "./ExecutePlanResult";
 
 export interface PlanStep {
   tool: string;
@@ -47,6 +48,8 @@ export interface PlanExecutionResult {
   };
   deviceMapping?: Record<string, string>; // Maps device labels to device IDs (e.g., {"A": "emulator-5554", "B": "emulator-5556"})
   perDeviceResults?: Map<string, DeviceExecutionResult>; // For multi-device plans
+  /** Per-step trace (always populated by the executor; may include `stepObservation` when `captureObserveSteps` is set). */
+  debug?: ExecutePlanDebugInfo;
 }
 
 export interface DeviceExecutionResult {

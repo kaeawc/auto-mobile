@@ -1,5 +1,16 @@
 import type { FailureObservationSummary } from "./FailureObservation";
 
+/**
+ * When passed to plan execution, each successful `observe` step stores a
+ * {@link FailureObservationSummary}-shaped payload in `debug.steps[n].details.stepObservation`.
+ * `summary` omits `viewHierarchy` / `rawViewHierarchy` to keep `executePlan` responses smaller.
+ */
+export type CaptureObserveStepMode = "summary" | "full";
+
+export interface PlanExecutionOptions {
+  captureObserveSteps?: CaptureObserveStepMode;
+}
+
 export interface ExecutePlanStepDebugInfo {
   step: string;
   status: "completed" | "failed" | "skipped";

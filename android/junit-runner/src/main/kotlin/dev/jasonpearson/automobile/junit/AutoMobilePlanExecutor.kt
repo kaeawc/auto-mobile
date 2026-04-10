@@ -333,6 +333,7 @@ internal object AutoMobilePlanExecutor {
       }
 
       appendExecutePlanCleanupArgs(args)
+      appendCaptureObserveStepsArgs(args)
 
       if (options.debugMode) {
         println("Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)")
@@ -767,6 +768,24 @@ internal object AutoMobilePlanExecutor {
     val env =
         System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")?.trim()?.lowercase().orEmpty()
     return env == "true" || env == "1" || env == "yes"
+  }
+
+  /**
+   * When set, the daemon attaches each successful `observe` step to `executePlan` `debug` (see
+   * AutoMobile `captureObserveSteps`). Single-device plans only.
+   *
+   * **System property:** `automobile.junit.executePlan.captureObserveSteps` — `summary` or `full`
+   *
+   * **Environment:** `AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS` (same values)
+   */
+  private fun appendCaptureObserveStepsArgs(args: MutableMap<String, JsonElement>) {
+    val v =
+        System.getProperty("automobile.junit.executePlan.captureObserveSteps")?.trim()?.lowercase()
+            ?: System.getenv("AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS")?.trim()?.lowercase()
+            ?: return
+    if (v == "summary" || v == "full") {
+      args["captureObserveSteps"] = JsonPrimitive(v)
+    }
   }
 
   // ── Retry helpers ────────────────────────────────────────────────────────

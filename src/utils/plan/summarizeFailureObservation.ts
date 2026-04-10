@@ -1,5 +1,21 @@
 import type { FailureObservationSummary } from "../../models/FailureObservation";
 
+/**
+ * Drop heavy hierarchy fields for `executePlan` debug when mode is `summary`.
+ */
+export function trimObservationForStepCapture(
+  summary: FailureObservationSummary,
+  mode: "summary" | "full"
+): FailureObservationSummary {
+  if (mode === "full") {
+    return summary;
+  }
+  const out: FailureObservationSummary = { ...summary };
+  delete out.viewHierarchy;
+  delete out.rawViewHierarchy;
+  return out;
+}
+
 const MAX_SAMPLES = 80;
 const MAX_TEXT_LEN = 300;
 const MAX_ID_LEN = 200;
@@ -17,7 +33,11 @@ export function summarizeObserveResultForFailure(raw: Record<string, unknown>): 
   const elements = raw.elements;
   if (elements && typeof elements === "object") {
     const elObj = elements as Record<string, unknown>;
-    bucketLoop: for (const key of ELEMENT_BUCKETS) {
+    let done = false;
+    for (const key of ELEMENT_BUCKETS) {
+      if (done) {
+        break;
+      }
       const arr = elObj[key];
       if (!Array.isArray(arr)) {
         continue;
@@ -38,7 +58,8 @@ export function summarizeObserveResultForFailure(raw: Record<string, unknown>): 
           resourceIds.add(id);
         }
         if (texts.size >= MAX_SAMPLES && resourceIds.size >= MAX_SAMPLES) {
-          break bucketLoop;
+          done = true;
+          break;
         }
       }
     }

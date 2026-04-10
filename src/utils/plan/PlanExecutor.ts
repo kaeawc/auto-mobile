@@ -9,13 +9,19 @@ import { logger } from "../logger";
 import { ToolRegistry } from "../../server/toolRegistry";
 import { ActionableError } from "../../models";
 import { isDebugModeEnabled } from "../debug";
-import { ExecutePlanStepDebugInfo } from "../../models/ExecutePlanResult";
+import {
+  ExecutePlanStepDebugInfo,
+  type PlanExecutionOptions,
+} from "../../models/ExecutePlanResult";
 import { throwIfAborted } from "../toolUtils";
 import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
-import { summarizeObserveResultForFailure } from "./summarizeFailureObservation";
+import {
+  summarizeObserveResultForFailure,
+  trimObservationForStepCapture,
+} from "./summarizeFailureObservation";
 
 /**
  * Interface for plan execution
@@ -31,6 +37,7 @@ export interface PlanExecutor {
    * @param sessionUuid Optional session UUID to inject into tool calls for parallel execution
    * @param signal Optional abort signal for cancellation
    * @param abortStrategy Strategy for aborting when a device fails (default: "immediate")
+   * @param executionOptions Optional capture flags (e.g. per-step observe snapshots on single-device plans)
    * @returns Promise with execution result including success status, executed steps, and any errors
    */
   executePlan(
@@ -41,6 +48,7 @@ export interface PlanExecutor {
     sessionUuid?: string,
     signal?: AbortSignal,
     abortStrategy?: AbortStrategy,
+    executionOptions?: PlanExecutionOptions,
   ): Promise<PlanExecutionResult>;
 }
 
@@ -156,6 +164,21 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
+  private buildObserveStepCaptureFromResponse(
+    toolResponse: unknown,
+    mode: NonNullable<PlanExecutionOptions["captureObserveSteps"]>
+  ): FailureObservationSummary | undefined {
+    const raw = this.parseStructuredToolPayload(toolResponse);
+    if (!raw) {
+      return {
+        capturedAtMs: Date.now(),
+        observeError: "observe returned empty or unparseable payload",
+      };
+    }
+    const summary = summarizeObserveResultForFailure(raw);
+    return trimObservationForStepCapture(summary, mode);
+  }
+
   private async buildFailureObservationContext(
     failedTool: string,
     failureToolResponse: unknown | undefined,
@@ -205,12 +228,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
     deviceId?: string,
     sessionUuid?: string,
     signal?: AbortSignal,
-    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY
+    abortStrategy: AbortStrategy = DEFAULT_ABORT_STRATEGY,
+    executionOptions?: PlanExecutionOptions
   ): Promise<PlanExecutionResult> {
     // Check if this is a multi-device plan
     const partitionedPlan = PlanPartitioner.partition(plan);
 
     if (partitionedPlan) {
+      if (executionOptions?.captureObserveSteps) {
+        logger.warn(
+          "[PlanExecutor] captureObserveSteps is ignored for multi-device plans (parallel tracks do not emit unified debug steps)"
+        );
+      }
       // Multi-device parallel execution
       return this.executeParallel(
         plan,
@@ -230,7 +259,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
         platform,
         deviceId,
         sessionUuid,
-        signal
+        signal,
+        executionOptions
       );
     }
   }
@@ -244,7 +274,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform?: string,
     deviceId?: string,
     sessionUuid?: string,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    executionOptions?: PlanExecutionOptions
   ): Promise<PlanExecutionResult> {
     let executedSteps = 0;
     const debugMode = isDebugModeEnabled();
@@ -394,13 +425,27 @@ export class DefaultPlanExecutor implements PlanExecutor {
             };
           }
 
+          const completedDetails: Record<string, unknown> = {
+            params: step.params,
+          };
+          if (
+            step.tool === "observe" &&
+            executionOptions?.captureObserveSteps
+          ) {
+            const stepObservation = this.buildObserveStepCaptureFromResponse(
+              response,
+              executionOptions.captureObserveSteps
+            );
+            if (stepObservation) {
+              completedDetails.stepObservation = stepObservation;
+            }
+          }
+
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,
             status: "completed",
             durationMs: this.timer.now() - stepStartTime,
-            details: {
-              params: step.params
-            }
+            details: completedDetails,
           });
 
           executedSteps++;

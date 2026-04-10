@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { summarizeObserveResultForFailure } from "../../../src/utils/plan/summarizeFailureObservation";
+import {
+  summarizeObserveResultForFailure,
+  trimObservationForStepCapture,
+} from "../../../src/utils/plan/summarizeFailureObservation";
 
 describe("summarizeObserveResultForFailure", () => {
   test("collects visible texts and resource ids from elements buckets", () => {
@@ -34,5 +37,27 @@ describe("summarizeObserveResultForFailure", () => {
     const s = summarizeObserveResultForFailure({ activeWindow: null } as Record<string, unknown>);
     expect(s.visibleTextsSample).toEqual([]);
     expect(s.resourceIdsSample).toEqual([]);
+  });
+});
+
+describe("trimObservationForStepCapture", () => {
+  test("summary strips hierarchy fields", () => {
+    const s = summarizeObserveResultForFailure({
+      viewHierarchy: { a: 1 },
+      rawViewHierarchy: { b: 2 },
+      elements: { clickable: [], scrollable: [], text: [{ text: "x", resourceId: "id" }] },
+    } as Record<string, unknown>);
+    const t = trimObservationForStepCapture(s, "summary");
+    expect(t.viewHierarchy).toBeUndefined();
+    expect(t.rawViewHierarchy).toBeUndefined();
+    expect(t.visibleTextsSample).toContain("x");
+  });
+
+  test("full preserves hierarchy fields", () => {
+    const s = summarizeObserveResultForFailure({
+      viewHierarchy: { a: 1 },
+    } as Record<string, unknown>);
+    const t = trimObservationForStepCapture(s, "full");
+    expect(t.viewHierarchy).toEqual({ a: 1 });
   });
 });

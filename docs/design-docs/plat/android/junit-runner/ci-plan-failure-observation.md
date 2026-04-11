@@ -2,6 +2,8 @@
 
 Use this when a YAML plan fails in CI (for example **`tapOn`: element not found**) and you need to know **what was actually on screen** at failure time. This complements [CI daemon logs](ci-daemon-logs.md) and [CI app launch troubleshooting](ci-troubleshooting-app-launch.md).
 
+If **`observe`** + **`waitFor`** passed but the next **`tapOn`** fails with **pre-tap re-find / stable bounds** wording (or older flakes where **`tapOn` “succeeded”** but the UI did not change), see **[Android `tapOn` pre-tap stability and search flakes](../tapOn-pre-tap-stability-and-search-flakes.md)**.
+
 ---
 
 ## What `failureObservation` is

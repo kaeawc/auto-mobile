@@ -170,6 +170,24 @@ export type A11ySelectAllResult = BaseResult;
 /** Accessibility action result */
 export type A11yActionResult = ActionTimingResult;
 
+/** One accessibility window layer that contains the hit-test point (z-order index = windowIndex). */
+export interface AndroidHitTestLayer {
+  windowIndex: number;
+  windowType: string;
+  windowLayer: number;
+  active: boolean;
+  focused: boolean;
+  rootBounds: { left: number; top: number; right: number; bottom: number };
+  deepest: {
+    text?: string;
+    resourceId?: string;
+    className?: string;
+    bounds?: { left: number; top: number; right: number; bottom: number };
+    clickable?: string;
+    focused?: string;
+  };
+}
+
 /** Result of request_hit_test (deepest node at screen coordinates). */
 export interface AndroidHitTestResult {
   success: boolean;
@@ -185,6 +203,14 @@ export interface AndroidHitTestResult {
     clickable?: string;
     focused?: string;
   };
+  /** Per-window deepest nodes at (x,y) before choosing {@link deepest} (APPLICATION-first ranking). */
+  layers?: AndroidHitTestLayer[];
+  chosenWindowZIndex?: number;
+  /** z-order index of the window marked active in {@code getWindows()}, if any. */
+  activeWindowZIndex?: number | null;
+  windowCount?: number;
+  /** How the result was produced (multi-window scan vs active-root fallback). */
+  hitTestSource?: string;
 }
 
 /** Clipboard operation result from accessibility service */

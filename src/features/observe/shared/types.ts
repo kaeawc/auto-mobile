@@ -53,6 +53,19 @@ export interface GestureTimingResult extends BaseResult {
  */
 export interface ActionTimingResult extends BaseResult {
   action: string;
+  /**
+   * Android CtrlProxy `performAction` diagnostics (multi-window find, IME filter, brute-force stats).
+   * Present on `action_result` when the control-proxy APK supports it.
+   */
+  resolution?: {
+    imeWindowsExcludedForBounds: boolean;
+    inputMethodWindowPresent: boolean;
+    applicationWindowPresent: boolean;
+    windowsScannedForFind: number;
+    findResolutionPhase?: string;
+    bruteForceMaxIntersectingCandidates: number;
+    successPath: string;
+  };
 }
 
 // =============================================================================

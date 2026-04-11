@@ -267,6 +267,7 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
+  resolution?: Record<string, unknown>;
 }
 
 interface WsHitTestResultMessage extends WsMessageBase {
@@ -278,6 +279,11 @@ interface WsHitTestResultMessage extends WsMessageBase {
   totalTimeMs?: number;
   error?: string;
   deepest?: Record<string, unknown> | null;
+  layers?: unknown[];
+  chosenWindowZIndex?: number;
+  activeWindowZIndex?: number | null;
+  windowCount?: number;
+  hitTestSource?: string;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -827,6 +833,80 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
 
+  private static parseActionResolution(
+    raw: Record<string, unknown> | undefined
+  ): A11yActionResult["resolution"] {
+    if (!raw || typeof raw !== "object") {
+      return undefined;
+    }
+    const ime = raw.imeWindowsExcludedForBounds;
+    const imp = raw.inputMethodWindowPresent;
+    const app = raw.applicationWindowPresent;
+    const ws = raw.windowsScannedForFind;
+    const brute = raw.bruteForceMaxIntersectingCandidates;
+    const path = raw.successPath;
+    if (typeof ime !== "boolean" || typeof imp !== "boolean" || typeof app !== "boolean"
+      || typeof ws !== "number" || typeof brute !== "number" || typeof path !== "string") {
+      return undefined;
+    }
+    const phase = raw.findResolutionPhase;
+    return {
+      imeWindowsExcludedForBounds: ime,
+      inputMethodWindowPresent: imp,
+      applicationWindowPresent: app,
+      windowsScannedForFind: ws,
+      findResolutionPhase: typeof phase === "string" ? phase : undefined,
+      bruteForceMaxIntersectingCandidates: brute,
+      successPath: path
+    };
+  }
+
+  private static parseHitTestLayers(raw: unknown[] | undefined): AndroidHitTestResult["layers"] {
+    if (!Array.isArray(raw) || raw.length === 0) {
+      return undefined;
+    }
+    const out: NonNullable<AndroidHitTestResult["layers"]> = [];
+    for (const item of raw) {
+      if (!item || typeof item !== "object") {
+        continue;
+      }
+      const o = item as Record<string, unknown>;
+      const wi = o.windowIndex;
+      const wt = o.windowType;
+      const wl = o.windowLayer;
+      const act = o.active;
+      const foc = o.focused;
+      const rb = o.rootBounds as Record<string, unknown> | undefined;
+      const deepestRaw = o.deepest as Record<string, unknown> | null | undefined;
+      if (typeof wi !== "number" || typeof wt !== "string" || typeof wl !== "number"
+        || typeof act !== "boolean" || typeof foc !== "boolean"
+        || !rb
+        || typeof rb.left !== "number" || typeof rb.top !== "number"
+        || typeof rb.right !== "number" || typeof rb.bottom !== "number") {
+        continue;
+      }
+      const deepest = CtrlProxyClient.parseHitTestDeepest(deepestRaw ?? undefined);
+      if (!deepest) {
+        continue;
+      }
+      out.push({
+        windowIndex: wi,
+        windowType: wt,
+        windowLayer: wl,
+        active: act,
+        focused: foc,
+        rootBounds: {
+          left: rb.left,
+          top: rb.top,
+          right: rb.right,
+          bottom: rb.bottom
+        },
+        deepest
+      });
+    }
+    return out.length > 0 ? out : undefined;
+  }
+
   private static parseHitTestDeepest(
     raw: Record<string, unknown> | null | undefined
   ): AndroidHitTestResult["deepest"] {
@@ -1301,7 +1381,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           const bt = Math.round(disambiguationBounds.top);
           const br = Math.round(disambiguationBounds.right);
           const bb = Math.round(disambiguationBounds.bottom);
-          if ([bl, bt, br, bb].every((n) => Number.isFinite(n))) {
+          if ([bl, bt, br, bb].every(n => Number.isFinite(n))) {
             payload.boundsLeft = bl;
             payload.boundsTop = bt;
             payload.boundsRight = br;
@@ -1737,7 +1817,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       if (message.type === "connected") {
         const conn = message as WsConnectedMessage;
-        if (conn.versionName != null) {
+        if (conn.versionName !== undefined && conn.versionName !== null) {
           logger.info(
             `[CTRL_PROXY] Connected to control-proxy ${conn.versionName} (versionCode=${conn.versionCode ?? "?"})`
           );
@@ -1837,9 +1917,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle action result
       if (message.type === "action_result" && message.requestId) {
+        const am = message as WsActionResultMessage;
         this.requestManager.resolve<A11yActionResult>(message.requestId, {
           success: message.success, action: message.action,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming,
+          resolution: CtrlProxyClient.parseActionResolution(am.resolution)
         });
       }
 
@@ -1852,7 +1934,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           y: m.y ?? 0,
           totalTimeMs: m.totalTimeMs ?? 0,
           error: typeof m.error === "string" ? m.error : undefined,
-          deepest: CtrlProxyClient.parseHitTestDeepest(m.deepest)
+          deepest: CtrlProxyClient.parseHitTestDeepest(m.deepest),
+          layers: CtrlProxyClient.parseHitTestLayers(m.layers),
+          chosenWindowZIndex: typeof m.chosenWindowZIndex === "number" ? m.chosenWindowZIndex : undefined,
+          activeWindowZIndex: m.activeWindowZIndex === null || typeof m.activeWindowZIndex === "number"
+            ? m.activeWindowZIndex
+            : undefined,
+          windowCount: typeof m.windowCount === "number" ? m.windowCount : undefined,
+          hitTestSource: typeof m.hitTestSource === "string" ? m.hitTestSource : undefined
         });
       }
 

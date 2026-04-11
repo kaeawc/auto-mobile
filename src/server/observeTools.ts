@@ -283,7 +283,11 @@ export function registerObserveTools() {
       // If accessibility service reports as disabled, reset setup state to force reinstall on next attempt
       // This handles cases where the service was uninstalled externally
       if (device.platform === "android" && result.accessibilityState?.enabled === false) {
-        logger.warn("[observe] Accessibility service not enabled, resetting setup state for next attempt");
+        logger.warn(
+          `[observe] device=${device.deviceId} accessibilityState.enabled=false (service=${String(result.accessibilityState?.service)}). ` +
+            `System reports no enabled accessibility services — enable AutoMobile CtrlProxy on the device. ` +
+            `Without it, hierarchy stays empty and plans fail at early observe (e.g. login / Choose Server API). Resetting CtrlProxy setup state for next attempt.`
+        );
         try {
           const manager = AndroidCtrlProxyManager.getInstance(device);
           manager.resetSetupState();

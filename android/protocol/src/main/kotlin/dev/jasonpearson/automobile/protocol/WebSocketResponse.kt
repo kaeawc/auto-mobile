@@ -380,6 +380,8 @@ data class ActionResult(
   val action: String? = null,
   val totalTimeMs: Long,
   val error: String? = null,
+  /** CtrlProxy semantic click / multi-window resolution diagnostics (optional JSON object). */
+  val resolution: kotlinx.serialization.json.JsonObject? = null,
   val perfTiming: String? = null,
 ) : WebSocketResponse()
 

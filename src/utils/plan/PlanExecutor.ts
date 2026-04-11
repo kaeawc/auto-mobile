@@ -22,6 +22,7 @@ import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
+import { captureUiAutomatorDumpForFailure } from "./captureUiAutomatorDumpForFailure";
 
 /**
  * Interface for plan execution
@@ -225,7 +226,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
         const raw = this.parseStructuredToolPayload(failureToolResponse);
         if (raw) {
-          return summarizeObserveResultForFailure(raw);
+          const summary = summarizeObserveResultForFailure(raw);
+          if (
+            platform === "android" &&
+            deviceId &&
+            raw.awaitTimeout === true
+          ) {
+            const dump = await captureUiAutomatorDumpForFailure(deviceId, signal);
+            if (dump) {
+              return { ...summary, uiAutomatorDumpXml: dump };
+            }
+          }
+          return summary;
         }
         return {
           capturedAtMs: Date.now(),

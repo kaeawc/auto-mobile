@@ -117,4 +117,114 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastStrategy).toBe("random");
     });
   });
+
+  describe("resolveAndroidLabelRowOverlapBoundsForClickableParent", () => {
+    test("returns intersection rect of row and label text", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: { bounds: "[0,0][1080,1920]" },
+            node: [
+              {
+                $: { clickable: "true", bounds: "[0,700][1080,800]" }
+              },
+              {
+                $: { text: "Dan Corkill", bounds: "[48,715][300,785]" }
+              }
+            ]
+          }
+        }
+      } as any;
+      const row = {
+        bounds: { left: 0, top: 700, right: 1080, bottom: 800 },
+        clickable: "true"
+      } as any;
+      const r = (tapOn as any).resolveAndroidLabelRowOverlapBoundsForClickableParent(
+        { text: "Dan Corkill", action: "tap", tapClickableParent: true },
+        row,
+        viewHierarchy
+      );
+      expect(r).toEqual({ left: 48, top: 715, right: 300, bottom: 785 });
+    });
+  });
+
+  describe("resolveAndroidCoordinateTapPointForClickableParent", () => {
+    test("uses center of text bounds intersected with row bounds", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: { bounds: "[0,0][1080,1920]" },
+            node: [
+              {
+                $: { clickable: "true", bounds: "[0,700][1080,800]" }
+              },
+              {
+                $: { text: "Dan Corkill", bounds: "[48,715][300,785]" }
+              }
+            ]
+          }
+        }
+      } as any;
+      const row = {
+        bounds: { left: 0, top: 700, right: 1080, bottom: 800 },
+        clickable: "true"
+      } as any;
+      const p = (tapOn as any).resolveAndroidCoordinateTapPointForClickableParent(
+        { text: "Dan Corkill", action: "tap", tapClickableParent: true },
+        row,
+        viewHierarchy
+      );
+      expect(p).toEqual({ x: 174, y: 750 });
+    });
+
+    test("when row clips wide text, prefers text center clamped to row inside overlap", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: { bounds: "[0,0][1080,1920]" },
+            node: [
+              {
+                $: { clickable: "true", bounds: "[0,700][120,800]" }
+              },
+              {
+                $: { text: "Dan Corkill", bounds: "[48,715][300,785]" }
+              }
+            ]
+          }
+        }
+      } as any;
+      const row = {
+        bounds: { left: 0, top: 700, right: 120, bottom: 800 },
+        clickable: "true"
+      } as any;
+      const p = (tapOn as any).resolveAndroidCoordinateTapPointForClickableParent(
+        { text: "Dan Corkill", action: "tap", tapClickableParent: true },
+        row,
+        viewHierarchy
+      );
+      // Overlap center would be ~(84, 750); text bbox center is ~(174, 750), clamped to row interior → x=117
+      expect(p).toEqual({ x: 117, y: 750 });
+    });
+
+    test("falls back to row center when label text is not in hierarchy", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const row = {
+        bounds: { left: 0, top: 700, right: 1080, bottom: 800 },
+        clickable: "true"
+      } as any;
+      const p = (tapOn as any).resolveAndroidCoordinateTapPointForClickableParent(
+        { text: "Nobody", action: "tap", tapClickableParent: true },
+        row,
+        { hierarchy: { node: { $: { bounds: "[0,0][1080,1920]" } } } } as any
+      );
+      expect(p).toEqual({ x: 540, y: 750 });
+    });
+  });
 });

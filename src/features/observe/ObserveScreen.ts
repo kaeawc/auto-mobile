@@ -406,6 +406,19 @@ export class RealObserveScreen implements ObserveScreen {
       if (viewHierarchy) {
         result.viewHierarchy = viewHierarchy;
 
+        if (this.device.platform === "android") {
+          const hierarchyPayload = viewHierarchy.hierarchy as { error?: string } | undefined;
+          const hierarchyErr =
+            hierarchyPayload && typeof hierarchyPayload.error === "string" ? hierarchyPayload.error : undefined;
+          if (hierarchyErr) {
+            logger.warn(
+              `[ObserveScreen] Android hierarchy error device=${this.device.deviceId}: ${hierarchyErr}. ` +
+                `If failureObservation.accessibilityState.enabled is false, enable AutoMobile CtrlProxy under Settings > Accessibility ` +
+                `and reinstall/sync the control-proxy APK from auto-mobile-mcp.`
+            );
+          }
+        }
+
         // Use the updatedAt from the view hierarchy if available (from accessibility service)
         if (viewHierarchy.updatedAt) {
           result.updatedAt = viewHierarchy.updatedAt;

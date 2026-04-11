@@ -80,19 +80,52 @@ describe("TapOnElement TalkBack mode detection", () => {
 
       // Test tap
       await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined, []);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+        "tap",
+        50,
+        50,
+        500,
+        element,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        undefined
+      );
 
       executeAndroidTapWithCoordinates.mockClear();
 
       // Test longPress
       await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined, []);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+        "longPress",
+        50,
+        50,
+        1000,
+        element,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        undefined
+      );
 
       executeAndroidTapWithCoordinates.mockClear();
 
       // Test doubleTap
       await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("doubleTap", 50, 50, 500, element, undefined, []);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
+        "doubleTap",
+        50,
+        50,
+        500,
+        element,
+        undefined,
+        [],
+        undefined,
+        undefined,
+        undefined
+      );
     });
   });
 
@@ -130,7 +163,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         options,
         undefined,
-        []
+        [],
+        undefined
       );
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
@@ -167,7 +201,8 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         options,
         undefined,
-        []
+        [],
+        undefined
       );
     });
 
@@ -201,19 +236,19 @@ describe("TapOnElement TalkBack mode detection", () => {
 
       // Test tap
       await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("tap", 50, 50, element, 500, {}, undefined, []);
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("tap", 50, 50, element, 500, {}, undefined, [], undefined);
 
       executeAndroidTapWithAccessibility.mockClear();
 
       // Test longPress
       await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("longPress", 50, 50, element, 1000, {}, undefined, []);
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("longPress", 50, 50, element, 1000, {}, undefined, [], undefined);
 
       executeAndroidTapWithAccessibility.mockClear();
 
       // Test doubleTap
       await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("doubleTap", 50, 50, element, 500, {}, undefined, []);
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("doubleTap", 50, 50, element, 500, {}, undefined, [], undefined);
     });
   });
 
@@ -407,6 +442,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         name: "test-device",
         platform: "android",
         id: "emulator-5554",
+        deviceId: "emulator-5554",
       } as any,
       fakeAdb as any,
       {
@@ -533,7 +569,10 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
           success: false,
           error: "Long press failed"
         }
-      ]
+      ],
+      undefined,
+      undefined,
+      undefined
     );
   });
 
@@ -613,7 +652,10 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
           success: false,
           error: "Fallback failed"
         }
-      ]
+      ],
+      undefined,
+      undefined,
+      undefined
     );
   });
 
@@ -688,7 +730,10 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
           success: false,
           error: "fallback failed"
         }
-      ]
+      ],
+      undefined,
+      undefined,
+      undefined
     );
   });
 });

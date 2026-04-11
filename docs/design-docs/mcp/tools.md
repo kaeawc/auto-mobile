@@ -8,7 +8,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 
 #### Interactions
 
-- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match).
+- 👆 `tapOn` supports tap, double-tap, long press, and long-press drag actions. Selector strategies include `text`, `elementId`, `clickable` (first clickable element), `siblingOfText` (clickable sibling of a text element), and `tapClickableParent` (nearest clickable ancestor of a text match). On **Android**, taps re-validate the target in a fresh accessibility tree (stable bounds + loading-aware retries); see [tapOn pre-tap stability](../plat/android/tapOn-pre-tap-stability-and-search-flakes.md).
 - 👉 `swipeOn` handles directional swipes and scrolling within container bounds.
 - ↔️ `dragAndDrop` for element-to-element moves.
 - 🔍 `pinchOn` for zoom in/out gestures.

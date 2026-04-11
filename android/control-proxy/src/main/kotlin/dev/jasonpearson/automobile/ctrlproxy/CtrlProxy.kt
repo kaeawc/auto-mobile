@@ -823,9 +823,10 @@ class CtrlProxy : AccessibilityService() {
               },
               onRequestImeAction = { requestId, action -> performImeAction(requestId, action) },
               onRequestSelectAll = { requestId -> performSelectAll(requestId) },
-              onRequestAction = { requestId, action, resourceId ->
-                performNodeAction(requestId, action, resourceId)
+              onRequestAction = { requestId, action, resourceId, bl, bt, br, bb ->
+                performNodeAction(requestId, action, resourceId, bl, bt, br, bb)
               },
+              onRequestHitTest = { requestId, x, y -> performHitTest(requestId, x, y) },
               onRequestClipboard = { requestId, action, text ->
                 performClipboard(requestId, action, text)
               },
@@ -2848,35 +2849,322 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Perform accessibility node action (click, long_click, or focus) on an element identified by
-   * resource-id. Designed for TalkBack mode where coordinate-based taps may be intercepted.
+   * Smallest (by screen area) node whose bounds contain (x, y), preferring deeper descendants.
+   * Caller must recycle the returned node when non-null. Recycles [root] before returning when
+   * traversal completes.
    */
-  private fun performNodeAction(requestId: String?, action: String, resourceId: String?) {
-    val startTime = System.currentTimeMillis()
-    Log.d(TAG, "performAction: action='$action', resourceId='$resourceId'")
-    perfProvider.serial("performAction")
+  private fun findSmallestNodeContainingPoint(root: AccessibilityNodeInfo, x: Int, y: Int): AccessibilityNodeInfo? {
+    val r = Rect()
+    root.getBoundsInScreen(r)
+    if (!r.contains(x, y)) {
+      return null
+    }
+    var bestChild: AccessibilityNodeInfo? = null
+    var bestArea = Int.MAX_VALUE
+    for (i in 0 until root.childCount) {
+      val child = root.getChild(i) ?: continue
+      val found = findSmallestNodeContainingPoint(child, x, y)
+      if (found != null) {
+        val fr = Rect()
+        found.getBoundsInScreen(fr)
+        val area = fr.width() * fr.height()
+        if (area < bestArea) {
+          bestChild?.recycle()
+          bestChild = found
+          bestArea = area
+        } else {
+          found.recycle()
+        }
+      }
+      child.recycle()
+    }
+    return bestChild ?: AccessibilityNodeInfo.obtain(root)
+  }
 
+  /**
+   * True if [node] can receive ACTION_CLICK or ACTION_LONG_CLICK via [performAction], including
+   * nodes that delegate clicks (action list) without `isClickable` / `isLongClickable`.
+   */
+  private fun nodeSupportsTapAction(node: AccessibilityNodeInfo, longPress: Boolean): Boolean {
+    if (!node.isEnabled) return false
+    val wantId =
+        if (longPress) {
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_LONG_CLICK
+        } else {
+          android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK
+        }
+    if (longPress) {
+      if (node.isLongClickable) return true
+    } else {
+      if (node.isClickable) return true
+    }
+    for (i in 0 until node.actionList.size) {
+      if (node.actionList[i].id == wantId) return true
+    }
+    return false
+  }
+
+  /**
+   * Resolve a clickable target for list rows that have no view id on the row container: use the
+   * center of [rect], find the deepest node there, then walk up to the first ancestor that accepts
+   * [forAction] (`click` or `long_click`). Caller must recycle the returned node when non-null.
+   */
+  private fun findClickableNodeAtBoundsCenter(
+      root: AccessibilityNodeInfo,
+      rect: Rect,
+      forAction: String,
+  ): AccessibilityNodeInfo? {
+    val longPress = forAction == "long_click"
+    val cx = (rect.left + rect.right) / 2
+    val cy = (rect.top + rect.bottom) / 2
+    val deepest = findSmallestNodeContainingPoint(root, cx, cy) ?: return null
+    var walk: AccessibilityNodeInfo? = deepest
     try {
-      if (resourceId == null || resourceId.isEmpty()) {
+      while (walk != null) {
+        if (nodeSupportsTapAction(walk, longPress)) {
+          val out = AccessibilityNodeInfo.obtain(walk)
+          if (walk != deepest) {
+            walk.recycle()
+          }
+          return out
+        }
+        val p = walk.parent
+        if (walk != deepest) {
+          walk.recycle()
+        }
+        walk = p
+      }
+      return null
+    } finally {
+      deepest.recycle()
+    }
+  }
+
+  /** Among nodes matching [resourceId], pick the smallest-area node intersecting [expected] bounds. */
+  private fun findBestNodeByResourceIdAndBounds(
+      root: AccessibilityNodeInfo?,
+      resourceId: String,
+      expected: Rect,
+  ): AccessibilityNodeInfo? {
+    if (root == null) return null
+    var best: AccessibilityNodeInfo? = null
+    var bestArea = Int.MAX_VALUE
+
+    fun visit(node: AccessibilityNodeInfo) {
+      val rid = node.viewIdResourceName
+      val matchesId = rid != null && (rid == resourceId || rid.endsWith(":id/$resourceId"))
+      if (matchesId) {
+        val nr = Rect()
+        node.getBoundsInScreen(nr)
+        if (Rect.intersects(nr, expected)) {
+          val area = nr.width() * nr.height()
+          if (area < bestArea) {
+            best?.recycle()
+            best = AccessibilityNodeInfo.obtain(node)
+            bestArea = area
+          }
+        }
+      }
+      for (i in 0 until node.childCount) {
+        val c = node.getChild(i) ?: continue
+        visit(c)
+        c.recycle()
+      }
+    }
+
+    visit(root)
+    return best
+  }
+
+  private fun nodeToHitTestUiElement(node: AccessibilityNodeInfo): UIElementInfo {
+    val r = Rect()
+    node.getBoundsInScreen(r)
+    return UIElementInfo(
+        text = node.text?.toString(),
+        resourceId = node.viewIdResourceName,
+        className = node.className?.toString(),
+        bounds = ElementBounds(r.left, r.top, r.right, r.bottom),
+        clickable = if (node.isClickable) "true" else "false",
+        focused = if (node.isFocused) "true" else "false",
+        enabled = if (node.isEnabled) "true" else "false",
+        contentDesc = node.contentDescription?.toString(),
+    )
+  }
+
+  private fun performHitTest(requestId: String?, x: Int, y: Int) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performHitTest: x=$x y=$y")
+    perfProvider.serial("hitTest")
+    try {
+      val root = rootInActiveWindow
+      if (root == null) {
         perfProvider.end()
-        val errorTime = System.currentTimeMillis()
-        val error = "resource-id is required for accessibility actions"
-        Log.w(TAG, error)
-        serviceScope.launch {
-          broadcastActionResult(requestId, action, false, error, errorTime - startTime)
+        val elapsed = System.currentTimeMillis() - startTime
+        kotlinx.coroutines.runBlocking {
+          broadcastHitTestResult(requestId, x, y, null, elapsed, "No active window root")
         }
         return
       }
+      try {
+        val node = findSmallestNodeContainingPoint(root, x, y)
+        if (node == null) {
+          perfProvider.end()
+          val elapsed = System.currentTimeMillis() - startTime
+          kotlinx.coroutines.runBlocking {
+            broadcastHitTestResult(requestId, x, y, null, elapsed, "No node contains coordinates")
+          }
+          return
+        }
+        val element = nodeToHitTestUiElement(node)
+        node.recycle()
+        perfProvider.end()
+        val elapsed = System.currentTimeMillis() - startTime
+        kotlinx.coroutines.runBlocking { broadcastHitTestResult(requestId, x, y, element, elapsed, null) }
+      } finally {
+        root.recycle()
+      }
+    } catch (e: Exception) {
+      perfProvider.end()
+      val elapsed = System.currentTimeMillis() - startTime
+      Log.e(TAG, "Hit test failed", e)
+      kotlinx.coroutines.runBlocking {
+        broadcastHitTestResult(requestId, x, y, null, elapsed, e.message ?: "Unknown error")
+      }
+    }
+  }
+
+  private suspend fun broadcastHitTestResult(
+      requestId: String?,
+      x: Int,
+      y: Int,
+      deepest: UIElementInfo?,
+      totalTimeMs: Long,
+      error: String?,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping hit_test result broadcast")
+      return
+    }
+    try {
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"hit_test_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"$requestId"""")
+          }
+          append(""","x":$x,"y":$y""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          append(""","success":${error == null}""")
+          if (error != null) {
+            append(""","error":${jsonCompact.encodeToString(error)}""")
+          }
+          if (deepest != null) {
+            val elJson = jsonCompact.encodeToString(UIElementInfo.serializer(), deepest)
+            append(""","deepest":$elJson""")
+          } else {
+            append(""","deepest":null""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+      Log.d(TAG, "Broadcasted hit_test result to ${webSocketServer.getConnectionCount()} clients")
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting hit test result", e)
+    }
+  }
+
+  /**
+   * Perform accessibility node action (click, long_click, or focus) on an element identified by
+   * resource-id. Designed for TalkBack mode where coordinate-based taps may be intercepted.
+   *
+   * When [boundsLeft]..[boundsBottom] are all non-null and [action] is click or long_click, the
+   * node is resolved by matching resource-id and intersecting screen bounds (disambiguates list
+   * rows that share the same id).
+   *
+   * When [resourceId] is null or empty, click/long_click may still run if all four bounds are set:
+   * the target is the first clickable enabled ancestor of the deepest node at the rect center
+   * (rows without resource-id on the container).
+   */
+  private fun performNodeAction(
+      requestId: String?,
+      action: String,
+      resourceId: String?,
+      boundsLeft: Int? = null,
+      boundsTop: Int? = null,
+      boundsRight: Int? = null,
+      boundsBottom: Int? = null,
+  ) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performAction: action='$action', resourceId='$resourceId', bounds=[$boundsLeft,$boundsTop][$boundsRight,$boundsBottom]")
+    perfProvider.serial("performAction")
+
+    try {
+      val disambiguationRect: Rect? =
+          if (boundsLeft != null && boundsTop != null && boundsRight != null && boundsBottom != null) {
+            Rect(boundsLeft, boundsTop, boundsRight, boundsBottom)
+          } else {
+            null
+          }
+
+      if (resourceId.isNullOrEmpty()) {
+        if (disambiguationRect == null || (action != "click" && action != "long_click")) {
+          perfProvider.end()
+          val errorTime = System.currentTimeMillis()
+          val error =
+              if (disambiguationRect == null) {
+                "resource-id or full bounds (left, top, right, bottom) is required for accessibility actions"
+              } else {
+                "bounds-only resolution requires click or long_click action"
+              }
+          Log.w(TAG, error)
+          serviceScope.launch {
+            broadcastActionResult(requestId, action, false, error, errorTime - startTime)
+          }
+          return
+        }
+      }
 
       perfProvider.startOperation("findNode")
-      val root = rootInActiveWindow
-      val targetNode = findNodeByResourceId(root, resourceId)
+      val targetNode: AccessibilityNodeInfo? =
+          if (resourceId.isNullOrEmpty()) {
+            val root = rootInActiveWindow
+            if (root == null) {
+              null
+            } else {
+              try {
+                findClickableNodeAtBoundsCenter(root, disambiguationRect!!, action)
+              } finally {
+                root.recycle()
+              }
+            }
+          } else {
+            val root = rootInActiveWindow
+            if (root == null) {
+              null
+            } else {
+              if (disambiguationRect != null && (action == "click" || action == "long_click")) {
+                findBestNodeByResourceIdAndBounds(root, resourceId, disambiguationRect)
+                    ?: findNodeByResourceId(root, resourceId)
+                    ?: findClickableNodeAtBoundsCenter(root, disambiguationRect, action)
+              } else {
+                findNodeByResourceId(root, resourceId)
+              }
+            }
+          }
       perfProvider.endOperation("findNode")
 
       if (targetNode == null) {
         perfProvider.end()
         val errorTime = System.currentTimeMillis()
-        val error = "Element not found with resource-id: $resourceId"
+        val error =
+            if (resourceId.isNullOrEmpty()) {
+              "No clickable node at bounds center"
+            } else {
+              "Element not found with resource-id: $resourceId"
+            }
         Log.w(TAG, error)
         serviceScope.launch {
           broadcastActionResult(requestId, action, false, error, errorTime - startTime)

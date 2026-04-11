@@ -77,7 +77,10 @@ android {
     disable += "ProtectedPermissions"
   }
 
-  buildFeatures { compose = true }
+  buildFeatures {
+    compose = true
+    buildConfig = true
+  }
 
   compileOptions {
     sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())

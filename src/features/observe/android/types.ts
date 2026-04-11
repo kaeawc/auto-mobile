@@ -170,6 +170,23 @@ export type A11ySelectAllResult = BaseResult;
 /** Accessibility action result */
 export type A11yActionResult = ActionTimingResult;
 
+/** Result of request_hit_test (deepest node at screen coordinates). */
+export interface AndroidHitTestResult {
+  success: boolean;
+  x: number;
+  y: number;
+  totalTimeMs: number;
+  error?: string;
+  deepest?: {
+    text?: string;
+    resourceId?: string;
+    className?: string;
+    bounds?: { left: number; top: number; right: number; bottom: number };
+    clickable?: string;
+    focused?: string;
+  };
+}
+
 /** Clipboard operation result from accessibility service */
 export interface A11yClipboardResult extends BaseResult {
   action: "copy" | "paste" | "clear" | "get";

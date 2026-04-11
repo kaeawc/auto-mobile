@@ -60,7 +60,13 @@ const executePlanDebugStepSchema = z.object({
   step: z.string(),
   status: z.enum(["completed", "failed", "skipped"]),
   durationMs: z.number().int(),
-  details: z.any().optional()
+  details: z
+    .any()
+    .optional()
+    .describe(
+      "Per-step context: always `params`; optional `stepObservation` when captureObserveSteps is set; " +
+        "optional `tapDebug` on tapOn (Android tap diagnostics) when the tool returned it."
+    )
 });
 
 const executePlanDebugSchema = z.object({

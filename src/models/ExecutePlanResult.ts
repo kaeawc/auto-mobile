@@ -8,6 +8,10 @@ import type { FailureObservationSummary } from "./FailureObservation";
 export type CaptureObserveStepMode = "summary" | "full";
 
 export interface PlanExecutionOptions {
+  /**
+   * When set, successful `observe` steps include `debug.steps[n].details.stepObservation`.
+   * Ignored for multi-device (parallel) plans.
+   */
   captureObserveSteps?: CaptureObserveStepMode;
 }
 
@@ -15,6 +19,12 @@ export interface ExecutePlanStepDebugInfo {
   step: string;
   status: "completed" | "failed" | "skipped";
   durationMs: number;
+  /**
+   * Per-step metadata. Common fields:
+   * - `params` — step arguments
+   * - `stepObservation` — successful `observe` snapshots when `captureObserveSteps` is set
+   * - `tapDebug` — Android `tapOn` tap diagnostics when the tool returned it (success or failure)
+   */
   details?: any;
 }
 

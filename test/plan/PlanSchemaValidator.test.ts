@@ -65,6 +65,45 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate grantAndroidPermissions step with inline appId and permissions", () => {
+      const yaml = `
+name: grant-plan
+steps:
+  - tool: grantAndroidPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+    label: Grant notifications
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate explicit Android permission / appop steps in sequence", () => {
+      const yaml = `
+name: grant-explicit
+steps:
+  - tool: setAndroidNotificationPolicyAccess
+    appId: com.example.app
+    allowed: false
+  - tool: setAndroidScheduleExactAlarmAppOp
+    appId: com.example.app
+    mode: deny
+  - tool: grantAndroidPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+  - tool: setAndroidNotificationPolicyAccess
+    appId: com.example.app
+    allowed: true
+  - tool: setAndroidScheduleExactAlarmAppOp
+    appId: com.example.app
+    mode: allow
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should validate plan with merge keys", () => {
       const yaml = `
 name: merge-keys-test
@@ -269,6 +308,18 @@ invalidField: value
         expect(error.field).toBeDefined();
         expect(error.message).toBeDefined();
       }
+    });
+
+    it("should reject grantAndroidPermissions with empty permissions array", () => {
+      const yaml = `
+name: bad-grant
+steps:
+  - tool: grantAndroidPermissions
+    appId: com.example.app
+    permissions: []
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
     });
   });
 

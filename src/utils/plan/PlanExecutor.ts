@@ -66,22 +66,24 @@ export class DefaultPlanExecutor implements PlanExecutor {
   /**
    * Extract the actual tool result from an MCP-formatted response.
    *
-   * Tool handlers return responses wrapped by createJSONToolResponse():
-   *   { content: [{ type: "text", text: '{"success": false, "error": "..."}' }] }
-   *
-   * This method unwraps the MCP content envelope to get the actual result object
-   * (e.g., { success: false, error: "Element not found" }).
-   *
-   * If the response already has "success" at the top level (not wrapped), it is
-   * returned as-is for backward compatibility.
+   * Tool handlers may return:
+   * - `createStructuredToolResponse()`: `{ structuredContent, content, success? }` — prefer
+   *   `structuredContent` so fields like `tapDebug` are visible (top-level `success` mirrors
+   *   the inner object and must not short-circuit unwrapping).
+   * - `createJSONToolResponse()`: `{ content: [{ type: "text", text: "<json>" }] }`
+   * - A plain `{ success, ... }` object (no `content` array)
    */
   private extractToolResult(response: any): any {
     if (!response || typeof response !== "object") {
       return response;
     }
 
-    // If "success" exists at the top level, the response is already unwrapped
-    if ("success" in response) {
+    const structured = response.structuredContent;
+    if (structured && typeof structured === "object" && "success" in structured) {
+      return structured;
+    }
+
+    if ("success" in response && !Array.isArray(response.content)) {
       return response;
     }
 
@@ -102,6 +104,24 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
 
     return response;
+  }
+
+  /**
+   * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
+   * (e.g. Android `tapOn` → `tapDebug`).
+   */
+  private mergeToolDiagnosticsIntoStepDetails(
+    toolName: string,
+    toolResult: unknown,
+    details: Record<string, unknown>
+  ): void {
+    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
+      return;
+    }
+    const tr = toolResult as Record<string, unknown>;
+    if (tr.tapDebug !== undefined && tr.tapDebug !== null) {
+      details.tapDebug = tr.tapDebug;
+    }
   }
 
   private parseStructuredToolPayload(response: unknown): Record<string, unknown> | null {
@@ -411,17 +431,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
               sessionUuid,
               signal
             );
+            const failedToolDetails: Record<string, unknown> = {
+              params: step.params,
+              error: String(errorMsg),
+              ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
+              ...(failureObservation ? { failureObservation } : {})
+            };
+            this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, failedToolDetails);
             debugSteps.push({
               step: `Execute step ${i + 1}: ${step.tool}`,
               status: "failed",
               durationMs: this.timer.now() - stepStartTime,
-              details: {
-                params: step.params,
-                error: String(errorMsg),
-                // Include debug info from tool response if available
-                ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
-                ...(failureObservation ? { failureObservation } : {})
-              }
+              details: failedToolDetails
             });
 
             return {
@@ -495,6 +516,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
               completedDetails.stepObservation = stepObservation;
             }
           }
+
+          this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, completedDetails);
 
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,

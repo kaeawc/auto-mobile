@@ -737,7 +737,9 @@
                     "minimum": -9007199254740991,
                     "maximum": 9007199254740991
                   },
-                  "details": {}
+                  "details": {
+                    "description": "Per-step context: always `params`; optional `stepObservation` when captureObserveSteps is set; optional `tapDebug` on tapOn (Android tap diagnostics) when the tool returned it."
+                  }
                 },
                 "required": [
                   "step",
@@ -859,6 +861,56 @@
       },
       "required": [
         "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "grantAndroidPermissions",
+    "description": "Grant Android runtime permissions via `adb shell pm grant --user …` (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name) to receive permissions"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Runtime permission names to grant via `adb shell pm grant --user …`"
+        },
+        "userId": {
+          "description": "Android user id for `pm grant --user` (default: 0, or inferred from foreground app / work profile)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "permissions"
       ],
       "additionalProperties": false
     }
@@ -4313,6 +4365,88 @@
       "required": [
         "deviceId",
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setAndroidNotificationPolicyAccess",
+    "description": "Set notification policy / Do Not Disturb access via `cmd notification allow_dnd` or `disallow_dnd` (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name)"
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "true = `cmd notification allow_dnd` (notification policy / DND access); false = `cmd notification disallow_dnd` (best-effort revoke)"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "allowed"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setAndroidScheduleExactAlarmAppOp",
+    "description": "Set UID-level SCHEDULE_EXACT_ALARM appop to allow or deny (`appops set --uid …`; deny API 31+ only, best-effort) (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name); used as `appops set --uid` target like FUB test helpers"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "allow = UID `SCHEDULE_EXACT_ALARM` allow (strict); deny = UID deny on API 31+ only (best-effort), skipped below API 31"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "mode"
       ],
       "additionalProperties": false
     }

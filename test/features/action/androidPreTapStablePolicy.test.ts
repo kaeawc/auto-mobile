@@ -14,16 +14,26 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
     ).toBe(1);
   });
 
-  test("text selection keeps strict consecutive matches (Corkill-style lists)", () => {
+  test("plain text tap uses one consecutive match (re-find still required)", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Dan Corkill",
         action: "tap"
       })
-    ).toBe(ANDROID_PRE_TAP_STABLE_MATCHES_STRICT);
+    ).toBe(1);
   });
 
-  test("tapClickableParent keeps strict matches even with elementId unused", () => {
+  test("text plus elementId uses one consecutive match", () => {
+    expect(
+      androidPreTapConsecutiveStableMatchesRequired({
+        text: "OK",
+        elementId: "com.app:id/confirm",
+        action: "tap"
+      })
+    ).toBe(1);
+  });
+
+  test("tapClickableParent keeps strict matches (Corkill-style list rows)", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Row",

@@ -23,6 +23,8 @@ The flake was **not** primarily “wrong tap coordinates” or “semantic click
 
 Together: **don’t tap on ghosts**, and **wait long enough through real loading** for the row to reappear in the a11y tree. After this landed, the same plan **passed repeatedly** (e.g. four consecutive runs) where step 28 had previously been flaky.
 
+**Policy note:** The **two consecutive** ε-stable re-finds apply to **churn-prone selector paths** (`tapClickableParent`, `siblingOfText`, `clickable`, `scrollableContainer`). Plain **`text`** or **`elementId`-only** taps still require a **live re-find** after refresh but only **one** successful stable match, so static labels are not held to the same double-stability bar as search list rows.
+
 ---
 
 ## Symptom
@@ -67,7 +69,7 @@ These changes **improved** robustness or diagnostics and are worth keeping in mi
 
 | Piece | Location |
 |-------|-----------|
-| Pre-tap loop + stability requirement | `src/features/action/TapOnElement.ts` — `resolveAndroidStableTapTargetAfterRefreshes` |
+| Pre-tap loop + stability requirement | `src/features/action/TapOnElement.ts` — `resolveAndroidStableTapTargetAfterRefreshes`; match count from `src/features/action/androidPreTapStablePolicy.ts` |
 | Bounds ε comparison | `src/utils/bounds.ts` — `boundsNearlyEqual` |
 | Loading heuristic | `src/utils/androidTransientLoading.ts` |
 | Unit tests | `test/utils/bounds.test.ts`, `test/utils/androidTransientLoading.test.ts` |

@@ -48,4 +48,11 @@ export interface TapOnElementOptions {
   // Find a clickable element that is a sibling of an element containing this text.
   // Useful for tapping checkboxes, icons, or buttons next to a specific text label.
   siblingOfText?: string;
+
+  /**
+   * When true, text and siblingOfText matching use full-string equality (case-insensitive)
+   * instead of substring containment. Use when short labels like "Claim" would otherwise
+   * match longer copy (e.g. "Time left to claim:") and confuse stable pre-tap re-find.
+   */
+  exactText?: boolean;
 }

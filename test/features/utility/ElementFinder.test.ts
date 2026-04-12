@@ -50,6 +50,16 @@ describe("DefaultElementFinder", () => {
       expect(results).toHaveLength(1);
     });
 
+    test("exact match: Claim does not match Time left to claim label", () => {
+      const hierarchy = makeHierarchy([
+        { $: { text: "Time left to claim:", bounds: "[302,453][668,516]" } },
+        { $: { text: "Claim", bounds: "[740,2200][854,2263]" } },
+      ]);
+      const results = finder.findElementsByText(hierarchy, "Claim", null, false, false);
+      expect(results).toHaveLength(1);
+      expect(results[0].text).toBe("Claim");
+    });
+
     test("prefers exact matches over partial", () => {
       const hierarchy = makeHierarchy([
         { $: { text: "Login", bounds: "[0,0][100,50]" } },

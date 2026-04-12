@@ -5756,6 +5756,10 @@
           },
           "additionalProperties": false
         },
+        "exactText": {
+          "description": "When true, match text (and siblingOfText) with full-string equality (case-insensitive), not substrings. Use for short labels like \"Claim\" that could match longer UI copy (e.g. \"Time left to claim:\") and break stable Android pre-tap re-find.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": [

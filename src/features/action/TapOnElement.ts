@@ -220,11 +220,13 @@ export class TapOnElement extends BaseVisualChange {
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
 
+    const textFuzzy = options.exactText !== true;
+
     if (options.siblingOfText) {
       return {
         selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.siblingOfText, {
           container: options.container,
-          fuzzyMatch: true,
+          fuzzyMatch: textFuzzy,
           caseSensitive: false,
           strategy: options.selectionStrategy
         }),
@@ -238,7 +240,7 @@ export class TapOnElement extends BaseVisualChange {
         return {
           selection: this.elementSelector.selectClickableParentByText(viewHierarchy, options.text, {
             container: options.container,
-            fuzzyMatch: true,
+            fuzzyMatch: textFuzzy,
             caseSensitive: false,
             strategy: options.selectionStrategy
           }),
@@ -250,7 +252,7 @@ export class TapOnElement extends BaseVisualChange {
       return {
         selection: this.elementSelector.selectByText(viewHierarchy, options.text, {
           container: options.container,
-          partialMatch: true,
+          partialMatch: textFuzzy,
           caseSensitive: false,
           strategy: options.selectionStrategy
         }),
@@ -1026,6 +1028,9 @@ export class TapOnElement extends BaseVisualChange {
     const exact = this.finder.findElementByText(viewHierarchy, options.text, container, false, false);
     if (exact) {
       return exact;
+    }
+    if (options.exactText) {
+      return null;
     }
     return this.finder.findElementByText(viewHierarchy, options.text, container, true, false);
   }

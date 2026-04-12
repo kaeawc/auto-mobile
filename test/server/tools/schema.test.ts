@@ -189,6 +189,16 @@ describe("MCP Tools Schema", () => {
     expect(result.action).toBe("tap");
   });
 
+  test("tapOn accepts optional exactText", async () => {
+    const { tapOnSchema } = await import("../../../src/server/interactionTools");
+    const result = tapOnSchema.parse({
+      platform: "android",
+      text: "Claim",
+      exactText: true,
+    });
+    expect(result.exactText).toBe(true);
+  });
+
   test("given a request contains fields that are defined by the schema but have incorrect values, should return an error response", async function() {
 
     const { client } = fixture.getContext();

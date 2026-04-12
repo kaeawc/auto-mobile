@@ -70,6 +70,7 @@ export interface TapOnArgs {
   clickable?: boolean;
   scrollableContainer?: boolean;
   siblingOfText?: string;
+  exactText?: boolean;
 }
 
 export interface DragAndDropArgs {

@@ -143,6 +143,10 @@ const tapOnBaseSchema = z.object({
   searchUntil: z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
   }).optional().describe("Poll for element before tapping"),
+  exactText: z.boolean().optional().describe(
+    "When true, match text (and siblingOfText) with full-string equality (case-insensitive), not substrings. " +
+    "Use for short labels like \"Claim\" that could match longer UI copy (e.g. \"Time left to claim:\") and break stable Android pre-tap re-find."
+  ),
   platform: platformSchema
 }).strict();
 
@@ -434,6 +438,7 @@ export function registerInteractionTools() {
       clickable: args.clickable,
       scrollableContainer: args.scrollableContainer,
       siblingOfText: args.siblingOfText,
+      exactText: args.exactText,
     }, progress);
 
     const searchStats = result.searchUntil;

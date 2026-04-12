@@ -5,6 +5,7 @@ import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
+import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import {
   DaemonRequest,
   DaemonResponse,
@@ -398,10 +399,7 @@ export class UnixSocketServer {
     mcpClient: Client,
     request: DaemonRequest
   ): Promise<any> {
-    // Extract timeout from request, defaulting to 30 seconds if not provided
-    // (MCP SDK default is 60 seconds, but we prefer faster failure for better UX)
-    const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30000;
-    const requestOptions = { timeout: request.timeoutMs ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS };
+    const requestOptions = { timeout: resolveMcpRequestTimeoutMs(request) };
 
     switch (request.method) {
       case "tools/list": {

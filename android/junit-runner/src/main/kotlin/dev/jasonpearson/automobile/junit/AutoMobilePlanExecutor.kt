@@ -342,7 +342,11 @@ internal object AutoMobilePlanExecutor {
       DaemonHeartbeat.registerSession(sessionUuid)
       response =
           try {
-            DaemonSocketClientManager.callTool("executePlan", JsonObject(args), options.timeoutMs)
+            DaemonSocketClientManager.callTool(
+                "executePlan",
+                JsonObject(args),
+                options.effectiveExecutePlanTimeoutMs(),
+            )
           } finally {
             DaemonHeartbeat.unregisterSession(sessionUuid)
           }

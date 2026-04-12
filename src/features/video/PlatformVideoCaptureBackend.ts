@@ -15,8 +15,7 @@ import type {
   VideoCaptureBackend,
   VideoCaptureConfig,
 } from "./VideoRecorderService";
-
-const ANDROID_SCREENRECORD_MAX_SECONDS = 180;
+import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
 interface ProcessExitState {

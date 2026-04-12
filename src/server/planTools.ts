@@ -13,6 +13,7 @@ import { DaemonState } from "../daemon/daemonState";
 import { normalizePlanDevices } from "../utils/plan/PlanDevices";
 import { ExecutePlanStepDebugInfo } from "../models/ExecutePlanResult";
 import { startVideoRecording, stopVideoRecording } from "./videoRecordingManager";
+import { AndroidSegmentedPlanVideoSession } from "./androidSegmentedPlanVideoSession";
 import { startTestRecording, stopTestRecording, getTestRecordingStatus } from "./testRecordingManager";
 import { startMcpRecording, stopMcpRecording, getMcpRecordingStatus } from "./mcpRecordingManager";
 import { serverConfig } from "../utils/ServerConfig";
@@ -372,25 +373,54 @@ const executePlanTool = async (device: BootedDevice, params: {
       throw new ActionableError("Device label requires a devices list to be provided.");
     }
 
-    // Start video recording for test plan execution
-    let videoRecordingId: string | undefined;
+    // Start video recording for test plan execution (Android: segmented past screenrecord 180s cap)
+    const videoOutputPrefix = `test-${plan.name}-${defaultTimer.now()}`;
+    let androidVideoSession: AndroidSegmentedPlanVideoSession | undefined;
+    let iosVideoRecordingId: string | undefined;
     try {
       logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Starting automatic video recording for test`);
-      const recording = await startVideoRecording({
-        device,
-        outputName: `test-${plan.name}-${defaultTimer.now()}`,
-        maxDurationSeconds: 300, // 5 minutes max
-      });
-      videoRecordingId = recording.recordingId;
-      logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Video recording started: ${videoRecordingId}`);
+      if (device.platform === "android") {
+        androidVideoSession = new AndroidSegmentedPlanVideoSession({
+          device,
+          outputNamePrefix: videoOutputPrefix,
+        });
+        await androidVideoSession.startFirstSegment();
+        logger.info(
+          `[PERF +${defaultTimer.now() - perfStart}ms] Android segmented video recording started`
+        );
+      } else {
+        const recording = await startVideoRecording({
+          device,
+          outputName: videoOutputPrefix,
+          maxDurationSeconds: 300,
+        });
+        iosVideoRecordingId = recording.recordingId;
+        logger.info(
+          `[PERF +${defaultTimer.now() - perfStart}ms] Video recording started: ${iosVideoRecordingId}`
+        );
+      }
     } catch (videoError) {
       logger.warn(`[PERF +${defaultTimer.now() - perfStart}ms] Failed to start automatic video recording: ${videoError}`);
-      // Continue with plan execution even if video recording fails to start
+      androidVideoSession = undefined;
+      iosVideoRecordingId = undefined;
     }
+
+    const planExecutionOptions =
+      params.captureObserveSteps || androidVideoSession
+        ? {
+          ...(params.captureObserveSteps
+            ? { captureObserveSteps: params.captureObserveSteps as const }
+            : {}),
+          ...(androidVideoSession
+            ? { onBeforePlanStep: androidVideoSession.onBeforePlanStep }
+            : {}),
+        }
+        : undefined;
 
     // Execute the plan with device context, ensuring video recording is stopped in finally block
     let result;
-    let videoFilePath: string | undefined;
+    let videoFilePaths: string[] = [];
+    let videoRecordingIds: string[] = [];
     try {
       logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Starting plan execution on device ${device.deviceId} (${device.platform})`);
       result = await executePlan(
@@ -401,23 +431,32 @@ const executePlanTool = async (device: BootedDevice, params: {
         params.sessionUuid,
         signal,
         params.abortStrategy,
-        params.captureObserveSteps
-          ? { captureObserveSteps: params.captureObserveSteps }
-          : undefined
+        planExecutionOptions
       );
       const execDuration = defaultTimer.now() - perfStart;
       logger.info(`[PERF +${execDuration}ms] Plan execution completed: ${result.success ? "SUCCESS" : "FAILED"} (${result.executedSteps}/${result.totalSteps} steps)`);
     } finally {
-      // Stop video recording regardless of plan execution outcome
-      if (videoRecordingId) {
+      if (androidVideoSession) {
         try {
-          logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Stopping automatic video recording: ${videoRecordingId}`);
-          const stopResult = await stopVideoRecording(videoRecordingId);
-          videoFilePath = stopResult.metadata.filePath;
-          logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Video recording stopped successfully: ${videoFilePath}`);
+          logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Finalizing segmented video recording`);
+          const finalized = await androidVideoSession.finalize();
+          videoFilePaths = finalized.filePaths;
+          videoRecordingIds = finalized.recordingIds;
+          logger.info(
+            `[PERF +${defaultTimer.now() - perfStart}ms] Segmented video finalized (${videoFilePaths.length} file(s))`
+          );
+        } catch (videoError) {
+          logger.warn(`[PERF +${defaultTimer.now() - perfStart}ms] Failed to finalize segmented video: ${videoError}`);
+        }
+      } else if (iosVideoRecordingId) {
+        try {
+          logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Stopping automatic video recording: ${iosVideoRecordingId}`);
+          const stopResult = await stopVideoRecording(iosVideoRecordingId);
+          videoFilePaths = [stopResult.metadata.filePath];
+          videoRecordingIds = [iosVideoRecordingId];
+          logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Video recording stopped successfully: ${stopResult.metadata.filePath}`);
         } catch (videoError) {
           logger.warn(`[PERF +${defaultTimer.now() - perfStart}ms] Failed to stop automatic video recording: ${videoError}`);
-          // Don't throw - let the original result/error propagate
         }
       }
     }
@@ -425,11 +464,12 @@ const executePlanTool = async (device: BootedDevice, params: {
     // Capture step data and error message for recording
     const steps = convertDebugStepsToRecords(result.debug?.steps);
     const errorMessage = result.failedStep?.error ?? undefined;
+    const primaryVideoPath = videoFilePaths[0];
 
     await recordTestExecution(result.success ? "passed" : "failed", defaultTimer.now() - startTime, {
       steps,
       errorMessage,
-      videoPath: videoFilePath,
+      videoPath: primaryVideoPath,
     });
 
     const response: ExecutePlanResult = {
@@ -441,7 +481,8 @@ const executePlanTool = async (device: BootedDevice, params: {
       platform: device.platform,
       deviceId: device.deviceId,
       deviceMapping,
-      ...(result.debug ? { debug: result.debug } : {})
+      ...(result.debug ? { debug: result.debug } : {}),
+      ...(videoFilePaths.length > 0 ? { videoFilePaths, videoRecordingIds } : {}),
     };
 
     logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Returning from executePlanTool (deviceId=${device.deviceId})`);

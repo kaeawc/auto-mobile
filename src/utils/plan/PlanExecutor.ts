@@ -38,7 +38,8 @@ export interface PlanExecutor {
    * @param sessionUuid Optional session UUID to inject into tool calls for parallel execution
    * @param signal Optional abort signal for cancellation
    * @param abortStrategy Strategy for aborting when a device fails (default: "immediate")
-   * @param executionOptions Optional capture flags (e.g. per-step observe snapshots on single-device plans)
+   * @param executionOptions Optional capture flags and hooks (e.g. `captureObserveSteps`, `onBeforePlanStep`;
+   *   hooks are ignored for multi-device parallel plans)
    * @returns Promise with execution result including success status, executed steps, and any errors
    */
   executePlan(
@@ -351,6 +352,12 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
       for (let i = startStep; i < plan.steps.length; i++) {
         throwIfAborted(signal);
+        if (executionOptions?.onBeforePlanStep) {
+          await executionOptions.onBeforePlanStep({
+            stepIndex: i,
+            totalSteps: plan.steps.length,
+          });
+        }
         const step = plan.steps[i];
         const stepStartTime = debugMode ? this.timer.now() : 0;
         const stepLabel = step.label || step.params?.label || JSON.stringify(step.params).substring(0, 50);

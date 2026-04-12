@@ -42,6 +42,7 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
+import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import type { Point } from "../../models/Point";
@@ -112,9 +113,6 @@ export class TapOnElement extends BaseVisualChange {
   private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING = 32;
 
   private static readonly ANDROID_PRE_TAP_REFIND_DELAY_MS = 150;
-
-  /** Require this many consecutive refreshes that each re-find the target with matching bounds (±ε). */
-  private static readonly ANDROID_PRE_TAP_STABLE_MATCHES = 2;
 
   private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = 3;
 
@@ -354,9 +352,10 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   /**
-   * Re-fetch the Android hierarchy and re-resolve the tap target until the same bounds appear on two
-   * consecutive successful re-finds (±ε). Refuses to fall back to pre-refresh coordinates when the
-   * refreshed tree does not contain a stable target.
+   * Re-fetch the Android hierarchy and re-resolve the tap target until bounds match on enough
+   * consecutive successful re-finds (±ε); the required count depends on selector type (see
+   * {@link androidPreTapConsecutiveStableMatchesRequired}). Refuses to fall back to pre-refresh
+   * coordinates when the refreshed tree does not contain a matching target.
    */
   private async resolveAndroidStableTapTargetAfterRefreshes(
     options: TapOnElementOptions,
@@ -368,6 +367,7 @@ export class TapOnElement extends BaseVisualChange {
     | { ok: true; viewHierarchy: ViewHierarchyResult; tapElement: Element; usedParent: boolean }
     | { ok: false; error: string }
   > {
+    const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
     let prevBounds: Element["bounds"] | null = null;
     let consecutiveStable = 0;
     let best: {
@@ -446,9 +446,9 @@ export class TapOnElement extends BaseVisualChange {
         usedParent: refreshed.usedParent
       };
 
-      if (consecutiveStable >= TapOnElement.ANDROID_PRE_TAP_STABLE_MATCHES) {
+      if (consecutiveStable >= stableMatchesRequired) {
         logger.info(
-          `[TapOnElement] Android tap target stable after ${attempt + 1} refresh(es) (bounds matched on last ${TapOnElement.ANDROID_PRE_TAP_STABLE_MATCHES} consecutive re-finds, ε=${TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`
+          `[TapOnElement] Android tap target stable after ${attempt + 1} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`
         );
         return { ok: true, ...best };
       }

@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  type StreamableHTTPReconnectionOptions,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import {
@@ -49,7 +52,20 @@ import type { KeyValueType } from "../features/storage/storageTypes";
  * tests, but this server shares a single in-process MCP HTTP client (one Streamable HTTP session).
  * Concurrent `callTool` on that client corrupts the session and yields transport errors plus
  * `Operation cancelled` on in-flight `executePlan`. All MCP forwards are serialized below.
+ *
+ * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
+ * The server transport allows only one such stream per session; a second GET while the first
+ * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
+ * stale sessions are recovered via `getMcpClient()` + "Session not found" retry.
  */
+/** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
+const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
+  initialReconnectionDelay: 1000,
+  maxReconnectionDelay: 30_000,
+  reconnectionDelayGrowFactor: 1.5,
+  maxRetries: 0,
+};
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private sessions: Map<string, SessionContext> = new Map();
@@ -488,7 +504,12 @@ export class UnixSocketServer {
       logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);
       throw new Error("mcpEndpoint is not set");
     }
-    const transport = new StreamableHTTPClientTransport(this.mcpEndpoint);
+    const transport = new StreamableHTTPClientTransport(
+      new URL(this.mcpEndpoint),
+      {
+        reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
+      }
+    );
 
     const client = new Client(
       {

@@ -338,6 +338,9 @@ export class DaemonManager {
     if (options.noUiPerfMode) {
       args.push("--no-ui-perf-mode");
     }
+    if (options.noNavigationScreenshots) {
+      args.push("--no-navigation-screenshots");
+    }
     if (options.memPerfAudit) {
       args.push("--mem-perf-audit");
     }
@@ -624,6 +627,8 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       options.dismissKeyboardAfterInput = true;
     } else if (args[i] === "--no-ui-perf-mode") {
       options.noUiPerfMode = true;
+    } else if (args[i] === "--no-navigation-screenshots") {
+      options.noNavigationScreenshots = true;
     } else if (args[i] === "--mem-perf-audit") {
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {

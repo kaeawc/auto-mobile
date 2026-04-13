@@ -287,21 +287,45 @@ internal object DaemonSocketPaths {
       val entryPoint = File(localPath, "dist/src/index.js")
       if (entryPoint.exists()) {
         val runtime = resolveRuntimePath()
-        return listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
+        return withNoNavigationScreenshots(
+          listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand),
+        )
       }
     }
 
-    // Prefer bunx, fall back to npx, then the global binary.
     val runner = resolvePackageRunner()
-    return if (runner != null) {
-      if (runner.endsWith("npx")) {
-        listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      } else {
-        listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      }
-    } else {
-      listOf("auto-mobile", "--daemon", subCommand)
+    val command =
+        if (runner != null) {
+          if (runner.endsWith("npx")) {
+            listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+          } else {
+            listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+          }
+        } else {
+          listOf("auto-mobile", "--daemon", subCommand)
+        }
+
+    return withNoNavigationScreenshots(command)
+  }
+
+  /**
+   * When true, the spawned daemon passes `--no-navigation-screenshots` to disable screenshot
+   * capture on navigation events. Reduces emulator resource usage in CI where navigation graph
+   * thumbnails are not needed.
+   */
+  private fun noNavigationScreenshotsRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.no.navigation.screenshots", false)) {
+      return true
     }
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withNoNavigationScreenshots(command: List<String>): List<String> {
+    if (!noNavigationScreenshotsRequested()) {
+      return command
+    }
+    return command + "--no-navigation-screenshots"
   }
 
   private fun resolveLocalProjectPath(): String? {

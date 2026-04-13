@@ -28,7 +28,8 @@ function parseArgs(): {
   cliMode: boolean;
   cliArgs: string[];
   daemonPort: number | undefined;
-  daemonHost: string;
+  /** Set only when `--host` is passed; otherwise Daemon uses its default (IPv4 loopback). */
+  daemonHost: string | undefined;
   debugPerf: boolean;
   debug: boolean;
   uiPerfMode: boolean;
@@ -54,7 +55,7 @@ function parseArgs(): {
   const args = process.argv.slice(2);
 
   let daemonPort: number | undefined;
-  let daemonHost = "localhost";
+  let daemonHost: string | undefined;
 
   // Detect CLI mode based on command line flag
   const cliMode = args.includes("--cli");
@@ -425,7 +426,7 @@ async function main() {
     if (daemonMode) {
       await startDaemon({
         port: daemonPort,
-        host: daemonHost,
+        ...(daemonHost !== undefined ? { host: daemonHost } : {}),
         debug,
         debugPerf,
       });

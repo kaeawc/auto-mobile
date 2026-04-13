@@ -15,7 +15,7 @@ class SimpleIntegrationTest {
   @Test
   fun testAutoMobilePlanExecutionOptionsDefaults() {
     val options = AutoMobilePlanExecutionOptions()
-    assertEquals(30000L, options.timeoutMs)
+    assertEquals(MIN_EXECUTE_PLAN_TIMEOUT_MS, options.timeoutMs)
     assertEquals("auto", options.device)
     assertTrue(options.aiAssistance)
     assertEquals(0, options.maxRetries)

@@ -299,6 +299,9 @@ export class DaemonManager {
     if (options.port) {
       args.push("--port", options.port.toString());
     }
+    if (options.host) {
+      args.push("--host", options.host);
+    }
     if (options.debug) {
       args.push("--debug");
     }
@@ -580,6 +583,12 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
   for (let i = 0; i < args.length; i++) {
     if (args[i] === "--port") {
       options.port = parseInt(args[i + 1], 10);
+      i++;
+    } else if (args[i] === "--host") {
+      const host = args[i + 1];
+      if (host && !host.startsWith("--")) {
+        options.host = host;
+      }
       i++;
     } else if (args[i] === "--debug") {
       options.debug = true;

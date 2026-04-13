@@ -203,6 +203,13 @@ export class SessionManager {
   }
 
   /**
+   * Get session assigned to a device (reverse lookup)
+   */
+  getSessionForDevice(deviceId: string): string | null {
+    return this.deviceSessionMap.get(deviceId) ?? null;
+  }
+
+  /**
    * Release a session and free its device
    *
    * Called when a test completes or times out.

@@ -9,7 +9,8 @@ export type FeatureFlagKey =
   | "accessibility-auto-detect"
   | "raw-element-search"
   | "ai-recovery"
-  | "mcp-recording";
+  | "mcp-recording"
+  | "navigation-screenshots";
 
 export type FeatureFlagConfig = Record<string, unknown>;
 
@@ -103,5 +104,11 @@ export const FEATURE_FLAG_DEFINITIONS: FeatureFlagDefinition[] = [
     label: "MCP call recording",
     description: "Enable the recordSteps tool to capture MCP tool calls as replayable YAML test plans.",
     defaultValue: false,
+  },
+  {
+    key: "navigation-screenshots",
+    label: "Navigation screenshots",
+    description: "Capture screenshots on navigation events to enrich the navigation graph. Disable to reduce device resource usage.",
+    defaultValue: true,
   },
 ];

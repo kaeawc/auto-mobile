@@ -371,6 +371,7 @@ async function main() {
       networkMockable,
       dismissKeyboardAfterInput,
       mcpRecording,
+      navigationScreenshots,
       noProxy,
       noDaemon,
     } = parseArgs();

@@ -106,6 +106,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileNotificationObserver.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         ViewBodyTracker.shared.initialize(buffer: buffer, dateProvider: dateProvider)
+        #if canImport(UIKit) && !os(watchOS)
+        ViewHierarchyTracker.shared.initialize(buffer: buffer)
+        #endif
         UserDefaultsInspector.shared.initialize(buffer: buffer)
         DatabaseInspector.shared.initialize()
 
@@ -245,6 +248,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         AutoMobileNotificationObserver.shared.reset()
         AutoMobileInteractionTracker.shared.reset()
         ViewBodyTracker.shared.reset()
+        #if canImport(UIKit) && !os(watchOS)
+        ViewHierarchyTracker.shared.reset()
+        #endif
         UserDefaultsInspector.shared.reset()
         DatabaseInspector.shared.reset()
         AutoMobileNetwork.shared.reset()

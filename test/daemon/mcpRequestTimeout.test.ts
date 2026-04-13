@@ -48,4 +48,48 @@ describe("resolveMcpRequestTimeoutMs", () => {
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(900_000);
   });
+
+  test("falls back to default for NaN timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: NaN
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("falls back to default for Infinity timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "executePlan", arguments: {} },
+      timeoutMs: Infinity
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS);
+  });
+
+  test("falls back to default for negative timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: -1
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
+
+  test("falls back to default for zero timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: 0
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_MCP_REQUEST_TIMEOUT_MS);
+  });
 });

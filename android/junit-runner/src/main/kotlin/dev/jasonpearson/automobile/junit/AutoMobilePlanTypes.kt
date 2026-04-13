@@ -10,6 +10,8 @@ import dev.jasonpearson.automobile.validation.ToolResultEntry
  * Minimum time the JUnit runner waits on the daemon for one `executePlan` (socket read + inner MCP
  * `callTool`). Lower values caused premature inner HTTP cancellation and `Operation cancelled` on
  * long UI plans.
+ *
+ * Keep in sync with `MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS` in `src/daemon/mcpRequestTimeout.ts`.
  */
 const val MIN_EXECUTE_PLAN_TIMEOUT_MS: Long = 600_000L
 

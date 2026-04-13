@@ -14,6 +14,8 @@ public class CtrlProxy {
     private let commandHandler: CommandHandler
     private let hierarchyDebouncer: HierarchyDebouncer
     private let fpsMonitor: DisplayLinkFPSMonitor
+    private let sdkHierarchyCache: SdkHierarchyCache
+    private let sdkHierarchyClient: SdkHierarchyClient
 
     #if canImport(XCTest) && os(iOS)
         private var application: XCUIApplication?
@@ -23,12 +25,16 @@ public class CtrlProxy {
     public init(port: UInt16 = defaultPort, timer: Timer = SystemTimer(), storageInspector: StorageInspecting? = DefaultStorageInspecting()) {
         elementLocator = ElementLocator()
         gesturePerformer = GesturePerformer(elementLocator: elementLocator)
+        sdkHierarchyCache = SdkHierarchyCache()
+        sdkHierarchyClient = SdkHierarchyClient()
         commandHandler = CommandHandler(
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
-            storageInspector: storageInspector
+            storageInspector: storageInspector,
+            sdkHierarchyClient: sdkHierarchyClient,
+            sdkHierarchyCache: sdkHierarchyCache
         )
-        server = WebSocketServer(port: port, commandHandler: commandHandler)
+        server = WebSocketServer(port: port, commandHandler: commandHandler, sdkHierarchyCache: sdkHierarchyCache)
         hierarchyDebouncer = HierarchyDebouncer(elementLocator: elementLocator, timer: timer)
         fpsMonitor = DisplayLinkFPSMonitor()
     }
@@ -68,7 +74,11 @@ public class CtrlProxy {
                     print(
                         "[CtrlProxy] Hierarchy changed (hash=\(hash), extraction=\(extractionTimeMs)ms), broadcasting"
                     )
-                    self?.server.broadcastHierarchyUpdate(hierarchy)
+                    let enriched = HierarchyMerger.merge(
+                        xcuitest: hierarchy,
+                        sdk: self?.sdkHierarchyCache.latest
+                    )
+                    self?.server.broadcastHierarchyUpdate(enriched)
                 case .unchanged:
                     // Don't broadcast unchanged results (animation mode)
                     break

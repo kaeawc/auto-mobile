@@ -91,7 +91,6 @@ import type {
   A11yImeActionResult,
   A11ySelectAllResult,
   A11yActionResult,
-  AndroidHitTestResult,
   A11yClipboardResult,
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
@@ -209,10 +208,6 @@ interface WsRequestBase extends WsMessageBase {
 
 interface WsConnectedMessage extends WsMessageBase {
   type: "connected";
-  id?: number;
-  /** Present on control-proxy builds that include WebSocket handshake metadata */
-  versionName?: string;
-  versionCode?: number;
 }
 
 interface WsHierarchyUpdateMessage extends WsMessageBase {
@@ -268,23 +263,6 @@ interface WsSelectAllResultMessage extends WsRequestBase {
 interface WsActionResultMessage extends WsRequestBase {
   type: "action_result";
   action: string;
-  resolution?: Record<string, unknown>;
-}
-
-interface WsHitTestResultMessage extends WsMessageBase {
-  type: "hit_test_result";
-  requestId: string;
-  x?: number;
-  y?: number;
-  success?: boolean;
-  totalTimeMs?: number;
-  error?: string;
-  deepest?: Record<string, unknown> | null;
-  layers?: unknown[];
-  chosenWindowZIndex?: number;
-  activeWindowZIndex?: number | null;
-  windowCount?: number;
-  hitTestSource?: string;
 }
 
 interface WsClipboardResultMessage extends WsRequestBase {
@@ -548,7 +526,6 @@ type WebSocketMessage =
   | WsImeActionResultMessage
   | WsSelectAllResultMessage
   | WsActionResultMessage
-  | WsHitTestResultMessage
   | WsClipboardResultMessage
   | WsCaCertResultMessage
   | WsDeviceOwnerStatusResultMessage
@@ -647,19 +624,8 @@ export interface CtrlProxy {
   ): Promise<A11ySelectAllResult>;
 
   requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    disambiguationBounds?: { left: number; top: number; right: number; bottom: number }
+    action: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yActionResult>;
-
-  requestHitTest(
-    x: number,
-    y: number,
-    timeoutMs?: number,
-    perf?: PerformanceTracker
-  ): Promise<AndroidHitTestResult>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -832,111 +798,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     CtrlProxyClient.instances.clear();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
-  }
-
-  private static parseActionResolution(
-    raw: Record<string, unknown> | undefined
-  ): A11yActionResult["resolution"] {
-    if (!raw || typeof raw !== "object") {
-      return undefined;
-    }
-    const ime = raw.imeWindowsExcludedForBounds;
-    const imp = raw.inputMethodWindowPresent;
-    const app = raw.applicationWindowPresent;
-    const ws = raw.windowsScannedForFind;
-    const brute = raw.bruteForceMaxIntersectingCandidates;
-    const path = raw.successPath;
-    if (typeof ime !== "boolean" || typeof imp !== "boolean" || typeof app !== "boolean"
-      || typeof ws !== "number" || typeof brute !== "number" || typeof path !== "string") {
-      return undefined;
-    }
-    const phase = raw.findResolutionPhase;
-    return {
-      imeWindowsExcludedForBounds: ime,
-      inputMethodWindowPresent: imp,
-      applicationWindowPresent: app,
-      windowsScannedForFind: ws,
-      findResolutionPhase: typeof phase === "string" ? phase : undefined,
-      bruteForceMaxIntersectingCandidates: brute,
-      successPath: path
-    };
-  }
-
-  private static parseHitTestLayers(raw: unknown[] | undefined): AndroidHitTestResult["layers"] {
-    if (!Array.isArray(raw) || raw.length === 0) {
-      return undefined;
-    }
-    const out: NonNullable<AndroidHitTestResult["layers"]> = [];
-    for (const item of raw) {
-      if (!item || typeof item !== "object") {
-        continue;
-      }
-      const o = item as Record<string, unknown>;
-      const wi = o.windowIndex;
-      const wt = o.windowType;
-      const wl = o.windowLayer;
-      const act = o.active;
-      const foc = o.focused;
-      const rb = o.rootBounds as Record<string, unknown> | undefined;
-      const deepestRaw = o.deepest as Record<string, unknown> | null | undefined;
-      if (typeof wi !== "number" || typeof wt !== "string" || typeof wl !== "number"
-        || typeof act !== "boolean" || typeof foc !== "boolean"
-        || !rb
-        || typeof rb.left !== "number" || typeof rb.top !== "number"
-        || typeof rb.right !== "number" || typeof rb.bottom !== "number") {
-        continue;
-      }
-      const deepest = CtrlProxyClient.parseHitTestDeepest(deepestRaw ?? undefined);
-      if (!deepest) {
-        continue;
-      }
-      out.push({
-        windowIndex: wi,
-        windowType: wt,
-        windowLayer: wl,
-        active: act,
-        focused: foc,
-        rootBounds: {
-          left: rb.left,
-          top: rb.top,
-          right: rb.right,
-          bottom: rb.bottom
-        },
-        deepest
-      });
-    }
-    return out.length > 0 ? out : undefined;
-  }
-
-  private static parseHitTestDeepest(
-    raw: Record<string, unknown> | null | undefined
-  ): AndroidHitTestResult["deepest"] {
-    if (!raw || typeof raw !== "object") {
-      return undefined;
-    }
-    const boundsRaw = raw.bounds as Record<string, unknown> | undefined;
-    const bounds =
-      boundsRaw
-      && typeof boundsRaw.left === "number"
-      && typeof boundsRaw.top === "number"
-      && typeof boundsRaw.right === "number"
-      && typeof boundsRaw.bottom === "number"
-        ? {
-          left: boundsRaw.left,
-          top: boundsRaw.top,
-          right: boundsRaw.right,
-          bottom: boundsRaw.bottom
-        }
-        : undefined;
-    const rid = raw["resource-id"] ?? raw.resourceId;
-    return {
-      text: typeof raw.text === "string" ? raw.text : undefined,
-      resourceId: typeof rid === "string" ? rid : undefined,
-      className: typeof raw.className === "string" ? raw.className : undefined,
-      bounds,
-      clickable: typeof raw.clickable === "string" ? raw.clickable : undefined,
-      focused: typeof raw.focused === "string" ? raw.focused : undefined
-    };
   }
 
   /**
@@ -1341,11 +1202,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   // ===========================================================================
 
   async requestAction(
-    action: string,
-    resourceId?: string,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    disambiguationBounds?: { left: number; top: number; right: number; bottom: number }
+    action: string, resourceId?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11yActionResult> {
     const startTime = this.timer.now();
 
@@ -1370,30 +1227,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
           throw new Error("WebSocket not connected");
         }
-        const payload: Record<string, unknown> = {
-          type: "request_action",
-          requestId,
-          action,
-          // Explicit null so Kotlin always parses `resourceId` and can use bounds-only resolution.
-          resourceId: resourceId ?? null
-        };
-        if (disambiguationBounds) {
-          const bl = Math.round(disambiguationBounds.left);
-          const bt = Math.round(disambiguationBounds.top);
-          const br = Math.round(disambiguationBounds.right);
-          const bb = Math.round(disambiguationBounds.bottom);
-          if ([bl, bt, br, bb].every(n => Number.isFinite(n))) {
-            payload.boundsLeft = bl;
-            payload.boundsTop = bt;
-            payload.boundsRight = br;
-            payload.boundsBottom = bb;
-          } else {
-            logger.warn(
-              "[CTRL_PROXY] Omitting request_action bounds: non-finite coordinates after round()"
-            );
-          }
-        }
-        this.ws.send(JSON.stringify(payload));
+        const message = JSON.stringify({ type: "request_action", requestId, action, resourceId });
+        this.ws.send(message);
         logger.debug(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
       });
 
@@ -1411,62 +1246,6 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Action request failed after ${duration}ms: ${error}`);
       return { success: false, action, totalTimeMs: duration, error: `${error}` };
-    }
-  }
-
-  async requestHitTest(
-    x: number,
-    y: number,
-    timeoutMs: number = 5000,
-    perf: PerformanceTracker = new NoOpPerformanceTracker()
-  ): Promise<AndroidHitTestResult> {
-    const startTime = this.timer.now();
-    this.cancelScreenshotBackoff();
-
-    try {
-      const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
-      if (!connected) {
-        logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection for hit test");
-        return {
-          success: false,
-          x,
-          y,
-          totalTimeMs: this.timer.now() - startTime,
-          error: "Failed to connect to accessibility service"
-        };
-      }
-
-      const requestId = this.requestManager.generateId("hitTest");
-      const hitPromise = this.requestManager.register<AndroidHitTestResult>(
-        requestId,
-        "hit_test",
-        timeoutMs,
-        (_id, _type, timeout) => ({
-          success: false,
-          x,
-          y,
-          totalTimeMs: this.timer.now() - startTime,
-          error: `Hit test timeout after ${timeout}ms`
-        })
-      );
-
-      await perf.track("sendRequest", async () => {
-        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
-          throw new Error("WebSocket not connected");
-        }
-        this.ws.send(JSON.stringify({
-          type: "request_hit_test",
-          requestId,
-          x: Math.round(x),
-          y: Math.round(y)
-        }));
-      });
-
-      return await perf.track("waitForHitTest", () => hitPromise);
-    } catch (error) {
-      const duration = this.timer.now() - startTime;
-      logger.warn(`[CTRL_PROXY] Hit test request failed after ${duration}ms: ${error}`);
-      return { success: false, x, y, totalTimeMs: duration, error: `${error}` };
     }
   }
 
@@ -1699,7 +1478,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       );
 
       this.hierarchyNavigationDetector.setNavigationCallback(info => {
-        if (info.packageName && info.screenFingerprint && serverConfig.isNavigationScreenshotsEnabled()) {
+        if (info.packageName && info.screenFingerprint) {
+          if (!serverConfig.isNavigationScreenshotsEnabled()) {
+            return;
+          }
           const appId = info.packageName;
           const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
           NavigationScreenshotManager.getInstance()
@@ -1817,16 +1599,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       const message: WebSocketMessage = JSON.parse(data.toString());
 
       if (message.type === "connected") {
-        const conn = message as WsConnectedMessage;
-        if (conn.versionName !== undefined && conn.versionName !== null) {
-          logger.info(
-            `[CTRL_PROXY] Connected to control-proxy ${conn.versionName} (versionCode=${conn.versionCode ?? "?"})`
-          );
-        } else {
-          logger.warn(
-            "[CTRL_PROXY] Connected to control-proxy without version handshake — install a current APK (see AUTOMOBILE_CTRL_PROXY_APK_PATH or ensureCompatibleVersion)"
-          );
-        }
+        logger.debug(`[CTRL_PROXY] Received connection confirmation`);
         return;
       }
 
@@ -1918,31 +1691,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
       // Handle action result
       if (message.type === "action_result" && message.requestId) {
-        const am = message as WsActionResultMessage;
         this.requestManager.resolve<A11yActionResult>(message.requestId, {
           success: message.success, action: message.action,
-          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming,
-          resolution: CtrlProxyClient.parseActionResolution(am.resolution)
-        });
-      }
-
-      // Handle hit test result (deepest a11y node at coordinates)
-      if (message.type === "hit_test_result" && message.requestId) {
-        const m = message as WsHitTestResultMessage;
-        this.requestManager.resolve<AndroidHitTestResult>(message.requestId, {
-          success: m.success !== false,
-          x: m.x ?? 0,
-          y: m.y ?? 0,
-          totalTimeMs: m.totalTimeMs ?? 0,
-          error: typeof m.error === "string" ? m.error : undefined,
-          deepest: CtrlProxyClient.parseHitTestDeepest(m.deepest),
-          layers: CtrlProxyClient.parseHitTestLayers(m.layers),
-          chosenWindowZIndex: typeof m.chosenWindowZIndex === "number" ? m.chosenWindowZIndex : undefined,
-          activeWindowZIndex: m.activeWindowZIndex === null || typeof m.activeWindowZIndex === "number"
-            ? m.activeWindowZIndex
-            : undefined,
-          windowCount: typeof m.windowCount === "number" ? m.windowCount : undefined,
-          hitTestSource: typeof m.hitTestSource === "string" ? m.hitTestSource : undefined
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
       }
 

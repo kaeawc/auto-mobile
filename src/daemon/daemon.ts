@@ -112,6 +112,9 @@ export class Daemon {
     if (options.noUiPerfMode) {
       serverConfig.setUiPerfMode(false);
     }
+    if (options.noNavigationScreenshots) {
+      serverConfig.setNavigationScreenshotsEnabled(false);
+    }
     if (options.memPerfAudit) {
       serverConfig.setMemPerfAuditMode(true);
     }

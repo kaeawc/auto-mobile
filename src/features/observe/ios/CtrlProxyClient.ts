@@ -679,13 +679,11 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
                 } catch { /* non-fatal */ }
               }
             }
-            if (screenshotUri) {
-              await recorder.recordNavigationEvent({
-                timestamp: ts, applicationId,
-                destination, source: navSource, arguments: navArgs, metadata: navMeta,
-                screenshotUri,
-              });
-            }
+            await recorder.recordNavigationEvent({
+              timestamp: ts, applicationId,
+              destination, source: navSource, arguments: navArgs, metadata: navMeta,
+              screenshotUri,
+            });
             break;
           }
           case "custom": {

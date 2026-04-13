@@ -44,6 +44,11 @@ import type { KeyValueType } from "../features/storage/storageTypes";
  * - Forward tool calls to local HTTP MCP server
  * - Return DaemonResponse to clients
  * - Manage concurrent client sessions
+ *
+ * JUnit uses one Unix socket per thread (`DaemonSocketClientManager` ThreadLocal) for parallel
+ * tests, but this server shares a single in-process MCP HTTP client (one Streamable HTTP session).
+ * Concurrent `callTool` on that client corrupts the session and yields transport errors plus
+ * `Operation cancelled` on in-flight `executePlan`. All MCP forwards are serialized below.
  */
 export class UnixSocketServer {
   private server: NetServer | null = null;
@@ -53,6 +58,8 @@ export class UnixSocketServer {
   private daemonState: DaemonStateAccess;
   private mcpClient: Client | null = null;
   private mcpClientPromise: Promise<Client> | null = null;
+  /** Tail of a promise chain that serializes MCP HTTP forwards across all socket connections. */
+  private mcpForwardTail: Promise<void> = Promise.resolve();
   private timer: Timer;
   private featureFlagService: FeatureFlagService | null;
 
@@ -196,23 +203,37 @@ export class UnixSocketServer {
           };
         }
 
-        const mcpClient = await this.getMcpClient();
+        const queueEnterMs = this.timer.now();
+        const result = await this.runExclusiveMcpForward(async () => {
+          const queueWaitMs = this.timer.now() - queueEnterMs;
+          const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
+          const timeoutMs = resolveMcpRequestTimeoutMs(request);
+          logger.debug(
+            `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} mcpTimeoutMs=${timeoutMs}`
+          );
+          const forwardStartMs = this.timer.now();
+          try {
+            const mcpClient = await this.getMcpClient();
 
-        let result;
-        try {
-          result = await this.handleIdeRequest(mcpClient, request);
-        } catch (ideError) {
-          const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
-          if (ideErrorMessage.includes("Session not found")) {
-            logger.warn("MCP client session expired, reconnecting and retrying...");
-            this.mcpClient = null;
-            this.mcpClientPromise = null;
-            const freshClient = await this.getMcpClient();
-            result = await this.handleIdeRequest(freshClient, request);
-          } else {
-            throw ideError;
+            try {
+              return await this.handleIdeRequest(mcpClient, request);
+            } catch (ideError) {
+              const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
+              if (ideErrorMessage.includes("Session not found")) {
+                logger.warn("MCP client session expired, reconnecting and retrying...");
+                this.mcpClient = null;
+                this.mcpClientPromise = null;
+                const freshClient = await this.getMcpClient();
+                return await this.handleIdeRequest(freshClient, request);
+              }
+              throw ideError;
+            }
+          } finally {
+            logger.debug(
+              `[McpForward] end socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
+            );
           }
-        }
+        });
 
         return {
           id: request.id,
@@ -234,6 +255,32 @@ export class UnixSocketServer {
         };
       }
     });
+  }
+
+  /**
+   * Run one MCP forward at a time. The shared `mcpClient` is not safe under concurrent
+   * `tools/call` (long SSE responses from `executePlan` interleaved with other RPCs).
+   */
+  private runExclusiveMcpForward<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mcpForwardTail.then(() => fn());
+    this.mcpForwardTail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /** Compact label for debug logs (method + tool name or resource URI). */
+  private static describeMcpForwardRequest(request: DaemonRequest): string {
+    if (request.method === "tools/call") {
+      const name = request.params?.name;
+      return `method=tools/call tool=${typeof name === "string" ? name : "?"}`;
+    }
+    if (request.method === "resources/read") {
+      const uri = request.params?.uri;
+      return `method=resources/read uri=${typeof uri === "string" ? uri : "?"}`;
+    }
+    return `method=${request.method}`;
   }
 
   /**

@@ -44,6 +44,7 @@ import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../ut
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import { listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 
@@ -436,7 +437,10 @@ export class Daemon {
           // Setup cleanup handlers
           streamableTransport.onclose = async () => {
             if (streamableTransport.sessionId) {
-              const cancelled = await executionTracker.cancelSessionExecutions(streamableTransport.sessionId);
+              const cancelled = await executionTracker.cancelSessionExecutions(
+                streamableTransport.sessionId,
+                "streamable_http_onclose"
+              );
               this.transports.delete(streamableTransport.sessionId);
               logger.info(
                 `Streamable HTTP session closed: ${streamableTransport.sessionId} (cancelled ${cancelled} executions)`
@@ -446,11 +450,14 @@ export class Daemon {
 
           streamableTransport.onerror = async error => {
             if (streamableTransport.sessionId) {
+              const detail = describeUnknownError(error);
               logger.error(
-                `Streamable HTTP transport error for session ${streamableTransport.sessionId}:`,
-                error
+                `Streamable HTTP transport error for session ${streamableTransport.sessionId}: ${detail}`
               );
-              await executionTracker.cancelSessionExecutions(streamableTransport.sessionId);
+              await executionTracker.cancelSessionExecutions(
+                streamableTransport.sessionId,
+                `streamable_http_onerror: ${detail}`
+              );
               this.transports.delete(streamableTransport.sessionId);
             }
           };

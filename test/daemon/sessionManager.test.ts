@@ -175,6 +175,23 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("getSessionForDevice", () => {
+    test("should return session id for assigned device", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBe("session-1");
+    });
+
+    test("should return null for unknown device", () => {
+      expect(sessionManager.getSessionForDevice("emulator-9999")).toBeNull();
+    });
+
+    test("should return null after session is released", async () => {
+      await sessionManager.createSession("session-1", "emulator-5554", "android");
+      await sessionManager.releaseSession("session-1");
+      expect(sessionManager.getSessionForDevice("emulator-5554")).toBeNull();
+    });
+  });
+
   describe("statistics", () => {
     test("should return correct session statistics", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android");

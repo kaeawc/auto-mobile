@@ -46,6 +46,7 @@ import {
   computeChecksum,
 } from "../ScreenshotBackoffScheduler";
 import { getFailureRecorder } from "../../failures/FailureRecorder";
+import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import type { StackTraceElement } from "../../../server/failuresResources";
@@ -1698,7 +1699,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       );
 
       this.hierarchyNavigationDetector.setNavigationCallback(info => {
-        if (info.packageName && info.screenFingerprint) {
+        if (info.packageName && info.screenFingerprint && serverConfig.isNavigationScreenshotsEnabled()) {
           const appId = info.packageName;
           const screenName = `screen_${info.screenFingerprint.substring(0, 12)}`;
           NavigationScreenshotManager.getInstance()
@@ -2136,7 +2137,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
           logger.info(`[CTRL_PROXY] Navigation event: ${event.destination} (app: ${event.applicationId})`);
           await this.getNavigationGraphManager().recordNavigationEvent(event);
 
-          if (event.applicationId && event.destination) {
+          if (event.applicationId && event.destination && serverConfig.isNavigationScreenshotsEnabled()) {
             NavigationScreenshotManager.getInstance()
               .captureAndStore(this.device, this.adb, event.applicationId, event.destination)
               .then(screenshotPath => {

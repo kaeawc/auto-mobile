@@ -220,19 +220,28 @@ export class UnixSocketServer {
         }
 
         const queueEnterMs = this.timer.now();
+        const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+
         const result = await this.runExclusiveMcpForward(async () => {
           const queueWaitMs = this.timer.now() - queueEnterMs;
+          const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
           const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-          const timeoutMs = resolveMcpRequestTimeoutMs(request);
           logger.debug(
-            `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} mcpTimeoutMs=${timeoutMs}`
+            `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`
           );
+
+          if (remainingTimeoutMs <= 0) {
+            throw new Error(
+              `MCP forward timeout: spent ${queueWaitMs}ms waiting in queue (budget was ${totalTimeoutMs}ms)`
+            );
+          }
+
           const forwardStartMs = this.timer.now();
           try {
             const mcpClient = await this.getMcpClient();
 
             try {
-              return await this.handleIdeRequest(mcpClient, request);
+              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs);
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
@@ -240,7 +249,8 @@ export class UnixSocketServer {
                 this.mcpClient = null;
                 this.mcpClientPromise = null;
                 const freshClient = await this.getMcpClient();
-                return await this.handleIdeRequest(freshClient, request);
+                const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
+                return await this.handleIdeRequest(freshClient, request, retryRemainingMs > 0 ? retryRemainingMs : 1000);
               }
               throw ideError;
             }
@@ -460,9 +470,14 @@ export class UnixSocketServer {
 
   private async handleIdeRequest(
     mcpClient: Client,
-    request: DaemonRequest
+    request: DaemonRequest,
+    remainingTimeoutMs?: number
   ): Promise<any> {
-    const requestOptions = { timeout: resolveMcpRequestTimeoutMs(request) };
+    const baseTimeout = resolveMcpRequestTimeoutMs(request);
+    const timeout = remainingTimeoutMs !== undefined
+      ? Math.min(baseTimeout, remainingTimeoutMs)
+      : baseTimeout;
+    const requestOptions = { timeout };
 
     switch (request.method) {
       case "tools/list": {

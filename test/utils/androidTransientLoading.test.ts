@@ -15,8 +15,8 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("true when resource-id contains progress_bar", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/progress_bar_loading",
-      class: "android.view.View",
-      bounds: "[0,0][10,10]"
+      "class": "android.view.View",
+      "bounds": "[0,0][10,10]"
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -32,9 +32,9 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("false for unrelated views", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/title",
-      class: "android.widget.TextView",
-      text: "Hello",
-      bounds: "[0,0][10,10]"
+      "class": "android.widget.TextView",
+      "text": "Hello",
+      "bounds": "[0,0][10,10]"
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(false);
   });

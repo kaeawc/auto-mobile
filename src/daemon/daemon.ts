@@ -790,6 +790,17 @@ export class Daemon {
               this.stoppingRecordings.delete(recordingId);
             }
           }
+
+          // Cancel active executions and release the session so the test fails
+          // fast instead of waiting for the full MCP request timeout.
+          const sessionId = this.sessionManager.getSessionForDevice(deviceId);
+          if (sessionId) {
+            logger.warn(
+              `[Daemon] Device ${deviceId} disconnected — cancelling session ${sessionId}`
+            );
+            await this.cancelAndReleaseSession(sessionId);
+          }
+
           this.deviceDisconnectMisses.delete(deviceId);
         }
       } catch (error) {

@@ -311,7 +311,7 @@ internal object DaemonSocketPaths {
               }
             }
 
-    return withNoUiPerfMode(withDismissKeyboardAfterInput(command))
+    return withNoNavigationScreenshots(withNoUiPerfMode(withDismissKeyboardAfterInput(command)))
   }
 
   /**
@@ -351,6 +351,26 @@ internal object DaemonSocketPaths {
       return command
     }
     return command + "--no-ui-perf-mode"
+  }
+
+  /**
+   * When true, the spawned daemon passes `--no-navigation-screenshots` to disable screenshot
+   * capture on navigation events. Reduces emulator resource usage in CI where navigation graph
+   * thumbnails are not needed.
+   */
+  private fun noNavigationScreenshotsRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.no.navigation.screenshots", false)) {
+      return true
+    }
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withNoNavigationScreenshots(command: List<String>): List<String> {
+    if (!noNavigationScreenshotsRequested()) {
+      return command
+    }
+    return command + "--no-navigation-screenshots"
   }
 
   private fun resolveLocalProjectPath(): String? {

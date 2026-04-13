@@ -289,6 +289,16 @@ export class Daemon {
   private async startHttpServer(): Promise<void> {
     this.httpServer = createHttpServer();
 
+    // Disable default timeouts on this loopback-only server. Node.js 18+ sets
+    // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
+    // connections for long-running tool calls like executePlan. With the timeout
+    // active the HTTP response is silently dropped after ~5 min, the
+    // StreamableHTTPServerTransport fires onclose, and the MCP client never
+    // receives the result — even when the tool completed successfully.
+    this.httpServer.requestTimeout = 0;
+    this.httpServer.headersTimeout = 0;
+    this.httpServer.timeout = 0;
+
     this.httpServer.on("request", async (req, res) => {
       // CORS headers for development
       res.setHeader("Access-Control-Allow-Origin", "*");

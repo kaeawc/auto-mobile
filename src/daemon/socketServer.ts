@@ -141,30 +141,32 @@ export class UnixSocketServer {
     let buffer = "";
 
     socket.on("data", async data => {
-      try {
-        // Accumulate data into buffer
-        buffer += data.toString();
+      buffer += data.toString();
 
-        // Process complete JSON messages (newline-delimited)
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.trim()) {
-            const request: DaemonRequest = JSON.parse(line);
-            const response = await this.handleRequest(sessionId, request);
-            socket.write(JSON.stringify(response) + "\n");
-          }
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
         }
-      } catch (error) {
-        logger.error(`Error processing request from ${sessionId}:`, error);
-        const errorResponse: DaemonResponse = {
-          id: "unknown",
-          type: "mcp_response",
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        socket.write(JSON.stringify(errorResponse) + "\n");
+
+        let requestId = "unknown";
+        try {
+          const request: DaemonRequest = JSON.parse(line);
+          requestId = request.id;
+          const response = await this.handleRequest(sessionId, request);
+          socket.write(JSON.stringify(response) + "\n");
+        } catch (error) {
+          logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+          const errorResponse: DaemonResponse = {
+            id: requestId,
+            type: "mcp_response",
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+          socket.write(JSON.stringify(errorResponse) + "\n");
+        }
       }
     });
 

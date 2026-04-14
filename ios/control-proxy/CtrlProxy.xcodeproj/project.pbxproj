@@ -8,14 +8,21 @@
 
 /* Begin PBXBuildFile section */
 		0377180BB666F63386C77E17 /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
+		0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
+		0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */; };
 		0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */; };
 		12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */; };
 		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
+		158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
+		261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
+		2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
+		2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
 		3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
 		42E706C81F51E89DEBD9C1A9 /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */; };
+		45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
 		47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
@@ -36,14 +43,17 @@
 		C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		C194D73F02D0776F0F7FCA7B /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
+		CB577FE46E063BB09F5D4010 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
 		CC061B4978496D75042B253A /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
 		CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
+		CFCA362E1EF1F3251B19BC1B /* HierarchyMergerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */; };
 		D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
 		DFEE186C8B4CD32EF76D995A /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */; };
 		E8327D679D58C8F804C064B1 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */; };
 		E8B2051927387427E1F14EC2 /* ElementLocatorTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */; };
 		EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */; };
+		EE7765F6DA0807474D52C3DD /* SdkHierarchyCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */; };
 		F469E7EF16C59A99DBD519DA /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
 		F7B78DBB0517EC004EF4ECF6 /* ModelsTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 184CFC1280E0802EBF53965F /* ModelsTests.swift */; };
 /* End PBXBuildFile section */
@@ -100,9 +110,11 @@
 /* Begin PBXFileReference section */
 		009A6B01284035997298367F /* CtrlProxyUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncer.swift; sourceTree = "<group>"; };
+		043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCache.swift; sourceTree = "<group>"; };
 		056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = CtrlProxy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		0CDD96577EB9823B5FCF2585 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = CtrlProxyApp/Assets.xcassets; sourceTree = SOURCE_ROOT; };
 		0EE277596991C059142C485B /* CtrlProxy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxy.swift; sourceTree = "<group>"; };
+		0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMergerTests.swift; sourceTree = "<group>"; };
 		0F9D7B74C318EE243B225B95 /* Protocols.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Protocols.swift; sourceTree = "<group>"; };
 		1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DisplayLinkFPSMonitor.swift; sourceTree = "<group>"; };
 		184CFC1280E0802EBF53965F /* ModelsTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelsTests.swift; sourceTree = "<group>"; };
@@ -111,10 +123,12 @@
 		25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandlerTests.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCacheTests.swift; sourceTree = "<group>"; };
 		637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		652F5687D2FC57F3D6D4629C /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
 		802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxyUITests.swift; sourceTree = "<group>"; };
+		83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyModels.swift; sourceTree = "<group>"; };
 		878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		95565999DC108319DEED894A /* ElementLocator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocator.swift; sourceTree = "<group>"; };
 		9A1B2931E58B158EE51C5F4F /* Fakes.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Fakes.swift; sourceTree = "<group>"; };
@@ -126,7 +140,9 @@
 		D81453AD074F2A392251CFC3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		DBA97A6C3A1240A055D9876C /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
 		DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProviderTests.swift; sourceTree = "<group>"; };
+		E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyClient.swift; sourceTree = "<group>"; };
 		F2144B84CD70DB35A1030624 /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
+		FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMerger.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -164,8 +180,10 @@
 				25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */,
 				B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */,
 				3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */,
+				0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */,
 				184CFC1280E0802EBF53965F /* ModelsTests.swift */,
 				DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */,
+				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
 			);
 			name = CtrlProxyTests;
 			path = Tests/CtrlProxyTests;
@@ -213,11 +231,15 @@
 				9A1B2931E58B158EE51C5F4F /* Fakes.swift */,
 				F2144B84CD70DB35A1030624 /* GesturePerformer.swift */,
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
+				FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */,
 				D81453AD074F2A392251CFC3 /* Models.swift */,
 				DBA97A6C3A1240A055D9876C /* OSLogReader.swift */,
 				B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */,
 				A284B6FFBE969931BB03A2FF /* PerfProvider.swift */,
 				0F9D7B74C318EE243B225B95 /* Protocols.swift */,
+				043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */,
+				E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */,
+				83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */,
 				B4CB9272A186932D89EB1072 /* WebSocketServer.swift */,
 			);
 			name = CtrlProxy;
@@ -384,11 +406,15 @@
 				A603343B94D35DDF48F7AA4D /* Fakes.swift in Sources */,
 				D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */,
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
+				158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */,
 				BD7D2FF024054ED74F17958D /* Models.swift in Sources */,
 				C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */,
 				D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */,
 				E8327D679D58C8F804C064B1 /* PerformanceMetrics.swift in Sources */,
 				47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */,
+				0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */,
+				0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */,
+				2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */,
 				C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -400,8 +426,10 @@
 				12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */,
 				E8B2051927387427E1F14EC2 /* ElementLocatorTests.swift in Sources */,
 				4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */,
+				CFCA362E1EF1F3251B19BC1B /* HierarchyMergerTests.swift in Sources */,
 				F7B78DBB0517EC004EF4ECF6 /* ModelsTests.swift in Sources */,
 				0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */,
+				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -417,11 +445,15 @@
 				1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */,
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
+				45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */,
 				BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */,
 				141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */,
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,
 				B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */,
 				2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */,
+				EE7765F6DA0807474D52C3DD /* SdkHierarchyCache.swift in Sources */,
+				261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */,
+				CB577FE46E063BB09F5D4010 /* SdkHierarchyModels.swift in Sources */,
 				53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

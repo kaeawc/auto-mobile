@@ -48,4 +48,14 @@ export interface TapOnElementOptions {
   // Find a clickable element that is a sibling of an element containing this text.
   // Useful for tapping checkboxes, icons, or buttons next to a specific text label.
   siblingOfText?: string;
+
+  /**
+   * When true, refresh the accessibility hierarchy before tapping and require consecutive
+   * re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping
+   * stale coordinates when the UI is still settling (loading overlays, list refreshes, IME).
+   *
+   * Off by default. Recommended for search result lists, dynamically loaded content, and
+   * any flow where the target can disappear between observe and tap.
+   */
+  preTapStability?: boolean;
 }

@@ -186,18 +186,10 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
         return { enabled: true, service: "unknown" };
       }
 
-      logger.info(
-        `[AccessibilityDetector] device=${deviceId} settings get secure enabled_accessibility_services is empty/null — ` +
-          `no accessibility service (including CtrlProxy) is enabled. AutoMobile needs CtrlProxy on in Settings > Accessibility. ` +
-          `Raw (truncated): ${output.slice(0, 240)}`
-      );
+      logger.debug(`[AccessibilityDetector] No accessibility services enabled on device ${deviceId}`);
       return { enabled: false, service: "unknown" };
     } catch (error) {
       logger.error(`[AccessibilityDetector] Failed to detect accessibility state for device ${deviceId}:`, error);
-      logger.warn(
-        `[AccessibilityDetector] device=${deviceId} ADB settings query failed; treating accessibility as disabled. ` +
-          `Check adb shell settings get secure enabled_accessibility_services manually.`
-      );
       // Graceful fallback: assume disabled on error
       return { enabled: false, service: "unknown" };
     }

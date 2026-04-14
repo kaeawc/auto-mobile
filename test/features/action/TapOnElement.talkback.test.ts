@@ -63,9 +63,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         element,
         undefined,
-        { action: "tap", elementId: "test:id/button" },
-        undefined,
-        []
+        { action: "tap", elementId: "test:id/button" }
       );
 
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalledTimes(1);
@@ -79,53 +77,20 @@ describe("TapOnElement TalkBack mode detection", () => {
       } as any;
 
       // Test tap
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-        "tap",
-        50,
-        50,
-        500,
-        element,
-        undefined,
-        [],
-        undefined,
-        undefined,
-        undefined
-      );
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
 
       executeAndroidTapWithCoordinates.mockClear();
 
       // Test longPress
-      await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-        "longPress",
-        50,
-        50,
-        1000,
-        element,
-        undefined,
-        [],
-        undefined,
-        undefined,
-        undefined
-      );
+      await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
 
       executeAndroidTapWithCoordinates.mockClear();
 
       // Test doubleTap
-      await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element, undefined, undefined, undefined, []);
-      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-        "doubleTap",
-        50,
-        50,
-        500,
-        element,
-        undefined,
-        [],
-        undefined,
-        undefined,
-        undefined
-      );
+      await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element);
+      expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("doubleTap", 50, 50, 500, element, undefined);
     });
   });
 
@@ -149,9 +114,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         element,
         undefined,
-        options,
-        undefined,
-        []
+        options
       );
 
       expect(executeAndroidTapWithAccessibility).toHaveBeenCalledTimes(1);
@@ -162,8 +125,6 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         500,
         options,
-        undefined,
-        [],
         undefined
       );
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
@@ -188,9 +149,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         element,
         undefined,
-        options,
-        undefined,
-        []
+        options
       );
 
       expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith(
@@ -200,8 +159,6 @@ describe("TapOnElement TalkBack mode detection", () => {
         element,
         500,
         options,
-        undefined,
-        [],
         undefined
       );
     });
@@ -219,9 +176,7 @@ describe("TapOnElement TalkBack mode detection", () => {
         500,
         element,
         undefined,
-        { action: "tap" },
-        undefined,
-        []
+        { action: "tap" }
       );
 
       expect(executeAndroidTapWithAccessibility).toHaveBeenCalledTimes(1);
@@ -235,20 +190,20 @@ describe("TapOnElement TalkBack mode detection", () => {
       } as any;
 
       // Test tap
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("tap", 50, 50, element, 500, {}, undefined, [], undefined);
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("tap", 50, 50, element, 500, {}, undefined);
 
       executeAndroidTapWithAccessibility.mockClear();
 
       // Test longPress
-      await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("longPress", 50, 50, element, 1000, {}, undefined, [], undefined);
+      await (tapOnElement as any).executeAndroidTap("longPress", 50, 50, 1000, element, undefined, {});
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("longPress", 50, 50, element, 1000, {}, undefined);
 
       executeAndroidTapWithAccessibility.mockClear();
 
       // Test doubleTap
-      await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element, undefined, {}, undefined, []);
-      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("doubleTap", 50, 50, element, 500, {}, undefined, [], undefined);
+      await (tapOnElement as any).executeAndroidTap("doubleTap", 50, 50, 500, element, undefined, {});
+      expect(executeAndroidTapWithAccessibility).toHaveBeenCalledWith("doubleTap", 50, 50, element, 500, {}, undefined);
     });
   });
 
@@ -262,12 +217,12 @@ describe("TapOnElement TalkBack mode detection", () => {
       } as any;
 
       // First call
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
       const firstCheckCount = fakeAccessibilityDetector.getCheckCount();
       expect(firstCheckCount).toBe(1);
 
       // Second call - note: real AccessibilityDetector would cache, but FakeAccessibilityDetector doesn't
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
       const secondCheckCount = fakeAccessibilityDetector.getCheckCount();
 
       // Verify detector was called for second tap (caching is tested in AccessibilityDetector tests)
@@ -283,7 +238,7 @@ describe("TapOnElement TalkBack mode detection", () => {
       } as any;
 
       // First call with TalkBack disabled
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
       expect(executeAndroidTapWithCoordinates).toHaveBeenCalled();
       executeAndroidTapWithCoordinates.mockClear();
 
@@ -292,7 +247,7 @@ describe("TapOnElement TalkBack mode detection", () => {
       fakeAccessibilityDetector.setTalkBackEnabled(true);
 
       // Second call should detect TalkBack as enabled (new detection)
-      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {}, undefined, []);
+      await (tapOnElement as any).executeAndroidTap("tap", 50, 50, 500, element, undefined, {});
       expect(executeAndroidTapWithAccessibility).toHaveBeenCalled();
       expect(executeAndroidTapWithCoordinates).not.toHaveBeenCalled();
     });
@@ -442,7 +397,6 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
         name: "test-device",
         platform: "android",
         id: "emulator-5554",
-        deviceId: "emulator-5554",
       } as any,
       fakeAdb as any,
       {
@@ -471,8 +425,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
@@ -494,8 +447,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
@@ -515,8 +467,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       1000,
       {},
-      undefined,
-      []
+      undefined
     );
 
     // Should not call executeTap for longPress
@@ -551,29 +502,11 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       1000,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.longPressCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-      "longPress",
-      50,
-      50,
-      1000,
-      element,
-      undefined,
-      [
-        {
-          method: "android-talkback-longpress-coordinate-fallback",
-          success: false,
-          error: "Long press failed"
-        }
-      ],
-      undefined,
-      undefined,
-      undefined
-    );
+    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("longPress", 50, 50, 1000, element, undefined);
   });
 
   test("uses coordinate fallback when focus navigation fails", async () => {
@@ -595,8 +528,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
@@ -628,35 +560,12 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
     expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-      "tap",
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      [
-        {
-          method: "android-talkback-focus-navigation",
-          success: false,
-          error: "Navigation failed"
-        },
-        {
-          method: "android-talkback-coordinate-fallback-coordinate-fallback",
-          success: false,
-          error: "Fallback failed"
-        }
-      ],
-      undefined,
-      undefined,
-      undefined
-    );
+    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
   });
 
   test("routes text-only element through focus navigation", async () => {
@@ -672,8 +581,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     // Strategy is called even without resource-id
@@ -706,34 +614,11 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       element,
       500,
       {},
-      undefined,
-      []
+      undefined
     );
 
     expect(fakeTalkBackStrategy.tapCalls).toHaveLength(1);
     expect(fakeTalkBackStrategy.fallbackCalls).toHaveLength(1);
-    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith(
-      "tap",
-      50,
-      50,
-      500,
-      element,
-      undefined,
-      [
-        {
-          method: "android-talkback-focus-navigation",
-          success: false,
-          error: "no identifying information"
-        },
-        {
-          method: "android-talkback-coordinate-fallback-coordinate-fallback",
-          success: false,
-          error: "fallback failed"
-        }
-      ],
-      undefined,
-      undefined,
-      undefined
-    );
+    expect(executeAndroidTapWithCoordinates).toHaveBeenCalledWith("tap", 50, 50, 500, element, undefined);
   });
 });

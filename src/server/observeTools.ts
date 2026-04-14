@@ -10,7 +10,6 @@ import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { IdentifyInteractions, IdentifyInteractionsOptions } from "../features/observe/IdentifyInteractions";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
-import { elementContainerSchema } from "./elementSelectorSchemas";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { defaultTimer } from "../utils/SystemTimer";
@@ -29,25 +28,15 @@ import {
 } from "./toolOutputSchemas";
 
 // Schema definitions
-// waitFor accepts elementId OR text directly (oneOf), plus optional timeout and optional container (same shape as tapOn)
+// waitFor accepts elementId OR text directly (oneOf), plus optional timeout
 const waitForSchema = z.union([
   z.object({
     elementId: z.string().describe("Element resource ID / accessibility identifier"),
-    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-    container: elementContainerSchema
-      .optional()
-      .describe(
-        "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView)."
-      )
+    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)")
   }),
   z.object({
     text: z.string().describe("Element text"),
-    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)"),
-    container: elementContainerSchema
-      .optional()
-      .describe(
-        "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView)."
-      )
+    timeout: z.number().optional().describe("Wait timeout ms (default: 5000)")
   })
 ]);
 
@@ -134,30 +123,27 @@ const WAIT_FOR_POLL_INTERVAL_MS = 100;
 type ObserveWaitForOptions = z.infer<typeof waitForSchema>;
 type ObserveArgs = z.infer<typeof observeSchema>;
 
-const waitForContainerForFinder = (
-  waitFor: ObserveWaitForOptions
-): { elementId?: string; text?: string } | null => {
-  if (!waitFor.container) {
-    return null;
-  }
-  return "elementId" in waitFor.container
-    ? { elementId: waitFor.container.elementId }
-    : { text: waitFor.container.text };
-};
-
 const findWaitForElement = (
   finder: ElementFinder,
   waitFor: ObserveWaitForOptions,
   viewHierarchy: ViewHierarchyResult
 ): Element | null => {
-  const container = waitForContainerForFinder(waitFor);
-
   if ("elementId" in waitFor) {
-    return finder.findElementByResourceId(viewHierarchy, waitFor.elementId, container);
+    return finder.findElementByResourceId(
+      viewHierarchy,
+      waitFor.elementId,
+      undefined
+    );
   }
 
   if ("text" in waitFor) {
-    return finder.findElementByText(viewHierarchy, waitFor.text, container, true, false);
+    return finder.findElementByText(
+      viewHierarchy,
+      waitFor.text,
+      undefined,
+      true,
+      false
+    );
   }
 
   return null;
@@ -283,11 +269,7 @@ export function registerObserveTools() {
       // If accessibility service reports as disabled, reset setup state to force reinstall on next attempt
       // This handles cases where the service was uninstalled externally
       if (device.platform === "android" && result.accessibilityState?.enabled === false) {
-        logger.warn(
-          `[observe] device=${device.deviceId} accessibilityState.enabled=false (service=${String(result.accessibilityState?.service)}). ` +
-            `System reports no enabled accessibility services — enable AutoMobile CtrlProxy on the device. ` +
-            `Without it, hierarchy stays empty and plans fail at early observe (e.g. login / Choose Server API). Resetting CtrlProxy setup state for next attempt.`
-        );
+        logger.warn("[observe] Accessibility service not enabled, resetting setup state for next attempt");
         try {
           const manager = AndroidCtrlProxyManager.getInstance(device);
           manager.resetSetupState();

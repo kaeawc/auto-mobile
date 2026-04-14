@@ -5,14 +5,8 @@ import {
   Element,
   ElementSelectionResult,
   ObserveResult,
-  CurrentFocusResult,
   TapOnElementResult,
-  TapOnInjectionAttempt,
   TapOnSelectedElement,
-  TapOnTapDebug,
-  TapOnTapDiagnostics,
-  TapOnFocusDebug,
-  TapOnHitTestDebug,
   ViewHierarchyResult
 } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
@@ -26,9 +20,8 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { logger } from "../../utils/logger";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import type { AndroidHitTestResult } from "../observe/android/types";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
-import { createGlobalPerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { DEFAULT_VISION_CONFIG, getVisionEnrichedError, type VisionFallbackConfig, type VisionAnalyzer } from "../../vision/index";
 import { buildElementSearchDebugContext } from "../../utils/DebugContextBuilder";
 import { throwIfAborted } from "../../utils/toolUtils";
@@ -42,10 +35,9 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
-import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
+import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
-import type { Point } from "../../models/Point";
 import { isTruthyFlag } from "../../utils/elementProperties";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
@@ -94,14 +86,6 @@ export class TapOnElement extends BaseVisualChange {
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
-
-  /** Duration passed to AccessibilityService.dispatchGesture for a normal tap (matches TalkBack fallback). */
-  private static readonly CTRL_PROXY_TAP_DURATION_MS = 50;
-
-  private static readonly CTRL_PROXY_TAP_TIMEOUT_MS = 5000;
-
-  /** CtrlProxy focus + hit-test queries around each tap (keep small to avoid slowing plans). */
-  private static readonly TAP_DIAGNOSTICS_TIMEOUT_MS = 1200;
 
   /** Android: refresh + re-find attempts before tap (includes stability requirement). */
   private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS = 8;
@@ -218,13 +202,11 @@ export class TapOnElement extends BaseVisualChange {
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
 
-    const textFuzzy = options.exactText !== true;
-
     if (options.siblingOfText) {
       return {
         selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.siblingOfText, {
           container: options.container,
-          fuzzyMatch: textFuzzy,
+          fuzzyMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy
         }),
@@ -238,7 +220,7 @@ export class TapOnElement extends BaseVisualChange {
         return {
           selection: this.elementSelector.selectClickableParentByText(viewHierarchy, options.text, {
             container: options.container,
-            fuzzyMatch: textFuzzy,
+            fuzzyMatch: true,
             caseSensitive: false,
             strategy: options.selectionStrategy
           }),
@@ -250,7 +232,7 @@ export class TapOnElement extends BaseVisualChange {
       return {
         selection: this.elementSelector.selectByText(viewHierarchy, options.text, {
           container: options.container,
-          partialMatch: textFuzzy,
+          partialMatch: true,
           caseSensitive: false,
           strategy: options.selectionStrategy
         }),
@@ -317,6 +299,38 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     return rawHierarchy;
+  }
+
+  private async refreshViewHierarchy(
+    timeoutMs: number,
+    screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal
+  ): Promise<ViewHierarchyResult | null> {
+    const effectiveTimeoutMs = Math.max(0, timeoutMs);
+    switch (this.device.platform) {
+      case "android": {
+        const rawHierarchy = await refreshAndroidViewHierarchy(
+          this.accessibilityService,
+          this.viewHierarchy,
+          effectiveTimeoutMs,
+          signal
+        );
+
+        return rawHierarchy
+          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
+          : null;
+      }
+      case "ios":
+      {
+        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
+        return rawHierarchy
+          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
+          : null;
+      }
+      default:
+        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+    }
   }
 
   private async refreshViewHierarchy(
@@ -573,211 +587,6 @@ export class TapOnElement extends BaseVisualChange {
     };
   }
 
-  private buildTapOnTapDebug(params: {
-    platform: "android";
-    action: string;
-    tapPoint: { x: number; y: number };
-    tapElement: Element;
-    usedClickableParent: boolean;
-    injectionAttempts: TapOnInjectionAttempt[];
-    observation?: ObserveResult;
-    diagnostics?: TapOnTapDiagnostics;
-    androidTapGeometry?: TapOnTapDebug["androidTapGeometry"];
-    androidTimingMs?: TapOnTapDebug["androidTimingMs"];
-    androidSemanticResolution?: TapOnTapDebug["androidSemanticResolution"];
-  }): TapOnTapDebug {
-    const b = params.tapElement.bounds;
-    return {
-      platform: params.platform,
-      action: params.action,
-      tapPoint: params.tapPoint,
-      tapTargetBounds: {
-        left: b.left,
-        top: b.top,
-        right: b.right,
-        bottom: b.bottom
-      },
-      tapTargetResourceId:
-        typeof params.tapElement["resource-id"] === "string"
-          ? params.tapElement["resource-id"]
-          : undefined,
-      tapTargetClass:
-        typeof params.tapElement.class === "string" ? params.tapElement.class : undefined,
-      usedClickableParent: params.usedClickableParent,
-      injectionAttempts: params.injectionAttempts,
-      observationAfter: params.observation
-        ? {
-          updatedAt: params.observation.updatedAt,
-          freshnessWarning: params.observation.freshness?.warning
-        }
-        : undefined,
-      diagnostics: params.diagnostics,
-      androidTapGeometry: params.androidTapGeometry,
-      androidTimingMs: params.androidTimingMs,
-      androidSemanticResolution: params.androidSemanticResolution
-    };
-  }
-
-  private focusResultToDebug(result: CurrentFocusResult): TapOnFocusDebug | null {
-    if (result.error) {
-      return { error: result.error };
-    }
-    const el = result.focusedElement;
-    if (!el) {
-      return null;
-    }
-    return {
-      resourceId: typeof el["resource-id"] === "string" ? el["resource-id"] : undefined,
-      className: typeof el.class === "string" ? el.class : undefined,
-      text: typeof el.text === "string" ? el.text : undefined,
-      focused: this.finder.isElementFocused(el)
-    };
-  }
-
-  private hitTestLayerToDebug(layer: NonNullable<AndroidHitTestResult["layers"]>[number]): TapOnHitTestLayerDebug {
-    const d = layer.deepest;
-    return {
-      windowIndex: layer.windowIndex,
-      windowType: layer.windowType,
-      windowLayer: layer.windowLayer,
-      active: layer.active,
-      focused: layer.focused,
-      rootBounds: layer.rootBounds,
-      deepest: {
-        resourceId: d.resourceId,
-        className: d.className,
-        text: d.text,
-        clickable: d.clickable,
-        focused: d.focused,
-        bounds: d.bounds
-      }
-    };
-  }
-
-  private hitTestResultToDebug(hit: AndroidHitTestResult): TapOnHitTestDebug {
-    const d = hit.deepest;
-    return {
-      x: hit.x,
-      y: hit.y,
-      success: hit.success,
-      error: hit.error,
-      totalTimeMs: hit.totalTimeMs,
-      deepest: d
-        ? {
-          resourceId: d.resourceId,
-          className: d.className,
-          text: d.text,
-          clickable: d.clickable,
-          focused: d.focused,
-          bounds: d.bounds
-        }
-        : undefined,
-      layers: hit.layers?.map(layer => this.hitTestLayerToDebug(layer)),
-      chosenWindowZIndex: hit.chosenWindowZIndex,
-      activeWindowZIndex: hit.activeWindowZIndex,
-      windowCount: hit.windowCount,
-      hitTestSource: hit.hitTestSource
-    };
-  }
-
-  private async fillAndroidTapDiagnosticsAround(
-    x: number,
-    y: number,
-    phase: "before" | "after",
-    out: TapOnTapDiagnostics,
-    signal?: AbortSignal
-  ): Promise<void> {
-    throwIfAborted(signal);
-    try {
-      const [focus, hit] = await Promise.all([
-        this.accessibilityService.requestCurrentFocus(TapOnElement.TAP_DIAGNOSTICS_TIMEOUT_MS, new NoOpPerformanceTracker()),
-        this.accessibilityService.requestHitTest(x, y, TapOnElement.TAP_DIAGNOSTICS_TIMEOUT_MS, new NoOpPerformanceTracker())
-      ]);
-      if (phase === "before") {
-        out.focusBeforeTap = this.focusResultToDebug(focus);
-        out.hitTestBeforeTap = this.hitTestResultToDebug(hit);
-      } else {
-        out.focusAfterTap = this.focusResultToDebug(focus);
-        out.hitTestAfterTap = this.hitTestResultToDebug(hit);
-      }
-    } catch (error) {
-      logger.debug(`[TapOnElement] ${phase} tap diagnostics failed: ${error}`);
-    }
-  }
-
-  /**
-   * Prefer ACTION_CLICK with bounds disambiguation (CtrlProxy) before coordinate gestures.
-   * Helps list rows / search UIs where dispatchGesture succeeds but the app ignores the tap.
-   */
-  private async tryAndroidSemanticClick(
-    element: Element,
-    signal?: AbortSignal,
-    disambiguationBoundsOverride?: { left: number; top: number; right: number; bottom: number },
-    semanticClickOptions?: { omitFrameworkResourceId?: boolean }
-  ): Promise<{
-    success: boolean;
-    error?: string;
-    resolution?: TapOnTapDebug["androidSemanticResolution"];
-  }> {
-    const resourceIdRaw = typeof element["resource-id"] === "string" ? element["resource-id"].trim() : "";
-    const frameworkResourceId =
-      resourceIdRaw.startsWith("android:id/") && resourceIdRaw.length > 0;
-    const resourceIdForRequest =
-      semanticClickOptions?.omitFrameworkResourceId === true && frameworkResourceId
-        ? undefined
-        : resourceIdRaw.length > 0
-          ? resourceIdRaw
-          : undefined;
-    const b = disambiguationBoundsOverride ?? element.bounds;
-    if (
-      !b
-      || !Number.isFinite(b.left)
-      || !Number.isFinite(b.top)
-      || !Number.isFinite(b.right)
-      || !Number.isFinite(b.bottom)
-    ) {
-      return { success: false, error: "tap target has no bounds for semantic click disambiguation" };
-    }
-    throwIfAborted(signal);
-    const disambiguationBounds = {
-      left: Math.round(b.left),
-      top: Math.round(b.top),
-      right: Math.round(b.right),
-      bottom: Math.round(b.bottom)
-    };
-    const boundsSource = disambiguationBoundsOverride ? "label∩row" : "element";
-    const resourceIdLog =
-      semanticClickOptions?.omitFrameworkResourceId === true && frameworkResourceId
-        ? `(bounds-only; omitted ${resourceIdRaw})`
-        : (resourceIdForRequest ?? "(bounds-only)");
-    logger.info(
-      `[TapOnElement] Android semantic click (CtrlProxy performAction): device=${this.device.deviceId} ` +
-        `resourceId=${resourceIdLog} bounds=${JSON.stringify(disambiguationBounds)} ` +
-        `(disambiguation=${boundsSource}). ` +
-        `CtrlProxy may exclude IME windows when an APPLICATION window intersects these bounds (list row + keyboard).`
-    );
-    const result = await this.accessibilityService.requestAction(
-      "click",
-      resourceIdForRequest,
-      TapOnElement.CTRL_PROXY_TAP_TIMEOUT_MS,
-      new NoOpPerformanceTracker(),
-      disambiguationBounds
-    );
-    if (!result.success) {
-      logger.warn(
-        `[TapOnElement] Semantic click failed device=${this.device.deviceId}: ${result.error ?? "unknown"}. ` +
-          `Next: dispatchGesture / adb tap; hitTest uses topmost z-order window (not only rootInActiveWindow).`
-      );
-    } else {
-      logger.info(`[TapOnElement] Semantic click succeeded device=${this.device.deviceId}`);
-    }
-    return {
-      success: result.success,
-      error: result.error,
-      resolution: result.resolution
-    };
-  }
-
   private async handleElementNotFound(
     options: TapOnElementOptions,
     observeResult?: ObserveResult,
@@ -1014,166 +823,6 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   /**
-   * Prefer an exact text match when resolving label bounds for {@link TapOnElementOptions.tapClickableParent}
-   * so a partial match does not bind the wrong row (flaky list / search UIs).
-   */
-  private findLabelTextElementForTapClickableParent(
-    options: TapOnElementOptions,
-    viewHierarchy: ViewHierarchyResult
-  ): Element | null {
-    if (!options.text) {
-      return null;
-    }
-    const container = options.container ?? null;
-    const exact = this.finder.findElementByText(viewHierarchy, options.text, container, false, false);
-    if (exact) {
-      return exact;
-    }
-    if (options.exactText) {
-      return null;
-    }
-    return this.finder.findElementByText(viewHierarchy, options.text, container, true, false);
-  }
-
-  /**
-   * Clamp a point to the interior of a screen rect (Android bounds are left/top inclusive, right/bottom exclusive).
-   */
-  private clampPointToRectInterior(
-    point: Point,
-    rect: { left: number; top: number; right: number; bottom: number },
-    inset: number
-  ): Point {
-    const left = rect.left + inset;
-    const top = rect.top + inset;
-    const right = rect.right - inset;
-    const bottom = rect.bottom - inset;
-    if (left >= right || top >= bottom) {
-      return {
-        x: Math.floor((rect.left + rect.right) / 2),
-        y: Math.floor((rect.top + rect.bottom) / 2)
-      };
-    }
-    return {
-      x: Math.floor(Math.min(Math.max(point.x, left), right - 1)),
-      y: Math.floor(Math.min(Math.max(point.y, top), bottom - 1))
-    };
-  }
-
-  /**
-   * Intersection of the clickable row bounds and the visible text node for {@link options.text}.
-   * Used to tighten coordinate taps so sampling stays on the label instead of row padding or
-   * IME-adjacent dead zones. Semantic CtrlProxy clicks use full row bounds when
-   * {@link TapOnElementOptions.tapClickableParent} is set (see {@link TapOnElement.execute}).
-   */
-  private resolveAndroidLabelRowOverlapBoundsForClickableParent(
-    options: TapOnElementOptions,
-    tapElement: Element,
-    viewHierarchy: ViewHierarchyResult
-  ): { left: number; top: number; right: number; bottom: number } | null {
-    const rowBounds = tapElement.bounds;
-    if (!rowBounds || !options.text) {
-      return null;
-    }
-    const textEl = this.findLabelTextElementForTapClickableParent(options, viewHierarchy);
-    if (!textEl?.bounds) {
-      return null;
-    }
-    const tb = textEl.bounds;
-    const left = Math.max(rowBounds.left, tb.left);
-    const top = Math.max(rowBounds.top, tb.top);
-    const right = Math.min(rowBounds.right, tb.right);
-    const bottom = Math.min(rowBounds.bottom, tb.bottom);
-    if (left >= right || top >= bottom) {
-      logger.debug(
-        "[TapOnElement] tapClickableParent: text bounds do not overlap row bounds; no label overlap rect"
-      );
-      return null;
-    }
-    return { left, top, right, bottom };
-  }
-
-  /**
-   * When tapping a clickable list/search row by contained text, the row's geometric center can sit
-   * on padding, dividers, or a window overlay while the label is offset (e.g. left-aligned name).
-   * Gesture injection targets screen coordinates. Prefer the label node's center (clamped inside the
-   * row) when it lies in the label∩row overlap — hit-testing often reports a non-clickable
-   * {@code FrameLayout} at the overlap centroid when the real {@code TextView} is smaller.
-   */
-  private resolveAndroidCoordinateTapPointForClickableParent(
-    options: TapOnElementOptions,
-    tapElement: Element,
-    viewHierarchy: ViewHierarchyResult
-  ): Point {
-    const rowCenter = this.geometry.getElementCenter(tapElement);
-    const rowBounds = tapElement.bounds;
-    if (!options.text || !rowBounds) {
-      return rowCenter;
-    }
-    const textEl = this.findLabelTextElementForTapClickableParent(options, viewHierarchy);
-    const textCenter =
-      textEl !== undefined &&
-      textEl !== null &&
-      textEl.bounds !== undefined &&
-      textEl.bounds !== null
-        ? this.geometry.getElementCenter(textEl as Element)
-        : null;
-    const clampedTextCenter =
-      textCenter !== null ? this.clampPointToRectInterior(textCenter, rowBounds, 2) : null;
-
-    const overlap = this.resolveAndroidLabelRowOverlapBoundsForClickableParent(
-      options,
-      tapElement,
-      viewHierarchy
-    );
-
-    const pointInOverlap = (p: Point, o: { left: number; top: number; right: number; bottom: number }) =>
-      p.x >= o.left && p.x < o.right && p.y >= o.top && p.y < o.bottom;
-
-    if (clampedTextCenter && overlap && pointInOverlap(clampedTextCenter, overlap)) {
-      const oc = {
-        x: Math.floor((overlap.left + overlap.right) / 2),
-        y: Math.floor((overlap.top + overlap.bottom) / 2)
-      };
-      if (clampedTextCenter.x !== oc.x || clampedTextCenter.y !== oc.y) {
-        logger.info(
-          `[TapOnElement] tapClickableParent: coordinate tap at text-bbox center clamped to row ` +
-            `(${clampedTextCenter.x},${clampedTextCenter.y}) instead of overlap center (${oc.x},${oc.y})`
-        );
-      }
-      return clampedTextCenter;
-    }
-
-    if (overlap) {
-      const p: Point = {
-        x: Math.floor((overlap.left + overlap.right) / 2),
-        y: Math.floor((overlap.top + overlap.bottom) / 2)
-      };
-      if (clampedTextCenter && !pointInOverlap(clampedTextCenter, overlap)) {
-        logger.info(
-          `[TapOnElement] tapClickableParent: text center outside label∩row overlap; ` +
-            `using overlap center (${p.x},${p.y})`
-        );
-      } else if (p.x !== rowCenter.x || p.y !== rowCenter.y) {
-        logger.info(
-          `[TapOnElement] tapClickableParent: coordinate tap at label overlap (${p.x},${p.y}) ` +
-            `instead of row center (${rowCenter.x},${rowCenter.y})`
-        );
-      }
-      return p;
-    }
-
-    if (clampedTextCenter) {
-      logger.info(
-        `[TapOnElement] tapClickableParent: no label∩row overlap; tap at text center clamped to row ` +
-          `(${clampedTextCenter.x},${clampedTextCenter.y})`
-      );
-      return clampedTextCenter;
-    }
-
-    return rowCenter;
-  }
-
-  /**
    * Execute a tap on text
    * @param options - Command options
    * @param progress - Optional progress callback
@@ -1198,17 +847,6 @@ export class TapOnElement extends BaseVisualChange {
     let previousObserveResult: ObserveResult | null = null;
     let selectionCapture: SelectionCaptureState | null = null;
     let searchUntilStats: SearchUntilStats | undefined;
-    let tapDebugParts: {
-      action: string;
-      tapPoint: { x: number; y: number };
-      tapElement: Element;
-      usedClickableParent: boolean;
-      injectionAttempts: TapOnInjectionAttempt[];
-      diagnostics?: TapOnTapDiagnostics;
-      androidTapGeometry?: TapOnTapDebug["androidTapGeometry"];
-      androidTimingMs?: TapOnTapDebug["androidTimingMs"];
-      androidSemanticResolution?: TapOnTapDebug["androidSemanticResolution"];
-    } | null = null;
 
     try {
       throwIfAborted(signal);
@@ -1217,8 +855,6 @@ export class TapOnElement extends BaseVisualChange {
         async (observeResult: ObserveResult) => {
           previousObserveResult = observeResult;
           throwIfAborted(signal);
-          const observeCallbackEnteredAtMs = Date.now();
-          const semanticResolutionBox: { v?: TapOnTapDebug["androidSemanticResolution"] } = {};
 
           let viewHierarchy = observeResult.viewHierarchy;
           if (!viewHierarchy) {
@@ -1249,21 +885,6 @@ export class TapOnElement extends BaseVisualChange {
             if (isFocused) {
               logger.info(`Element is already focused, no action needed`);
               perf.end();
-              if (this.device.platform === "android") {
-                tapDebugParts = {
-                  action,
-                  tapPoint: { x: initialTapPoint.x, y: initialTapPoint.y },
-                  tapElement: element,
-                  usedClickableParent: false,
-                  injectionAttempts: [
-                    {
-                      method: "no-gesture",
-                      success: true,
-                      error: "Element already focused; tap not performed"
-                    }
-                  ]
-                };
-              }
               return {
                 success: true,
                 action,
@@ -1283,11 +904,11 @@ export class TapOnElement extends BaseVisualChange {
           }
 
           const isTalkBackEnabled = this.device.platform === "android"
-            ? (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback"
+            ? (await this.accessibilityDetector.detectMethod(this.device.id, this.adb)) === "talkback"
             : false;
           const isVoiceOverEnabled = this.device.platform === "ios"
             ? await this.iosVoiceOverDetector.isVoiceOverEnabled(
-              this.device.deviceId,
+              this.device.id,
               IOSCtrlProxyClient.getInstance(this.device)
             )
             : false;
@@ -1302,7 +923,7 @@ export class TapOnElement extends BaseVisualChange {
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
 
-          if (this.device.platform === "android") {
+          if (this.device.platform === "android" && options.preTapStability) {
             const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
               options,
               observeResult,
@@ -1319,33 +940,11 @@ export class TapOnElement extends BaseVisualChange {
             usedParent = stable.usedParent;
             viewHierarchy = stable.viewHierarchy;
           }
-          const afterHierarchyRefreshMs = Date.now() - observeCallbackEnteredAtMs;
 
           if (usedParent) {
             logger.info("[TapOnElement] Using clickable parent for non-clickable element");
           }
-          const androidLabelOverlapBounds =
-            this.device.platform === "android" &&
-            options.tapClickableParent === true &&
-            options.text
-              ? this.resolveAndroidLabelRowOverlapBoundsForClickableParent(options, tapElement, viewHierarchy)
-              : undefined;
-          // Semantic click searches the live a11y tree for nodes intersecting this rect. The label∩row
-          // overlap tightens coordinate taps; it can be a strict subset of the row and miss nodes after
-          // refresh/scroll, yielding "No clickable node within disambiguation bounds" while the row
-          // rect still intersects the real list item.
-          const androidSemanticDisambiguationBounds =
-            this.device.platform === "android" &&
-            options.tapClickableParent === true &&
-            tapElement.bounds
-              ? tapElement.bounds
-              : androidLabelOverlapBounds ?? undefined;
-          const tapPoint =
-            this.device.platform === "android" &&
-            options.tapClickableParent === true &&
-            options.text
-              ? this.resolveAndroidCoordinateTapPointForClickableParent(options, tapElement, viewHierarchy)
-              : this.geometry.getElementCenter(tapElement);
+          const tapPoint = this.geometry.getElementCenter(tapElement);
 
           selectionCapture = await this.selectionStateTracker.prepare({
             action,
@@ -1353,10 +952,6 @@ export class TapOnElement extends BaseVisualChange {
             element: tapElement,
             signal
           });
-
-          const injectionAttempts: TapOnInjectionAttempt[] = [];
-          const tapDiagnostics: TapOnTapDiagnostics = {};
-          const beforeExecuteTapMs = Date.now() - observeCallbackEnteredAtMs;
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
@@ -1370,68 +965,16 @@ export class TapOnElement extends BaseVisualChange {
                   tapElement,
                   signal,
                   options,
-                  isTalkBackEnabled,
-                  injectionAttempts,
-                  tapDiagnostics,
-                  androidSemanticDisambiguationBounds,
-                  semanticResolutionBox
+                  isTalkBackEnabled
                 );
                 break;
               case "ios":
-                await this.executeiOSTap(
-                  action,
-                  tapPoint.x,
-                  tapPoint.y,
-                  longPressDuration,
-                  tapElement,
-                  isVoiceOverEnabled
-                );
+                await this.executeiOSTap(action, tapPoint.x, tapPoint.y, longPressDuration, tapElement, isVoiceOverEnabled);
                 break;
               default:
                 throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
             }
           });
-
-          if (this.device.platform === "android") {
-            const rowB = tapElement.bounds;
-            tapDebugParts = {
-              action,
-              tapPoint: { x: tapPoint.x, y: tapPoint.y },
-              tapElement,
-              // `usedParent` is only true when resolveTapTargetElement walked up from a non-clickable
-              // match; tapClickableParent already selects a clickable ancestor, so keep the flag true
-              // when that mode was requested.
-              usedClickableParent: usedParent || options.tapClickableParent === true,
-              injectionAttempts,
-              diagnostics: tapDiagnostics,
-              androidTapGeometry:
-                rowB !== undefined && rowB !== null
-                  ? {
-                    rowBounds: {
-                      left: rowB.left,
-                      top: rowB.top,
-                      right: rowB.right,
-                      bottom: rowB.bottom
-                    },
-                    labelRowOverlapBounds: androidLabelOverlapBounds,
-                    semanticDisambiguationBounds:
-                        androidSemanticDisambiguationBounds ?? {
-                          left: rowB.left,
-                          top: rowB.top,
-                          right: rowB.right,
-                          bottom: rowB.bottom
-                        },
-                    coordinateTapPoint: { x: tapPoint.x, y: tapPoint.y }
-                  }
-                  : undefined,
-              androidTimingMs: {
-                tapPathStartedAtMs: observeCallbackEnteredAtMs,
-                elapsedMsAfterAndroidHierarchyRefresh: afterHierarchyRefreshMs,
-                elapsedMsBeforeExecuteTap: beforeExecuteTapMs
-              },
-              androidSemanticResolution: semanticResolutionBox.v
-            };
-          }
 
           perf.end();
           return {
@@ -1468,22 +1011,6 @@ export class TapOnElement extends BaseVisualChange {
           }
         }
       );
-
-      if (result.success && tapDebugParts) {
-        result.tapDebug = this.buildTapOnTapDebug({
-          platform: "android",
-          action: tapDebugParts.action,
-          tapPoint: tapDebugParts.tapPoint,
-          tapElement: tapDebugParts.tapElement,
-          usedClickableParent: tapDebugParts.usedClickableParent,
-          injectionAttempts: tapDebugParts.injectionAttempts,
-          observation: result.observation,
-          diagnostics: tapDebugParts.diagnostics,
-          androidTapGeometry: tapDebugParts.androidTapGeometry,
-          androidTimingMs: tapDebugParts.androidTimingMs,
-          androidSemanticResolution: tapDebugParts.androidSemanticResolution
-        });
-      }
 
       if (result.success && result.observation && result.element) {
         const selectedElements = await this.selectionStateTracker.finalize({
@@ -1551,114 +1078,26 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    signal: AbortSignal | undefined,
-    options: TapOnElementOptions | undefined,
-    isTalkBackEnabled: boolean | undefined,
-    injectionAttempts: TapOnInjectionAttempt[],
-    tapDiagnostics?: TapOnTapDiagnostics,
-    semanticDisambiguationBoundsOverride?: { left: number; top: number; right: number; bottom: number },
-    semanticResolutionSink?: { v?: TapOnTapDebug["androidSemanticResolution"] }
+    signal?: AbortSignal,
+    options?: TapOnElementOptions,
+    isTalkBackEnabled?: boolean
   ): Promise<void> {
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled = typeof isTalkBackEnabled === "boolean"
       ? isTalkBackEnabled
-      : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback";
-
-    const xRounded = Math.round(x);
-    const yRounded = Math.round(y);
-    if (tapDiagnostics && this.accessibilityService.isConnected()) {
-      await this.fillAndroidTapDiagnosticsAround(xRounded, yRounded, "before", tapDiagnostics, signal);
-    }
-
-    logger.info(
-      `[TapOnElement] Android tap device=${this.device.deviceId} action=${action} point=(${xRounded},${yRounded}) ` +
-        `talkBackMode=${talkBackEnabled} ctrlProxyConnected=${this.accessibilityService.isConnected()}`
-    );
+      : (await this.accessibilityDetector.detectMethod(this.device.id, this.adb)) === "talkback";
 
     if (talkBackEnabled) {
       // TalkBack mode: Use accessibility actions with coordinate fallback
-      await this.executeAndroidTapWithAccessibility(
-        action,
-        x,
-        y,
-        element,
-        durationMs,
-        options,
-        signal,
-        injectionAttempts,
-        semanticResolutionSink
-      );
+      await this.executeAndroidTapWithAccessibility(action, x, y, element, durationMs, options, signal);
     } else {
       // Standard mode: Use coordinate-based taps
-      await this.executeAndroidTapWithCoordinates(
-        action,
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        injectionAttempts,
-        options,
-        semanticDisambiguationBoundsOverride,
-        semanticResolutionSink
-      );
-    }
-
-    if (tapDiagnostics && this.accessibilityService.isConnected()) {
-      await this.fillAndroidTapDiagnosticsAround(xRounded, yRounded, "after", tapDiagnostics, signal);
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
     }
   }
 
   /**
-   * Try a coordinate tap via the Android accessibility service (dispatchGesture).
-   * Default tap order uses this before {@code adb shell input tap}. For {@link TapOnElementOptions.tapClickableParent},
-   * {@link executeAndroidTapWithCoordinates} issues ADB first then this call (both may run).
-   */
-  private async tryAndroidCtrlProxyCoordinateTap(
-    x: number,
-    y: number,
-    signal?: AbortSignal
-  ): Promise<{ success: boolean; error?: string }> {
-    throwIfAborted(signal);
-    try {
-      const result = await this.accessibilityService.requestTapCoordinates(
-        x,
-        y,
-        TapOnElement.CTRL_PROXY_TAP_DURATION_MS,
-        TapOnElement.CTRL_PROXY_TAP_TIMEOUT_MS,
-        new NoOpPerformanceTracker()
-      );
-      if (!result.success) {
-        const err = result.error ?? "unknown";
-        logger.warn(`[TapOnElement] CtrlProxy coordinate tap failed at (${x}, ${y}): ${err}`);
-        return { success: false, error: err };
-      }
-      return { success: true };
-    } catch (error) {
-      const err = error instanceof Error ? error.message : String(error);
-      logger.warn(`[TapOnElement] CtrlProxy coordinate tap threw: ${err}`);
-      return { success: false, error: err };
-    }
-  }
-
-  /**
-   * Framework list rows (e.g. AlertDialog items) use `android:id/text1`. ACTION_CLICK on that node
-   * can return true without invoking the ListView item listener, so the UI looks "tapped" in logs
-   * but selection (e.g. API server) never applies. Prefer real gestures for those ids.
-   */
-  private isAndroidFrameworkResourceId(element: Element): boolean {
-    const rid = element["resource-id"];
-    return typeof rid === "string" && rid.startsWith("android:id/");
-  }
-
-  /**
-   * Execute tap in standard (non-TalkBack) mode: prefer CtrlProxy semantic click, then coordinate
-   * injection. For {@link TapOnElementOptions.tapClickableParent}, issue {@code adb shell input tap}
-   * before {@code dispatchGesture} when semantic click fails: gesture injection follows the topmost
-   * compositor window, which can miss application list rows (e.g. search + IME) while ADB often
-   * still delivers the touch to the intended surface. ADB's command always exits successfully even
-   * when no view handles the touch, so we still run {@code dispatchGesture} afterward as a second
-   * delivery path (not a success signal).
+   * Execute tap using coordinate-based input commands (standard mode)
    */
   private async executeAndroidTapWithCoordinates(
     action: string,
@@ -1666,144 +1105,16 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     durationMs: number,
     element: Element,
-    signal: AbortSignal | undefined,
-    injectionAttempts: TapOnInjectionAttempt[],
-    options?: TapOnElementOptions,
-    semanticDisambiguationBoundsOverride?: { left: number; top: number; right: number; bottom: number },
-    semanticResolutionSink?: { v?: TapOnTapDebug["androidSemanticResolution"] }
+    signal?: AbortSignal
   ): Promise<void> {
     if (action === "tap") {
-      // Framework `android:id/*` rows (e.g. text1) skip semantic click by default: ACTION_CLICK can
-      // return true without invoking the list listener (e.g. API server picker). For tapClickableParent
-      // search/list rows, coordinate taps often miss real a11y targets (hit-test shows only a root
-      // FrameLayout); bounds-only resolution + brute-force in CtrlProxy is the reliable path first.
-      const gestureFirstForFrameworkId =
-        this.isAndroidFrameworkResourceId(element) && options?.tapClickableParent !== true;
-      if (!gestureFirstForFrameworkId) {
-        const semantic = await this.tryAndroidSemanticClick(
-          element,
-          signal,
-          semanticDisambiguationBoundsOverride,
-          {
-            omitFrameworkResourceId:
-              options?.tapClickableParent === true && this.isAndroidFrameworkResourceId(element)
-          }
-        );
-        if (semanticResolutionSink !== undefined && semantic.resolution !== undefined) {
-          semanticResolutionSink.v = semantic.resolution;
-        }
-        injectionAttempts.push({
-          method: "android-ctrl-proxy-action-click-bounds",
-          success: semantic.success,
-          error: semantic.error
-        });
-        if (semantic.success) {
-          return;
-        }
-      }
-
-      const tryAdbTapBeforeGesture = options?.tapClickableParent === true;
-      const xTap = Math.round(x);
-      const yTap = Math.round(y);
-      let adbShellTapIssued = false;
-
-      if (tryAdbTapBeforeGesture) {
-        logger.info(
-          `[TapOnElement] tapClickableParent: trying ADB input tap before dispatchGesture at (${xTap},${yTap})`
-        );
-        try {
-          await this.adb.executeCommand(
-            `shell input tap ${xTap} ${yTap}`,
-            undefined,
-            undefined,
-            undefined,
-            signal
-          );
-          injectionAttempts.push({ method: "android-adb-shell-input-tap", success: true });
-          adbShellTapIssued = true;
-          logger.info(
-            `[TapOnElement] tapClickableParent: ADB tap command completed; still trying dispatchGesture ` +
-              `(shell input tap does not indicate whether a view consumed the event)`
-          );
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          injectionAttempts.push({ method: "android-adb-shell-input-tap", success: false, error: err });
-          logger.warn(
-            `[TapOnElement] ADB tap before dispatchGesture failed (${err}); continuing with CtrlProxy gesture`
-          );
-        }
-      }
-
-      const proxy = await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal);
-      injectionAttempts.push({
-        method: "android-ctrl-proxy-dispatch-gesture",
-        success: proxy.success,
-        error: proxy.error
-      });
-      if (proxy.success) {
-        return;
-      }
-      if (!tryAdbTapBeforeGesture) {
-        logger.info(`[TapOnElement] Falling back to ADB input tap at (${xTap}, ${yTap})`);
-        try {
-          await this.adb.executeCommand(`shell input tap ${xTap} ${yTap}`, undefined, undefined, undefined, signal);
-          injectionAttempts.push({ method: "android-adb-shell-input-tap", success: true });
-        } catch (error) {
-          const err = error instanceof Error ? error.message : String(error);
-          injectionAttempts.push({ method: "android-adb-shell-input-tap", success: false, error: err });
-          throw error;
-        }
-        return;
-      }
-      if (adbShellTapIssued) {
-        logger.warn(
-          `[TapOnElement] tapClickableParent: dispatchGesture failed after ADB tap at (${xTap},${yTap}); ` +
-            `continuing (${proxy.error ?? "unknown"}) — ADB may still have delivered the touch`
-        );
-        return;
-      }
-      throw new ActionableError(
-        `Android tap failed (tapClickableParent): ADB tap errored before gesture or was skipped, ` +
-          `and CtrlProxy dispatchGesture failed (${proxy.error ?? "unknown"})`
-      );
-    }
-
-    if (action === "longPress") {
-      await this.executeAndroidLongPress(x, y, durationMs, element?.["resource-id"], signal, injectionAttempts);
-      return;
-    }
-
-    if (action === "doubleTap") {
-      const first = await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal);
-      injectionAttempts.push({
-        method: "android-ctrl-proxy-dispatch-gesture(1/2)",
-        success: first.success,
-        error: first.error
-      });
-      if (first.success) {
-        await this.timer.sleep(200);
-        throwIfAborted(signal);
-        const second = await this.tryAndroidCtrlProxyCoordinateTap(x, y, signal);
-        injectionAttempts.push({
-          method: "android-ctrl-proxy-dispatch-gesture(2/2)",
-          success: second.success,
-          error: second.error
-        });
-        if (second.success) {
-          return;
-        }
-      }
-      logger.info(`[TapOnElement] Falling back to ADB double tap at (${x}, ${y})`);
-      try {
-        await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
-        await this.timer.sleep(200);
-        await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
-        injectionAttempts.push({ method: "android-adb-shell-input-tap-double", success: true });
-      } catch (error) {
-        const err = error instanceof Error ? error.message : String(error);
-        injectionAttempts.push({ method: "android-adb-shell-input-tap-double", success: false, error: err });
-        throw error;
-      }
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+    } else if (action === "longPress") {
+      await this.executeAndroidLongPress(x, y, durationMs, element?.["resource-id"], signal);
+    } else if (action === "doubleTap") {
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      await this.timer.sleep(200);
+      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
     }
   }
 
@@ -1818,10 +1129,8 @@ export class TapOnElement extends BaseVisualChange {
     y: number,
     element: Element,
     durationMs: number,
-    _options: TapOnElementOptions | undefined,
-    signal: AbortSignal | undefined,
-    injectionAttempts: TapOnInjectionAttempt[],
-    semanticResolutionSink?: { v?: TapOnTapDebug["androidSemanticResolution"] }
+    _options?: TapOnElementOptions,
+    signal?: AbortSignal
   ): Promise<void> {
     const driver = this.talkBackDriverFactory.createDriver(this.device);
 
@@ -1834,29 +1143,13 @@ export class TapOnElement extends BaseVisualChange {
         element,
         driver
       );
-      injectionAttempts.push({
-        method: `android-talkback-longpress-${longPressResult.method}`,
-        success: longPressResult.success,
-        error: longPressResult.error
-      });
 
       if (!longPressResult.success) {
         logger.warn(
           `[TapOnElement] Long press accessibility methods failed (${longPressResult.error}), ` +
           `falling back to ADB tap at (${x}, ${y})`
         );
-        await this.executeAndroidTapWithCoordinates(
-          action,
-          x,
-          y,
-          durationMs,
-          element,
-          signal,
-          injectionAttempts,
-          undefined,
-          undefined,
-          semanticResolutionSink
-        );
+        await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
       }
       return;
     }
@@ -1864,16 +1157,11 @@ export class TapOnElement extends BaseVisualChange {
     // Try focus navigation for tap and doubleTap actions
     if (action === "tap" || action === "doubleTap") {
       const result = await this.talkBackStrategy.executeTap(
-        this.device.deviceId,
+        this.device.id,
         element,
         action as "tap" | "doubleTap",
         driver
       );
-      injectionAttempts.push({
-        method: `android-talkback-${result.method}`,
-        success: result.success,
-        error: result.error
-      });
 
       if (result.success) {
         return;
@@ -1894,29 +1182,13 @@ export class TapOnElement extends BaseVisualChange {
       durationMs,
       driver
     );
-    injectionAttempts.push({
-      method: `android-talkback-coordinate-fallback-${fallbackResult.method}`,
-      success: fallbackResult.success,
-      error: fallbackResult.error
-    });
 
     if (!fallbackResult.success) {
       logger.warn(
         `[TapOnElement] Accessibility coordinate tap failed (${fallbackResult.error}), ` +
         `falling back to ADB tap at (${x}, ${y})`
       );
-      await this.executeAndroidTapWithCoordinates(
-        action,
-        x,
-        y,
-        durationMs,
-        element,
-        signal,
-        injectionAttempts,
-        undefined,
-        undefined,
-        semanticResolutionSink
-      );
+      await this.executeAndroidTapWithCoordinates(action, x, y, durationMs, element, signal);
     }
   }
 
@@ -1934,8 +1206,8 @@ export class TapOnElement extends BaseVisualChange {
     x: number,
     y: number,
     durationMs: number,
-    element: Element | undefined,
-    isVoiceOverEnabled: boolean | undefined
+    element?: Element,
+    isVoiceOverEnabled?: boolean
   ): Promise<void> {
     if (isVoiceOverEnabled && element) {
       await this.executeIOSTapWithVoiceOver(action, element, x, y, durationMs);
@@ -2035,59 +1307,27 @@ export class TapOnElement extends BaseVisualChange {
     x: number,
     y: number,
     durationMs: number,
-    resourceId: string | undefined,
-    signal: AbortSignal | undefined,
-    injectionAttempts: TapOnInjectionAttempt[]
+    resourceId?: string,
+    signal?: AbortSignal
   ): Promise<void> {
     throwIfAborted(signal);
     if (resourceId) {
       try {
         const result = await this.accessibilityService.requestAction("long_click", resourceId);
-        injectionAttempts.push({
-          method: "android-accessibility-long-click-action",
-          success: result.success,
-          error: result.success ? undefined : result.error
-        });
         if (result.success) {
           return;
         }
         logger.warn(`[TapOnElement] Accessibility long click failed: ${result.error}`);
       } catch (error) {
-        const err = error instanceof Error ? error.message : String(error);
-        injectionAttempts.push({
-          method: "android-accessibility-long-click-action",
-          success: false,
-          error: err
-        });
         logger.warn(`[TapOnElement] Accessibility long click error: ${error}`);
       }
     }
 
     try {
-      await this.adb.executeCommand(
-        `shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-        undefined,
-        undefined,
-        undefined,
-        signal
-      );
-      injectionAttempts.push({ method: "android-adb-touchscreen-swipe-longpress", success: true });
+      await this.adb.executeCommand(`shell input touchscreen swipe ${x} ${y} ${x} ${y} ${durationMs}`, undefined, undefined, undefined, signal);
     } catch (error) {
       logger.warn(`[TapOnElement] touch input swipe failed, falling back to input swipe: ${error}`);
-      try {
-        await this.adb.executeCommand(
-          `shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`,
-          undefined,
-          undefined,
-          undefined,
-          signal
-        );
-        injectionAttempts.push({ method: "android-adb-swipe-longpress-fallback", success: true });
-      } catch (err2) {
-        const msg = err2 instanceof Error ? err2.message : String(err2);
-        injectionAttempts.push({ method: "android-adb-swipe-longpress-fallback", success: false, error: msg });
-        throw err2;
-      }
+      await this.adb.executeCommand(`shell input swipe ${x} ${y} ${x} ${y} ${durationMs}`, undefined, undefined, undefined, signal);
     }
   }
 

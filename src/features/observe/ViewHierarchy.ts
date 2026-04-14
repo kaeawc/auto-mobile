@@ -199,11 +199,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
 
       // Accessibility service returned null
       perf.end();
-      logger.warn(
-        `[VIEW_HIERARCHY] device=${this.device.deviceId} CtrlProxy returned null hierarchy (no snapshot). ` +
-          `Causes: WebSocket not connected, CtrlProxy APK not installed/crashed, or accessibility service disabled in Settings. ` +
-          `Observe waitFor/tapOn cannot match elements until CtrlProxy is running.`
-      );
+      logger.warn("[VIEW_HIERARCHY] Accessibility service returned null hierarchy");
       return {
         hierarchy: {
           error: "Failed to retrieve view hierarchy from accessibility service"

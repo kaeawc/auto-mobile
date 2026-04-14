@@ -71,6 +71,7 @@ export interface TapOnArgs {
   scrollableContainer?: boolean;
   siblingOfText?: string;
   exactText?: boolean;
+  preTapStability?: boolean;
 }
 
 export interface DragAndDropArgs {

@@ -23,9 +23,7 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
-import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.jsonObject
-import kotlinx.serialization.json.put
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import kotlinx.serialization.modules.subclass
@@ -72,11 +70,6 @@ data class LegacyWebSocketRequest(
     // Action parameters (IME or node actions)
     val action: String? =
         null, // IME action: done, next, search, send, go, previous; node action: long_click
-    // Optional bounds to disambiguate request_action when multiple nodes share resource-id
-    val boundsLeft: Int? = null,
-    val boundsTop: Int? = null,
-    val boundsRight: Int? = null,
-    val boundsBottom: Int? = null,
     // Stale check parameters
     val sinceTimestamp: Long? =
         null, // For request_hierarchy_if_stale: extract only if no events since this timestamp
@@ -161,17 +154,8 @@ class WebSocketServer(
     private val onRequestImeAction: ((requestId: String?, action: String) -> Unit)? = null,
     private val onRequestSelectAll: ((requestId: String?) -> Unit)? = null,
     private val onRequestAction:
-        ((
-            requestId: String?,
-            action: String,
-            resourceId: String?,
-            boundsLeft: Int?,
-            boundsTop: Int?,
-            boundsRight: Int?,
-            boundsBottom: Int?,
-        ) -> Unit)? =
+        ((requestId: String?, action: String, resourceId: String?) -> Unit)? =
         null,
-    private val onRequestHitTest: ((requestId: String?, x: Int, y: Int) -> Unit)? = null,
     private val onRequestClipboard: ((requestId: String?, action: String, text: String?) -> Unit)? =
         null,
     private val onRequestInstallCaCert: ((requestId: String?, certificate: String) -> Unit)? = null,
@@ -281,16 +265,8 @@ class WebSocketServer(
                     synchronized(connections) { connections.add(this) }
 
                     try {
-                      // Handshake includes BuildConfig so host logs can prove which APK is running.
-                      val connectedPayload =
-                          json.encodeToString(
-                              buildJsonObject {
-                                put("type", "connected")
-                                put("id", connectionId)
-                                put("versionName", BuildConfig.VERSION_NAME)
-                                put("versionCode", BuildConfig.VERSION_CODE)
-                              })
-                      send(Frame.Text(connectedPayload))
+                      // Send initial connection message
+                      send(Frame.Text("""{"type":"connected","id":$connectionId}"""))
 
                       // Listen for incoming messages
                       for (frame in incoming) {
@@ -654,27 +630,9 @@ class WebSocketServer(
           Log.d(TAG, "Received action request (requestId: ${request.requestId})")
           val action = request.action
           if (action != null) {
-            onRequestAction?.invoke(
-                request.requestId,
-                action,
-                request.resourceId,
-                request.boundsLeft,
-                request.boundsTop,
-                request.boundsRight,
-                request.boundsBottom,
-            )
+            onRequestAction?.invoke(request.requestId, action, request.resourceId)
           } else {
             Log.w(TAG, "Action request missing required action")
-          }
-        }
-        "request_hit_test" -> {
-          Log.d(TAG, "Received hit_test request (requestId: ${request.requestId})")
-          val x = request.x
-          val y = request.y
-          if (x != null && y != null) {
-            onRequestHitTest?.invoke(request.requestId, x, y)
-          } else {
-            Log.w(TAG, "Hit test request missing x/y")
           }
         }
         "request_clipboard" -> {

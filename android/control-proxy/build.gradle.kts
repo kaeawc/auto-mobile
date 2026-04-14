@@ -35,8 +35,8 @@ android {
     applicationId = "dev.jasonpearson.automobile.ctrlproxy"
     minSdk = libs.versions.build.android.minSdk.get().toInt()
     targetSdk = libs.versions.build.android.targetSdk.get().toInt()
-    versionCode = 3
-    versionName = "0.0.18-SNAPSHOT"
+    versionCode = 1
+    versionName = "0.0.16-SNAPSHOT"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
@@ -77,10 +77,7 @@ android {
     disable += "ProtectedPermissions"
   }
 
-  buildFeatures {
-    compose = true
-    buildConfig = true
-  }
+  buildFeatures { compose = true }
 
   compileOptions {
     sourceCompatibility = JavaVersion.toVersion(libs.versions.build.java.target.get())

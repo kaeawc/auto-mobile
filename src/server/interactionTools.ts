@@ -148,6 +148,11 @@ const tapOnBaseSchema = z.object({
     "When true, match text (and siblingOfText) with full-string equality (case-insensitive), not substrings. " +
     "Use for short labels like \"Claim\" that could match longer UI copy (e.g. \"Time left to claim:\") and break stable Android pre-tap re-find."
   ),
+  preTapStability: z.boolean().optional().describe(
+    "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with " +
+    "stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still " +
+    "settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content."
+  ),
   platform: platformSchema
 }).strict();
 
@@ -440,6 +445,7 @@ export function registerInteractionTools() {
       scrollableContainer: args.scrollableContainer,
       siblingOfText: args.siblingOfText,
       exactText: args.exactText,
+      preTapStability: args.preTapStability,
     }, progress);
 
     const searchStats = result.searchUntil;

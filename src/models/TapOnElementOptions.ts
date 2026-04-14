@@ -55,4 +55,14 @@ export interface TapOnElementOptions {
    * match longer copy (e.g. "Time left to claim:") and confuse stable pre-tap re-find.
    */
   exactText?: boolean;
+
+  /**
+   * When true, refresh the accessibility hierarchy before tapping and require consecutive
+   * re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping
+   * stale coordinates when the UI is still settling (loading overlays, list refreshes, IME).
+   *
+   * Off by default. Recommended for search result lists, dynamically loaded content, and
+   * any flow where the target can disappear between observe and tap.
+   */
+  preTapStability?: boolean;
 }

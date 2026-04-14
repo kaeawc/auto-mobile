@@ -17,7 +17,7 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
   test("plain text tap uses one consecutive match (re-find still required)", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
-        text: "Dan Corkill",
+        text: "Jane Smith",
         action: "tap"
       })
     ).toBe(1);
@@ -33,7 +33,7 @@ describe("androidPreTapConsecutiveStableMatchesRequired", () => {
     ).toBe(1);
   });
 
-  test("tapClickableParent keeps strict matches (Corkill-style list rows)", () => {
+  test("tapClickableParent keeps strict matches (list rows with dynamic content)", () => {
     expect(
       androidPreTapConsecutiveStableMatchesRequired({
         text: "Row",

@@ -98,6 +98,8 @@ export class TapOnElement extends BaseVisualChange {
 
   private static readonly ANDROID_PRE_TAP_REFIND_DELAY_MS = 150;
 
+  private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = 800;
+
   private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = 3;
 
   constructor(
@@ -399,7 +401,7 @@ export class TapOnElement extends BaseVisualChange {
       }
 
       const freshHierarchy = await this.refreshViewHierarchy(
-        800,
+        TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
         observeResult.screenSize,
         signal
       );

@@ -29,7 +29,7 @@ export interface SystemTrayNotificationArgs {
 }
 
 export interface SystemTrayArgs {
-  action: "open" | "close" | "find" | "tap" | "dismiss" | "clearAll";
+  action: "open" | "find" | "tap" | "dismiss" | "clearAll";
   notification?: SystemTrayNotificationArgs;
   awaitTimeout?: number;
   platform: Platform;
@@ -70,7 +70,6 @@ export interface TapOnArgs {
   clickable?: boolean;
   scrollableContainer?: boolean;
   siblingOfText?: string;
-  exactText?: boolean;
   preTapStability?: boolean;
 }
 

@@ -10,7 +10,7 @@ export const ANDROID_PRE_TAP_STABLE_MATCHES_STRICT = 2;
  * Plain {@link TapOnElementOptions.text} taps use one successful post-refresh re-find (same as
  * elementId-only): still never tap from pre-observe coordinates without a live hierarchy match.
  *
- * Corkill-style double stability applies when resolution is structurally churn-prone:
+ * Double stability applies when resolution is structurally churn-prone:
  * {@link TapOnElementOptions.tapClickableParent}, {@link TapOnElementOptions.siblingOfText},
  * {@link TapOnElementOptions.clickable}, or {@link TapOnElementOptions.scrollableContainer}.
  */

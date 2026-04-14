@@ -50,13 +50,6 @@ export interface TapOnElementOptions {
   siblingOfText?: string;
 
   /**
-   * When true, text and siblingOfText matching use full-string equality (case-insensitive)
-   * instead of substring containment. Use when short labels like "Claim" would otherwise
-   * match longer copy (e.g. "Time left to claim:") and confuse stable pre-tap re-find.
-   */
-  exactText?: boolean;
-
-  /**
    * When true, refresh the accessibility hierarchy before tapping and require consecutive
    * re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping
    * stale coordinates when the UI is still settling (loading overlays, list refreshes, IME).

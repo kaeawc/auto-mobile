@@ -35,7 +35,9 @@ import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
-import { boundsEqual } from "../../utils/bounds";
+import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
+import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
+import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
 import { isTruthyFlag } from "../../utils/elementProperties";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
@@ -84,6 +86,21 @@ export class TapOnElement extends BaseVisualChange {
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
+
+  /** Android: refresh + re-find attempts before tap (includes stability requirement). */
+  private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS = 8;
+
+  /**
+   * When the tree shows a loading overlay (progress/shimmer), list rows may be absent for longer than
+   * {@link ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS} polling cycles; allow extra refreshes before aborting.
+   */
+  private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING = 32;
+
+  private static readonly ANDROID_PRE_TAP_REFIND_DELAY_MS = 150;
+
+  private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = 800;
+
+  private static readonly ANDROID_PRE_TAP_BOUNDS_EPSILON_PX = 3;
 
   constructor(
     device: BootedDevice,
@@ -316,6 +333,148 @@ export class TapOnElement extends BaseVisualChange {
       default:
         throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
     }
+  }
+
+  private async refreshViewHierarchy(
+    timeoutMs: number,
+    screenSize?: ObserveResult["screenSize"],
+    signal?: AbortSignal
+  ): Promise<ViewHierarchyResult | null> {
+    const effectiveTimeoutMs = Math.max(0, timeoutMs);
+    switch (this.device.platform) {
+      case "android": {
+        const rawHierarchy = await refreshAndroidViewHierarchy(
+          this.accessibilityService,
+          this.viewHierarchy,
+          effectiveTimeoutMs,
+          signal
+        );
+
+        return rawHierarchy
+          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
+          : null;
+      }
+      case "ios":
+      {
+        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
+        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
+        return rawHierarchy
+          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
+          : null;
+      }
+      default:
+        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
+    }
+  }
+
+  /**
+   * Re-fetch the Android hierarchy and re-resolve the tap target until bounds match on enough
+   * consecutive successful re-finds (±ε); the required count depends on selector type (see
+   * {@link androidPreTapConsecutiveStableMatchesRequired}). Refuses to fall back to pre-refresh
+   * coordinates when the refreshed tree does not contain a matching target.
+   */
+  private async resolveAndroidStableTapTargetAfterRefreshes(
+    options: TapOnElementOptions,
+    observeResult: ObserveResult,
+    action: TapOnElementOptions["action"],
+    isTalkBackEnabled: boolean,
+    signal?: AbortSignal
+  ): Promise<
+    | { ok: true; viewHierarchy: ViewHierarchyResult; tapElement: Element; usedParent: boolean }
+    | { ok: false; error: string }
+  > {
+    const stableMatchesRequired = androidPreTapConsecutiveStableMatchesRequired(options);
+    let prevBounds: Element["bounds"] | null = null;
+    let consecutiveStable = 0;
+    let best: {
+      viewHierarchy: ViewHierarchyResult;
+      tapElement: Element;
+      usedParent: boolean;
+    } | null = null;
+
+    let maxAttempts = TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS;
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      throwIfAborted(signal);
+      if (attempt > 0) {
+        await this.timer.sleep(TapOnElement.ANDROID_PRE_TAP_REFIND_DELAY_MS);
+      }
+
+      const freshHierarchy = await this.refreshViewHierarchy(
+        TapOnElement.ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS,
+        observeResult.screenSize,
+        signal
+      );
+      if (!freshHierarchy) {
+        logger.warn(
+          `[TapOnElement] Android pre-tap refresh attempt ${attempt + 1}/${maxAttempts} returned no hierarchy`
+        );
+        consecutiveStable = 0;
+        prevBounds = null;
+        continue;
+      }
+
+      if (
+        androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, this.elementParser) &&
+        maxAttempts < TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING
+      ) {
+        maxAttempts = TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING;
+        logger.info(
+          `[TapOnElement] Android pre-tap: loading/progress indicators present; extending refind attempts to ${maxAttempts}`
+        );
+      }
+
+      const refind = this.findElementInHierarchy(options, freshHierarchy);
+      if (!refind.selection.element) {
+        logger.warn(
+          `[TapOnElement] Android pre-tap refresh attempt ${attempt + 1}/${maxAttempts} did not re-find tap target`
+        );
+        consecutiveStable = 0;
+        prevBounds = null;
+        continue;
+      }
+
+      const refreshed = this.resolveTapTargetElement(
+        refind.selection.element as Element,
+        freshHierarchy,
+        action,
+        isTalkBackEnabled
+      );
+      const b = refreshed.element.bounds;
+      if (b === undefined || b === null) {
+        consecutiveStable = 0;
+        prevBounds = null;
+        continue;
+      }
+
+      if (
+        prevBounds !== null &&
+        boundsNearlyEqual(prevBounds, b, TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX)
+      ) {
+        consecutiveStable++;
+      } else {
+        consecutiveStable = 1;
+      }
+      prevBounds = b;
+      best = {
+        viewHierarchy: freshHierarchy,
+        tapElement: refreshed.element,
+        usedParent: refreshed.usedParent
+      };
+
+      if (consecutiveStable >= stableMatchesRequired) {
+        logger.info(
+          `[TapOnElement] Android tap target stable after ${attempt + 1} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`
+        );
+        return { ok: true, ...best };
+      }
+    }
+
+    return {
+      ok: false,
+      error:
+        "Android tap aborted: could not re-find the target in the accessibility hierarchy with stable bounds after repeated refreshes (refusing tap using pre-observe coordinates). The UI may still be updating (list, keyboard, loading overlay, or animation)."
+    };
   }
 
   private async searchForElement(
@@ -755,12 +914,35 @@ export class TapOnElement extends BaseVisualChange {
               IOSCtrlProxyClient.getInstance(this.device)
             )
             : false;
-          const { element: tapElement, usedParent } = this.resolveTapTargetElement(
+          let tapElement: Element;
+          let usedParent: boolean;
+          const initialTapTarget = this.resolveTapTargetElement(
             element,
             viewHierarchy,
             action,
             isTalkBackEnabled
           );
+          tapElement = initialTapTarget.element;
+          usedParent = initialTapTarget.usedParent;
+
+          if (this.device.platform === "android" && options.preTapStability) {
+            const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
+              options,
+              observeResult,
+              action,
+              isTalkBackEnabled,
+              signal
+            );
+            if (!stable.ok) {
+              perf.end();
+              return { success: false, error: stable.error };
+            }
+            observeResult.viewHierarchy = stable.viewHierarchy;
+            tapElement = stable.tapElement;
+            usedParent = stable.usedParent;
+            viewHierarchy = stable.viewHierarchy;
+          }
+
           if (usedParent) {
             logger.info("[TapOnElement] Using clickable parent for non-clickable element");
           }

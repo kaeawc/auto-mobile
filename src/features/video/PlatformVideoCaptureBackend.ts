@@ -15,8 +15,7 @@ import type {
   VideoCaptureBackend,
   VideoCaptureConfig,
 } from "./VideoRecorderService";
-
-const ANDROID_SCREENRECORD_MAX_SECONDS = 180;
+import { ANDROID_SCREENRECORD_MAX_SECONDS } from "./androidScreenrecord";
 const PROCESS_EXIT_TIMEOUT_MS = 5000;
 
 interface ProcessExitState {
@@ -160,21 +159,31 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
     logger.info(`[VideoCapture] Stopping recording ${handle.recordingId}`);
 
     if (backendHandle.kind === "android") {
-      // For Android screenrecord, send SIGINT but give it time to finalize
-      // screenrecord needs a few seconds to write the moov atom after being interrupted
-      if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
-        logger.info(`[VideoCapture] Sending SIGINT to screenrecord`);
-        backendHandle.process.kill("SIGINT");
+      // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
+      // `adb shell screenrecord` process, ADB can drop the session before the device writes
+      // the MP4 moov atom — leading to tiny/corrupt files that show a single frozen frame.
+      // NOTE: pkill -2 signals *all* screenrecord processes on the device. This is fine for
+      // single-recording usage but would interfere with concurrent recordings on the same device.
+      const adbForStop = this.adbFactory.create(backendHandle.device);
+      try {
+        const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);
+        logger.info(
+          `[VideoCapture] Device pkill -2 screenrecord completed (out=${pk.stdout.trim().slice(0, 120)} err=${pk.stderr.trim().slice(0, 160)})`
+        );
+      } catch (error) {
+        logger.warn(
+          `[VideoCapture] Device-side pkill -2 screenrecord failed; will rely on host SIGINT: ${error instanceof Error ? error.message : String(error)}`
+        );
       }
 
-      // Wait up to 10 seconds for graceful exit, then force kill
+      // Wait for the host adb process to exit now that remote screenrecord should have finalized
       const gracefulExitTimeout = 10000;
       let timeoutId: NodeJS.Timeout | undefined;
       const timeoutPromise = new Promise<void>(resolve => {
         timeoutId = defaultTimer.setTimeout(() => {
-          if (backendHandle.process.exitCode === null) {
-            logger.warn(`[VideoCapture] screenrecord did not exit gracefully, sending SIGKILL`);
-            backendHandle.process.kill("SIGKILL");
+          if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+            logger.info(`[VideoCapture] Sending SIGINT to host adb after pkill wait`);
+            backendHandle.process.kill("SIGINT");
           }
           resolve();
         }, gracefulExitTimeout);
@@ -184,7 +193,14 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       if (timeoutId) {
         clearTimeout(timeoutId);
       }
-      await backendHandle.exitPromise;
+
+      if (backendHandle.process.exitCode === null && !backendHandle.process.killed) {
+        logger.warn(`[VideoCapture] screenrecord still running after SIGINT; sending SIGKILL`);
+        backendHandle.process.kill("SIGKILL");
+        await backendHandle.exitPromise;
+      } else {
+        await backendHandle.exitPromise;
+      }
 
       logger.info(`[VideoCapture] Process exited with code: ${backendHandle.exitState.exitCode}, signal: ${backendHandle.exitState.signal}`);
 

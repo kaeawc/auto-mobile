@@ -29,9 +29,10 @@ public enum HierarchyMerger {
         // Pass 1: enrich existing XCUITest nodes with SDK extras
         let enrichedRoot = enrichNode(xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes)
 
-        // Collect the set of SDK nodes that matched an XCUITest node
-        var matchedSdkKeys: Set<LookupKey> = []
-        collectMatchedKeys(element: xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes, matched: &matchedSdkKeys)
+        // Collect a counted bag of SDK keys that matched an XCUITest node.
+        // Using counts (not a set) so identical-keyed siblings aren't collapsed.
+        var matchedSdkKeyCounts: [LookupKey: Int] = [:]
+        collectMatchedKeys(element: xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes, matched: &matchedSdkKeyCounts)
 
         // Pass 2: inject SDK-only nodes as children of matched parents
         let injectedRoot = injectSdkOnlyNodes(
@@ -41,7 +42,7 @@ public enum HierarchyMerger {
             boundsLookup: boundsLookup,
             identifierLookup: identifierLookup,
             allSdkNodes: allSdkNodes,
-            matchedSdkKeys: matchedSdkKeys
+            matchedSdkKeyCounts: matchedSdkKeyCounts
         )
 
         return ViewHierarchy(
@@ -263,16 +264,18 @@ public enum HierarchyMerger {
     // MARK: - Pass 2: SDK-Only Node Injection
 
     /// Collect the exact lookup keys for SDK nodes that matched an XCUITest node.
+    /// Uses a counted bag so identical-keyed siblings each get their own match slot.
     private static func collectMatchedKeys(
         element: UIElementInfo,
         lookup: [LookupKey: SdkViewNode],
         boundsLookup: [BoundsKey: SdkViewNode],
         identifierLookup: [String: SdkViewNode],
         allSdkNodes: [SdkViewNode],
-        matched: inout Set<LookupKey>
+        matched: inout [LookupKey: Int]
     ) {
         if let sdkNode = findMatch(className: element.className, resourceId: element.resourceId, bounds: element.bounds, in: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes) {
-            matched.insert(exactKey(for: sdkNode))
+            let key = exactKey(for: sdkNode)
+            matched[key, default: 0] += 1
         }
         if let children = element.node {
             for child in children {
@@ -291,7 +294,7 @@ public enum HierarchyMerger {
         boundsLookup: [BoundsKey: SdkViewNode],
         identifierLookup: [String: SdkViewNode],
         allSdkNodes: [SdkViewNode],
-        matchedSdkKeys: Set<LookupKey>
+        matchedSdkKeyCounts: [LookupKey: Int]
     ) -> UIElementInfo {
         // Find the SDK node that corresponds to this XCUITest element
         let currentSdk = sdkNode ?? findMatch(
@@ -314,16 +317,21 @@ public enum HierarchyMerger {
                 boundsLookup: boundsLookup,
                 identifierLookup: identifierLookup,
                 allSdkNodes: allSdkNodes,
-                matchedSdkKeys: matchedSdkKeys
+                matchedSdkKeyCounts: matchedSdkKeyCounts
             )
         }
 
-        // Find SDK children of this node that have no XCUITest counterpart
+        // Find SDK children of this node that have no XCUITest counterpart.
+        // Use a local count to handle identical siblings: if 3 SDK children share
+        // a key but only 2 were matched, the 3rd should still be injected.
         var injected: [UIElementInfo] = []
         if let sdkChildren = currentSdk?.children {
+            var localKeyCounts: [LookupKey: Int] = [:]
             for sdkChild in sdkChildren {
                 let childKey = exactKey(for: sdkChild)
-                if !matchedSdkKeys.contains(childKey) && isWorthInjecting(sdkChild) {
+                localKeyCounts[childKey, default: 0] += 1
+                let matchedCount = matchedSdkKeyCounts[childKey] ?? 0
+                if localKeyCounts[childKey]! > matchedCount && isWorthInjecting(sdkChild) {
                     injected.append(convertSdkNode(sdkChild))
                 }
             }

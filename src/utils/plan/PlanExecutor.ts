@@ -108,24 +108,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
     return response;
   }
 
-  /**
-   * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
-   * (e.g. Android `tapOn` → `tapDebug`).
-   */
-  private mergeToolDiagnosticsIntoStepDetails(
-    toolName: string,
-    toolResult: unknown,
-    details: Record<string, unknown>
-  ): void {
-    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
-      return;
-    }
-    const tr = toolResult as Record<string, unknown>;
-    if (tr.tapDebug !== undefined && tr.tapDebug !== null) {
-      details.tapDebug = tr.tapDebug;
-    }
-  }
-
   private parseStructuredToolPayload(response: unknown): Record<string, unknown> | null {
     if (!response || typeof response !== "object") {
       return null;
@@ -163,6 +145,24 @@ export class DefaultPlanExecutor implements PlanExecutor {
     return {
       awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined
     };
+  }
+
+  /**
+   * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
+   * (e.g. Android `tapOn` → `tapDebug`).
+   */
+  private mergeToolDiagnosticsIntoStepDetails(
+    toolName: string,
+    toolResult: unknown,
+    details: Record<string, unknown>
+  ): void {
+    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
+      return;
+    }
+    const tr = toolResult as Record<string, unknown>;
+    if (tr.tapDebug !== undefined && tr.tapDebug !== null) {
+      details.tapDebug = tr.tapDebug;
+    }
   }
 
   private async captureFailureObservation(

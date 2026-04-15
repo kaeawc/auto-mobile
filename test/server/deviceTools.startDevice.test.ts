@@ -17,6 +17,7 @@ describe("startDevice handler", () => {
       deviceManagerFactory: () => fakeDeviceUtils,
       deviceMatcherFactory: () => fakeMatcher,
       notifyResourcesChanged: async () => {},
+      ensureCtrlProxyReady: async () => {},
     });
 
     registerDeviceTools();

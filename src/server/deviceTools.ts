@@ -10,6 +10,7 @@ import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from ".
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
+import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
@@ -40,7 +41,7 @@ const startDeviceParametersSchema = z.object({
   timeoutMs: z.number().optional().describe("Boot timeout in ms"),
 });
 
-export const startDeviceSchema = z.preprocess((input) => {
+export const startDeviceSchema = z.preprocess(input => {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     return input;
   }
@@ -96,6 +97,7 @@ export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
+  ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
 }
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
@@ -123,6 +125,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
+    ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
   };
 }
 
@@ -328,6 +331,48 @@ export function registerDeviceTools() {
     );
   }
 
+  async function ensureCtrlProxyReady(
+    device: BootedDevice,
+    perf: ReturnType<typeof createPerformanceTracker>,
+  ) {
+    if (device.platform !== "ios") {
+      return;
+    }
+
+    perf.startOperation("ensureCtrlProxy");
+    try {
+      const manager = IOSCtrlProxyManager.getInstance(device);
+      const xcTestClient = IOSCtrlProxyClient.getInstance(device, manager.getServicePort());
+
+      // If WebSocket already connected and responsive, nothing to do
+      if (xcTestClient.isConnected()) {
+        const isReady = await xcTestClient.verifyServiceReady(2, 200, 2000);
+        if (isReady) {
+          logger.info(`[startDevice] CtrlProxy iOS already ready for ${device.deviceId}`);
+          perf.endOperation("ensureCtrlProxy");
+          return;
+        }
+      }
+
+      // Setup: download bundle if needed, start xcodebuild, wait for service
+      const setupResult = await manager.setup(false, perf);
+      if (!setupResult.success) {
+        logger.warn(`[startDevice] CtrlProxy iOS setup failed for ${device.deviceId}: ${setupResult.error ?? setupResult.message}`);
+        perf.endOperation("ensureCtrlProxy");
+        return;
+      }
+
+      // Wait for WebSocket connection and verify responsiveness
+      const connected = await xcTestClient.waitForConnection(5, 1000);
+      if (connected) {
+        await xcTestClient.verifyServiceReady(5, 1000, 5000);
+      }
+    } catch (error) {
+      logger.warn(`[startDevice] CtrlProxy iOS setup failed (non-fatal): ${error}`);
+    }
+    perf.endOperation("ensureCtrlProxy");
+  }
+
   async function buildBootedResponse(
     device: BootedDevice,
     source: "booted" | "cold-boot",
@@ -335,6 +380,12 @@ export function registerDeviceTools() {
     args: StartDeviceArgs,
     processId?: number,
   ) {
+    // Ensure iOS automation proxy is installed and running before returning.
+    // This avoids the first observe/tap call paying the full setup cost.
+    const deps = getDeviceToolsDependencies();
+    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+    await ctrlProxySetup(device, perf);
+
     // Always generate a session ID for consistent device interactions.
     // When autolock is enabled, the session ID is enforced for all subsequent tool calls.
     // When disabled, AutoMobile assumes a single agent and the session ID is advisory.

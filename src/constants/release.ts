@@ -26,7 +26,7 @@ export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
 export const APK_URL: string = RELEASE_VERSION === LATEST_RELEASE_VERSION
   ? `https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy-debug.apk`
   : `https://github.com/kaeawc/auto-mobile/releases/download/v${RELEASE_VERSION}/control-proxy-debug.apk`;
-export const APK_SHA256_CHECKSUM: string = "d94eab8b95cf03b6e64cf72c6e6989256e9e4ccc912a8c756072508a9abd8361"; // Empty = skip verification (local dev only)
+export const APK_SHA256_CHECKSUM: string = "3965e3cef026c9b71a142b7682f72dfe9af772e32f6e281769427e6e30b56395"; // Empty = skip verification (local dev only)
 
 /**
  * iOS CtrlProxy Release Constants

@@ -114,6 +114,17 @@ fun PropertyInspectorPanel(
                 }
             }
 
+            // SDK extras section (if present)
+            if (element.extras.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                PropertySection(title = "SDK Properties") {
+                    for ((key, value) in element.extras.toSortedMap()) {
+                        val label = key.removePrefix("sdk.")
+                        PropertyRow(label, value)
+                    }
+                }
+            }
+
             // Text content section (if present)
             if (!element.text.isNullOrEmpty()) {
                 Spacer(Modifier.height(16.dp))

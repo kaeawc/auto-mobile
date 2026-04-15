@@ -12,6 +12,13 @@ Pull down the notification shade:
 systemTray with action: "open"
 ```
 
+## Close Notification Shade
+
+Collapse the shade (safe no-op if already closed). Prefer this over `pressButton` for deterministic cleanup between tests:
+```
+systemTray with action: "close"
+```
+
 ## Find Notification
 
 Search for a specific notification:
@@ -57,7 +64,7 @@ systemTray "open" → systemTray "find" → systemTray "tap"
 
 **Clear notifications before test:**
 ```
-systemTray "open" → systemTray "clearAll" → pressButton "back"
+systemTray "open" → systemTray "clearAll" → systemTray "close"
 ```
 
 **Verify notification appeared:**

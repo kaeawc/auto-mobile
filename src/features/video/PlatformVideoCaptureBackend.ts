@@ -162,6 +162,8 @@ export class PlatformVideoCaptureBackend implements VideoCaptureBackend {
       // Stop screenrecord on the *device* with SIGINT first. If we only SIGINT the host
       // `adb shell screenrecord` process, ADB can drop the session before the device writes
       // the MP4 moov atom — leading to tiny/corrupt files that show a single frozen frame.
+      // NOTE: pkill -2 signals *all* screenrecord processes on the device. This is fine for
+      // single-recording usage but would interfere with concurrent recordings on the same device.
       const adbForStop = this.adbFactory.create(backendHandle.device);
       try {
         const pk = await adbForStop.executeCommand("shell pkill -2 screenrecord", 8000);

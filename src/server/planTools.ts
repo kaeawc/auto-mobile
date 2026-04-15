@@ -481,7 +481,7 @@ const executePlanTool = async (device: BootedDevice, params: {
       platform: device.platform,
       deviceId: device.deviceId,
       deviceMapping,
-      ...(result.debug ? { debug: result.debug } : {}),
+      ...(params.captureObserveSteps && result.debug ? { debug: result.debug } : {}),
       ...(videoFilePaths.length > 0 ? { videoFilePaths, videoRecordingIds } : {}),
     };
 

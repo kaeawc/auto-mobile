@@ -169,9 +169,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
-    signal: AbortSignal | undefined
   ): Promise<FailureObservationSummary | undefined> {
-    throwIfAborted(signal);
     const observeTool = ToolRegistry.getTool("observe");
     if (!observeTool) {
       return undefined;
@@ -186,7 +184,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         enhancedParams.sessionUuid = sessionUuid;
       }
       const parsedParams = observeTool.schema.parse(enhancedParams);
-      const response = await observeTool.handler(parsedParams, undefined, signal);
+      const response = await observeTool.handler(parsedParams, undefined, undefined);
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {
         return { capturedAtMs: Date.now(), observeError: "observe returned empty payload" };
@@ -221,7 +219,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
     platform: string | undefined,
     deviceId: string | undefined,
     sessionUuid: string | undefined,
-    signal: AbortSignal | undefined
   ): Promise<FailureObservationSummary | undefined> {
     try {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
@@ -248,7 +245,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (!platform) {
         return undefined;
       }
-      return await this.captureFailureObservation(platform, deviceId, sessionUuid, signal);
+      return await this.captureFailureObservation(platform, deviceId, sessionUuid);
     } catch (error) {
       return {
         capturedAtMs: Date.now(),
@@ -448,7 +445,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
               platform,
               deviceId,
               sessionUuid,
-              signal
             );
             const failedToolDetails: Record<string, unknown> = {
               params: step.params,
@@ -490,7 +486,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
               platform,
               deviceId,
               sessionUuid,
-              signal
             );
             debugSteps.push({
               step: `Execute step ${i + 1}: ${step.tool}`,
@@ -555,7 +550,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             platform,
             deviceId,
             sessionUuid,
-            signal
           );
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,
@@ -932,7 +926,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
               platform,
               deviceId,
               sessionUuid,
-              signal
             );
 
             return {
@@ -960,7 +953,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
               platform,
               deviceId,
               sessionUuid,
-              signal
             );
             return {
               success: false,
@@ -990,7 +982,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             platform,
             deviceId,
             sessionUuid,
-            signal
           );
 
           return {

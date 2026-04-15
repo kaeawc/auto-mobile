@@ -268,10 +268,6 @@ export function registerAppTools(
   };
 
   const grantAndroidPermissionsHandler = async (device: BootedDevice, args: GrantAndroidPermissionsArgs) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("grantAndroidPermissions is only supported on Android devices");
-    }
-
     try {
       const grantAndroidPermissions = new GrantAndroidPermissions(device);
       const result = await grantAndroidPermissions.execute(args.appId, {
@@ -297,10 +293,6 @@ export function registerAppTools(
     device: BootedDevice,
     args: SetAndroidNotificationPolicyAccessArgs
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("setAndroidNotificationPolicyAccess is only supported on Android devices");
-    }
-
     try {
       const action = new SetAndroidNotificationPolicyAccess(device);
       const result = await action.execute(args.appId, { allowed: args.allowed });
@@ -325,10 +317,6 @@ export function registerAppTools(
     device: BootedDevice,
     args: SetAndroidScheduleExactAlarmAppOpArgs
   ) => {
-    if (device.platform !== "android") {
-      throw new ActionableError("setAndroidScheduleExactAlarmAppOp is only supported on Android devices");
-    }
-
     try {
       const action = new SetAndroidScheduleExactAlarmAppOp(device);
       const result = await action.execute(args.appId, { mode: args.mode });

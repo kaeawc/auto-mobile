@@ -940,7 +940,6 @@ export class TapOnElement extends BaseVisualChange {
             observeResult.viewHierarchy = stable.viewHierarchy;
             tapElement = stable.tapElement;
             usedParent = stable.usedParent;
-            viewHierarchy = stable.viewHierarchy;
           }
 
           if (usedParent) {

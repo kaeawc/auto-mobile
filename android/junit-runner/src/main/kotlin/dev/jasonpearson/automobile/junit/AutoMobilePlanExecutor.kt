@@ -332,7 +332,7 @@ internal object AutoMobilePlanExecutor {
         args["testMetadata"] = buildTestMetadata(testContext)
       }
 
-      appendExecutePlanCleanupArgs(args)
+      // appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
 
       if (options.debugMode) {

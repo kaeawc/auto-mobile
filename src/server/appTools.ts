@@ -5,6 +5,9 @@ import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import { GrantAndroidPermissions } from "../features/action/GrantAndroidPermissions";
+import { SetAndroidNotificationPolicyAccess } from "../features/action/SetAndroidNotificationPolicyAccess";
+import { SetAndroidScheduleExactAlarmAppOp } from "../features/action/SetAndroidScheduleExactAlarmAppOp";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import {
@@ -61,6 +64,47 @@ export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
   keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
 }));
 
+export const grantAndroidPermissionsSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("Android applicationId (package name) to receive permissions"),
+    permissions: z
+      .array(z.string().min(1))
+      .min(1)
+      .describe("Runtime permission names to grant via `adb shell pm grant --user …`"),
+    userId: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe(
+        "Android user id for `pm grant --user` (default: 0, or inferred from foreground app / work profile)"
+      ),
+  })
+);
+
+export const setAndroidNotificationPolicyAccessSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("Android applicationId (package name)"),
+    allowed: z
+      .boolean()
+      .describe(
+        "true = `cmd notification allow_dnd` (notification policy / DND access); " +
+          "false = `cmd notification disallow_dnd` (best-effort revoke)"
+      ),
+  })
+);
+
+export const setAndroidScheduleExactAlarmAppOpSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("Android applicationId (package name); used as `appops set --uid` target like FUB test helpers"),
+    mode: z
+      .enum(["allow", "deny"])
+      .describe(
+        "allow = UID `SCHEDULE_EXACT_ALARM` allow (strict); deny = UID deny on API 31+ only (best-effort), skipped below API 31"
+      ),
+  })
+);
+
 export const listAppsSchema = z.object({}).passthrough();
 
 // Export interfaces for type safety
@@ -82,6 +126,12 @@ export interface UninstallAppArgs {
   appId: string;
   keepData?: boolean;
 }
+
+export type GrantAndroidPermissionsArgs = z.infer<typeof grantAndroidPermissionsSchema>;
+
+export type SetAndroidNotificationPolicyAccessArgs = z.infer<typeof setAndroidNotificationPolicyAccessSchema>;
+
+export type SetAndroidScheduleExactAlarmAppOpArgs = z.infer<typeof setAndroidScheduleExactAlarmAppOpSchema>;
 
 // Register tools
 export function registerAppTools(
@@ -217,6 +267,75 @@ export function registerAppTools(
     }
   };
 
+  const grantAndroidPermissionsHandler = async (device: BootedDevice, args: GrantAndroidPermissionsArgs) => {
+    try {
+      const grantAndroidPermissions = new GrantAndroidPermissions(device);
+      const result = await grantAndroidPermissions.execute(args.appId, {
+        permissions: args.permissions,
+        userId: args.userId,
+      });
+
+      const stepCount = result.results.length;
+      const message = result.success
+        ? `Granted ${stepCount} permission(s) to ${args.appId} (user ${result.userId})`
+        : (result.error ?? "One or more permission grants failed");
+
+      return createJSONToolResponse({
+        message,
+        ...result
+      });
+    } catch (error) {
+      throw new ActionableError(`Failed to grant permissions: ${error}`);
+    }
+  };
+
+  const setAndroidNotificationPolicyAccessHandler = async (
+    device: BootedDevice,
+    args: SetAndroidNotificationPolicyAccessArgs
+  ) => {
+    try {
+      const action = new SetAndroidNotificationPolicyAccess(device);
+      const result = await action.execute(args.appId, { allowed: args.allowed });
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "setAndroidNotificationPolicyAccess failed");
+      }
+      return createJSONToolResponse({
+        message: args.allowed
+          ? `Granted notification policy (DND) access to ${args.appId}`
+          : `Revoked notification policy (DND) access for ${args.appId} (best-effort)`,
+        ...result,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`setAndroidNotificationPolicyAccess failed: ${error}`);
+    }
+  };
+
+  const setAndroidScheduleExactAlarmAppOpHandler = async (
+    device: BootedDevice,
+    args: SetAndroidScheduleExactAlarmAppOpArgs
+  ) => {
+    try {
+      const action = new SetAndroidScheduleExactAlarmAppOp(device);
+      const result = await action.execute(args.appId, { mode: args.mode });
+      if (!result.success) {
+        throw new ActionableError(result.error ?? "setAndroidScheduleExactAlarmAppOp failed");
+      }
+      const verb = args.mode === "allow" ? "Allowed" : "Denied (best-effort)";
+      return createJSONToolResponse({
+        message: `${verb} SCHEDULE_EXACT_ALARM appop for ${args.appId}${result.skipped ? ` (${result.skipReason})` : ""}`,
+        ...result,
+      });
+    } catch (error) {
+      if (error instanceof ActionableError) {
+        throw error;
+      }
+      throw new ActionableError(`setAndroidScheduleExactAlarmAppOp failed: ${error}`);
+    }
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -244,6 +363,27 @@ export function registerAppTools(
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "grantAndroidPermissions",
+    "Grant Android runtime permissions via `adb shell pm grant --user …` (Android only)",
+    grantAndroidPermissionsSchema,
+    grantAndroidPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setAndroidNotificationPolicyAccess",
+    "Set notification policy / Do Not Disturb access via `cmd notification allow_dnd` or `disallow_dnd` (Android only)",
+    setAndroidNotificationPolicyAccessSchema,
+    setAndroidNotificationPolicyAccessHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setAndroidScheduleExactAlarmAppOp",
+    "Set UID-level SCHEDULE_EXACT_ALARM appop to allow or deny (`appops set --uid …`; deny API 31+ only, best-effort) (Android only)",
+    setAndroidScheduleExactAlarmAppOpSchema,
+    setAndroidScheduleExactAlarmAppOpHandler
   );
 
   ToolRegistry.register(

@@ -97,6 +97,7 @@ export interface DeviceToolsDependencies {
   deviceManagerFactory: () => PlatformDeviceManager;
   deviceMatcherFactory: () => DeviceMatcher;
   notifyResourcesChanged: () => Promise<void>;
+  ensureCtrlProxyReady?: (device: BootedDevice, perf: ReturnType<typeof createPerformanceTracker>) => Promise<void>;
 }
 
 async function defaultNotifyResourcesChanged(): Promise<void> {
@@ -380,7 +381,9 @@ export function registerDeviceTools() {
   ) {
     // Ensure iOS automation proxy is installed and running before returning.
     // This avoids the first observe/tap call paying the full setup cost.
-    await ensureCtrlProxyReady(device, perf);
+    const deps = getDeviceToolsDependencies();
+    const ctrlProxySetup = deps.ensureCtrlProxyReady ?? ensureCtrlProxyReady;
+    await ctrlProxySetup(device, perf);
 
     // Always generate a session ID for consistent device interactions.
     // When autolock is enabled, the session ID is enforced for all subsequent tool calls.

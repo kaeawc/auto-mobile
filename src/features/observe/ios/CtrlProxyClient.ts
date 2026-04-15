@@ -896,6 +896,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       // Record layout telemetry event using converted hierarchy (same format as observation stream)
       const converted = this.convertToViewHierarchyResult(message.data);
       this.recordLayoutTelemetryEvent(converted);
+      // Push to observation stream for IDE plugins (request-response path)
+      this.pushHierarchyToObservationStream(converted);
     }
 
     // Handle request/response messages (with requestId) first

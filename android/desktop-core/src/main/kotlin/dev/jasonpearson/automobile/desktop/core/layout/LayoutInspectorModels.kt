@@ -448,17 +448,38 @@ object LayoutInspectorMockData {
         return null
     }
 
-    // Helper to find deepest element at point
+    // Helper to find deepest element at point, preferring the smallest match.
+    // Collects all leaf-level candidates containing the point, then picks
+    // the one with the smallest area so that full-screen overlay views
+    // (e.g. _UITouchPassthroughView) don't steal taps from content beneath.
     fun findElementAt(root: UIElementInfo, x: Int, y: Int): UIElementInfo? {
         if (!root.bounds.contains(x, y)) return null
 
-        // Check children first (depth-first to find deepest)
-        for (child in root.children.reversed()) {
-            val found = findElementAt(child, x, y)
-            if (found != null) return found
+        val candidates = mutableListOf<UIElementInfo>()
+        collectDeepestAt(root, x, y, candidates)
+
+        return candidates.minByOrNull { it.bounds.area }
+    }
+
+    private fun collectDeepestAt(
+        element: UIElementInfo,
+        x: Int,
+        y: Int,
+        candidates: MutableList<UIElementInfo>,
+    ) {
+        if (!element.bounds.contains(x, y)) return
+
+        var foundChild = false
+        for (child in element.children) {
+            if (child.bounds.contains(x, y)) {
+                collectDeepestAt(child, x, y, candidates)
+                foundChild = true
+            }
         }
 
-        return root
+        if (!foundChild) {
+            candidates.add(element)
+        }
     }
 
     // Helper to get path from root to element

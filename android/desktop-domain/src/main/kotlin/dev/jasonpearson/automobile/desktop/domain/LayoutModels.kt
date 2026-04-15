@@ -16,6 +16,7 @@ public data class UIElementInfo(
     val isChecked: Boolean,
     val children: List<UIElementInfo>,
     val depth: Int,
+    val extras: Map<String, String> = emptyMap(),
 )
 
 public data class ElementBounds(
@@ -28,6 +29,7 @@ public data class ElementBounds(
     public val height: Int get() = bottom - top
     public val centerX: Int get() = left + width / 2
     public val centerY: Int get() = top + height / 2
+    public val area: Long get() = width.toLong() * height.toLong()
 
     public fun contains(x: Int, y: Int): Boolean =
         x >= left && x < right && y >= top && y < bottom

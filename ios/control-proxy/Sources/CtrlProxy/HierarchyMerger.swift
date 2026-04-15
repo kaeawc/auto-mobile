@@ -10,20 +10,44 @@ public enum HierarchyMerger {
     private static let boundsTolerance = 2
 
     /// Merge SDK hierarchy data into the XCUITest hierarchy.
+    ///
+    /// Two-pass merge:
+    /// 1. **Enrich** — annotate existing XCUITest nodes with `sdk.*` extras from matched SDK nodes.
+    /// 2. **Inject** — add SDK-only nodes (views absent from the XCUITest tree) as children
+    ///    of their nearest matched parent. Injected nodes carry `sdk.source=sdkWalker`.
     public static func merge(xcuitest: ViewHierarchy, sdk: SdkViewHierarchy?) -> ViewHierarchy {
         guard let sdkRoot = sdk?.root else { return xcuitest }
         guard let xcuitestRoot = xcuitest.hierarchy else { return xcuitest }
 
-        // Build a flat lookup from the SDK tree keyed by (className, bounds)
+        // Build flat lookups from the SDK tree
         var lookup: [LookupKey: SdkViewNode] = [:]
-        buildLookup(node: sdkRoot, into: &lookup)
+        var boundsLookup: [BoundsKey: SdkViewNode] = [:]
+        var identifierLookup: [String: SdkViewNode] = [:]
+        var allSdkNodes: [SdkViewNode] = []
+        buildLookup(node: sdkRoot, into: &lookup, boundsLookup: &boundsLookup, identifierLookup: &identifierLookup, allNodes: &allSdkNodes)
 
-        let enrichedRoot = enrichNode(xcuitestRoot, lookup: lookup)
+        // Pass 1: enrich existing XCUITest nodes with SDK extras
+        let enrichedRoot = enrichNode(xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes)
+
+        // Collect the set of SDK nodes that matched an XCUITest node
+        var matchedSdkKeys: Set<LookupKey> = []
+        collectMatchedKeys(element: xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes, matched: &matchedSdkKeys)
+
+        // Pass 2: inject SDK-only nodes as children of matched parents
+        let injectedRoot = injectSdkOnlyNodes(
+            element: enrichedRoot,
+            sdkNode: sdkRoot,
+            lookup: lookup,
+            boundsLookup: boundsLookup,
+            identifierLookup: identifierLookup,
+            allSdkNodes: allSdkNodes,
+            matchedSdkKeys: matchedSdkKeys
+        )
 
         return ViewHierarchy(
             updatedAt: xcuitest.updatedAt,
             packageName: xcuitest.packageName,
-            hierarchy: enrichedRoot,
+            hierarchy: injectedRoot,
             windowInfo: xcuitest.windowInfo,
             windows: xcuitest.windows,
             screenScale: xcuitest.screenScale,
@@ -44,54 +68,132 @@ public enum HierarchyMerger {
         let bottom: Int
     }
 
-    private static func buildLookup(node: SdkViewNode, into lookup: inout [LookupKey: SdkViewNode]) {
+    /// Bounds-only key for fallback matching when class names differ
+    /// (e.g. XCUITest "UIView" vs SDK "_UIHostingView").
+    private struct BoundsKey: Hashable {
+        let left: Int
+        let top: Int
+        let right: Int
+        let bottom: Int
+    }
+
+    private static func buildLookup(
+        node: SdkViewNode,
+        into lookup: inout [LookupKey: SdkViewNode],
+        boundsLookup: inout [BoundsKey: SdkViewNode],
+        identifierLookup: inout [String: SdkViewNode],
+        allNodes: inout [SdkViewNode]
+    ) {
+        allNodes.append(node)
         // Insert exact key + all tolerance variants so findMatch is O(1)
         let tol = boundsTolerance
         for dl in -tol...tol {
             for dt in -tol...tol {
                 for dr in -tol...tol {
                     for db in -tol...tol {
+                        let l = node.bounds.left + dl
+                        let t = node.bounds.top + dt
+                        let r = node.bounds.right + dr
+                        let b = node.bounds.bottom + db
                         let key = LookupKey(
                             className: node.className,
-                            left: node.bounds.left + dl,
-                            top: node.bounds.top + dt,
-                            right: node.bounds.right + dr,
-                            bottom: node.bounds.bottom + db
+                            left: l, top: t, right: r, bottom: b
                         )
                         if lookup[key] == nil {
                             lookup[key] = node
+                        }
+                        let bKey = BoundsKey(left: l, top: t, right: r, bottom: b)
+                        if boundsLookup[bKey] == nil {
+                            boundsLookup[bKey] = node
                         }
                     }
                 }
             }
         }
+        // Index by accessibilityIdentifier for fallback when bounds don't match
+        if let identifier = node.accessibilityIdentifier, !identifier.isEmpty {
+            if identifierLookup[identifier] == nil {
+                identifierLookup[identifier] = node
+            }
+        }
         if let children = node.children {
             for child in children {
-                buildLookup(node: child, into: &lookup)
+                buildLookup(node: child, into: &lookup, boundsLookup: &boundsLookup, identifierLookup: &identifierLookup, allNodes: &allNodes)
             }
         }
     }
 
     // MARK: - Matching
 
-    private static func findMatch(className: String?, bounds: ElementBounds?, in lookup: [LookupKey: SdkViewNode]) -> SdkViewNode? {
-        guard let className = className, let bounds = bounds else { return nil }
-        return lookup[LookupKey(
-            className: className,
-            left: bounds.left,
-            top: bounds.top,
-            right: bounds.right,
-            bottom: bounds.bottom
-        )]
+    /// Find a matching SDK node for an XCUITest element.
+    /// Strategy: (1) exact className+bounds, (2) bounds-only, (3) accessibilityIdentifier,
+    /// (4) smallest enclosing SDK node (for SwiftUI views where accessibility bounds differ from UIKit).
+    private static func findMatch(
+        className: String?,
+        resourceId: String?,
+        bounds: ElementBounds?,
+        in lookup: [LookupKey: SdkViewNode],
+        boundsLookup: [BoundsKey: SdkViewNode],
+        identifierLookup: [String: SdkViewNode],
+        allSdkNodes: [SdkViewNode]
+    ) -> SdkViewNode? {
+        if let bounds = bounds {
+            // 1. Exact match: className + bounds
+            if let className = className {
+                if let exact = lookup[LookupKey(
+                    className: className,
+                    left: bounds.left, top: bounds.top,
+                    right: bounds.right, bottom: bounds.bottom
+                )] {
+                    return exact
+                }
+            }
+            // 2. Bounds-only fallback: different class names at the same position
+            if let boundsMatch = boundsLookup[BoundsKey(
+                left: bounds.left, top: bounds.top,
+                right: bounds.right, bottom: bounds.bottom
+            )] {
+                return boundsMatch
+            }
+        }
+        // 3. Identifier fallback: match by accessibilityIdentifier when bounds differ
+        if let resourceId = resourceId, !resourceId.isEmpty {
+            if let idMatch = identifierLookup[resourceId] {
+                return idMatch
+            }
+        }
+        // 4. Smallest enclosing SDK node: find the SDK node with smallest area
+        //    that fully contains this element's bounds
+        if let bounds = bounds {
+            let tol = boundsTolerance
+            var bestNode: SdkViewNode?
+            var bestArea = Int.max
+            for node in allSdkNodes {
+                let nb = node.bounds
+                // Check containment with tolerance
+                if nb.left - tol <= bounds.left &&
+                   nb.top - tol <= bounds.top &&
+                   nb.right + tol >= bounds.right &&
+                   nb.bottom + tol >= bounds.bottom {
+                    let area = nb.width * nb.height
+                    if area < bestArea {
+                        bestArea = area
+                        bestNode = node
+                    }
+                }
+            }
+            return bestNode
+        }
+        return nil
     }
 
     // MARK: - Enrichment
 
-    private static func enrichNode(_ element: UIElementInfo, lookup: [LookupKey: SdkViewNode]) -> UIElementInfo {
-        let sdkNode = findMatch(className: element.className, bounds: element.bounds, in: lookup)
+    private static func enrichNode(_ element: UIElementInfo, lookup: [LookupKey: SdkViewNode], boundsLookup: [BoundsKey: SdkViewNode], identifierLookup: [String: SdkViewNode], allSdkNodes: [SdkViewNode]) -> UIElementInfo {
+        let sdkNode = findMatch(className: element.className, resourceId: element.resourceId, bounds: element.bounds, in: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes)
         let enrichedExtras = buildExtras(existing: element.extras, sdkNode: sdkNode)
 
-        let enrichedChildren: [UIElementInfo]? = element.node?.map { enrichNode($0, lookup: lookup) }
+        let enrichedChildren: [UIElementInfo]? = element.node?.map { enrichNode($0, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes) }
 
         return UIElementInfo(
             text: element.text,
@@ -156,5 +258,227 @@ public enum HierarchyMerger {
         extras["sdk.isUserInteractionEnabled"] = String(node.isUserInteractionEnabled)
 
         return extras.isEmpty ? nil : extras
+    }
+
+    // MARK: - Pass 2: SDK-Only Node Injection
+
+    /// Collect the exact lookup keys for SDK nodes that matched an XCUITest node.
+    private static func collectMatchedKeys(
+        element: UIElementInfo,
+        lookup: [LookupKey: SdkViewNode],
+        boundsLookup: [BoundsKey: SdkViewNode],
+        identifierLookup: [String: SdkViewNode],
+        allSdkNodes: [SdkViewNode],
+        matched: inout Set<LookupKey>
+    ) {
+        if let sdkNode = findMatch(className: element.className, resourceId: element.resourceId, bounds: element.bounds, in: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes) {
+            matched.insert(exactKey(for: sdkNode))
+        }
+        if let children = element.node {
+            for child in children {
+                collectMatchedKeys(element: child, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes, matched: &matched)
+            }
+        }
+    }
+
+    /// Walk the enriched XCUITest tree alongside the SDK tree.
+    /// For each XCUITest node that matched an SDK node, check the SDK node's children —
+    /// any SDK child that didn't match an XCUITest node gets injected.
+    private static func injectSdkOnlyNodes(
+        element: UIElementInfo,
+        sdkNode: SdkViewNode?,
+        lookup: [LookupKey: SdkViewNode],
+        boundsLookup: [BoundsKey: SdkViewNode],
+        identifierLookup: [String: SdkViewNode],
+        allSdkNodes: [SdkViewNode],
+        matchedSdkKeys: Set<LookupKey>
+    ) -> UIElementInfo {
+        // Find the SDK node that corresponds to this XCUITest element
+        let currentSdk = sdkNode ?? findMatch(
+            className: element.className,
+            resourceId: element.resourceId,
+            bounds: element.bounds,
+            in: lookup,
+            boundsLookup: boundsLookup,
+            identifierLookup: identifierLookup,
+            allSdkNodes: allSdkNodes
+        )
+
+        // Recurse into existing children, pairing each with its SDK counterpart
+        let processedChildren: [UIElementInfo]? = element.node?.map { child in
+            let childSdk = findMatch(className: child.className, resourceId: child.resourceId, bounds: child.bounds, in: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes)
+            return injectSdkOnlyNodes(
+                element: child,
+                sdkNode: childSdk,
+                lookup: lookup,
+                boundsLookup: boundsLookup,
+                identifierLookup: identifierLookup,
+                allSdkNodes: allSdkNodes,
+                matchedSdkKeys: matchedSdkKeys
+            )
+        }
+
+        // Find SDK children of this node that have no XCUITest counterpart
+        var injected: [UIElementInfo] = []
+        if let sdkChildren = currentSdk?.children {
+            for sdkChild in sdkChildren {
+                let childKey = exactKey(for: sdkChild)
+                if !matchedSdkKeys.contains(childKey) && isWorthInjecting(sdkChild) {
+                    injected.append(convertSdkNode(sdkChild))
+                }
+            }
+        }
+
+        // If no injections needed, return as-is
+        guard !injected.isEmpty else {
+            if processedChildren != nil && processedChildren?.count != element.node?.count {
+                return element // shouldn't happen, but safety
+            }
+            return UIElementInfo(
+                text: element.text,
+                textSize: element.textSize,
+                contentDesc: element.contentDesc,
+                resourceId: element.resourceId,
+                className: element.className,
+                bounds: element.bounds,
+                clickable: element.clickable,
+                enabled: element.enabled,
+                focusable: element.focusable,
+                focused: element.focused,
+                accessibilityFocused: element.accessibilityFocused,
+                scrollable: element.scrollable,
+                password: element.password,
+                checkable: element.checkable,
+                checked: element.checked,
+                selected: element.selected,
+                longClickable: element.longClickable,
+                testTag: element.testTag,
+                role: element.role,
+                stateDescription: element.stateDescription,
+                errorMessage: element.errorMessage,
+                hintText: element.hintText,
+                viewId: element.viewId,
+                extras: element.extras,
+                actions: element.actions,
+                node: processedChildren
+            )
+        }
+
+        // Merge existing children with injected SDK-only nodes
+        var merged = processedChildren ?? []
+        merged.append(contentsOf: injected)
+
+        return UIElementInfo(
+            text: element.text,
+            textSize: element.textSize,
+            contentDesc: element.contentDesc,
+            resourceId: element.resourceId,
+            className: element.className,
+            bounds: element.bounds,
+            clickable: element.clickable,
+            enabled: element.enabled,
+            focusable: element.focusable,
+            focused: element.focused,
+            accessibilityFocused: element.accessibilityFocused,
+            scrollable: element.scrollable,
+            password: element.password,
+            checkable: element.checkable,
+            checked: element.checked,
+            selected: element.selected,
+            longClickable: element.longClickable,
+            testTag: element.testTag,
+            role: element.role,
+            stateDescription: element.stateDescription,
+            errorMessage: element.errorMessage,
+            hintText: element.hintText,
+            viewId: element.viewId,
+            extras: element.extras,
+            actions: element.actions,
+            node: merged.isEmpty ? nil : merged
+        )
+    }
+
+    /// Whether an SDK-only node is worth injecting into the XCUITest tree.
+    /// Skips purely structural container views that add no useful information.
+    private static func isWorthInjecting(_ node: SdkViewNode) -> Bool {
+        // Must have an accessibility identifier, label, custom actions, or be interactive
+        if node.accessibilityIdentifier != nil { return true }
+        if node.accessibilityLabel != nil { return true }
+        if !node.accessibilityCustomActions.isEmpty { return true }
+        if node.hasTapTarget { return true }
+        if node.accessibilityElementsHidden { return true }
+        if node.isAccessibilityElement { return true }
+        // Has meaningful visual properties (background, corner radius)
+        if node.backgroundColor != nil { return true }
+        if node.cornerRadius > 0 { return true }
+        // Has non-trivial children worth surfacing
+        if let children = node.children, children.contains(where: { isWorthInjecting($0) }) {
+            return true
+        }
+        return false
+    }
+
+    /// Convert an SDK node (and its subtree) to a UIElementInfo for injection.
+    private static func convertSdkNode(_ node: SdkViewNode) -> UIElementInfo {
+        var extras: [String: String] = ["sdk.source": "sdkWalker"]
+
+        if !node.accessibilityTraits.isEmpty {
+            extras["sdk.accessibilityTraits"] = node.accessibilityTraits.joined(separator: ",")
+        }
+        if !node.accessibilityCustomActions.isEmpty {
+            extras["sdk.accessibilityCustomActions"] = node.accessibilityCustomActions.joined(separator: ",")
+        }
+        if !node.gestureRecognizers.isEmpty {
+            let gestures = node.gestureRecognizers.map { "\($0.type)(\($0.isEnabled ? "enabled" : "disabled"))" }
+            extras["sdk.gestureRecognizers"] = gestures.joined(separator: ",")
+        }
+        if let bg = node.backgroundColor {
+            extras["sdk.backgroundColor"] = bg
+        }
+        extras["sdk.alpha"] = String(node.alpha)
+        if node.cornerRadius > 0 {
+            extras["sdk.cornerRadius"] = String(node.cornerRadius)
+        }
+        extras["sdk.isAccessibilityElement"] = String(node.isAccessibilityElement)
+        if node.accessibilityElementsHidden {
+            extras["sdk.accessibilityElementsHidden"] = "true"
+        }
+        extras["sdk.hasTapTarget"] = String(node.hasTapTarget)
+        if node.isOccluded {
+            extras["sdk.isOccluded"] = "true"
+        }
+        extras["sdk.isUserInteractionEnabled"] = String(node.isUserInteractionEnabled)
+
+        let convertedChildren: [UIElementInfo]? = node.children?.compactMap { child in
+            if isWorthInjecting(child) {
+                return convertSdkNode(child)
+            }
+            return nil
+        }
+
+        return UIElementInfo(
+            text: node.accessibilityLabel,
+            resourceId: node.accessibilityIdentifier,
+            className: node.className,
+            bounds: ElementBounds(
+                left: node.bounds.left,
+                top: node.bounds.top,
+                right: node.bounds.right,
+                bottom: node.bounds.bottom
+            ),
+            extras: extras,
+            node: convertedChildren?.isEmpty == true ? nil : convertedChildren
+        )
+    }
+
+    /// Build the exact (no tolerance) lookup key for an SDK node.
+    private static func exactKey(for node: SdkViewNode) -> LookupKey {
+        LookupKey(
+            className: node.className,
+            left: node.bounds.left,
+            top: node.bounds.top,
+            right: node.bounds.right,
+            bottom: node.bounds.bottom
+        )
     }
 }

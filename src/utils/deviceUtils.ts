@@ -184,7 +184,7 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.waitForEmulatorReady(device.name, timeoutMs, childProcess);
       case "ios":
-        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name);
+        return this.simctl.waitForSimulatorReady(device.deviceId ?? device.name, timeoutMs);
       default:
         throw new ActionableError("Unknown platform");
     }

@@ -98,9 +98,7 @@ public enum ViewHierarchyWalker {
 
         let occluded = isOccludedByOpaqueOverlay(frameInRoot, overlays: opaqueOverlays)
 
-        // Skip private UIKit internals
         let className = String(describing: type(of: view))
-        if className.hasPrefix("_UI") { return nil }
 
         let bounds = sdkBounds(from: frameInRoot)
         let traits = traitNames(for: view.accessibilityTraits)
@@ -114,8 +112,11 @@ public enum ViewHierarchyWalker {
         let hasTap = hasOwnInteractiveAction(view)
         let bgColor = hexColor(view.backgroundColor) ?? hexColor(view.layer.backgroundColor.flatMap { UIColor(cgColor: $0) })
 
-        // Walk children front-to-back for opaque overlay tracking
-        let subviews = view.accessibilityElements?.compactMap({ $0 as? UIView }) ?? view.subviews
+        // Walk children front-to-back for opaque overlay tracking.
+        // Always use UIView.subviews — accessibilityElements may contain
+        // non-UIView objects (e.g. SwiftUI accessibility nodes) that would
+        // cause us to miss the real view subtree.
+        let subviews = view.subviews
         var childNodes: [SdkViewNode] = []
         var childOpaqueOverlays = opaqueOverlays
 
@@ -153,9 +154,9 @@ public enum ViewHierarchyWalker {
             accessibilityTraits: traits,
             accessibilityCustomActions: customActions,
             gestureRecognizers: gestures,
-            alpha: Float(view.alpha),
+            alpha: sanitizeFloat(Float(view.alpha)),
             backgroundColor: bgColor,
-            cornerRadius: Float(view.layer.cornerRadius),
+            cornerRadius: sanitizeFloat(Float(view.layer.cornerRadius)),
             isHidden: view.isHidden,
             isUserInteractionEnabled: view.isUserInteractionEnabled,
             hasTapTarget: hasTap,
@@ -257,6 +258,12 @@ public enum ViewHierarchyWalker {
             if traits.contains(.toggleButton) { names.append("toggleButton") }
         }
         return names
+    }
+
+    // MARK: - Float Sanitization
+
+    private static func sanitizeFloat(_ value: Float) -> Float {
+        value.isFinite ? value : 0
     }
 
     // MARK: - Color Helpers

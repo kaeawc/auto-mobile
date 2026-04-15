@@ -50,6 +50,7 @@ export interface CtrlProxyNode {
   errorMessage?: string;
   hintText?: string;
   actions?: string[];
+  extras?: Record<string, string>;
   node?: CtrlProxyNode | CtrlProxyNode[];
 }
 

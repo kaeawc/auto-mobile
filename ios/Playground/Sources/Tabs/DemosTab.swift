@@ -114,6 +114,18 @@ struct DemosTab: View {
                         )
                     }
                 }
+
+                Section("View Hierarchy") {
+                    NavigationLink {
+                        ViewHierarchyDebugDemo()
+                    } label: {
+                        DemoRow(
+                            title: "Hierarchy Debug",
+                            description: "Test SDK walker vs accessibility tree",
+                            icon: "rectangle.3.group.fill"
+                        )
+                    }
+                }
             }
             .navigationTitle("Demos")
         }
@@ -938,6 +950,349 @@ struct NetworkTrackingDemo: View {
         .navigationBarTitleDisplayMode(.inline)
         .trackNavigation(destination: "NetworkTrackingDemo")
     }
+}
+
+// MARK: - View Hierarchy Debug Demo
+
+/// Demo screen that exercises cases where the SDK's in-process view walker
+/// reveals information the accessibility hierarchy hides or flattens.
+struct ViewHierarchyDebugDemo: View {
+    @State private var tapCount = 0
+    @State private var longPressCount = 0
+    @State private var swipeDirection = "none"
+    @State private var sliderValue = 0.5
+    @Environment(\.autoMobileTheme) private var theme
+
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 24) {
+                // 1. Combined accessibility element — hides children from a11y tree
+                combinedElementSection
+
+                // 2. Custom accessibility actions — only visible in SDK walker
+                customActionsSection
+
+                // 3. Multiple gesture recognizers on one view
+                gestureRecognizerSection
+
+                // 4. Nested opaque views with layered backgrounds
+                layeredViewsSection
+
+                // 5. Hidden views that are invisible to a11y but exist in UIView tree
+                hiddenViewsSection
+
+                // 6. UIKit representable with tap targets
+                uiKitControlSection
+
+                Spacer()
+            }
+            .padding()
+        }
+        .background(theme.background)
+        .navigationTitle("Hierarchy Debug")
+        .navigationBarTitleDisplayMode(.inline)
+        .trackNavigation(destination: "ViewHierarchyDebugDemo")
+    }
+
+    // MARK: - Section 1: Combined Accessibility Element
+
+    private var combinedElementSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Combined Element")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("Accessibility sees one element; SDK walker sees the children.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            HStack(spacing: 12) {
+                Image(systemName: "photo.fill")
+                    .font(.largeTitle)
+                    .foregroundStyle(theme.primary)
+                    .accessibilityIdentifier("combined-image")
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Photo Title")
+                        .font(.body)
+                        .foregroundStyle(theme.textPrimary)
+                        .accessibilityIdentifier("combined-title")
+                    Text("Subtitle with details")
+                        .font(.caption)
+                        .foregroundStyle(theme.textSecondary)
+                        .accessibilityIdentifier("combined-subtitle")
+                    HStack(spacing: 4) {
+                        Image(systemName: "star.fill")
+                            .font(.caption2)
+                            .foregroundStyle(Color.autoMobileWarning)
+                        Text("4.8")
+                            .font(.caption2)
+                            .foregroundStyle(theme.textSecondary)
+                        Text("(128 reviews)")
+                            .font(.caption2)
+                            .foregroundStyle(theme.textSecondary)
+                    }
+                    .accessibilityIdentifier("combined-rating")
+                }
+            }
+            .padding()
+            .background(theme.surfaceVariant)
+            .cornerRadius(12)
+            .accessibilityElement(children: .combine)
+            .accessibilityIdentifier("combined-card")
+            .accessibilityLabel("Photo Title, 4.8 stars, 128 reviews")
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Section 2: Custom Accessibility Actions
+
+    private var customActionsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Custom Actions")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("Accessibility custom actions are only visible through the SDK walker.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            VStack(spacing: 12) {
+                Text("Message from Alice")
+                    .font(.body)
+                    .foregroundStyle(theme.textPrimary)
+                Text("Hey, want to grab lunch tomorrow?")
+                    .font(.subheadline)
+                    .foregroundStyle(theme.textSecondary)
+                Text("Tap count: \(tapCount)")
+                    .font(.caption)
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(theme.surfaceVariant)
+            .cornerRadius(12)
+            .accessibilityIdentifier("message-cell")
+            .accessibilityElement(children: .combine)
+            .accessibilityAction(named: "Reply") { tapCount += 1 }
+            .accessibilityAction(named: "Forward") { tapCount += 1 }
+            .accessibilityAction(named: "Mark as Unread") { tapCount += 1 }
+            .accessibilityAction(named: "Delete") { tapCount += 1 }
+            .accessibilityAction(named: "Archive") { tapCount += 1 }
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Section 3: Gesture Recognizers
+
+    private var gestureRecognizerSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Gesture Recognizers")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("SDK walker shows gesture types; accessibility only reports 'button' trait.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            VStack(spacing: 4) {
+                Text("Tap, Long Press, or Swipe")
+                    .font(.body)
+                    .foregroundStyle(theme.textPrimary)
+                Text("Taps: \(tapCount)  Long Presses: \(longPressCount)  Swipe: \(swipeDirection)")
+                    .font(.caption)
+                    .foregroundStyle(theme.textSecondary)
+            }
+            .padding(40)
+            .frame(maxWidth: .infinity)
+            .background(theme.primary.opacity(0.15))
+            .cornerRadius(16)
+            .accessibilityIdentifier("gesture-target")
+            .onTapGesture { tapCount += 1 }
+            .onLongPressGesture { longPressCount += 1 }
+            .gesture(
+                DragGesture(minimumDistance: 30)
+                    .onEnded { value in
+                        let h = value.translation.width
+                        let v = value.translation.height
+                        if abs(h) > abs(v) {
+                            swipeDirection = h > 0 ? "right" : "left"
+                        } else {
+                            swipeDirection = v > 0 ? "down" : "up"
+                        }
+                    }
+            )
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Section 4: Layered Views
+
+    private var layeredViewsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Layered Views")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("SDK walker reveals z-order, alpha, background colors, and corner radii.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 20)
+                    .fill(Color.autoMobileRed.opacity(0.3))
+                    .frame(width: 200, height: 200)
+                    .accessibilityIdentifier("layer-back")
+
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.autoMobileWarning.opacity(0.5))
+                    .frame(width: 150, height: 150)
+                    .accessibilityIdentifier("layer-middle")
+
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(theme.primary.opacity(0.7))
+                    .frame(width: 100, height: 100)
+                    .accessibilityIdentifier("layer-front")
+
+                Text("Top")
+                    .font(.headline)
+                    .foregroundStyle(.white)
+                    .accessibilityIdentifier("layer-label")
+            }
+            .frame(maxWidth: .infinity)
+            .accessibilityIdentifier("layered-stack")
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Section 5: Hidden Views
+
+    private var hiddenViewsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("Hidden & Decorative Views")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("Views with accessibilityHidden or zero alpha exist in the UIView tree but not the accessibility tree.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            VStack(spacing: 12) {
+                Text("Visible content")
+                    .foregroundStyle(theme.textPrimary)
+                    .accessibilityIdentifier("visible-text")
+
+                Text("A11y-hidden content")
+                    .foregroundStyle(Color.autoMobileRed)
+                    .accessibilityIdentifier("a11y-hidden-text")
+                    .accessibilityHidden(true)
+
+                Text("Elements-hidden container child")
+                    .foregroundStyle(Color.autoMobileWarning)
+                    .accessibilityIdentifier("elements-hidden-child")
+
+                // Decorative divider — no a11y representation
+                Rectangle()
+                    .fill(
+                        LinearGradient(
+                            colors: [.clear, theme.primary, .clear],
+                            startPoint: .leading,
+                            endPoint: .trailing
+                        )
+                    )
+                    .frame(height: 2)
+                    .accessibilityIdentifier("decorative-divider")
+                    .accessibilityHidden(true)
+
+                Text("Below the decorative divider")
+                    .foregroundStyle(theme.textPrimary)
+                    .accessibilityIdentifier("below-divider-text")
+            }
+            .padding()
+            .background(theme.surfaceVariant)
+            .cornerRadius(12)
+            .accessibilityIdentifier("hidden-views-container")
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+
+    // MARK: - Section 6: UIKit Control
+
+    private var uiKitControlSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("UIKit Controls in SwiftUI")
+                .font(.headline)
+                .foregroundStyle(theme.textPrimary)
+            Text("UIViewRepresentable wraps real UIKit controls — SDK walker sees UIControl targets and actions.")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            StepperControlView(value: $sliderValue)
+                .frame(height: 44)
+                .accessibilityIdentifier("uikit-stepper")
+
+            Text("Value: \(String(format: "%.1f", sliderValue))")
+                .font(.caption)
+                .foregroundStyle(theme.textSecondary)
+
+            SegmentedControlView()
+                .frame(height: 44)
+                .accessibilityIdentifier("uikit-segmented")
+        }
+        .padding()
+        .background(theme.surfaceVariant.opacity(0.3))
+        .cornerRadius(12)
+    }
+}
+
+// MARK: - UIKit Representables
+
+struct StepperControlView: UIViewRepresentable {
+    @Binding var value: Double
+
+    func makeUIView(context: Context) -> UIStepper {
+        let stepper = UIStepper()
+        stepper.minimumValue = 0
+        stepper.maximumValue = 10
+        stepper.stepValue = 0.5
+        stepper.value = value
+        stepper.accessibilityIdentifier = "uikit-stepper-control"
+        stepper.addTarget(context.coordinator, action: #selector(Coordinator.valueChanged(_:)), for: .valueChanged)
+        return stepper
+    }
+
+    func updateUIView(_ uiView: UIStepper, context: Context) {
+        uiView.value = value
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(value: $value)
+    }
+
+    class Coordinator: NSObject {
+        var value: Binding<Double>
+        init(value: Binding<Double>) { self.value = value }
+
+        @objc func valueChanged(_ sender: UIStepper) {
+            value.wrappedValue = sender.value
+        }
+    }
+}
+
+struct SegmentedControlView: UIViewRepresentable {
+    func makeUIView(context: Context) -> UISegmentedControl {
+        let control = UISegmentedControl(items: ["Low", "Medium", "High"])
+        control.selectedSegmentIndex = 1
+        control.accessibilityIdentifier = "uikit-segmented-control"
+        return control
+    }
+
+    func updateUIView(_ uiView: UISegmentedControl, context: Context) {}
 }
 
 #Preview {

@@ -18,6 +18,13 @@ import type {
   CachedHierarchy,
 } from "./types";
 
+/** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
+interface ConvertedNode {
+  $: Record<string, string>;
+  extras?: Record<string, string>;
+  node?: ConvertedNode[];
+}
+
 /**
  * Delegate class for handling hierarchy operations.
  */
@@ -202,7 +209,7 @@ export class CtrlProxyHierarchy {
 
     return {
       hierarchy: {
-        node: filteredNode
+        node: filteredNode ?? undefined
       },
       packageName: hierarchy.packageName,
       updatedAt: hierarchy.updatedAt,
@@ -219,7 +226,7 @@ export class CtrlProxyHierarchy {
   // Private helper methods
   // ===========================================================================
 
-  private convertNode(node: CtrlProxyNode): { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } {
+  private convertNode(node: CtrlProxyNode): ConvertedNode {
     const attrs: Record<string, string> = {};
 
     if (node.text) {attrs["text"] = node.text;}
@@ -256,7 +263,11 @@ export class CtrlProxyHierarchy {
     if (hintText) {attrs["hint-text"] = hintText;}
     if (viewId) {attrs["view-id"] = viewId;}
 
-    const result: { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } = { $: attrs };
+    const result: ConvertedNode = { $: attrs };
+
+    if (node.extras && Object.keys(node.extras).length > 0) {
+      result.extras = node.extras;
+    }
 
     if (node.node) {
       const children = Array.isArray(node.node) ? node.node : [node.node];
@@ -355,16 +366,16 @@ export class CtrlProxyHierarchy {
    * Similar to Android's optimizeHierarchy + filterViewHierarchy
    */
   private filterHierarchyNode(
-    node: { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> },
+    node: ConvertedNode,
     isRoot: boolean = false
-  ): { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } | null {
+  ): ConvertedNode | null {
     const attrs = node.$ || {};
     const children = node.node || [];
 
     // Process children first (recursively)
-    const filteredChildren: Array<{ $: Record<string, string> }> = [];
+    const filteredChildren: ConvertedNode[] = [];
     for (const child of children) {
-      const filtered = this.filterHierarchyNode(child as { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> });
+      const filtered = this.filterHierarchyNode(child);
       if (filtered) {
         // If child filtering returned an array (promoted grandchildren), flatten it
         if (Array.isArray(filtered)) {
@@ -378,7 +389,8 @@ export class CtrlProxyHierarchy {
     // Root node is always kept
     if (isRoot) {
       const cleanedAttrs = this.cleanAttributes(attrs);
-      const result: { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } = { $: cleanedAttrs };
+      const result: ConvertedNode = { $: cleanedAttrs };
+      if (node.extras) { result.extras = node.extras; }
       if (filteredChildren.length > 0) {
         result.node = filteredChildren;
       }
@@ -390,7 +402,7 @@ export class CtrlProxyHierarchy {
       // Promote children (collapse this wrapper)
       if (filteredChildren.length > 0) {
         // Return children to be flattened into parent
-        return filteredChildren as unknown as { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> };
+        return filteredChildren as unknown as ConvertedNode;
       }
       // No children and no content - filter out completely
       return null;
@@ -413,7 +425,8 @@ export class CtrlProxyHierarchy {
     }
 
     const cleanedAttrs = this.cleanAttributes(attrs);
-    const result: { $: Record<string, string>; node?: Array<{ $: Record<string, string> }> } = { $: cleanedAttrs };
+    const result: ConvertedNode = { $: cleanedAttrs };
+    if (node.extras) { result.extras = node.extras; }
     if (filteredChildren.length > 0) {
       result.node = filteredChildren;
     }

@@ -66,6 +66,7 @@ export interface TapOnArgs {
     duration?: number;
   };
   platform: Platform;
+  preTapStability?: boolean;
   tapClickableParent?: boolean;
   clickable?: boolean;
   scrollableContainer?: boolean;

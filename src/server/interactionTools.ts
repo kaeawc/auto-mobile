@@ -144,6 +144,11 @@ const tapOnBaseSchema = z.object({
   searchUntil: z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
   }).optional().describe("Poll for element before tapping"),
+  preTapStability: z.boolean().optional().describe(
+    "Refresh the accessibility hierarchy before tapping and require consecutive " +
+    "re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping " +
+    "stale coordinates when the UI is still settling. Off by default."
+  ),
   platform: platformSchema
 }).strict();
 
@@ -431,6 +436,7 @@ export function registerInteractionTools() {
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,
+      preTapStability: args.preTapStability,
       tapClickableParent: args.tapClickableParent,
       clickable: args.clickable,
       scrollableContainer: args.scrollableContainer,

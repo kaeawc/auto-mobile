@@ -5552,6 +5552,10 @@
           },
           "additionalProperties": false
         },
+        "preTapStability": {
+          "description": "Refresh the accessibility hierarchy before tapping and require consecutive re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping stale coordinates when the UI is still settling. Off by default.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": [

@@ -125,6 +125,7 @@ export function setDeviceToolsDependencies(deps: Partial<DeviceToolsDependencies
     deviceManagerFactory: deps.deviceManagerFactory ?? currentDeps.deviceManagerFactory,
     deviceMatcherFactory: deps.deviceMatcherFactory ?? currentDeps.deviceMatcherFactory,
     notifyResourcesChanged: deps.notifyResourcesChanged ?? currentDeps.notifyResourcesChanged,
+    ensureCtrlProxyReady: deps.ensureCtrlProxyReady ?? currentDeps.ensureCtrlProxyReady,
   };
 }
 

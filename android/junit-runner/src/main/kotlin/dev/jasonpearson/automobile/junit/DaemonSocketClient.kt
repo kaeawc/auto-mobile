@@ -283,25 +283,97 @@ internal object DaemonSocketPaths {
 
   private fun buildDaemonCommand(subCommand: String): List<String> {
     val localPath = resolveLocalProjectPath()
-    if (localPath != null) {
-      val entryPoint = File(localPath, "dist/src/index.js")
-      if (entryPoint.exists()) {
-        val runtime = resolveRuntimePath()
-        return listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
-      }
-    }
+    val base =
+        if (localPath != null) {
+          val entryPoint = File(localPath, "dist/src/index.js")
+          if (entryPoint.exists()) {
+            val runtime = resolveRuntimePath()
+            listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
+          } else {
+            null
+          }
+        } else {
+          null
+        }
 
-    // Prefer bunx, fall back to npx, then the global binary.
-    val runner = resolvePackageRunner()
-    return if (runner != null) {
-      if (runner.endsWith("npx")) {
-        listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      } else {
-        listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-      }
-    } else {
-      listOf("auto-mobile", "--daemon", subCommand)
+    val command =
+        base
+            ?: run {
+              val runner = resolvePackageRunner()
+              if (runner != null) {
+                if (runner.endsWith("npx")) {
+                  listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+                } else {
+                  listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+                }
+              } else {
+                listOf("auto-mobile", "--daemon", subCommand)
+              }
+            }
+
+    return withNoNavigationScreenshots(
+      withNoUiPerfMode(
+        withDismissKeyboardAfterInput(command),
+      ),
+    )
+  }
+
+  /**
+   * When true, the spawned daemon passes `--dismiss-keyboard-after-input` so every `inputText` call
+   * hides the soft keyboard after injection (Android emulator CI often leaves it open otherwise).
+   *
+   * Configured via JVM system property `automobile.daemon.dismiss.keyboard.after.input` (e.g.
+   * `./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true`).
+   */
+  private fun dismissKeyboardAfterInputRequested(): Boolean {
+    return SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)
+  }
+
+  private fun withDismissKeyboardAfterInput(command: List<String>): List<String> {
+    if (!dismissKeyboardAfterInputRequested()) {
+      return command
     }
+    return command + "--dismiss-keyboard-after-input"
+  }
+
+  /**
+   * When true, the spawned daemon passes `--no-ui-perf-mode` so CI / emulator runs skip UI
+   * performance audit paths. Matches manual `bun … --daemon start --no-ui-perf-mode` when the
+   * runner performs `--daemon restart`.
+   */
+  private fun noUiPerfModeRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.no.ui.perf.mode", false)) {
+      return true
+    }
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_UI_PERF")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withNoUiPerfMode(command: List<String>): List<String> {
+    if (!noUiPerfModeRequested()) {
+      return command
+    }
+    return command + "--no-ui-perf-mode"
+  }
+
+  /**
+   * When true, the spawned daemon passes `--no-navigation-screenshots` to disable screenshot
+   * capture on navigation events. Reduces emulator resource usage in CI where navigation graph
+   * thumbnails are not needed.
+   */
+  private fun noNavigationScreenshotsRequested(): Boolean {
+    if (SystemPropertyCache.getBoolean("automobile.daemon.no.navigation.screenshots", false)) {
+      return true
+    }
+    val env = System.getenv("AUTOMOBILE_DAEMON_NO_NAVIGATION_SCREENSHOTS")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
+  }
+
+  private fun withNoNavigationScreenshots(command: List<String>): List<String> {
+    if (!noNavigationScreenshotsRequested()) {
+      return command
+    }
+    return command + "--no-navigation-screenshots"
   }
 
   private fun resolveLocalProjectPath(): String? {

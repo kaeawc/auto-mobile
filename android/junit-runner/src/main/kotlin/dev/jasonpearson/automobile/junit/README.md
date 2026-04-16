@@ -71,6 +71,8 @@ When using prompt-based testing:
 - `automobile.ci.mode`: Disable AI assistance in CI environments (default: false)
 - `automobile.plan.max.age.ms`: Max age for generated plans in milliseconds (default: 3600000 - 1 hour)
 - `automobile.daemon.local.project.path`: Path to a local AutoMobile checkout. When set, the runner uses `node <path>/dist/src/index.js` instead of `npx @kaeawc/auto-mobile@latest`. Can also be set via `AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH` environment variable.
+- `automobile.daemon.dismiss.keyboard.after.input`: When `true`, appends `--dismiss-keyboard-after-input` to the daemon command so Android soft keyboard is hidden after each `inputText` (helps CI emulators). Pass as a JVM system property (e.g. `-Dautomobile.daemon.dismiss.keyboard.after.input=true` on the Gradle CLI, or `systemProperty` on the unit test task) so forked workers see it.
+- `automobile.daemon.no.ui.perf.mode`: When `true`, appends `--no-ui-perf-mode` to the daemon `start` / `restart` command (same as CLI pre-start). Use in CI so a runner-triggered `--daemon restart` does not re-enable UI perf auditing. Can also be set via `AUTOMOBILE_DAEMON_NO_UI_PERF` (`1`, `true`, or `yes`).
 - `automobile.daemon.startup.timeout.ms`: Daemon startup timeout in milliseconds (default: 10000). Can also be set via `AUTOMOBILE_DAEMON_STARTUP_TIMEOUT_MS` environment variable.
 - `automobile.junit.shuffle.enabled`: Randomize test execution order (default: true)
 - `automobile.junit.shuffle.seed`: Seed for randomized order (default: current time)

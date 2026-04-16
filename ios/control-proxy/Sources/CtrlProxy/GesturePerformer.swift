@@ -1,7 +1,13 @@
 import Foundation
+import os
 #if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
+
+/// Logger used for text-input focus diagnostics. Visible via:
+///   xcrun simctl spawn booted log show --last 1m \
+///     --predicate 'subsystem == "dev.kaeawc.automobile.ctrlproxy"'
+private let gestureLog = Logger(subsystem: "dev.kaeawc.automobile.ctrlproxy", category: "GesturePerformer")
 
 /// Performs gestures and interactions using XCUITest APIs
 public class GesturePerformer: GesturePerforming {
@@ -52,46 +58,182 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Keyboard Focus Helpers
 
-        /// Check that some element in the app has keyboard focus.
-        /// Throws with a contextual error message if no focus is detected.
-        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
-            let hasFocus: Bool = runOnMainThread {
-                app.descendants(matching: .any)
+        /// Returns true if any text-input element in the snapshot has UIKit
+        /// first-responder focus (`snapshot.hasFocus`).
+        ///
+        /// Used as a fallback when the `hasKeyboardFocus == true` NSPredicate
+        /// returns no results — which happens with React Native TextInput
+        /// fields and other frameworks whose UITextField wrapper is the UIKit
+        /// first responder but does not propagate `hasKeyboardFocus` through
+        /// the XCTest accessibility bridge.
+        ///
+        /// `snapshot.hasFocus` reliably reflects UIKit first-responder state
+        /// and is what ElementLocator already uses to populate `focused: true`
+        /// in the view hierarchy — making this a symmetrical fallback.
+        ///
+        /// Credit: this technique (and the explanation above) was contributed
+        /// by the parallel "asdf" worktree during independent investigation
+        /// of the same issue; merged into the verified #1925 fix.
+        private static func snapshotHasTextInputWithFocus(_ snapshot: XCUIElementSnapshot) -> Bool {
+            let isTextInput = snapshot.elementType == .textField
+                || snapshot.elementType == .textView
+                || snapshot.elementType == .secureTextField
+                || snapshot.elementType == .other // safety net for custom wrappers (RN)
+            if isTextInput && snapshot.hasFocus {
+                return true
+            }
+            for child in snapshot.children {
+                if snapshotHasTextInputWithFocus(child) { return true }
+            }
+            return false
+        }
+
+        /// Detection strategies for keyboard focus, in order of cost:
+        ///
+        /// 1. `hasKeyboardFocus == true` NSPredicate — cheap, reliable for
+        ///    standard UIKit apps.
+        /// 2. Snapshot `hasFocus` traversal — catches React Native TextInputs
+        ///    and other frameworks whose first-responder status isn't
+        ///    exposed through `hasKeyboardFocus`.
+        /// 3. Keyboard-visibility probe — last-resort safety net; if the
+        ///    system keyboard is visible, something in the user-visible app
+        ///    must own first responder.
+        ///
+        /// Returns `(hasFocus, strategy)` so the caller can log which path
+        /// won. Query runs on the main thread.
+        private func detectKeyboardFocus(app: XCUIApplication) -> (Bool, String) {
+            return runOnMainThread { [springboard] in
+                // Strategy 1: predicate
+                let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                     .firstMatch
                     .exists
+                if byPredicate {
+                    return (true, "predicate")
+                }
+
+                // Strategy 2: snapshot.hasFocus traversal. Skip SpringBoard —
+                // the app we want is never SpringBoard in a text-input flow.
+                if app.identifier != "com.apple.springboard" {
+                    if let snapshot = try? app.snapshot(),
+                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot) {
+                        return (true, "snapshot.hasFocus")
+                    }
+                }
+
+                // Strategy 3: keyboard-visibility probe. Covers the case
+                // where neither the predicate nor the snapshot picks up
+                // focus (e.g., unknown/stale foreground bundle ID) but the
+                // user-visible keyboard proves something owns first responder.
+                if springboard.keyboards.firstMatch.exists || app.keyboards.firstMatch.exists {
+                    return (true, "keyboard-visibility")
+                }
+
+                return (false, "none")
             }
+        }
+
+        /// Check that some element in the app has keyboard focus.
+        /// Throws with a contextual error message if no focus is detected.
+        /// On failure, the thrown error embeds a focus-diagnostic summary so
+        /// it surfaces in the MCP response — not just in device logs.
+        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
+            let queryStart = Date()
+            let (hasFocus, strategy) = detectKeyboardFocus(app: app)
+            let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
+            gestureLog.info("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(app.label, privacy: .public)")
+
             guard hasFocus else {
+                let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
+                gestureLog.error("\(diag, privacy: .public)")
                 throw GestureError.gestureFailed(
-                    "No element has keyboard focus — \(context)"
+                    "No element has keyboard focus — \(context). Diagnostic: \(diag)"
                 )
             }
         }
 
-        /// Tap an element and poll for keyboard focus (200ms timeout, 20ms intervals).
+        /// Tap an element and poll for keyboard focus (500ms timeout, 50ms
+        /// intervals). Uses the same 3-strategy detection as
+        /// `requireKeyboardFocus`. Timeout was extended from 200ms → 500ms
+        /// to accommodate the snapshot-based fallback, which does an extra
+        /// XPC round-trip per poll when the predicate misses.
+        ///
         /// Throws if the element does not receive focus after the tap.
         private func tapAndAwaitKeyboardFocus(
             app: XCUIApplication,
             element: XCUIElement,
             resourceId: String
         ) throws {
+            let tapStart = Date()
+            gestureLog.info("tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)")
             element.tap()
 
-            let deadline = Date().addingTimeInterval(0.2)
+            let deadline = Date().addingTimeInterval(0.5)
             var hasFocus = false
+            var strategy = "none"
+            var iterations = 0
             while !hasFocus && Date() < deadline {
-                hasFocus = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    .firstMatch
-                    .exists
+                let result = detectKeyboardFocus(app: app)
+                hasFocus = result.0
+                strategy = result.1
+                iterations += 1
                 if !hasFocus {
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
                 }
             }
+            let elapsedMs = Int(Date().timeIntervalSince(tapStart) * 1000)
+            gestureLog.info("tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)")
+
             guard hasFocus else {
+                let diag = buildFocusDiagnostic(app: app, reason: "tapAndAwaitKeyboardFocus: \(resourceId)")
+                gestureLog.error("\(diag, privacy: .public)")
                 throw GestureError.gestureFailed(
-                    "Element '\(resourceId)' did not receive keyboard focus after tap"
+                    "Element '\(resourceId)' did not receive keyboard focus after tap. Diagnostic: \(diag)"
                 )
+            }
+        }
+
+        /// Build a compact diagnostic string enumerating candidate text-entry
+        /// elements and their focus state, for #1925-style "no keyboard focus"
+        /// failures. Returned as a single line so it fits in a WebSocket error.
+        private func buildFocusDiagnostic(app: XCUIApplication, reason: String) -> String {
+            return runOnMainThread { [springboard] in
+                var parts: [String] = []
+                parts.append("reason=\"\(reason)\"")
+                parts.append("app.label=\"\(app.label)\"")
+                parts.append("app.identifier=\"\(app.identifier)\"")
+
+                let typesToProbe: [(String, XCUIElement.ElementType)] = [
+                    ("textFields", .textField),
+                    ("secureTextFields", .secureTextField),
+                    ("textViews", .textView),
+                    ("searchFields", .searchField),
+                ]
+
+                for (name, type) in typesToProbe {
+                    let query = app.descendants(matching: type)
+                    let count = query.count
+                    parts.append("\(name).count=\(count)")
+
+                    // Only introspect a small number to avoid heavy XPC.
+                    let cap = min(count, 5)
+                    if cap > 0 {
+                        for i in 0..<cap {
+                            let el = query.element(boundBy: i)
+                            let hasFocus = (el.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
+                            let identifier = el.identifier
+                            let value = (el.value as? String) ?? ""
+                            let isSelected = el.isSelected
+                            let isHittable = el.isHittable
+                            let frame = el.frame
+                            parts.append("\(name)[\(i)]={id=\"\(identifier)\",hasKeyboardFocus=\(hasFocus),isSelected=\(isSelected),isHittable=\(isHittable),value.len=\(value.count),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}")
+                        }
+                    }
+                }
+
+                parts.append("app.keyboards.count=\(app.keyboards.count)")
+                parts.append("springboard.keyboards.count=\(springboard.keyboards.count)")
+                return parts.joined(separator: " | ")
             }
         }
 
@@ -239,8 +381,30 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Text Input
 
+        /// Resolve the XCUIApplication to use for text-input accessibility queries.
+        ///
+        /// Prefers the ElementLocator's tracked foreground bundle ID over the
+        /// (possibly stale) self.application. See issue #1925: the MCP server
+        /// launches apps via `simctl launch`, which updates ElementLocator's
+        /// tracker (through the observe path) but does NOT reach CommandHandler's
+        /// handleLaunchApp, so GesturePerformer.application stays pinned at
+        /// whatever CtrlProxy.start() initialised it to (SpringBoard / the
+        /// test host). That stale reference then returns zero textFields /
+        /// zero keyboards, making every typeText fail with "No element has
+        /// keyboard focus" — even when the app demonstrably has a focused
+        /// text field and a visible keyboard.
+        ///
+        /// Coordinate-based gestures (tap/swipe/drag/pinch) deliberately use
+        /// the SpringBoard anchor and do NOT go through this method.
+        private func resolveTextInputApp() -> XCUIApplication? {
+            if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
+                return XCUIApplication(bundleIdentifier: bundleId)
+            }
+            return application
+        }
+
         public func typeText(text: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -252,7 +416,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func setText(resourceId: String, text: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
             guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
@@ -273,7 +437,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func clearText(resourceId: String? = nil) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -300,7 +464,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func selectAll() throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -312,7 +476,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func performImeAction(_ action: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -437,7 +601,9 @@ public class GesturePerformer: GesturePerforming {
                 return nil
 
             case "paste":
-                guard let app = application else {
+                // Use foreground-app resolution (#1925) — the clipboard paste
+                // path also needs to query the correct app for hasKeyboardFocus.
+                guard let app = resolveTextInputApp() else {
                     throw GestureError.noApplication
                 }
                 let clipboardText: String? = runOnMainThread {

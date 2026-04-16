@@ -106,7 +106,14 @@ public class FakeElementLocator: ElementLocating {
 
     public func switchForegroundApp(bundleId: String) {
         switchedBundleIds.append(bundleId)
+        foregroundBundleId = bundleId
     }
+
+    /// Bundle ID of the currently tracked foreground app.
+    /// Updated automatically by `switchForegroundApp`; tests can also set
+    /// it directly to simulate an out-of-band transition (e.g. MCP-side
+    /// `simctl launch` that bypasses handleLaunchApp).
+    public var foregroundBundleId: String?
 
     public func getAppState(bundleId: String) -> ObservedAppState {
         getAppStateCalls.append(bundleId)

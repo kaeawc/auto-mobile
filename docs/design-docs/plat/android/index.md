@@ -18,6 +18,8 @@ The Android Accessibility Service provides real-time access to view hierarchy da
 rooting or special permissions beyond accessibility enablement. When enabled, it monitors UI changes,
 stores the latest hierarchy in app-private storage, and streams updates over WebSocket.
 
+For **`tapOn`** reliability when the UI churns between **`observe`** and tap (search lists, loading overlays), see **[Android `tapOn` pre-tap stability and search flakes](tapOn-pre-tap-stability-and-search-flakes.md)**.
+
 ## AutoMobile SDK
 
 The [AutoMobile SDK](auto-mobile-sdk.md) provides Android-specific components for integrating AutoMobile

@@ -434,15 +434,36 @@ public class GesturePerformer: GesturePerforming {
 
             try runOnMainThread {
                 try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-
-                // Select all and delete existing text via Cmd+A, Delete (O(1))
-                if let existingText = element.value as? String, !existingText.isEmpty {
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
-                }
-
+                // Clear any existing text per-character so RN's onChangeText
+                // fires for each delete (see clearViaDeletes for rationale).
+                GesturePerformer.clearViaDeletes(element: element)
                 element.typeText(text)
             }
+        }
+
+        /// Clear a text element by typing N individual delete key events.
+        ///
+        /// We cannot use Cmd+A + Delete (which sends two key events total)
+        /// because that path bypasses React Native's `onChangeText` bridge —
+        /// the native UITextField buffer clears but RN's JS state doesn't
+        /// update. Per-character deletes each fire the UIKit text-input
+        /// delegate chain that RN's bridge observes, so onChangeText runs
+        /// for each character and RN's state stays in sync.
+        ///
+        /// `typeText("")` is a no-op, so we cannot use it either.
+        ///
+        /// Returns the number of delete events sent (0 when the field was
+        /// already empty or the length was unknown).
+        @discardableResult
+        private static func clearViaDeletes(element: XCUIElement) -> Int {
+            let currentValue = (element.value as? String) ?? ""
+            guard !currentValue.isEmpty else { return 0 }
+            // XCUIKeyboardKey.delete is the backspace character; repeating it
+            // N times in a single typeText call dispatches N individual
+            // delete key events through the UIKit delegate chain.
+            let deleteString = String(repeating: XCUIKeyboardKey.delete.rawValue, count: currentValue.count)
+            element.typeText(deleteString)
+            return currentValue.count
         }
 
         public func clearText(resourceId: String? = nil) throws {
@@ -457,17 +478,28 @@ public class GesturePerformer: GesturePerforming {
 
                 try runOnMainThread {
                     try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-
-                    // Select all and delete via Cmd+A, Delete (O(1))
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
+                    GesturePerformer.clearViaDeletes(element: element)
                 }
             } else {
                 try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
 
                 runOnMainThread {
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
+                    // Locate the currently-focused element so we can delete
+                    // per-character and fire RN's onChangeText for each.
+                    let focusedQuery = app.descendants(matching: .any)
+                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    if focusedQuery.firstMatch.exists {
+                        GesturePerformer.clearViaDeletes(element: focusedQuery.firstMatch)
+                    } else {
+                        // Fallback: app-level Cmd+A/Delete. Reaches the UIKit
+                        // buffer even when no XCUITest-visible element owns
+                        // hasKeyboardFocus (e.g., RN wrappers — same case the
+                        // snapshot.hasFocus fallback covers for focus detection).
+                        // RN state will not update via this path; callers
+                        // should prefer the resourceId branch for RN apps.
+                        app.typeKey("a", modifierFlags: .command)
+                        app.typeKey(.delete, modifierFlags: [])
+                    }
                 }
             }
         }

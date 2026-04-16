@@ -109,6 +109,5 @@ tail -n 200 /tmp/auto-mobile-daemon-XXXXXX/daemon.log
 
 ## Related
 
-- [Plan failure observation](ci-plan-failure-observation.md) — `failedStep.failureObservation` in JUnit output vs launcher foreground
-- [CI app launch troubleshooting](ci-troubleshooting-app-launch.md) — adb verification, CtrlProxy alignment, ui-perf noise, YAML hardening
 - [CI Integration](ci-integration.md) — clone/build AutoMobile, env vars, Gradle wiring
+- [Diagnosing daemon MCP connectivity](diagnosing-daemon-mcp-connectivity.md) — socket path, health check, transport errors

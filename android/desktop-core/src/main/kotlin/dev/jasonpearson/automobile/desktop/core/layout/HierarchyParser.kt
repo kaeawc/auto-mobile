@@ -95,6 +95,9 @@ private fun parseJsonObjectNode(
     val isCheckable = attrs.getString("checkable") == "true"
     val isChecked = attrs.getString("checked") == "true"
 
+    // Parse extras map (sdk.* properties from the hierarchy merger)
+    val extras = parseExtras(attrs, nodeObj)
+
     // Parse children from "node" field
     val childrenElement = nodeObj["node"]
     val children = parseChildren(childrenElement, depth + 1, elementMap, parentMap)
@@ -123,6 +126,7 @@ private fun parseJsonObjectNode(
         isChecked = isChecked,
         depth = depth,
         children = children,
+        extras = extras,
     )
 
     // Populate lookup indexes as side-effect during parsing — zero extra traversals
@@ -206,6 +210,20 @@ private fun parseChildren(
         }
         else -> emptyList()
     }
+}
+
+/**
+ * Parse the "extras" map from node JSON. Checks both the attributes object and the node itself.
+ */
+private fun parseExtras(attrs: JsonObject, nodeObj: JsonObject): Map<String, String> {
+    val extrasObj = (attrs["extras"] ?: nodeObj["extras"]) as? JsonObject ?: return emptyMap()
+    val result = mutableMapOf<String, String>()
+    for ((key, value) in extrasObj) {
+        if (value is JsonPrimitive) {
+            value.contentOrNull?.let { result[key] = it }
+        }
+    }
+    return result
 }
 
 // Extension functions for safe JSON access

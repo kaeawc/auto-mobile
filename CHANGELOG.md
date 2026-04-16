@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.0.17] - 2026-04-16
+### Added
+- startDevice: accept generic parameters and return/boot matching device ([#1887](https://github.com/kaeawc/auto-mobile/issues/1887))
+- Add resource for installed app metadata (version, build number) ([#1886](https://github.com/kaeawc/auto-mobile/issues/1886))
+- Support iOS app installation in installApp ([#1885](https://github.com/kaeawc/auto-mobile/issues/1885)) (ios)
+- Add uninstallApp tool ([#1884](https://github.com/kaeawc/auto-mobile/issues/1884))
+
 ## [v0.0.16] - 2026-04-03
 ### Added
 - IDE Plugin: Implement screen stream display in Layout Inspector ([#1033](https://github.com/kaeawc/auto-mobile/issues/1033)) (android, ios)

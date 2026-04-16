@@ -1684,15 +1684,18 @@ fun AutoMobileContent(
                                   )
                               )
                         }
-                    // Version slider using index into sorted version list
+                    // Version slider — only shown when 2+ distinct versions exist
+                    var minIdx by remember { mutableStateOf(0f) }
+                    var maxIdxState by remember { mutableStateOf((allVersions.size - 1).coerceAtLeast(0).toFloat()) }
                     if (allVersions.size >= 2) {
                       val maxIdx = (allVersions.size - 1).toFloat()
-                      var minIdx by remember { mutableStateOf(0f) }
-                      var maxIdxState by remember { mutableStateOf(maxIdx) }
-                      val minVer = allVersions.getOrElse(minIdx.toInt()) { allVersions.first() }
+                      // Clamp state in case allVersions changed
+                      val clampedMaxIdx = maxIdxState.coerceIn(0f, maxIdx)
+                      val clampedMinIdx = minIdx.coerceIn(0f, clampedMaxIdx)
+                      val minVer = allVersions.getOrElse(clampedMinIdx.toInt()) { allVersions.first() }
                       val maxVer =
                           allVersions.getOrElse(
-                              maxIdxState.toInt().coerceAtMost(allVersions.size - 1)
+                              clampedMaxIdx.toInt().coerceAtMost(allVersions.size - 1)
                           ) {
                             allVersions.last()
                           }
@@ -1709,7 +1712,7 @@ fun AutoMobileContent(
                         )
                         Column(Modifier.weight(1f)) {
                           androidx.compose.material3.Slider(
-                              value = minIdx,
+                              value = clampedMinIdx,
                               onValueChange = { minIdx = it.coerceAtMost(maxIdxState) },
                               onValueChangeFinished = { saveFilters() },
                               valueRange = 0f..maxIdx,
@@ -1717,7 +1720,7 @@ fun AutoMobileContent(
                               modifier = Modifier.fillMaxWidth().height(16.dp),
                           )
                           androidx.compose.material3.Slider(
-                              value = maxIdxState,
+                              value = clampedMaxIdx,
                               onValueChange = { maxIdxState = it.coerceAtLeast(minIdx) },
                               onValueChangeFinished = { saveFilters() },
                               valueRange = 0f..maxIdx,
@@ -1726,109 +1729,113 @@ fun AutoMobileContent(
                           )
                         }
                       }
+                    }
 
-                      // iPhone / iPad chips
-                      Row(
-                          modifier = Modifier.padding(start = 12.dp),
-                          horizontalArrangement = Arrangement.spacedBy(4.dp),
-                      ) {
-                        FilterChip("iPhone", showIphone) {
-                          showIphone = !showIphone
-                          saveFilters()
-                        }
-                        FilterChip("iPad", showIpad) {
-                          showIpad = !showIpad
-                          saveFilters()
-                        }
+                    // iPhone / iPad chips
+                    Row(
+                        modifier = Modifier.padding(start = 12.dp),
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                    ) {
+                      FilterChip("iPhone", showIphone) {
+                        showIphone = !showIphone
+                        saveFilters()
                       }
-                      Spacer(Modifier.height(2.dp))
+                      FilterChip("iPad", showIpad) {
+                        showIpad = !showIpad
+                        saveFilters()
+                      }
+                    }
+                    Spacer(Modifier.height(2.dp))
 
-                      // Determine selected version range
-                      val selectedVersions =
+                    // Determine selected version range
+                    val selectedVersions =
+                        if (allVersions.size >= 2) {
                           allVersions
                               .subList(
-                                  minIdx.toInt(),
+                                  minIdx.toInt().coerceIn(0, allVersions.size - 1),
                                   (maxIdxState.toInt() + 1).coerceAtMost(allVersions.size),
                               )
                               .toSet()
+                        } else {
+                          allVersions.toSet()
+                        }
 
-                      // Filter by version range + device type
-                      val filteredIos =
-                          iosImages
-                              .filter { image ->
-                                val ver = image.iosVersion
-                                val inRange = ver == null || ver in selectedVersions
-                                val isIphone = image.name.contains("iPhone", ignoreCase = true)
-                                val isIpad = image.name.contains("iPad", ignoreCase = true)
-                                val typeOk =
-                                    when {
-                                      isIphone -> showIphone
-                                      isIpad -> showIpad
-                                      else -> true // Apple Watch, Apple TV, etc.
-                                    }
-                                inRange && typeOk
-                              }
-                              .sortedBy { it.name }
+                    // Filter by version range + device type
+                    val filteredIos =
+                        iosImages
+                            .filter { image ->
+                              val ver = image.iosVersion
+                              val inRange = ver == null || ver in selectedVersions
+                              val isIphone = image.name.contains("iPhone", ignoreCase = true)
+                              val isIpad = image.name.contains("iPad", ignoreCase = true)
+                              val typeOk =
+                                  when {
+                                    isIphone -> showIphone
+                                    isIpad -> showIpad
+                                    else -> true // Apple Watch, Apple TV, etc.
+                                  }
+                              inRange && typeOk
+                            }
+                            .sortedBy { it.name }
 
-                      // Group by version, sorted descending
-                      val iosByVersion =
-                          filteredIos
-                              .groupBy { it.iosVersion ?: "Unknown" }
-                              .toSortedMap(compareByDescending { it })
-                      iosByVersion.forEach { (version, images) ->
-                        Text(
-                            "iOS $version",
-                            fontSize = 9.sp,
-                            color = colors.text.normal.copy(alpha = 0.5f),
-                            modifier = Modifier.padding(start = 12.dp, top = 4.dp),
-                        )
-                        images.forEach { image ->
-                          Row(
-                              verticalAlignment = Alignment.CenterVertically,
+                    // Group by version, sorted descending
+                    val iosByVersion =
+                        filteredIos
+                            .groupBy { it.iosVersion ?: "Unknown" }
+                            .toSortedMap(compareByDescending { it })
+                    iosByVersion.forEach { (version, images) ->
+                      Text(
+                          "iOS $version",
+                          fontSize = 9.sp,
+                          color = colors.text.normal.copy(alpha = 0.5f),
+                          modifier = Modifier.padding(start = 12.dp, top = 4.dp),
+                      )
+                      images.forEach { image ->
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier =
+                                Modifier.fillMaxWidth()
+                                    .padding(start = 16.dp, top = 1.dp, bottom = 1.dp),
+                        ) {
+                          Text(
+                              image.name,
+                              color = colors.text.normal.copy(alpha = 0.6f),
+                              fontSize = 10.sp,
+                              modifier = Modifier.weight(1f),
+                              maxLines = 1,
+                              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                          )
+                          Text(
+                              "\u25B6",
+                              fontSize = 9.sp,
+                              color = Color(0xFF4CAF50).copy(alpha = 0.7f),
                               modifier =
-                                  Modifier.fillMaxWidth()
-                                      .padding(start = 16.dp, top = 1.dp, bottom = 1.dp),
-                          ) {
-                            Text(
-                                image.name,
-                                color = colors.text.normal.copy(alpha = 0.6f),
-                                fontSize = 10.sp,
-                                modifier = Modifier.weight(1f),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                "\u25B6",
-                                fontSize = 9.sp,
-                                color = Color(0xFF4CAF50).copy(alpha = 0.7f),
-                                modifier =
-                                    Modifier.clickable {
-                                          kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
-                                            try {
-                                              clientProvider
-                                                  ?.invoke()
-                                                  ?.startDevice(
-                                                      image.name,
-                                                      image.platform,
-                                                      image.deviceId,
-                                                  )
-                                            } catch (_: Exception) {}
-                                          }
+                                  Modifier.clickable {
+                                        kotlinx.coroutines.GlobalScope.launch(Dispatchers.IO) {
+                                          try {
+                                            clientProvider
+                                                ?.invoke()
+                                                ?.startDevice(
+                                                    image.name,
+                                                    image.platform,
+                                                    image.deviceId,
+                                                )
+                                          } catch (_: Exception) {}
                                         }
-                                        .pointerHoverIcon(PointerIcon.Hand)
-                                        .padding(4.dp),
-                            )
-                          }
+                                      }
+                                      .pointerHoverIcon(PointerIcon.Hand)
+                                      .padding(4.dp),
+                          )
                         }
                       }
-                      if (filteredIos.isEmpty())
-                          Text(
-                              "No matching simulators",
-                              fontSize = 10.sp,
-                              color = colors.text.normal.copy(alpha = 0.4f),
-                              modifier = Modifier.padding(start = 12.dp),
-                          )
                     }
+                    if (filteredIos.isEmpty())
+                        Text(
+                            "No matching simulators",
+                            fontSize = 10.sp,
+                            color = colors.text.normal.copy(alpha = 0.4f),
+                            modifier = Modifier.padding(start = 12.dp),
+                        )
                   }
                 }
               }

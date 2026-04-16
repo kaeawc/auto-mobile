@@ -8,7 +8,7 @@ build-android-buildTools = "36.0.0"        # Used in playground Android modules
 build-android-compileSdk = "36"            # Used in playground Android modules
 build-android-minSdk = "24"                # Used in playground Android modules
 build-android-targetSdk = "36"             # Used in playground Android modules
-build-android-agp = "9.1.0"
+build-android-agp = "9.1.1"
 
 # Kotlin versions
 build-kotlin = "2.3.20"
@@ -39,12 +39,12 @@ media3 = "1.10.0"
 clikt = "5.1.0"
 junit-jupiter-api = "6.0.3"
 junit-vintage-engine = "6.0.3"
-koog-agents = "0.7.3"
+koog-agents = "0.8.0"
 mockk = "1.14.9"
 mockk-android = "1.14.4"
 robolectric = "4.16.1"
 snakeyaml = "2.6"
-json-schema-validator = "3.0.1"
+json-schema-validator = "3.0.2"
 test-junit = "4.13.2"
 turbine = "1.2.1"
 test-androidx-junit = "1.3.0"

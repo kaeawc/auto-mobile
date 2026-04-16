@@ -206,7 +206,7 @@ export class FakeSimctl implements ISimCtl {
     this.recordCall("killSimulator", { deviceId: device.deviceId });
   }
 
-  async waitForSimulatorReady(udid: string): Promise<BootedDevice> {
+  async waitForSimulatorReady(udid: string, _timeoutMs?: number): Promise<BootedDevice> {
     this.recordCall("waitForSimulatorReady", { udid });
     const simulator = this.bootedSimulators.find(s => s.deviceId === udid);
     if (simulator) {

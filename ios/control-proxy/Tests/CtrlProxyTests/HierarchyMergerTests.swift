@@ -27,6 +27,7 @@ final class HierarchyMergerTests: XCTestCase {
         className: String = "UIView",
         bounds: SdkBounds = SdkBounds(left: 0, top: 0, right: 100, bottom: 100),
         accessibilityLabel: String? = nil,
+        accessibilityIdentifier: String? = nil,
         accessibilityTraits: [String] = [],
         accessibilityCustomActions: [String] = [],
         gestureRecognizers: [SdkGestureInfo] = [],
@@ -44,6 +45,7 @@ final class HierarchyMergerTests: XCTestCase {
             className: className,
             bounds: bounds,
             accessibilityLabel: accessibilityLabel,
+            accessibilityIdentifier: accessibilityIdentifier,
             isAccessibilityElement: isAccessibilityElement,
             accessibilityElementsHidden: accessibilityElementsHidden,
             accessibilityTraits: accessibilityTraits,
@@ -176,17 +178,18 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertNil(result.hierarchy?.extras)
     }
 
-    // MARK: - Class Name Mismatch
+    // MARK: - Class Name Mismatch (bounds-only fallback)
 
-    func testClassNameMismatchNoMatch() {
+    func testClassNameMismatchMatchesByBounds() {
         let xcuiRoot = makeElement(
-            className: "UIButton",
+            className: "UIView",
             bounds: ElementBounds(left: 10, top: 20, right: 100, bottom: 50)
         )
         let sdkRoot = makeSdkNode(
-            className: "UILabel",
+            className: "_UIHostingView",
             bounds: SdkBounds(left: 10, top: 20, right: 100, bottom: 50),
-            accessibilityTraits: ["staticText"]
+            backgroundColor: "#FF0000FF",
+            cornerRadius: 8.0
         )
 
         let result = HierarchyMerger.merge(
@@ -194,7 +197,73 @@ final class HierarchyMergerTests: XCTestCase {
             sdk: makeSdkHierarchy(root: sdkRoot)
         )
 
-        XCTAssertNil(result.hierarchy?.extras)
+        let extras = result.hierarchy?.extras
+        XCTAssertNotNil(extras, "Bounds-only fallback should match even when class names differ")
+        XCTAssertEqual(extras?["sdk.backgroundColor"], "#FF0000FF")
+        XCTAssertEqual(extras?["sdk.cornerRadius"], "8.0")
+    }
+
+    func testExactClassMatchPreferredOverBoundsOnly() {
+        let xcuiRoot = makeElement(
+            className: "UILabel",
+            bounds: ElementBounds(left: 10, top: 20, right: 100, bottom: 50)
+        )
+        let exactSdkNode = makeSdkNode(
+            className: "UILabel",
+            bounds: SdkBounds(left: 10, top: 20, right: 100, bottom: 50),
+            accessibilityTraits: ["staticText"],
+            backgroundColor: "#00FF00FF"
+        )
+        let otherSdkNode = makeSdkNode(
+            className: "_UIHostingView",
+            bounds: SdkBounds(left: 10, top: 20, right: 100, bottom: 50),
+            backgroundColor: "#FF0000FF"
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+            children: [exactSdkNode, otherSdkNode]
+        )
+        let xcuiWrapper = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812),
+            children: [xcuiRoot]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiWrapper),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let childExtras = result.hierarchy?.node?.first?.extras
+        XCTAssertEqual(childExtras?["sdk.accessibilityTraits"], "staticText")
+        XCTAssertEqual(childExtras?["sdk.backgroundColor"], "#00FF00FF")
+    }
+
+    func testIdentifierFallbackMatchesDifferentBounds() {
+        // XCUITest and SDK have different bounds but same accessibilityIdentifier
+        let xcuiWithId = UIElementInfo(
+            resourceId: "layered-stack",
+            className: "UIView",
+            bounds: ElementBounds(left: 10, top: 100, right: 200, bottom: 300)
+        )
+        let sdkRoot = makeSdkNode(
+            className: "_UIHostingView",
+            bounds: SdkBounds(left: 15, top: 105, right: 205, bottom: 305),
+            accessibilityIdentifier: "layered-stack",
+            backgroundColor: "#0000FFFF",
+            cornerRadius: 16.0
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiWithId),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let extras = result.hierarchy?.extras
+        XCTAssertNotNil(extras, "Identifier fallback should match when bounds differ")
+        XCTAssertEqual(extras?["sdk.backgroundColor"], "#0000FFFF")
+        XCTAssertEqual(extras?["sdk.cornerRadius"], "16.0")
     }
 
     // MARK: - Children
@@ -295,6 +364,247 @@ final class HierarchyMergerTests: XCTestCase {
         let extras = result.hierarchy?.extras
         XCTAssertEqual(extras?["custom.key"], "custom.value")
         XCTAssertEqual(extras?["sdk.hasTapTarget"], "true")
+    }
+
+    // MARK: - SDK-Only Node Injection
+
+    func testSdkOnlyNodeWithIdentifierInjected() {
+        // XCUITest tree has a parent but is missing a child that the SDK tree has
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        // SDK tree has same parent + a child with an accessibilityIdentifier
+        let sdkChild = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 10, top: 10, right: 100, bottom: 50),
+            accessibilityIdentifier: "decorative-divider",
+            backgroundColor: "#FF0000FF",
+            cornerRadius: 4,
+            children: nil
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        // The injected child should appear as a child of the root
+        let children = result.hierarchy?.node
+        XCTAssertNotNil(children)
+        XCTAssertEqual(children?.count, 1)
+
+        let injected = children?.first
+        XCTAssertEqual(injected?.className, "UIView")
+        XCTAssertEqual(injected?.resourceId, "decorative-divider")
+        XCTAssertEqual(injected?.extras?["sdk.source"], "sdkWalker")
+        XCTAssertEqual(injected?.extras?["sdk.backgroundColor"], "#FF0000FF")
+        XCTAssertEqual(injected?.extras?["sdk.cornerRadius"], "4.0")
+    }
+
+    func testSdkOnlyNodeWithCustomActionsInjected() {
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let sdkChild = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 100, right: 390, bottom: 200),
+            accessibilityLabel: "Message from Alice",
+            accessibilityCustomActions: ["Reply", "Forward", "Delete"]
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let injected = result.hierarchy?.node?.first
+        XCTAssertNotNil(injected)
+        XCTAssertEqual(injected?.text, "Message from Alice")
+        XCTAssertEqual(injected?.extras?["sdk.accessibilityCustomActions"], "Reply,Forward,Delete")
+        XCTAssertEqual(injected?.extras?["sdk.source"], "sdkWalker")
+    }
+
+    func testSdkOnlyNodeWithA11yHiddenInjected() {
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let sdkChild = makeSdkNode(
+            className: "UILabel",
+            bounds: SdkBounds(left: 10, top: 50, right: 200, bottom: 80),
+            accessibilityLabel: "Hidden helper text",
+            accessibilityElementsHidden: true
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let injected = result.hierarchy?.node?.first
+        XCTAssertNotNil(injected)
+        XCTAssertEqual(injected?.className, "UILabel")
+        XCTAssertEqual(injected?.text, "Hidden helper text")
+        XCTAssertEqual(injected?.extras?["sdk.accessibilityElementsHidden"], "true")
+        XCTAssertEqual(injected?.extras?["sdk.source"], "sdkWalker")
+    }
+
+    func testMatchedSdkNodeNotDuplicatedAsInjection() {
+        // Both trees have the same child — it should be enriched, not injected
+        let xcuiChild = makeElement(
+            className: "UILabel",
+            bounds: ElementBounds(left: 10, top: 50, right: 200, bottom: 80),
+            text: "Hello"
+        )
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [xcuiChild]
+        )
+        let sdkChild = makeSdkNode(
+            className: "UILabel",
+            bounds: SdkBounds(left: 10, top: 50, right: 200, bottom: 80),
+            accessibilityTraits: ["staticText"]
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        // Should still be exactly 1 child (enriched, not duplicated)
+        XCTAssertEqual(result.hierarchy?.node?.count, 1)
+        let child = result.hierarchy?.node?.first
+        XCTAssertEqual(child?.text, "Hello")
+        XCTAssertEqual(child?.extras?["sdk.accessibilityTraits"], "staticText")
+        XCTAssertNil(child?.extras?["sdk.source"]) // Not injected, just enriched
+    }
+
+    func testStructuralOnlyNodeNotInjected() {
+        // SDK child has no identifier, label, actions, or visual properties — skip it
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let sdkChild = makeSdkNode(
+            className: "UITransitionView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        // Structural-only node should not be injected
+        XCTAssertNil(result.hierarchy?.node)
+    }
+
+    func testNestedSdkOnlyChildrenInjected() {
+        // SDK-only parent with a meaningful child — both should be injected
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let sdkGrandchild = makeSdkNode(
+            className: "UIImageView",
+            bounds: SdkBounds(left: 20, top: 20, right: 60, bottom: 60),
+            accessibilityIdentifier: "nested-icon"
+        )
+        let sdkChild = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 10, top: 10, right: 100, bottom: 100),
+            accessibilityIdentifier: "nested-container",
+            children: [sdkGrandchild]
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkChild]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let injectedParent = result.hierarchy?.node?.first
+        XCTAssertNotNil(injectedParent)
+        XCTAssertEqual(injectedParent?.resourceId, "nested-container")
+        XCTAssertEqual(injectedParent?.extras?["sdk.source"], "sdkWalker")
+
+        let injectedChild = injectedParent?.node?.first
+        XCTAssertNotNil(injectedChild)
+        XCTAssertEqual(injectedChild?.resourceId, "nested-icon")
+        XCTAssertEqual(injectedChild?.extras?["sdk.source"], "sdkWalker")
+    }
+
+    func testInjectedNodePreservesExistingChildren() {
+        // XCUITest parent has existing children; SDK-only nodes should be appended
+        let xcuiChild = makeElement(
+            className: "UILabel",
+            bounds: ElementBounds(left: 10, top: 10, right: 200, bottom: 40),
+            text: "Existing"
+        )
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [xcuiChild]
+        )
+        let sdkExisting = makeSdkNode(
+            className: "UILabel",
+            bounds: SdkBounds(left: 10, top: 10, right: 200, bottom: 40)
+        )
+        let sdkNew = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 10, top: 50, right: 200, bottom: 100),
+            accessibilityIdentifier: "sdk-only-view",
+            backgroundColor: "#00FF00FF"
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [sdkExisting, sdkNew]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let children = result.hierarchy?.node
+        XCTAssertEqual(children?.count, 2)
+        XCTAssertEqual(children?[0].text, "Existing")
+        XCTAssertNil(children?[0].extras?["sdk.source"])
+        XCTAssertEqual(children?[1].resourceId, "sdk-only-view")
+        XCTAssertEqual(children?[1].extras?["sdk.source"], "sdkWalker")
     }
 
     // MARK: - Hierarchy Metadata Preserved

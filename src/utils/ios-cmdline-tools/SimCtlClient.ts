@@ -90,9 +90,10 @@ export interface SimCtl {
   /**
    * Wait for a simulator to be ready
    * @param udid - Device UDID to wait for
+   * @param timeoutMs - Maximum time to wait in milliseconds
    * @returns Promise with booted device information
    */
-  waitForSimulatorReady(udid: string): Promise<BootedDevice>;
+  waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice>;
 
   /**
    * Get the list of available (booted and shutdown) simulator UDIDs
@@ -553,19 +554,36 @@ export class SimCtlClient implements SimCtl {
     await this.executeCommand(`shutdown ${device.deviceId}`);
   }
 
-  async waitForSimulatorReady(udid: string): Promise<BootedDevice> {
+  async waitForSimulatorReady(udid: string, timeoutMs?: number): Promise<BootedDevice> {
     const perf = createGlobalPerformanceTracker();
+
+    // Use `simctl bootstatus -b` which blocks until the simulator is fully
+    // booted (data migration complete, system app ready, springboard launched).
+    // This is far more reliable than polling `simctl list devices` for state.
+    perf.startOperation("bootstatus");
+    try {
+      await this.executeCommand(`bootstatus ${udid} -b`, timeoutMs);
+    } catch (error) {
+      perf.endOperation("bootstatus");
+      const message = error instanceof Error ? error.message : String(error);
+      // "Invalid device" means the UDID doesn't exist at all
+      if (message.includes("Invalid device")) {
+        throw new ActionableError(`Simulator with UDID ${udid} not found`);
+      }
+      throw new ActionableError(
+        `Simulator with UDID ${udid} failed to become ready: ${message}`
+      );
+    }
+    perf.endOperation("bootstatus");
+
+    // Now look up device metadata to return a full BootedDevice
     perf.startOperation("deviceLookup");
     const simulator = (await this.listSimulatorImages())
       .find(device => device.deviceId === udid);
     perf.endOperation("deviceLookup");
 
     if (!simulator) {
-      throw new ActionableError(`Simulator with UDID ${udid} not found`);
-    }
-
-    if (!simulator.isRunning) {
-      throw new ActionableError(`Simulator with UDID ${udid} is not running`);
+      throw new ActionableError(`Simulator with UDID ${udid} not found after boot`);
     }
 
     return {

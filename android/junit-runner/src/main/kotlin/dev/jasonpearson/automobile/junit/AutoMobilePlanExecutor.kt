@@ -332,7 +332,6 @@ internal object AutoMobilePlanExecutor {
         args["testMetadata"] = buildTestMetadata(testContext)
       }
 
-      // appendExecutePlanCleanupArgs(args)
       appendCaptureObserveStepsArgs(args)
 
       if (options.debugMode) {
@@ -726,52 +725,6 @@ internal object AutoMobilePlanExecutor {
     }
     val responseError = (responseElement as? JsonObject)?.get("error") as? JsonPrimitive
     return responseError?.content
-  }
-
-  /**
-   * Optional `executePlan` post-run cleanup (daemon `toolRegistry` `finally`). Read fresh on each
-   * build so per-test property changes apply (not cached via `SystemPropertyCache`).
-   *
-   * **System properties** (take precedence when set):
-   * - `automobile.junit.executePlan.cleanupAppId` — non-blank package → daemon cleanup after plan
-   * - `automobile.junit.executePlan.cleanupClearAppData` — `true` / `1` → clear app data; unset or
-   *   false → force-stop only
-   *
-   * **Environment** (used when the property is unset for that field):
-   * - `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_APP_ID`
-   * - `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA` — `true` / `1` / `yes`
-   *
-   * This is intentionally **not** on `AutoMobilePlanExecutionOptions` so apps can keep compiling
-   * against an older published runner while CI jobs that publish a newer JAR get the behavior.
-   */
-  private fun appendExecutePlanCleanupArgs(args: MutableMap<String, JsonElement>) {
-    val cleanupAppId = resolveExecutePlanCleanupAppId()
-    if (cleanupAppId.isEmpty()) {
-      return
-    }
-    args["cleanupAppId"] = JsonPrimitive(cleanupAppId)
-    if (resolveExecutePlanCleanupClearAppData()) {
-      args["cleanupClearAppData"] = JsonPrimitive(true)
-    }
-  }
-
-  private fun resolveExecutePlanCleanupAppId(): String {
-    val prop = System.getProperty("automobile.junit.executePlan.cleanupAppId")?.trim().orEmpty()
-    if (prop.isNotEmpty()) {
-      return prop
-    }
-    return System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_APP_ID")?.trim().orEmpty()
-  }
-
-  private fun resolveExecutePlanCleanupClearAppData(): Boolean {
-    val propRaw = System.getProperty("automobile.junit.executePlan.cleanupClearAppData")
-    if (propRaw != null) {
-      val t = propRaw.trim()
-      return t.equals("true", ignoreCase = true) || t == "1"
-    }
-    val env =
-        System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")?.trim()?.lowercase().orEmpty()
-    return env == "true" || env == "1" || env == "yes"
   }
 
   /**

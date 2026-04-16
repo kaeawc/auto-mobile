@@ -90,72 +90,6 @@ class AutoMobilePlanExecutorTest {
   }
 
   @Test
-  fun `executePlan passes cleanupAppId and cleanupClearAppData from system properties`() {
-    fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(emptyList()),
-                )
-            )
-        ),
-    )
-
-    System.setProperty("automobile.junit.executePlan.cleanupAppId", " com.example.app ")
-    System.setProperty("automobile.junit.executePlan.cleanupClearAppData", "true")
-    try {
-      AutoMobilePlanExecutor.execute(
-          "test-plans/launch-clock-app.yaml",
-          emptyMap(),
-          AutoMobilePlanExecutionOptions(),
-      )
-    } finally {
-      System.clearProperty("automobile.junit.executePlan.cleanupAppId")
-      System.clearProperty("automobile.junit.executePlan.cleanupClearAppData")
-    }
-
-    val args = fakeDaemonClient.lastExecutePlanArgs
-    assertNotNull(args)
-    assertEquals("com.example.app", args!!["cleanupAppId"]!!.jsonPrimitive.content)
-    assertEquals(true, args["cleanupClearAppData"]!!.jsonPrimitive.content.toBoolean())
-  }
-
-  @Test
-  fun `executePlan passes cleanupAppId without cleanupClearAppData when property false`() {
-    fakeDaemonClient.setResponse(
-        "executePlan",
-        buildDaemonResponse(
-            JsonObject(
-                mapOf(
-                    "success" to JsonPrimitive(true),
-                    "toolResults" to JsonArray(emptyList()),
-                )
-            )
-        ),
-    )
-
-    System.setProperty("automobile.junit.executePlan.cleanupAppId", "com.example.app")
-    System.setProperty("automobile.junit.executePlan.cleanupClearAppData", "false")
-    try {
-      AutoMobilePlanExecutor.execute(
-          "test-plans/launch-clock-app.yaml",
-          emptyMap(),
-          AutoMobilePlanExecutionOptions(),
-      )
-    } finally {
-      System.clearProperty("automobile.junit.executePlan.cleanupAppId")
-      System.clearProperty("automobile.junit.executePlan.cleanupClearAppData")
-    }
-
-    val args = fakeDaemonClient.lastExecutePlanArgs
-    assertNotNull(args)
-    assertEquals("com.example.app", args!!["cleanupAppId"]!!.jsonPrimitive.content)
-    assertNull(args["cleanupClearAppData"])
-  }
-
-  @Test
   fun `getSelection returns null when selectedElement is missing`() {
     val step =
         JsonObject(
@@ -285,8 +219,6 @@ private class FakeDaemonToolClient : DaemonToolClient {
   private val responses = mutableMapOf<String, DaemonResponse>()
   override var sessionUuid: String = "test-session"
 
-  var lastExecutePlanArgs: JsonObject? = null
-
   fun setResponse(toolName: String, response: DaemonResponse) {
     responses[toolName] = response
   }
@@ -296,9 +228,6 @@ private class FakeDaemonToolClient : DaemonToolClient {
       arguments: JsonObject,
       timeoutMs: Long,
   ): DaemonResponse {
-    if (toolName == "executePlan") {
-      lastExecutePlanArgs = arguments
-    }
     return responses[toolName]
         ?: throw IllegalStateException("No response configured for tool: $toolName")
   }

@@ -48,22 +48,6 @@ pass/fail event based on the daemon's response.
 | `cleanupAfter` | `Boolean` | `true` | Terminate the app after the test completes (requires `appId`). |
 | `clearAppData` | `Boolean` | `false` | Clear app data in addition to terminating (requires `appId`). |
 
-### Post-plan `executePlan` cleanup (properties / env)
-
-To run daemon **post-plan** cleanup without `clearAppData` on the opening `launchApp` step, set **JVM
-system properties** (read when each `executePlan` request is built). This avoids adding fields to
-`AutoMobilePlanExecutionOptions`, so projects can keep compiling against an older Maven Central
-artifact while CI jobs that publish a newer runner get the behavior.
-
-| Property | Env fallback | Effect |
-|---|---|---|
-| `automobile.junit.executePlan.cleanupAppId` | `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_APP_ID` | Non-blank → cleanup after `executePlan` (`toolRegistry` `finally`). |
-| `automobile.junit.executePlan.cleanupClearAppData` | `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA` | `true` / `1` / `yes` → clear app data (**including runtime permissions**). Unset / false → force-stop only. |
-
-**Retry caveat:** cleanup runs after **every** `executePlan` invocation, including failures and each
-JVM retry when `maxRetries > 0`. Prefer **data-clear only with `maxRetries = 0`**, or terminate-only
-cleanup if you rely on retries.
-
 ### Choosing `aiAssistance`
 
 - Set `aiAssistance = false` for stable plans in CI. This removes the dependency on an AI provider

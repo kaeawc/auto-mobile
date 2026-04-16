@@ -139,26 +139,6 @@ By default, tests with `appId` set will terminate the app after execution to red
 To fully reset app state between tests, set `clearAppData = true` (Android only). If `cleanupAfter`
 is enabled but `appId` is blank, cleanup is skipped and a warning is logged.
 
-### Post-plan cleanup (system properties / env)
-
-Post-`executePlan` cleanup is configured via **JVM system properties** (or env fallbacks), **not**
-`AutoMobilePlanExecutionOptions`, so downstream apps can compile against an older published runner
-while newer JARs pick up the behavior.
-
-| Mechanism | Purpose |
-|-----------|---------|
-| `automobile.junit.executePlan.cleanupAppId` | Non-blank package → daemon cleanup after the plan (`AppCleanupService`). |
-| `automobile.junit.executePlan.cleanupClearAppData` | `true` / `1` → clear app data (wipes **runtime permissions**). Omit or `false` → force-stop only. |
-| `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_APP_ID` | Env fallback when the `cleanupAppId` property is unset. |
-| `AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA` | Env fallback (`true` / `1` / `yes`) when the clear property is unset. |
-
-Set properties in `testOptions.unitTests.all { systemProperty(...) }`, or export env vars in CI.
-Terminate-only cleanup pairs well with **`pm grant` once per class**; full clear after the plan when
-you need a reset.
-
-**Note:** cleanup runs after every `executePlan` completion, including failures and each JVM retry
-when `maxRetries > 0`; prefer **`maxRetries = 0`** when using data-clear cleanup.
-
 #### Generated Plans Directory Structure
 
 ```

@@ -5,6 +5,7 @@ import com.networknt.schema.InputFormat
 import com.networknt.schema.Schema
 import com.networknt.schema.SchemaRegistry
 import com.networknt.schema.SpecificationVersion
+import dev.jasonpearson.automobile.validation.ValidTools
 import org.yaml.snakeyaml.Yaml
 
 /** Severity level for validation errors */
@@ -35,71 +36,6 @@ data class TestPlanValidationError(
 object TestPlanValidator {
   private var schema: Schema? = null
   private val yaml = Yaml()
-
-  // Deprecated fields that should generate warnings instead of errors
-  private val DEPRECATED_FIELDS = setOf("generated", "appId", "parameters", "description")
-
-  // Valid AutoMobile tool names (extracted from src/server/*Tools.ts)
-  private val VALID_TOOLS =
-      setOf(
-          // App management
-          "launchApp",
-          "terminateApp",
-          "installApp",
-          // UI interactions
-          "tapOn",
-          "swipeOn",
-          "pinchOn",
-          "dragAndDrop",
-          // Input
-          "inputText",
-          "clearText",
-          "selectAllText",
-          "imeAction",
-          "keyboard",
-          // Navigation
-          "pressButton",
-          "pressKey",
-          "homeScreen",
-          "recentApps",
-          "openLink",
-          "navigateTo",
-          // Observation
-          "observe",
-          // Device management
-          "listDevices",
-          "startDevice",
-          "killDevice",
-          "setActiveDevice",
-          // Device configuration
-          "rotate",
-          "shake",
-          "systemTray",
-          "changeLocalization",
-          // Testing
-          "executePlan",
-          "criticalSection",
-          // Deep links
-          "getDeepLinks",
-          // Navigation graph
-          "getNavigationGraph",
-          "explore",
-          "identifyInteractions",
-          // Snapshots
-          "captureDeviceSnapshot",
-          "restoreDeviceSnapshot",
-          "listSnapshots",
-          "deleteSnapshot",
-          // Video recording
-          "videoRecording",
-          // Device images
-          "listDeviceImages",
-          // Debugging
-          "debugSearch",
-          "bugReport",
-          // Doctor
-          "doctor",
-      )
 
   /** Load the JSON schema from resources */
   @Synchronized
@@ -222,7 +158,7 @@ object TestPlanValidator {
     steps.forEachIndexed { index, step ->
       if (step is Map<*, *>) {
         val toolName = step["tool"] as? String
-        if (toolName != null && toolName.isNotEmpty() && !VALID_TOOLS.contains(toolName)) {
+        if (toolName != null && toolName.isNotEmpty() && !ValidTools.TOOLS.contains(toolName)) {
           val lineInfo = findToolNameLine(yamlContent, index, toolName)
           errors.add(
               TestPlanValidationError(
@@ -378,7 +314,7 @@ object TestPlanValidator {
   private fun isDeprecatedFieldError(field: String, message: String, messageType: String): Boolean {
     // Check if the field itself is deprecated
     val fieldName = field.substringAfterLast('.').substringAfterLast(']')
-    if (fieldName in DEPRECATED_FIELDS) {
+    if (fieldName in ValidTools.DEPRECATED_FIELDS) {
       return true
     }
 
@@ -386,7 +322,7 @@ object TestPlanValidator {
     if (messageType.contains("additionalProperties") || message.contains("additional")) {
       val propertyMatch = Regex("property '([^']+)'").find(message)
       val property = propertyMatch?.groupValues?.getOrNull(1)
-      if (property in DEPRECATED_FIELDS) {
+      if (property in ValidTools.DEPRECATED_FIELDS) {
         return true
       }
     }

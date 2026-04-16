@@ -282,40 +282,31 @@ internal object DaemonSocketPaths {
   }
 
   private fun buildDaemonCommand(subCommand: String): List<String> {
-    val localPath = resolveLocalProjectPath()
-    val base =
-        if (localPath != null) {
-          val entryPoint = File(localPath, "dist/src/index.js")
-          if (entryPoint.exists()) {
-            val runtime = resolveRuntimePath()
-            listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
-          } else {
-            null
-          }
-        } else {
-          null
-        }
+    val command = resolveLocalCommand(subCommand)
+        ?: resolvePackageCommand(subCommand)
+        ?: listOf("auto-mobile", "--daemon", subCommand)
 
-    val command =
-        base
-            ?: run {
-              val runner = resolvePackageRunner()
-              if (runner != null) {
-                if (runner.endsWith("npx")) {
-                  listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-                } else {
-                  listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
-                }
-              } else {
-                listOf("auto-mobile", "--daemon", subCommand)
-              }
-            }
+    return command
+        .withDismissKeyboardAfterInput()
+        .withNoUiPerfMode()
+        .withNoNavigationScreenshots()
+  }
 
-    return withNoNavigationScreenshots(
-      withNoUiPerfMode(
-        withDismissKeyboardAfterInput(command),
-      ),
-    )
+  private fun resolveLocalCommand(subCommand: String): List<String>? {
+    val localPath = resolveLocalProjectPath() ?: return null
+    val entryPoint = File(localPath, "dist/src/index.js")
+    if (!entryPoint.exists()) return null
+    val runtime = resolveRuntimePath()
+    return listOf(runtime, entryPoint.absolutePath, "--daemon", subCommand)
+  }
+
+  private fun resolvePackageCommand(subCommand: String): List<String>? {
+    val runner = resolvePackageRunner() ?: return null
+    return if (runner.endsWith("npx")) {
+      listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+    } else {
+      listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+    }
   }
 
   /**
@@ -329,11 +320,9 @@ internal object DaemonSocketPaths {
     return SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)
   }
 
-  private fun withDismissKeyboardAfterInput(command: List<String>): List<String> {
-    if (!dismissKeyboardAfterInputRequested()) {
-      return command
-    }
-    return command + "--dismiss-keyboard-after-input"
+  private fun List<String>.withDismissKeyboardAfterInput(): List<String> {
+    if (!dismissKeyboardAfterInputRequested()) return this
+    return this + "--dismiss-keyboard-after-input"
   }
 
   /**
@@ -349,11 +338,9 @@ internal object DaemonSocketPaths {
     return env == "1" || env == "true" || env == "yes"
   }
 
-  private fun withNoUiPerfMode(command: List<String>): List<String> {
-    if (!noUiPerfModeRequested()) {
-      return command
-    }
-    return command + "--no-ui-perf-mode"
+  private fun List<String>.withNoUiPerfMode(): List<String> {
+    if (!noUiPerfModeRequested()) return this
+    return this + "--no-ui-perf-mode"
   }
 
   /**
@@ -369,11 +356,9 @@ internal object DaemonSocketPaths {
     return env == "1" || env == "true" || env == "yes"
   }
 
-  private fun withNoNavigationScreenshots(command: List<String>): List<String> {
-    if (!noNavigationScreenshotsRequested()) {
-      return command
-    }
-    return command + "--no-navigation-screenshots"
+  private fun List<String>.withNoNavigationScreenshots(): List<String> {
+    if (!noNavigationScreenshotsRequested()) return this
+    return this + "--no-navigation-screenshots"
   }
 
   private fun resolveLocalProjectPath(): String? {

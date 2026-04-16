@@ -143,6 +143,8 @@ nav:
               - 'CI Integration': design-docs/plat/android/junit-runner/ci-integration.md
               - 'CI daemon logs': design-docs/plat/android/junit-runner/ci-daemon-logs.md
               - 'Diagnosing daemon connectivity': design-docs/plat/android/junit-runner/diagnosing-daemon-mcp-connectivity.md
+              - 'CI app launch troubleshooting': design-docs/plat/android/junit-runner/ci-troubleshooting-app-launch.md
+              - 'Agent brief (app not foreground)': design-docs/plat/android/junit-runner/agent-brief-app-not-foreground.md
             - 'IDE Plugin':
               - 'Overview': design-docs/plat/android/ide-plugin/overview.md
               - 'Test Recording': design-docs/plat/android/ide-plugin/test-recording.md

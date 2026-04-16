@@ -262,7 +262,17 @@ describe("TapOnElement VoiceOver mode", () => {
       // We verify via call count
       const initialCallCount = fakeVoiceOverDetector.getCallCount();
 
-      await (androidTapOnElement as any).executeAndroidTap("tap", 50, 50, 500, {} as any);
+      await (androidTapOnElement as any).executeAndroidTap(
+        "tap",
+        50,
+        50,
+        500,
+        {} as any,
+        undefined,
+        undefined,
+        undefined,
+        []
+      );
 
       expect(fakeVoiceOverDetector.getCallCount()).toBe(initialCallCount);
     });

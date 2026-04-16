@@ -117,6 +117,5 @@ If logs show **`pre-tap refresh attempt …/8`** with **no** “extending refind
 
 ## See also
 
-- [Plan failures: `failureObservation`](junit-runner/ci-plan-failure-observation.md) — interpreting trees at failure time  
-- [Android Control Proxy](control-proxy.md) — accessibility service and CtrlProxy  
+- [Android Control Proxy](control-proxy.md) — accessibility service and CtrlProxy
 - [MCP tools](../../mcp/tools.md) — **`tapOn`** selector overview  

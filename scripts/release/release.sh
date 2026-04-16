@@ -2,12 +2,10 @@
 #
 # Release script for AutoMobile Android libraries
 #
-# This script handles the full release lifecycle:
+# This script handles publishing Android libraries:
 # 1. Updates VERSION_NAME to release version
-# 2. Commits and tags the release
-# 3. Publishes to Maven Central
-# 4. Bumps to next SNAPSHOT version
-# 5. Commits and pushes everything
+# 2. Publishes to Maven Central
+# 3. Restores next SNAPSHOT version
 #
 # Usage:
 #   ./scripts/release/release.sh 0.0.10
@@ -73,10 +71,9 @@ if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   exit 1
 fi
 
-# Calculate next snapshot version (bump minor, reset patch)
-IFS='.' read -r major minor _patch <<< "$version"
-next_minor=$((minor + 1))
-next_snapshot="${major}.${next_minor}.0-SNAPSHOT"
+IFS='.' read -r major minor patch <<< "$version"
+next_patch=$((patch + 1))
+next_snapshot="${major}.${minor}.${next_patch}-SNAPSHOT"
 
 echo -e "${GREEN}Release Configuration:${NC}"
 echo "  Release version: $version"
@@ -84,36 +81,22 @@ echo "  Next snapshot:   $next_snapshot"
 echo "  Dry run:         $dry_run"
 echo ""
 
-# Function to update VERSION_NAME in gradle.properties
 update_gradle_version() {
   local new_version="$1"
-  local file="$GRADLE_PROPERTIES"
-
   if [[ "$dry_run" == true ]]; then
-    echo -e "${YELLOW}[DRY RUN]${NC} Would update VERSION_NAME to $new_version in $file"
+    echo -e "${YELLOW}[DRY RUN]${NC} Would update VERSION_NAME to $new_version in $GRADLE_PROPERTIES"
     return 0
   fi
 
-  # Use sed to replace VERSION_NAME line
   if [[ "$(uname)" == "Darwin" ]]; then
-    sed -i '' "s/^VERSION_NAME=.*/VERSION_NAME=$new_version/" "$file"
+    sed -i '' "s/^VERSION_NAME=.*/VERSION_NAME=$new_version/" "$GRADLE_PROPERTIES"
   else
-    sed -i "s/^VERSION_NAME=.*/VERSION_NAME=$new_version/" "$file"
+    sed -i "s/^VERSION_NAME=.*/VERSION_NAME=$new_version/" "$GRADLE_PROPERTIES"
   fi
 
   echo -e "${GREEN}Updated${NC} VERSION_NAME to $new_version"
 }
 
-# Function to run git commands
-run_git() {
-  if [[ "$dry_run" == true ]]; then
-    echo -e "${YELLOW}[DRY RUN]${NC} git $*"
-    return 0
-  fi
-  git "$@"
-}
-
-# Function to run gradle commands
 run_gradle() {
   if [[ "$dry_run" == true ]]; then
     echo -e "${YELLOW}[DRY RUN]${NC} ./gradlew $*"
@@ -122,74 +105,36 @@ run_gradle() {
   (cd "$REPO_ROOT/android" && ./gradlew "$@")
 }
 
-# Ensure we're on main branch and up to date
-current_branch=$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)
-if [[ "$current_branch" != "main" && "$dry_run" == false ]]; then
-  echo -e "${YELLOW}Warning: Not on main branch (currently on $current_branch)${NC}"
-  read -p "Continue anyway? [y/N] " -n 1 -r
-  echo
-  if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-    exit 1
-  fi
-fi
-
-# Check for uncommitted changes
-if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" && "$dry_run" == false ]]; then
-  echo -e "${RED}Error: Working directory has uncommitted changes${NC}" >&2
-  echo "Please commit or stash your changes before releasing."
-  exit 1
-fi
-
 echo ""
 echo -e "${GREEN}Step 1: Update to release version ($version)${NC}"
 update_gradle_version "$version"
 
 echo ""
-echo -e "${GREEN}Step 2: Commit release version${NC}"
-run_git -C "$REPO_ROOT" add android/gradle.properties
-run_git -C "$REPO_ROOT" commit -m "chore: prepare release $version"
+echo -e "${GREEN}Step 2: Publish to Maven Central${NC}"
+run_gradle :protocol:publishAndReleaseToMavenCentral :test-plan-validation:publishAndReleaseToMavenCentral :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral --no-configuration-cache
 
 echo ""
-echo -e "${GREEN}Step 3: Create release tag (v$version)${NC}"
-run_git -C "$REPO_ROOT" tag -a "v$version" -m "Release v$version"
-
-echo ""
-echo -e "${GREEN}Step 4: Publish to Maven Central${NC}"
-run_gradle :protocol:publishAndReleaseToMavenCentral :test-plan-validation:publishAndReleaseToMavenCentral --no-configuration-cache
-run_gradle :junit-runner:publishAndReleaseToMavenCentral :auto-mobile-sdk:publishAndReleaseToMavenCentral --no-configuration-cache
-
-echo ""
-echo -e "${GREEN}Step 5: Update to next snapshot version ($next_snapshot)${NC}"
+echo -e "${GREEN}Step 3: Restore snapshot version ($next_snapshot)${NC}"
 update_gradle_version "$next_snapshot"
-
-echo ""
-echo -e "${GREEN}Step 6: Commit snapshot version${NC}"
-run_git -C "$REPO_ROOT" add android/gradle.properties
-run_git -C "$REPO_ROOT" commit -m "chore: prepare next development version"
-
-echo ""
-echo -e "${GREEN}Step 7: Push commits and tags${NC}"
-run_git -C "$REPO_ROOT" push origin HEAD
-run_git -C "$REPO_ROOT" push origin "v$version"
 
 echo ""
 echo -e "${GREEN}========================================${NC}"
 echo -e "${GREEN}Release complete!${NC}"
 echo -e "${GREEN}========================================${NC}"
 echo ""
+artifacts=(protocol test-plan-validation junit-runner sdk)
+group="dev.jasonpearson.auto-mobile"
+
 echo "Published artifacts:"
-echo "  - dev.jasonpearson.auto-mobile:auto-mobile-protocol:$version"
-echo "  - dev.jasonpearson.auto-mobile:auto-mobile-test-plan-validation:$version"
-echo "  - dev.jasonpearson.auto-mobile:auto-mobile-junit-runner:$version"
-echo "  - dev.jasonpearson.auto-mobile:auto-mobile-sdk:$version"
+for a in "${artifacts[@]}"; do
+  echo "  - $group:auto-mobile-$a:$version"
+done
 echo ""
 echo "Next steps:"
-echo "  - The tag push will trigger the release.yml workflow"
-echo "  - This will publish npm, Docker, and create GitHub Release"
+echo "  - Commit, tag, and push when ready"
 echo "  - Maven Central artifacts should be available shortly"
 echo ""
 echo "Maven Central URLs (may take a few minutes to appear):"
-echo "  https://central.sonatype.com/artifact/dev.jasonpearson.auto-mobile/auto-mobile-protocol/$version"
-echo "  https://central.sonatype.com/artifact/dev.jasonpearson.auto-mobile/auto-mobile-test-plan-validation/$version"
-echo "  https://central.sonatype.com/artifact/dev.jasonpearson.auto-mobile/auto-mobile-junit-runner/$version"
-echo "  https://central.sonatype.com/artifact/dev.jasonpearson.auto-mobile/auto-mobile-sdk/$version"
+for a in "${artifacts[@]}"; do
+  echo "  https://central.sonatype.com/artifact/$group/auto-mobile-$a/$version"
+done

@@ -7,6 +7,14 @@ import os
     import UIKit
 #endif
 
+/// Text-input command trace logger.
+///
+/// Log-level contract matches `GesturePerformer.gestureLog`:
+///   - `.debug`  — normal success path bookends (not persisted).
+///   - `.error`  — only on failures (persisted, rare, high-signal).
+///
+/// Do NOT promote success-path logs to `.info`; see GesturePerformer.swift
+/// for streaming instructions during a debug session.
 private let textInputLog = Logger(subsystem: "dev.kaeawc.automobile.ctrlproxy", category: "CommandHandler.text")
 
 /// Handles WebSocket commands matching Android AccessibilityService protocol
@@ -326,7 +334,7 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.info("handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog.debug("handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
 
         do {
             if let resourceId = resourceId {
@@ -343,7 +351,7 @@ public class CommandHandler: CommandHandling {
             throw error
         }
 
-        textInputLog.info("handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        textInputLog.debug("handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.setTextResult.rawValue,
             requestId: request.requestId,
@@ -356,7 +364,7 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.info("handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog.debug("handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
 
         do {
             try perfProvider.track("clearText") {
@@ -367,7 +375,7 @@ public class CommandHandler: CommandHandling {
             throw error
         }
 
-        textInputLog.info("handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        textInputLog.debug("handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.clearTextResult.rawValue,
             requestId: request.requestId,
@@ -383,7 +391,7 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleImeAction")
         defer { perfProvider.end() }
 
-        textInputLog.info("handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog.debug("handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
 
         do {
             try perfProvider.track("imeAction") {
@@ -394,7 +402,7 @@ public class CommandHandler: CommandHandling {
             throw error
         }
 
-        textInputLog.info("handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        textInputLog.debug("handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.imeActionResult.rawValue,
             requestId: request.requestId,
@@ -406,7 +414,7 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleSelectAll")
         defer { perfProvider.end() }
 
-        textInputLog.info("handleSelectAll begin requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog.debug("handleSelectAll begin requestId=\(request.requestId ?? "nil", privacy: .public)")
 
         do {
             try perfProvider.track("selectAll") {
@@ -417,7 +425,7 @@ public class CommandHandler: CommandHandling {
             throw error
         }
 
-        textInputLog.info("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        textInputLog.debug("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.selectAllResult.rawValue,
             requestId: request.requestId,

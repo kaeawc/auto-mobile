@@ -4,8 +4,17 @@ import os
     import XCTest
 #endif
 
-/// Logger used for text-input focus diagnostics. Visible via:
-///   xcrun simctl spawn booted log show --last 1m \
+/// Logger used for text-input focus diagnostics.
+///
+/// Log-level contract:
+///   - `.debug`  — normal success path trace (not persisted; only visible when
+///                 actively streaming). Use for `begin/done` bookends.
+///   - `.error`  — only on failures; carries the focus-diagnostic summary.
+///
+/// Do NOT promote success-path logs to `.info` — `Logger.info` is persisted
+/// to the unified log store and every text input would leave durable records.
+/// Enable streaming during a debug session with:
+///   xcrun simctl spawn booted log stream --level=debug \
 ///     --predicate 'subsystem == "dev.kaeawc.automobile.ctrlproxy"'
 private let gestureLog = Logger(subsystem: "dev.kaeawc.automobile.ctrlproxy", category: "GesturePerformer")
 
@@ -141,7 +150,7 @@ public class GesturePerformer: GesturePerforming {
             let queryStart = Date()
             let (hasFocus, strategy) = detectKeyboardFocus(app: app)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
-            gestureLog.info("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(app.label, privacy: .public)")
+            gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(app.label, privacy: .public)")
 
             guard hasFocus else {
                 let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
@@ -165,7 +174,7 @@ public class GesturePerformer: GesturePerforming {
             resourceId: String
         ) throws {
             let tapStart = Date()
-            gestureLog.info("tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)")
+            gestureLog.debug("tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)")
             element.tap()
 
             let deadline = Date().addingTimeInterval(0.5)
@@ -182,7 +191,7 @@ public class GesturePerformer: GesturePerforming {
                 }
             }
             let elapsedMs = Int(Date().timeIntervalSince(tapStart) * 1000)
-            gestureLog.info("tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)")
+            gestureLog.debug("tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)")
 
             guard hasFocus else {
                 let diag = buildFocusDiagnostic(app: app, reason: "tapAndAwaitKeyboardFocus: \(resourceId)")

@@ -457,45 +457,64 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
-        /// Delete-burst size for `clearViaDeletes`. Sized to cover typical
-        /// form-field content (email, name, phone, password, address, OTP)
-        /// without exceeding what XCUITest's keyboard input pipeline can
-        /// ship as a single `typeText` call before falling back to touch
-        /// synthesis — which, empirically, can trigger spurious home
-        /// transitions during very long bursts. 50 chars is a safe cap.
-        /// Overkill deletes on an empty field are harmless no-ops.
+        /// Delete-burst size per iteration in `clearViaDeletes`. Sized to
+        /// stay under the empirically observed threshold where XCUITest's
+        /// typeText falls back to touch synthesis (XCTouchGesturePerformer)
+        /// during very long single-string bursts, which can trigger
+        /// spurious home-screen transitions. Overkill deletes on an empty
+        /// field are harmless no-ops.
         private static let clearViaDeletesBurstSize = 50
 
-        /// Clear a text element by positioning the cursor at the end of
-        /// content then sending a large fixed-size burst of delete
-        /// keystrokes. Returns the burst size (callers typically ignore it).
+        /// Maximum loop iterations in `clearViaDeletes`. 20 × 50 = up to
+        /// 1000 chars clearable, which is far beyond any realistic form
+        /// field. The loop typically exits much earlier via the
+        /// no-progress or empty-value break conditions.
+        private static let clearViaDeletesMaxIterations = 20
+
+        /// Clear a text element by looping tap + delete-burst up to
+        /// `clearViaDeletesMaxIterations` times, with an early-exit when
+        /// `element.value` reports an empty string. Returns the
+        /// approximate number of delete keystrokes dispatched.
         ///
         /// **Why not Cmd+A + Delete?** Bypasses React Native's
         /// `onChangeText` bridge — the native buffer clears but RN JS state
         /// stays stale.
         ///
-        /// **Why a fixed burst and not a progress-driven loop?**
-        /// `element.value` on RN `TextInput` wrappers returns the
-        /// accessibility identifier (e.g. `"email-sign-in-email-input"`)
-        /// instead of the real content, so count- and equality-based
-        /// progress detection is unreliable. A single generous burst with
-        /// the cursor at the end sidesteps both problems.
+        /// **Why a loop?** A tap at `dx=0.95` does not reliably place the
+        /// cursor at end-of-content: when the text width exceeds the
+        /// field's visible width, the field scrolls to keep the cursor
+        /// visible, so the right-edge tap can land mid-text rather than in
+        /// trailing padding. A single 50-delete burst from a mid-text
+        /// cursor only consumes chars to the left of the cursor and then
+        /// no-ops on the remaining buffer. Iterating tap + burst lets us
+        /// chip away at the content regardless of cursor position.
         ///
-        /// **Cursor positioning.** A bare tap at the right edge places the
-        /// cursor at end-of-content (iOS snaps to the last character when
-        /// the tap lands in trailing padding). We use `tap()` rather than
-        /// `doubleTap()` because doubleTap on empty padding past the text
-        /// is a no-op and doesn't reposition the cursor. Coordinate-based
-        /// so it fires even when the element already has first-responder
-        /// focus.
+        /// **Why only an isEmpty early-exit, no value-equality check?**
+        /// RN `TextInput` wrappers and `placeholderValue` both tend to
+        /// surface the accessibility identifier rather than the real text
+        /// buffer or true placeholder, which would false-positive either a
+        /// "no progress" or "matches placeholder" break after a single
+        /// iteration and leave residual content. Extra deletes on an
+        /// already-empty field are harmless no-ops, so we accept the
+        /// worst-case cost of running the full iteration count on RN
+        /// fields in exchange for correctness.
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
-            element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-            element.typeText(String(
-                repeating: XCUIKeyboardKey.delete.rawValue,
-                count: clearViaDeletesBurstSize
-            ))
-            return clearViaDeletesBurstSize
+            var totalDeleted = 0
+            for iteration in 0..<clearViaDeletesMaxIterations {
+                let current = (element.value as? String) ?? ""
+                gestureLog.debug("clearViaDeletes iter=\(iteration, privacy: .public) valueCount=\(current.count, privacy: .public)")
+                if current.isEmpty {
+                    break
+                }
+                element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+                element.typeText(String(
+                    repeating: XCUIKeyboardKey.delete.rawValue,
+                    count: clearViaDeletesBurstSize
+                ))
+                totalDeleted += clearViaDeletesBurstSize
+            }
+            return totalDeleted
         }
 
         /// Resolve the currently-focused text-input element for the bare

@@ -155,6 +155,7 @@ nav:
               - 'Biometrics stubbing': design-docs/plat/android/biometrics.md
               - 'Notification triggering': design-docs/plat/android/notifications.md
               - 'System tray lookFor': design-docs/plat/android/system-tray-lookfor.md
+              - 'tapOn pre-tap stability': design-docs/plat/android/tapOn-pre-tap-stability-and-search-flakes.md
               - 'Clipboard tool': design-docs/plat/android/clipboard.md
             - 'Feature Ideas':
               - 'Overview': design-docs/plat/android/feature-ideas.md

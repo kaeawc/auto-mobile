@@ -151,6 +151,18 @@ data class RequestAction(
   override val requestId: String? = null,
   val action: String, // e.g., long_click
   val resourceId: String? = null,
+  val boundsLeft: Int? = null,
+  val boundsTop: Int? = null,
+  val boundsRight: Int? = null,
+  val boundsBottom: Int? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_hit_test")
+data class RequestHitTest(
+  override val requestId: String? = null,
+  val x: Int,
+  val y: Int,
 ) : WebSocketRequest()
 
 // =============================================================================

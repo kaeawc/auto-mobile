@@ -323,7 +323,11 @@ export async function createStressHarness(): Promise<StressHarness> {
         10,
         10,
         50,
-        element
+        element,
+        undefined,
+        undefined,
+        undefined,
+        []
       );
     },
     swipeOn: async () => {

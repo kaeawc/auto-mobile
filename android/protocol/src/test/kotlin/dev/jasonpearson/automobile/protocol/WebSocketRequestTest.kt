@@ -134,6 +134,49 @@ class WebSocketRequestTest {
   }
 
   @Test
+  fun `deserialize request_action with bounds disambiguation`() {
+    val message =
+        """{"type":"request_action","requestId":"a1","action":"click","resourceId":"com.app:id/name","boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestAction>(request)
+    assertEquals("a1", request.requestId)
+    assertEquals("click", request.action)
+    assertEquals("com.app:id/name", request.resourceId)
+    assertEquals(10, request.boundsLeft)
+    assertEquals(20, request.boundsTop)
+    assertEquals(100, request.boundsRight)
+    assertEquals(80, request.boundsBottom)
+  }
+
+  @Test
+  fun `deserialize request_action bounds only with null resourceId`() {
+    val message =
+        """{"type":"request_action","requestId":"b2","action":"click","resourceId":null,"boundsLeft":10,"boundsTop":20,"boundsRight":100,"boundsBottom":80}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestAction>(request)
+    assertEquals("b2", request.requestId)
+    assertEquals("click", request.action)
+    assertEquals(null, request.resourceId)
+    assertEquals(10, request.boundsLeft)
+    assertEquals(20, request.boundsTop)
+    assertEquals(100, request.boundsRight)
+    assertEquals(80, request.boundsBottom)
+  }
+
+  @Test
+  fun `deserialize request_hit_test`() {
+    val message = """{"type":"request_hit_test","requestId":"ht-1","x":320,"y":720}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestHitTest>(request)
+    assertEquals("ht-1", request.requestId)
+    assertEquals(320, request.x)
+    assertEquals(720, request.y)
+  }
+
+  @Test
   fun `deserialize get_preferences`() {
     val message = """{"type":"get_preferences","requestId":"pref-1","packageName":"com.example.app","fileName":"settings.xml"}"""
     val request = json.decodeFromString<WebSocketRequest>(message)

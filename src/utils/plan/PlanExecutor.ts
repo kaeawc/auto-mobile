@@ -130,6 +130,27 @@ export class DefaultPlanExecutor implements PlanExecutor {
     return null;
   }
 
+  /**
+   * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
+   * (e.g. Android `tapOn` -> `tapDebug`).
+   */
+  private mergeToolDiagnosticsIntoStepDetails(
+    toolName: string,
+    toolResult: unknown,
+    details: Record<string, unknown>
+  ): void {
+    if (toolName !== "tapOn" || toolResult === null || typeof toolResult !== "object") {
+      return;
+    }
+    const tr = toolResult as Record<string, unknown>;
+    const payload = (tr.structuredContent && typeof tr.structuredContent === "object")
+      ? tr.structuredContent as Record<string, unknown>
+      : tr;
+    if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
+      details.tapDebug = payload.tapDebug;
+    }
+  }
+
   private async captureFailureObservation(
     platform: string,
     deviceId: string | undefined,
@@ -398,17 +419,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
               deviceId,
               sessionUuid,
             );
+            const failedToolDetails: Record<string, unknown> = {
+              params: step.params,
+              error: String(errorMsg),
+              ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
+              ...(failureObservation ? { failureObservation } : {})
+            };
+            this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, failedToolDetails);
             debugSteps.push({
               step: `Execute step ${i + 1}: ${step.tool}`,
               status: "failed",
               durationMs: this.timer.now() - stepStartTime,
-              details: {
-                params: step.params,
-                error: String(errorMsg),
-                // Include debug info from tool response if available
-                ...(toolResult.debug ? { toolDebug: toolResult.debug } : {}),
-                ...(failureObservation ? { failureObservation } : {})
-              }
+              details: failedToolDetails,
             });
 
             return {
@@ -443,6 +465,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               completedDetails.stepObservation = stepObservation;
             }
           }
+          this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, completedDetails);
 
           debugSteps.push({
             step: `Execute step ${i + 1}: ${step.tool}`,

@@ -165,7 +165,8 @@ public class GesturePerformer: GesturePerforming {
             let queryStart = Date()
             let (hasFocus, strategy) = detectKeyboardFocus(app: app)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
-            gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(app.label, privacy: .public)")
+            let appLabel = runOnMainThread { app.label }
+            gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(appLabel, privacy: .public)")
 
             guard hasFocus else {
                 let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
@@ -456,53 +457,45 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
-        /// Maximum doubleTap+delete rounds in `clearViaDeletes`. Each round
-        /// removes one word-token (space/`@`/`.`-separated). 10 handles
-        /// heavily tokenized values like long email addresses.
-        private static let clearViaDeletesMaxIterations = 10
+        /// Delete-burst size for `clearViaDeletes`. Sized to cover typical
+        /// form-field content (email, name, phone, password, address, OTP)
+        /// without exceeding what XCUITest's keyboard input pipeline can
+        /// ship as a single `typeText` call before falling back to touch
+        /// synthesis — which, empirically, can trigger spurious home
+        /// transitions during very long bursts. 50 chars is a safe cap.
+        /// Overkill deletes on an empty field are harmless no-ops.
+        private static let clearViaDeletesBurstSize = 50
 
-        /// Clear a text element by repeating doubleTap+delete at the right
-        /// edge until the field is empty or the iteration cap is hit.
-        /// Returns the total characters removed.
+        /// Clear a text element by positioning the cursor at the end of
+        /// content then sending a large fixed-size burst of delete
+        /// keystrokes. Returns the burst size (callers typically ignore it).
         ///
         /// **Why not Cmd+A + Delete?** Bypasses React Native's
         /// `onChangeText` bridge — the native buffer clears but RN JS state
         /// stays stale.
         ///
-        /// **doubleTap + N-delete loop.** Each iteration double-taps at the
-        /// right edge (selecting the word under the cursor) then sends N
-        /// delete keystrokes (N = current field length). The double-tap fires
-        /// as a coordinate gesture so it works even when the element already
-        /// has first-responder focus. `@`/`.`/space act as word boundaries,
-        /// so email addresses like `hello@test.com` require ~5 rounds; most
-        /// form fields clear in 1–3. Sending N deletes after each selection
-        /// ensures any chars not covered by the selection (due to a partial
-        /// word-boundary selection) are also consumed before the next round.
+        /// **Why a fixed burst and not a progress-driven loop?**
+        /// `element.value` on RN `TextInput` wrappers returns the
+        /// accessibility identifier (e.g. `"email-sign-in-email-input"`)
+        /// instead of the real content, so count- and equality-based
+        /// progress detection is unreliable. A single generous burst with
+        /// the cursor at the end sidesteps both problems.
+        ///
+        /// **Cursor positioning.** A bare tap at the right edge places the
+        /// cursor at end-of-content (iOS snaps to the last character when
+        /// the tap lands in trailing padding). We use `tap()` rather than
+        /// `doubleTap()` because doubleTap on empty padding past the text
+        /// is a no-op and doesn't reposition the cursor. Coordinate-based
+        /// so it fires even when the element already has first-responder
+        /// focus.
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
-            let initialValue = (element.value as? String) ?? ""
-            guard !initialValue.isEmpty else { return 0 }
-
-            let endCoord = element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
-            var totalDeleted = 0
-            for _ in 0..<clearViaDeletesMaxIterations {
-                let before = (element.value as? String) ?? ""
-                if before.isEmpty { break }
-                endCoord.doubleTap()
-                let deleteCount = max(1, before.count)
-                element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
-                let after = (element.value as? String) ?? ""
-                if after.isEmpty {
-                    totalDeleted += before.count
-                    break
-                }
-                // No progress (value.isEmpty check unreliable for RN fields
-                // that return accessibilityIdentifier instead of text content
-                // — if before==after the delete was a no-op, stop looping).
-                if after == before { break }
-                totalDeleted += max(0, before.count - after.count)
-            }
-            return totalDeleted
+            element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+            element.typeText(String(
+                repeating: XCUIKeyboardKey.delete.rawValue,
+                count: clearViaDeletesBurstSize
+            ))
+            return clearViaDeletesBurstSize
         }
 
         /// Resolve the currently-focused text-input element for the bare
@@ -521,6 +514,14 @@ public class GesturePerformer: GesturePerforming {
         /// doesn't propagate `hasKeyboardFocus` but does report
         /// `snapshot.hasFocus`. More expensive (one `.snapshot()` per
         /// candidate) but only runs when the predicate misses.
+        ///
+        /// Strategy 3 (`.other` snapshot walk): `detectKeyboardFocus` treats
+        /// focused `.other` snapshots as text inputs when they expose a
+        /// non-empty `value` or `placeholderValue` (see
+        /// `snapshotLooksLikeTextInput`). Mirror that here so flows where
+        /// focus is exposed only via an `.other` wrapper can be resolved —
+        /// otherwise `requireKeyboardFocus` passes and `clearText` throws
+        /// because this method returns nil.
         ///
         /// No keyboard-visibility fallback here: visibility proves focus
         /// exists somewhere but doesn't name an element, and we need an
@@ -550,6 +551,19 @@ public class GesturePerformer: GesturePerforming {
                         let candidate = query.element(boundBy: i)
                         guard let snap = try? candidate.snapshot() else { continue }
                         if snap.hasFocus {
+                            return candidate
+                        }
+                    }
+                }
+
+                // Strategy 3: .other elements that look like text inputs
+                let otherQuery = app.otherElements
+                let otherCount = otherQuery.count
+                if otherCount > 0 {
+                    for i in 0..<otherCount {
+                        let candidate = otherQuery.element(boundBy: i)
+                        guard let snap = try? candidate.snapshot() else { continue }
+                        if snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap) {
                             return candidate
                         }
                     }

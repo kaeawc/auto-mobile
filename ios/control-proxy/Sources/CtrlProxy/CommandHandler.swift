@@ -8,14 +8,8 @@ import os
 #endif
 
 /// Text-input command trace logger.
-///
-/// Log-level contract matches `GesturePerformer.gestureLog`:
-///   - `.debug`  — normal success path bookends (not persisted).
-///   - `.error`  — only on failures (persisted, rare, high-signal).
-///
-/// Do NOT promote success-path logs to `.info`; see GesturePerformer.swift
-/// for streaming instructions during a debug session.
-private let textInputLog = Logger(subsystem: "dev.kaeawc.automobile.ctrlproxy", category: "CommandHandler.text")
+/// See `Logging.swift` for the log-level contract shared across CtrlProxy.
+private let textInputLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "CommandHandler.text")
 
 /// Handles WebSocket commands matching Android AccessibilityService protocol
 public class CommandHandler: CommandHandling {

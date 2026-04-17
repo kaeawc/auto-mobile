@@ -4,19 +4,9 @@ import os
     import XCTest
 #endif
 
-/// Logger used for text-input focus diagnostics.
-///
-/// Log-level contract:
-///   - `.debug`  — normal success path trace (not persisted; only visible when
-///                 actively streaming). Use for `begin/done` bookends.
-///   - `.error`  — only on failures; carries the focus-diagnostic summary.
-///
-/// Do NOT promote success-path logs to `.info` — `Logger.info` is persisted
-/// to the unified log store and every text input would leave durable records.
-/// Enable streaming during a debug session with:
-///   xcrun simctl spawn booted log stream --level=debug \
-///     --predicate 'subsystem == "dev.kaeawc.automobile.ctrlproxy"'
-private let gestureLog = Logger(subsystem: "dev.kaeawc.automobile.ctrlproxy", category: "GesturePerformer")
+/// Logger for text-input focus diagnostics.
+/// See `Logging.swift` for the log-level contract shared across CtrlProxy.
+private let gestureLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "GesturePerformer")
 
 /// Performs gestures and interactions using XCUITest APIs
 public class GesturePerformer: GesturePerforming {
@@ -71,28 +61,51 @@ public class GesturePerformer: GesturePerforming {
         /// first-responder focus (`snapshot.hasFocus`).
         ///
         /// Used as a fallback when the `hasKeyboardFocus == true` NSPredicate
-        /// returns no results — which happens with React Native TextInput
+        /// returns no results — which happens with React Native `TextInput`
         /// fields and other frameworks whose UITextField wrapper is the UIKit
         /// first responder but does not propagate `hasKeyboardFocus` through
-        /// the XCTest accessibility bridge.
+        /// the XCTest accessibility bridge. `snapshot.hasFocus` reliably
+        /// reflects UIKit first-responder state, mirroring what
+        /// `ElementLocator` uses to populate `focused: true` in the hierarchy.
         ///
-        /// `snapshot.hasFocus` reliably reflects UIKit first-responder state
-        /// and is what ElementLocator already uses to populate `focused: true`
-        /// in the view hierarchy — making this a symmetrical fallback.
+        /// For `.other` (RN wrapper views), require a non-empty `value` or
+        /// `placeholderValue` before treating the node as a text input —
+        /// otherwise any focused `.other` (a button, custom control, etc.)
+        /// would register as focused text and we'd try to delete from it.
         ///
-        /// Credit: this technique (and the explanation above) was contributed
-        /// by the parallel "asdf" worktree during independent investigation
-        /// of the same issue; merged into the verified #1925 fix.
-        private static func snapshotHasTextInputWithFocus(_ snapshot: XCUIElementSnapshot) -> Bool {
-            let isTextInput = snapshot.elementType == .textField
-                || snapshot.elementType == .textView
-                || snapshot.elementType == .secureTextField
-                || snapshot.elementType == .other // safety net for custom wrappers (RN)
-            if isTextInput && snapshot.hasFocus {
+        /// Depth-guarded at 64 to bound recursion on pathological trees.
+        private static func snapshotHasTextInputWithFocus(
+            _ snapshot: XCUIElementSnapshot,
+            depth: Int = 0
+        ) -> Bool {
+            if depth > 64 { return false }
+
+            let type = snapshot.elementType
+            let isKnownTextInput = type == .textField
+                || type == .textView
+                || type == .secureTextField
+            let isTextLikeOther = type == .other && snapshotLooksLikeTextInput(snapshot)
+
+            if (isKnownTextInput || isTextLikeOther) && snapshot.hasFocus {
                 return true
             }
             for child in snapshot.children {
-                if snapshotHasTextInputWithFocus(child) { return true }
+                if snapshotHasTextInputWithFocus(child, depth: depth + 1) { return true }
+            }
+            return false
+        }
+
+        /// Heuristic for treating an `.other`-typed snapshot as a text-input
+        /// wrapper. Text fields expose a non-empty `value` (current content)
+        /// or a `placeholderValue` (hint text); plain buttons / containers
+        /// do not. False positives would cause `clearViaDeletes` to send
+        /// delete keys to a non-text element.
+        private static func snapshotLooksLikeTextInput(_ snapshot: XCUIElementSnapshot) -> Bool {
+            if let value = snapshot.value as? String, !value.isEmpty {
+                return true
+            }
+            if let placeholder = snapshot.placeholderValue, !placeholder.isEmpty {
+                return true
             }
             return false
         }
@@ -443,17 +456,15 @@ public class GesturePerformer: GesturePerforming {
 
         /// Clear a text element by typing N individual delete key events.
         ///
-        /// We cannot use Cmd+A + Delete (which sends two key events total)
-        /// because that path bypasses React Native's `onChangeText` bridge —
-        /// the native UITextField buffer clears but RN's JS state doesn't
-        /// update. Per-character deletes each fire the UIKit text-input
-        /// delegate chain that RN's bridge observes, so onChangeText runs
-        /// for each character and RN's state stays in sync.
-        ///
-        /// `typeText("")` is a no-op, so we cannot use it either.
+        /// Cmd+A + Delete (which sends two key events total) bypasses React
+        /// Native's `onChangeText` bridge — the native UITextField buffer
+        /// clears but RN's JS state doesn't update. Per-character deletes
+        /// each fire the UIKit text-input delegate chain that RN's bridge
+        /// observes, so `onChangeText` runs for each character and RN's
+        /// state stays in sync. `typeText("")` is a documented no-op.
         ///
         /// Returns the number of delete events sent (0 when the field was
-        /// already empty or the length was unknown).
+        /// already empty).
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
             let currentValue = (element.value as? String) ?? ""
@@ -466,6 +477,60 @@ public class GesturePerformer: GesturePerforming {
             return currentValue.count
         }
 
+        /// Resolve the currently-focused text-input element for the bare
+        /// `clearText` / `selectAll` / `performImeAction` paths. Mirrors
+        /// `detectKeyboardFocus`'s first two strategies but returns the
+        /// actual `XCUIElement` so callers can dispatch `typeText` against
+        /// it (and have React Native's `onChangeText` bridge fire).
+        ///
+        /// Strategy 1 (predicate): `hasKeyboardFocus == true` — cheap, works
+        /// for standard UIKit apps.
+        ///
+        /// Strategy 2 (snapshot walk): iterate candidate text-input element
+        /// types (`textFields`, `secureTextFields`, `textViews`,
+        /// `searchFields`) and check each element's snapshot for
+        /// `hasFocus`. Catches RN `TextInput`s whose UITextField wrapper
+        /// doesn't propagate `hasKeyboardFocus` but does report
+        /// `snapshot.hasFocus`. More expensive (one `.snapshot()` per
+        /// candidate) but only runs when the predicate misses.
+        ///
+        /// No keyboard-visibility fallback here: visibility proves focus
+        /// exists somewhere but doesn't name an element, and we need an
+        /// element to dispatch deletes against. Callers that hit that case
+        /// should use `clearText(resourceId:)` with a concrete selector.
+        private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
+            return runOnMainThread {
+                // Strategy 1: predicate
+                let byPredicate = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                if byPredicate.exists {
+                    return byPredicate
+                }
+
+                // Strategy 2: per-type snapshot traversal
+                let queries: [XCUIElementQuery] = [
+                    app.textFields,
+                    app.secureTextFields,
+                    app.textViews,
+                    app.searchFields,
+                ]
+                for query in queries {
+                    let count = query.count
+                    guard count > 0 else { continue }
+                    for i in 0..<count {
+                        let candidate = query.element(boundBy: i)
+                        guard let snap = try? candidate.snapshot() else { continue }
+                        if snap.hasFocus {
+                            return candidate
+                        }
+                    }
+                }
+
+                return nil
+            }
+        }
+
         public func clearText(resourceId: String? = nil) throws {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
@@ -475,32 +540,27 @@ public class GesturePerformer: GesturePerforming {
                 guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
                     throw GestureError.elementNotFound(resourceId)
                 }
-
                 try runOnMainThread {
                     try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
                     GesturePerformer.clearViaDeletes(element: element)
                 }
-            } else {
-                try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+                return
+            }
 
-                runOnMainThread {
-                    // Locate the currently-focused element so we can delete
-                    // per-character and fire RN's onChangeText for each.
-                    let focusedQuery = app.descendants(matching: .any)
-                        .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    if focusedQuery.firstMatch.exists {
-                        GesturePerformer.clearViaDeletes(element: focusedQuery.firstMatch)
-                    } else {
-                        // Fallback: app-level Cmd+A/Delete. Reaches the UIKit
-                        // buffer even when no XCUITest-visible element owns
-                        // hasKeyboardFocus (e.g., RN wrappers — same case the
-                        // snapshot.hasFocus fallback covers for focus detection).
-                        // RN state will not update via this path; callers
-                        // should prefer the resourceId branch for RN apps.
-                        app.typeKey("a", modifierFlags: .command)
-                        app.typeKey(.delete, modifierFlags: [])
-                    }
-                }
+            // Bare clearText: require focus (3-strategy), then resolve the
+            // focused element to dispatch per-character deletes against.
+            // Single code path — no Cmd+A/Delete fallback, because that
+            // path bypasses RN's onChangeText bridge.
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+            guard let focused = resolveFocusedTextElement(app: app) else {
+                let diag = buildFocusDiagnostic(app: app, reason: "clearText: focus confirmed but no XCUITest-visible element resolved")
+                gestureLog.error("\(diag, privacy: .public)")
+                throw GestureError.gestureFailed(
+                    "clearText could not resolve a focused text element. Pass resourceId to clear a specific field. Diagnostic: \(diag)"
+                )
+            }
+            runOnMainThread {
+                GesturePerformer.clearViaDeletes(element: focused)
             }
         }
 

@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(os)
 import os
+#endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
@@ -454,67 +456,51 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
-        /// Maximum iterations for `clearViaDeletes` before giving up. 5 is
-        /// generous — normal flows complete in 1–2 iterations.
-        private static let clearViaDeletesMaxIterations = 5
+        /// Maximum doubleTap+delete rounds in `clearViaDeletes`. Each round
+        /// removes one word-token (space/`@`/`.`-separated). 10 handles
+        /// heavily tokenized values like long email addresses.
+        private static let clearViaDeletesMaxIterations = 10
 
-        /// Clear a text element by sending per-character delete key events.
-        /// Returns the total number of delete events issued.
+        /// Clear a text element by repeating doubleTap+delete at the right
+        /// edge until the field is empty or the iteration cap is hit.
+        /// Returns the total characters removed.
         ///
-        /// **Why not Cmd+A + Delete?** Two key events are faster but bypass
-        /// React Native's `onChangeText` bridge — the native UITextField
-        /// buffer clears but RN's JS state stays stale. Per-character
-        /// deletes each fire the UIKit text-input delegate chain RN
-        /// observes, so `onChangeText` runs once per character.
-        /// `typeText("")` is a documented no-op.
+        /// **Why not Cmd+A + Delete?** Bypasses React Native's
+        /// `onChangeText` bridge — the native buffer clears but RN JS state
+        /// stays stale.
         ///
-        /// **Why the loop?** Two orthogonal failure modes:
-        ///
-        /// 1. Cursor position. A centered `element.tap()` (from
-        ///    `tapAndAwaitKeyboardFocus`) lands mid-content on populated
-        ///    fields. Delete keys only consume chars BEFORE the cursor —
-        ///    so a single pass leaves trailing content untouched. We
-        ///    reposition the cursor at the right edge (`dx=0.95`) each
-        ///    iteration so the next batch of deletes hits the remaining
-        ///    suffix.
-        ///
-        /// 2. Dropped events / RN re-render races. On iOS 18 + RN,
-        ///    `element.typeText(N×delete)` occasionally loses events when
-        ///    RN re-renders between keystrokes. The loop detects progress
-        ///    (`previousCount == currentCount` → break) and retries the
-        ///    remainder.
-        ///
-        /// Bounded by `clearViaDeletesMaxIterations` (5) to guarantee
-        /// termination even if deletes are completely ineffective.
+        /// **doubleTap + N-delete loop.** Each iteration double-taps at the
+        /// right edge (selecting the word under the cursor) then sends N
+        /// delete keystrokes (N = current field length). The double-tap fires
+        /// as a coordinate gesture so it works even when the element already
+        /// has first-responder focus. `@`/`.`/space act as word boundaries,
+        /// so email addresses like `hello@test.com` require ~5 rounds; most
+        /// form fields clear in 1–3. Sending N deletes after each selection
+        /// ensures any chars not covered by the selection (due to a partial
+        /// word-boundary selection) are also consumed before the next round.
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
+            let initialValue = (element.value as? String) ?? ""
+            guard !initialValue.isEmpty else { return 0 }
+
+            let endCoord = element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
             var totalDeleted = 0
-            var previousCount = -1
             for _ in 0..<clearViaDeletesMaxIterations {
-                let currentValue = (element.value as? String) ?? ""
-                let currentCount = currentValue.count
-                if currentCount == 0 { break }
-                if currentCount == previousCount {
-                    // No progress since last pass — cursor is stuck or
-                    // deletes are being dropped. Stop rather than loop
-                    // forever.
+                let before = (element.value as? String) ?? ""
+                if before.isEmpty { break }
+                endCoord.doubleTap()
+                let deleteCount = max(1, before.count)
+                element.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: deleteCount))
+                let after = (element.value as? String) ?? ""
+                if after.isEmpty {
+                    totalDeleted += before.count
                     break
                 }
-                previousCount = currentCount
-
-                // Reposition cursor at the right edge of the visible
-                // field bounds. For any content that fits in the visible
-                // width, this places the cursor past the last character.
-                // Uses a separate tap so the next typeText (which is the
-                // per-char delete burst) starts from end-of-content.
-                element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-
-                let deleteString = String(
-                    repeating: XCUIKeyboardKey.delete.rawValue,
-                    count: currentCount
-                )
-                element.typeText(deleteString)
-                totalDeleted += currentCount
+                // No progress (value.isEmpty check unreliable for RN fields
+                // that return accessibilityIdentifier instead of text content
+                // — if before==after the delete was a no-op, stop looping).
+                if after == before { break }
+                totalDeleted += max(0, before.count - after.count)
             }
             return totalDeleted
         }

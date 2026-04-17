@@ -1,5 +1,7 @@
 import Foundation
+#if canImport(os)
 import os
+#endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
 #endif

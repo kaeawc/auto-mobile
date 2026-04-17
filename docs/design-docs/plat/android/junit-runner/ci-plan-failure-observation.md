@@ -1,6 +1,6 @@
 # Plan failures: `failureObservation` and JUnit artifacts
 
-Use this when a YAML plan fails in CI (for example **`tapOn`: element not found**) and you need to know **what was actually on screen** at failure time. This complements [CI daemon logs](ci-daemon-logs.md) and [CI app launch troubleshooting](ci-troubleshooting-app-launch.md).
+Use this when a YAML plan fails in CI (for example **`tapOn`: element not found**) and you need to know **what was actually on screen** at failure time. This complements [CI daemon logs](ci-daemon-logs.md).
 
 If **`observe`** + **`waitFor`** passed but the next **`tapOn`** fails with **pre-tap re-find / stable bounds** wording (or older flakes where **`tapOn` “succeeded”** but the UI did not change), see **[Android `tapOn` pre-tap stability and search flakes](../tapOn-pre-tap-stability-and-search-flakes.md)**.
 
@@ -110,7 +110,7 @@ The digest fields are filled from top-level **`elements`** (clickable / text / s
 
 | Symptom | Likely cause | Doc |
 |--------|----------------|-----|
-| **`PerformanceAudit` / `J.create is not a function`** then screenshot cancelled | **`--ui-perf-mode`** path | [CI app launch troubleshooting §3](ci-troubleshooting-app-launch.md) |
+| **`PerformanceAudit` / `J.create is not a function`** then screenshot cancelled | **`--ui-perf-mode`** path | Check CI integration docs |
 | **Tiny MP4 (~40 KB), only launcher in video** | Screen finalize / encoding; pin video fixes or **`AUTOMOBILE_ANDROID_VIDEO_USE_FFMPEG_PIPE`** | [Video recording](../../../mcp/observe/video-recording.md), [CI Integration](ci-integration.md) |
 | **`grep` with `\|` matches nothing** | Use **`grep -E`** for alternation | shell docs / CI snippets |
 
@@ -118,8 +118,6 @@ The digest fields are filled from top-level **`elements`** (clickable / text / s
 
 ## Related
 
-- [CI app launch troubleshooting](ci-troubleshooting-app-launch.md) — `launchApp`, `waitFor`, ui-perf, YAML hardening
 - [CI daemon logs](ci-daemon-logs.md) — capture **`daemon.log`**
 - [CI Integration](ci-integration.md) — pinned AutoMobile checkout, **`bun run build`**, env vars
-- [Agent brief: app not foreground](agent-brief-app-not-foreground.md) — adb / logcat playbook
 - [Writing Tests → observe](writing-tests.md) — `waitFor` schema

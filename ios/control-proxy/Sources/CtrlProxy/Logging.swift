@@ -1,5 +1,36 @@
 import Foundation
 
+#if !canImport(os)
+/// No-op `Logger` shim for non-Apple Swift toolchains where `os.Logger`
+/// isn't available. Lets the top-level `Logger(...)` declarations in
+/// `GesturePerformer.swift` / `CommandHandler.swift` and every
+/// `.debug(...)` / `.error(...)` call site compile without per-call
+/// `#if canImport(os)` guards. All logging on non-Apple platforms is a
+/// no-op — we don't run the CtrlProxy runtime there, only typecheck it.
+public enum OSLogPrivacy {
+    case `public`
+    case `private`
+}
+
+public struct OSLogInterpolation: StringInterpolationProtocol {
+    public init(literalCapacity _: Int, interpolationCount _: Int) {}
+    public mutating func appendLiteral(_: String) {}
+    public mutating func appendInterpolation<T>(_: T, privacy _: OSLogPrivacy) {}
+    public mutating func appendInterpolation<T>(_: T) {}
+}
+
+public struct OSLogMessage: ExpressibleByStringLiteral, ExpressibleByStringInterpolation {
+    public init(stringLiteral _: String) {}
+    public init(stringInterpolation _: OSLogInterpolation) {}
+}
+
+public struct Logger {
+    public init(subsystem _: String, category _: String) {}
+    public func debug(_: OSLogMessage) {}
+    public func error(_: OSLogMessage) {}
+}
+#endif
+
 /// Shared subsystem identifier for all CtrlProxy `os.Logger` output.
 ///
 /// Log-level contract across the CtrlProxy Swift sources:

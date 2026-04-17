@@ -23,10 +23,26 @@ class AutoMobileTestDemo {
   @Test
   fun testAutoMobilePlanExecutionOptionsDefaults() {
     val options = AutoMobilePlanExecutionOptions()
-    assertEquals(30000L, options.timeoutMs)
+    assertEquals(MIN_EXECUTE_PLAN_TIMEOUT_MS, options.timeoutMs)
     assertEquals("auto", options.device)
     assertTrue(options.aiAssistance)
     assertEquals(0, options.maxRetries)
+  }
+
+  @Test
+  fun effectiveExecutePlanTimeoutNeverDropsBelowFloor() {
+    assertEquals(
+        MIN_EXECUTE_PLAN_TIMEOUT_MS,
+        AutoMobilePlanExecutionOptions().effectiveExecutePlanTimeoutMs(),
+    )
+    assertEquals(
+        MIN_EXECUTE_PLAN_TIMEOUT_MS,
+        AutoMobilePlanExecutionOptions(timeoutMs = 30_000L).effectiveExecutePlanTimeoutMs(),
+    )
+    assertEquals(
+        900_000L,
+        AutoMobilePlanExecutionOptions(timeoutMs = 900_000L).effectiveExecutePlanTimeoutMs(),
+    )
   }
 
   @Test

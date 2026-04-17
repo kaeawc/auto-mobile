@@ -6,14 +6,27 @@ import dev.jasonpearson.automobile.validation.ToolResponse
 import dev.jasonpearson.automobile.validation.ToolResult
 import dev.jasonpearson.automobile.validation.ToolResultEntry
 
+/**
+ * Minimum time the JUnit runner waits on the daemon for one `executePlan` (socket read + inner MCP
+ * `callTool`). Lower values caused premature inner HTTP cancellation and `Operation cancelled` on
+ * long UI plans.
+ *
+ * Keep in sync with `MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS` in `src/daemon/mcpRequestTimeout.ts`.
+ */
+const val MIN_EXECUTE_PLAN_TIMEOUT_MS: Long = 600_000L
+
 /** Configuration options for AutoMobile plan execution. */
 data class AutoMobilePlanExecutionOptions(
-    val timeoutMs: Long = 30000L, // 30 second default
+    val timeoutMs: Long = MIN_EXECUTE_PLAN_TIMEOUT_MS,
     val device: String = "auto",
     val aiAssistance: Boolean = true,
     val maxRetries: Int = 0,
     val debugMode: Boolean = System.getProperty("automobile.debug", "false").toBoolean(),
 )
+
+/** Effective wait budget for a single `executePlan` daemon call (never below [MIN_EXECUTE_PLAN_TIMEOUT_MS]). */
+fun AutoMobilePlanExecutionOptions.effectiveExecutePlanTimeoutMs(): Long =
+    maxOf(timeoutMs, MIN_EXECUTE_PLAN_TIMEOUT_MS)
 
 /** Result of AutoMobile plan execution. */
 data class AutoMobilePlanExecutionResult(

@@ -86,8 +86,11 @@ export class ExecutionTracker {
     }
   }
 
-  async cancelSessionExecutions(sessionId: string): Promise<number> {
-    return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId");
+  /**
+   * @param reason Why the Streamable HTTP session (or equivalent) ended — logged for diagnostics.
+   */
+  async cancelSessionExecutions(sessionId: string, reason: string = "unspecified"): Promise<number> {
+    return this.cancelExecutionsForKey(sessionId, this.sessionExecutions, "sessionId", reason);
   }
 
   async cancelSessionUuidExecutions(sessionUuid: string): Promise<number> {
@@ -147,7 +150,8 @@ export class ExecutionTracker {
   private async cancelExecutionsForKey(
     key: string,
     executionMap: Map<string, Set<string>>,
-    label: "sessionId" | "sessionUuid"
+    label: "sessionId" | "sessionUuid",
+    cancelReason: string = "unspecified"
   ): Promise<number> {
     const executions = executionMap.get(key);
     if (!executions || executions.size === 0) {
@@ -163,7 +167,7 @@ export class ExecutionTracker {
       execution.abortController.abort();
       cancelled++;
       logger.info(
-        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName})`
+        `[ExecutionTracker] Cancelled execution ${executionId} for ${label}=${key} (tool=${execution.toolName}, reason=${cancelReason})`
       );
     }
 

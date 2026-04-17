@@ -3,8 +3,12 @@ import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
+import {
+  StreamableHTTPClientTransport,
+  type StreamableHTTPReconnectionOptions,
+} from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
+import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import {
   DaemonRequest,
   DaemonResponse,
@@ -43,7 +47,25 @@ import type { KeyValueType } from "../features/storage/storageTypes";
  * - Forward tool calls to local HTTP MCP server
  * - Return DaemonResponse to clients
  * - Manage concurrent client sessions
+ *
+ * JUnit uses one Unix socket per thread (`DaemonSocketClientManager` ThreadLocal) for parallel
+ * tests, but this server shares a single in-process MCP HTTP client (one Streamable HTTP session).
+ * Concurrent `callTool` on that client corrupts the session and yields transport errors plus
+ * `Operation cancelled` on in-flight `executePlan`. All MCP forwards are serialized below.
+ *
+ * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
+ * The server transport allows only one such stream per session; a second GET while the first
+ * is still mapped returns 409 and tears down the session. We disable that auto-reconnect here;
+ * stale sessions are recovered via `getMcpClient()` + "Session not found" retry.
  */
+/** Matches SDK defaults except `maxRetries`, which must stay 0 to avoid duplicate GET SSE. */
+const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOptions = {
+  initialReconnectionDelay: 1000,
+  maxReconnectionDelay: 30_000,
+  reconnectionDelayGrowFactor: 1.5,
+  maxRetries: 0,
+};
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
   private sessions: Map<string, SessionContext> = new Map();
@@ -52,6 +74,8 @@ export class UnixSocketServer {
   private daemonState: DaemonStateAccess;
   private mcpClient: Client | null = null;
   private mcpClientPromise: Promise<Client> | null = null;
+  /** Tail of a promise chain that serializes MCP HTTP forwards across all socket connections. */
+  private mcpForwardTail: Promise<void> = Promise.resolve();
   private timer: Timer;
   private featureFlagService: FeatureFlagService | null;
 
@@ -117,30 +141,32 @@ export class UnixSocketServer {
     let buffer = "";
 
     socket.on("data", async data => {
-      try {
-        // Accumulate data into buffer
-        buffer += data.toString();
+      buffer += data.toString();
 
-        // Process complete JSON messages (newline-delimited)
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || ""; // Keep incomplete line in buffer
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
 
-        for (const line of lines) {
-          if (line.trim()) {
-            const request: DaemonRequest = JSON.parse(line);
-            const response = await this.handleRequest(sessionId, request);
-            socket.write(JSON.stringify(response) + "\n");
-          }
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
         }
-      } catch (error) {
-        logger.error(`Error processing request from ${sessionId}:`, error);
-        const errorResponse: DaemonResponse = {
-          id: "unknown",
-          type: "mcp_response",
-          success: false,
-          error: error instanceof Error ? error.message : String(error),
-        };
-        socket.write(JSON.stringify(errorResponse) + "\n");
+
+        let requestId = "unknown";
+        try {
+          const request: DaemonRequest = JSON.parse(line);
+          requestId = request.id;
+          const response = await this.handleRequest(sessionId, request);
+          socket.write(JSON.stringify(response) + "\n");
+        } catch (error) {
+          logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
+          const errorResponse: DaemonResponse = {
+            id: requestId,
+            type: "mcp_response",
+            success: false,
+            error: error instanceof Error ? error.message : String(error),
+          };
+          socket.write(JSON.stringify(errorResponse) + "\n");
+        }
       }
     });
 
@@ -195,23 +221,37 @@ export class UnixSocketServer {
           };
         }
 
-        const mcpClient = await this.getMcpClient();
+        const queueEnterMs = this.timer.now();
+        const result = await this.runExclusiveMcpForward(async () => {
+          const queueWaitMs = this.timer.now() - queueEnterMs;
+          const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
+          const timeoutMs = resolveMcpRequestTimeoutMs(request);
+          logger.debug(
+            `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} mcpTimeoutMs=${timeoutMs}`
+          );
+          const forwardStartMs = this.timer.now();
+          try {
+            const mcpClient = await this.getMcpClient();
 
-        let result;
-        try {
-          result = await this.handleIdeRequest(mcpClient, request);
-        } catch (ideError) {
-          const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
-          if (ideErrorMessage.includes("Session not found")) {
-            logger.warn("MCP client session expired, reconnecting and retrying...");
-            this.mcpClient = null;
-            this.mcpClientPromise = null;
-            const freshClient = await this.getMcpClient();
-            result = await this.handleIdeRequest(freshClient, request);
-          } else {
-            throw ideError;
+            try {
+              return await this.handleIdeRequest(mcpClient, request);
+            } catch (ideError) {
+              const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
+              if (ideErrorMessage.includes("Session not found")) {
+                logger.warn("MCP client session expired, reconnecting and retrying...");
+                this.mcpClient = null;
+                this.mcpClientPromise = null;
+                const freshClient = await this.getMcpClient();
+                return await this.handleIdeRequest(freshClient, request);
+              }
+              throw ideError;
+            }
+          } finally {
+            logger.debug(
+              `[McpForward] end socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
+            );
           }
-        }
+        });
 
         return {
           id: request.id,
@@ -233,6 +273,32 @@ export class UnixSocketServer {
         };
       }
     });
+  }
+
+  /**
+   * Run one MCP forward at a time. The shared `mcpClient` is not safe under concurrent
+   * `tools/call` (long SSE responses from `executePlan` interleaved with other RPCs).
+   */
+  private runExclusiveMcpForward<T>(fn: () => Promise<T>): Promise<T> {
+    const run = this.mcpForwardTail.then(() => fn());
+    this.mcpForwardTail = run.then(
+      () => undefined,
+      () => undefined
+    );
+    return run;
+  }
+
+  /** Compact label for debug logs (method + tool name or resource URI). */
+  private static describeMcpForwardRequest(request: DaemonRequest): string {
+    if (request.method === "tools/call") {
+      const name = request.params?.name;
+      return `method=tools/call tool=${typeof name === "string" ? name : "?"}`;
+    }
+    if (request.method === "resources/read") {
+      const uri = request.params?.uri;
+      return `method=resources/read uri=${typeof uri === "string" ? uri : "?"}`;
+    }
+    return `method=${request.method}`;
   }
 
   /**
@@ -398,10 +464,7 @@ export class UnixSocketServer {
     mcpClient: Client,
     request: DaemonRequest
   ): Promise<any> {
-    // Extract timeout from request, defaulting to 30 seconds if not provided
-    // (MCP SDK default is 60 seconds, but we prefer faster failure for better UX)
-    const DEFAULT_MCP_REQUEST_TIMEOUT_MS = 30000;
-    const requestOptions = { timeout: request.timeoutMs ?? DEFAULT_MCP_REQUEST_TIMEOUT_MS };
+    const requestOptions = { timeout: resolveMcpRequestTimeoutMs(request) };
 
     switch (request.method) {
       case "tools/list": {
@@ -443,7 +506,12 @@ export class UnixSocketServer {
       logger.error(`ERROR: mcpEndpoint is empty or undefined when creating client!`);
       throw new Error("mcpEndpoint is not set");
     }
-    const transport = new StreamableHTTPClientTransport(this.mcpEndpoint);
+    const transport = new StreamableHTTPClientTransport(
+      new URL(this.mcpEndpoint),
+      {
+        reconnectionOptions: DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION,
+      }
+    );
 
     const client = new Client(
       {

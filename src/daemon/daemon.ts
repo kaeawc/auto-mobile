@@ -44,6 +44,7 @@ import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../ut
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
 import { listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 
@@ -79,7 +80,9 @@ export class Daemon {
 
   constructor(options: DaemonOptions = {}, installedAppsRepository?: InstalledAppsStore, timer: Timer = defaultTimer) {
     this.port = options.port || DEFAULT_DAEMON_PORT;
-    this.host = options.host || "localhost";
+    // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
+    // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
+    this.host = options.host || "127.0.0.1";
     this.debug = options.debug || false;
     this.daemonSessionId = randomUUID();
     this.timer = timer;
@@ -284,6 +287,16 @@ export class Daemon {
   private async startHttpServer(): Promise<void> {
     this.httpServer = createHttpServer();
 
+    // Disable default timeouts on this loopback-only server. Node.js 18+ sets
+    // requestTimeout to 300 000 ms (5 min), which kills Streamable HTTP
+    // connections for long-running tool calls like executePlan. With the timeout
+    // active the HTTP response is silently dropped after ~5 min, the
+    // StreamableHTTPServerTransport fires onclose, and the MCP client never
+    // receives the result — even when the tool completed successfully.
+    this.httpServer.requestTimeout = 0;
+    this.httpServer.headersTimeout = 0;
+    this.httpServer.timeout = 0;
+
     this.httpServer.on("request", async (req, res) => {
       // CORS headers for development
       res.setHeader("Access-Control-Allow-Origin", "*");
@@ -432,7 +445,10 @@ export class Daemon {
           // Setup cleanup handlers
           streamableTransport.onclose = async () => {
             if (streamableTransport.sessionId) {
-              const cancelled = await executionTracker.cancelSessionExecutions(streamableTransport.sessionId);
+              const cancelled = await executionTracker.cancelSessionExecutions(
+                streamableTransport.sessionId,
+                "streamable_http_onclose"
+              );
               this.transports.delete(streamableTransport.sessionId);
               logger.info(
                 `Streamable HTTP session closed: ${streamableTransport.sessionId} (cancelled ${cancelled} executions)`
@@ -442,11 +458,14 @@ export class Daemon {
 
           streamableTransport.onerror = async error => {
             if (streamableTransport.sessionId) {
+              const detail = describeUnknownError(error);
               logger.error(
-                `Streamable HTTP transport error for session ${streamableTransport.sessionId}:`,
-                error
+                `Streamable HTTP transport error for session ${streamableTransport.sessionId}: ${detail}`
               );
-              await executionTracker.cancelSessionExecutions(streamableTransport.sessionId);
+              await executionTracker.cancelSessionExecutions(
+                streamableTransport.sessionId,
+                `streamable_http_onerror: ${detail}`
+              );
               this.transports.delete(streamableTransport.sessionId);
             }
           };
@@ -840,21 +859,26 @@ export class Daemon {
    * Waits for device discovery with configurable timeout
    */
   private async initializeDevicePoolWithTimeout(timeoutMs: number): Promise<void> {
+    let timeoutHandle: NodeJS.Timeout | undefined;
     const timeoutPromise = new Promise<void>(resolve => {
-      const timer = defaultTimer.setTimeout(() => {
+      timeoutHandle = defaultTimer.setTimeout(() => {
         logger.warn(`Device pool initialization timed out after ${timeoutMs}ms`);
         resolve();
       }, timeoutMs);
-      // Allow process to exit even if this timer is pending
-      if (typeof (timer as { unref?: () => void }).unref === "function") {
-        (timer as { unref: () => void }).unref();
+      if (typeof (timeoutHandle as { unref?: () => void }).unref === "function") {
+        (timeoutHandle as { unref: () => void }).unref();
       }
     });
 
     const initPromise = this.initializeDevicePool();
 
-    // Race between initialization and timeout
-    await Promise.race([initPromise, timeoutPromise]);
+    try {
+      await Promise.race([initPromise, timeoutPromise]);
+    } finally {
+      if (timeoutHandle !== undefined) {
+        defaultTimer.clearTimeout(timeoutHandle);
+      }
+    }
 
     // Log final device pool status
     const deviceCount = this.devicePool.getTotalDeviceCount();

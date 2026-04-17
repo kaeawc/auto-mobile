@@ -471,67 +471,28 @@ public class GesturePerformer: GesturePerforming {
         /// no-progress or empty-value break conditions.
         private static let clearViaDeletesMaxIterations = 20
 
-        /// Attempt WDA's first-tier clear strategy: dispatch a keyboard
-        /// `Clear` HID event (`kHIDPage_KeyboardOrKeypad` / `0x9C`) via the
-        /// private `XCDeviceEvent` + `-[XCUIDevice performDeviceEvent:error:]`
-        /// API. One HID event wipes the entire field through the keyboard
-        /// event pipeline (so RN's `onChangeText` fires), regardless of
-        /// content length or cursor position.
-        ///
-        /// Returns `true` if the event dispatched without error; `false`
-        /// if the private API couldn't be resolved or the call failed.
-        /// Callers should still run the delete-burst loop afterward as a
-        /// safety net — this is a fast-path optimization, not a guarantee.
-        ///
-        /// Uses `objc_msgSend` via `unsafeBitCast` + `@convention(c)`
-        /// function types so we don't have to bring `NSInvocation` into a
-        /// Swift-only target.
-        private static func tryHidKeyboardClear() -> Bool {
-            guard let eventClass = NSClassFromString("XCDeviceEvent") else {
-                gestureLog.debug("tryHidKeyboardClear: XCDeviceEvent class not found")
-                return false
-            }
-            let factorySel = NSSelectorFromString("deviceEventWithPage:usage:duration:")
-            guard let factoryMethod = class_getClassMethod(eventClass, factorySel) else {
-                gestureLog.debug("tryHidKeyboardClear: deviceEventWithPage:usage:duration: not found")
-                return false
-            }
-            typealias FactoryFn = @convention(c) (AnyClass, Selector, UInt32, UInt32, Double) -> AnyObject?
-            let factory = unsafeBitCast(method_getImplementation(factoryMethod), to: FactoryFn.self)
-            // page=0x07 kHIDPage_KeyboardOrKeypad, usage=0x9C kHIDUsage_KeyboardClear
-            guard let event = factory(eventClass, factorySel, 0x07, 0x9C, 0.01) else {
-                gestureLog.debug("tryHidKeyboardClear: factory returned nil")
-                return false
-            }
-
-            let device = XCUIDevice.shared
-            let performSel = NSSelectorFromString("performDeviceEvent:error:")
-            guard let performMethod = class_getInstanceMethod(type(of: device), performSel) else {
-                gestureLog.debug("tryHidKeyboardClear: performDeviceEvent:error: not found")
-                return false
-            }
-            typealias PerformFn = @convention(c) (XCUIDevice, Selector, AnyObject, AutoreleasingUnsafeMutablePointer<NSError?>?) -> Bool
-            let perform = unsafeBitCast(method_getImplementation(performMethod), to: PerformFn.self)
-            var nsError: NSError? = nil
-            let ok = perform(device, performSel, event, &nsError)
-            if !ok {
-                gestureLog.debug("tryHidKeyboardClear: performDeviceEvent failed error=\(nsError?.localizedDescription ?? "nil", privacy: .public)")
-            }
-            return ok
-        }
-
-        /// Clear a text element by first attempting WDA's HID `Clear` key
-        /// event (single-shot, sidesteps cursor positioning and content
-        /// length), then falling back to a loop of tap + delete-burst up
-        /// to `clearViaDeletesMaxIterations` times, with an early-exit
-        /// when `element.value` reports an empty string. Returns the
-        /// approximate number of delete keystrokes dispatched by the
-        /// fallback loop (0 if the HID clear succeeded and the field is
-        /// visibly empty to XCUITest).
+        /// Clear a text element by looping tap + delete-burst up to
+        /// `clearViaDeletesMaxIterations` times, with an early-exit when
+        /// `element.value` reports an empty string. Returns the
+        /// approximate number of delete keystrokes dispatched.
         ///
         /// **Why not Cmd+A + Delete?** Bypasses React Native's
         /// `onChangeText` bridge — the native buffer clears but RN JS state
         /// stays stale.
+        ///
+        /// **Why not an HID `Clear` keyboard event (WDA's fast path)?**
+        /// We tried it with `XCDeviceEvent` + `kHIDUsage_KeyboardClear`
+        /// (0x9C) and confirmed it dispatches successfully (native
+        /// UITextField buffer went from 162 → 0 chars in ~240ms per
+        /// `element.value`). But it's a strict regression for RN: the
+        /// event bypasses RN's `onChangeText` bridge exactly like
+        /// Cmd+A+Delete does, so RN's JS state stays stale and RN
+        /// restores the content on its next re-render. Worse, it breaks
+        /// the loop's progress detection because `element.value` ends up
+        /// reading the placeholder instead of the restored text, so the
+        /// loop runs to the iteration cap without making visible
+        /// progress. The per-char delete loop is the only path that
+        /// reliably fires `onChangeText`.
         ///
         /// **Why a loop?** A tap at `dx=0.95` does not reliably place the
         /// cursor at end-of-content: when the text width exceeds the
@@ -553,12 +514,6 @@ public class GesturePerformer: GesturePerforming {
         /// fields in exchange for correctness.
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
-            // Fast path: single HID Clear event. On native UIKit fields
-            // this typically empties the buffer in one shot; the loop
-            // below then no-ops via the isEmpty check.
-            let hidCleared = tryHidKeyboardClear()
-            gestureLog.debug("clearViaDeletes hidCleared=\(hidCleared, privacy: .public)")
-
             var totalDeleted = 0
             for iteration in 0..<clearViaDeletesMaxIterations {
                 let current = (element.value as? String) ?? ""

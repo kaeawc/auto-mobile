@@ -48,6 +48,43 @@ describe("FieldTypeDetector", () => {
         expect(detector.detect(element)).toBe("text");
       });
 
+      test("detects iOS UISecureTextField as text", () => {
+        // UITextField and UISecureTextField share identical setUIState
+        // behaviour (tap + clear + type). The substring check would not
+        // match "uisecuretextfield" against "uitextfield" (the `ui` and
+        // `textfield` tokens are non-contiguous), so UISecureTextField
+        // must be listed explicitly in IOS_PATTERNS.text.
+        const element = createElement({
+          "class": "UISecureTextField",
+          "password": "true",
+          "focusable": true,
+          "clickable": true
+        });
+        expect(detector.detect(element)).toBe("text");
+      });
+
+      test("detects iOS UISecureTextField as password field", () => {
+        const element = createElement({
+          "class": "UISecureTextField",
+          "password": "true"
+        });
+        expect(detector.isPasswordField(element)).toBe(true);
+      });
+
+      test("shouldSkipVerification true for UISecureTextField text-type", () => {
+        // Secure text fields report a masked value (e.g., "••••") that
+        // cannot be compared to the target string. The password-field
+        // branch in SetUIState.applyFieldValue relies on this skip so
+        // the setUIState op doesn't falsely fail verification.
+        const element = createElement({
+          "class": "UISecureTextField",
+          "password": "true"
+        });
+        // Without a concrete `value` attribute, iOS text verification
+        // is unreliable — detector should skip.
+        expect(detector.shouldSkipVerification(element, "text")).toBe(true);
+      });
+
       test("detects focusable + clickable as text fallback", () => {
         const element = createElement({
           "class": "com.custom.TextInput",

@@ -34,6 +34,11 @@ const ANDROID_PATTERNS = {
 const IOS_PATTERNS = {
   text: [
     "UITextField",
+    // UISecureTextField is UIKit's password input; identical behaviour to
+    // UITextField from a setUIState perspective (tap + clear + type). The
+    // masked-value verification is handled by isPasswordField +
+    // shouldSkipVerification below.
+    "UISecureTextField",
     "UITextView",
     "UISearchBar"
   ],

@@ -27,6 +27,7 @@
 		4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
 		53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
 		5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */; };
+		5651AAF00833750D1DFD55CE /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF23F10C24C9F40E5CEC303 /* Logging.swift */; };
 		5BD7FFA4EE2841F197219322 /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
 		5DF6CF60A8796BBB8C80341C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0CDD96577EB9823B5FCF2585 /* Assets.xcassets */; };
 		5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
@@ -43,6 +44,7 @@
 		C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		C194D73F02D0776F0F7FCA7B /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
+		C72C24EBCEFADDCA5B2C99E9 /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF23F10C24C9F40E5CEC303 /* Logging.swift */; };
 		CB577FE46E063BB09F5D4010 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
 		CC061B4978496D75042B253A /* CommandHandler.swift in Sources */ = {isa = PBXBuildFile; fileRef = 77305F40F85694E983987E68 /* CommandHandler.swift */; };
 		CDEF0C911EA979C4E9C54B0B /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
@@ -121,6 +123,7 @@
 		1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DefaultStorageInspecting.swift; sourceTree = "<group>"; };
 		22671C94D317E15EED752E59 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandlerTests.swift; sourceTree = "<group>"; };
+		3BF23F10C24C9F40E5CEC303 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCacheTests.swift; sourceTree = "<group>"; };
@@ -232,6 +235,7 @@
 				F2144B84CD70DB35A1030624 /* GesturePerformer.swift */,
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
 				FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */,
+				3BF23F10C24C9F40E5CEC303 /* Logging.swift */,
 				D81453AD074F2A392251CFC3 /* Models.swift */,
 				DBA97A6C3A1240A055D9876C /* OSLogReader.swift */,
 				B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */,
@@ -407,6 +411,7 @@
 				D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */,
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
 				158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */,
+				5651AAF00833750D1DFD55CE /* Logging.swift in Sources */,
 				BD7D2FF024054ED74F17958D /* Models.swift in Sources */,
 				C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */,
 				D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */,
@@ -446,6 +451,7 @@
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
 				45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */,
+				C72C24EBCEFADDCA5B2C99E9 /* Logging.swift in Sources */,
 				BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */,
 				141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */,
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,

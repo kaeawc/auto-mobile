@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.18] - 2026-04-17
+### Other
+- iOS: text entry fails despite focused UITextField with react native ([#1925](https://github.com/kaeawc/auto-mobile/issues/1925))
+
 ## [v0.0.17] - 2026-04-16
 ### Added
 - startDevice: accept generic parameters and return/boot matching device ([#1887](https://github.com/kaeawc/auto-mobile/issues/1887))

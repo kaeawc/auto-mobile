@@ -534,4 +534,41 @@ final class ElementLocatorTests: XCTestCase {
         XCTAssertEqual(result[0].className, "UIView")
         XCTAssertEqual(result[1].text, "Enter name")
     }
+
+    // MARK: - #1925: foregroundBundleId protocol contract
+    //
+    // GesturePerformer's text-input paths (typeText, setText, clearText,
+    // selectAll, performImeAction, clipboard paste) resolve their
+    // XCUIApplication via `elementLocator.foregroundBundleId` at call time.
+    // That avoids drift when the MCP server launches apps via `simctl launch`
+    // instead of CommandHandler.handleLaunchApp. These tests pin the protocol
+    // contract so the fake stays in sync with the real ElementLocator.
+
+    func testFake_foregroundBundleId_nilByDefault() {
+        let locator = FakeElementLocator()
+        XCTAssertNil(locator.foregroundBundleId)
+    }
+
+    func testFake_foregroundBundleId_updatedBySwitchForegroundApp() {
+        let locator = FakeElementLocator()
+        locator.switchForegroundApp(bundleId: "com.example.rnexpoexamples")
+        XCTAssertEqual(locator.foregroundBundleId, "com.example.rnexpoexamples")
+    }
+
+    func testFake_foregroundBundleId_settableForOutOfBandTransitions() {
+        // Simulates the MCP `simctl launch` scenario where CommandHandler
+        // never sees handleLaunchApp but ElementLocator has latched the
+        // detected foreground app.
+        let locator = FakeElementLocator()
+        locator.foregroundBundleId = "com.snackpass.ai"
+        XCTAssertEqual(locator.foregroundBundleId, "com.snackpass.ai")
+    }
+
+    func testFake_foregroundBundleId_lastSwitchWins() {
+        let locator = FakeElementLocator()
+        locator.switchForegroundApp(bundleId: "com.example.first")
+        locator.switchForegroundApp(bundleId: "com.example.second")
+        XCTAssertEqual(locator.foregroundBundleId, "com.example.second")
+        XCTAssertEqual(locator.switchedBundleIds, ["com.example.first", "com.example.second"])
+    }
 }

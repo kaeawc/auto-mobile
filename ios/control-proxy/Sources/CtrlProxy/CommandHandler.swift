@@ -1,10 +1,17 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
 #if os(iOS)
     import UIKit
 #endif
+
+/// Text-input command trace logger.
+/// See `Logging.swift` for the log-level contract shared across CtrlProxy.
+private let textInputLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "CommandHandler.text")
 
 /// Handles WebSocket commands matching Android AccessibilityService protocol
 public class CommandHandler: CommandHandling {
@@ -319,12 +326,28 @@ public class CommandHandler: CommandHandling {
             throw CommandError.missingParameter("text")
         }
 
-        if let resourceId = request.resourceId {
-            try gesturePerformer.setText(resourceId: resourceId, text: text)
-        } else {
-            try gesturePerformer.typeText(text: text)
+        perfProvider.serial("handleSetText")
+        defer { perfProvider.end() }
+
+        let resourceId = request.resourceId
+        textInputLog.debug("handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+
+        do {
+            if let resourceId = resourceId {
+                try perfProvider.track("setText.byResourceId") {
+                    try gesturePerformer.setText(resourceId: resourceId, text: text)
+                }
+            } else {
+                try perfProvider.track("typeText") {
+                    try gesturePerformer.typeText(text: text)
+                }
+            }
+        } catch {
+            textInputLog.error("handleSetText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            throw error
         }
 
+        textInputLog.debug("handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.setTextResult.rawValue,
             requestId: request.requestId,
@@ -333,8 +356,22 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleClearText(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        try gesturePerformer.clearText(resourceId: request.resourceId)
+        perfProvider.serial("handleClearText")
+        defer { perfProvider.end() }
 
+        let resourceId = request.resourceId
+        textInputLog.debug("handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+
+        do {
+            try perfProvider.track("clearText") {
+                try gesturePerformer.clearText(resourceId: resourceId)
+            }
+        } catch {
+            textInputLog.error("handleClearText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            throw error
+        }
+
+        textInputLog.debug("handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.clearTextResult.rawValue,
             requestId: request.requestId,
@@ -347,8 +384,21 @@ public class CommandHandler: CommandHandling {
             throw CommandError.missingParameter("action")
         }
 
-        try gesturePerformer.performImeAction(action)
+        perfProvider.serial("handleImeAction")
+        defer { perfProvider.end() }
 
+        textInputLog.debug("handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+
+        do {
+            try perfProvider.track("imeAction") {
+                try gesturePerformer.performImeAction(action)
+            }
+        } catch {
+            textInputLog.error("handleImeAction FAILED action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            throw error
+        }
+
+        textInputLog.debug("handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.imeActionResult.rawValue,
             requestId: request.requestId,
@@ -357,8 +407,21 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleSelectAll(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        try gesturePerformer.selectAll()
+        perfProvider.serial("handleSelectAll")
+        defer { perfProvider.end() }
 
+        textInputLog.debug("handleSelectAll begin requestId=\(request.requestId ?? "nil", privacy: .public)")
+
+        do {
+            try perfProvider.track("selectAll") {
+                try gesturePerformer.selectAll()
+            }
+        } catch {
+            textInputLog.error("handleSelectAll FAILED error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            throw error
+        }
+
+        textInputLog.debug("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.selectAllResult.rawValue,
             requestId: request.requestId,

@@ -49,6 +49,13 @@ public protocol ElementLocating {
     /// Uses bounded polling: up to 500ms with 50ms intervals (10 attempts max).
     /// Returns true if state was reached, false if timed out.
     func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool
+
+    /// Bundle ID of the currently tracked foreground app, or nil if none has
+    /// been set yet. Used by GesturePerformer's text-input paths to resolve a
+    /// fresh XCUIApplication at call time (see issue #1925) — this avoids the
+    /// drift where an MCP-side `simctl launch` updates ElementLocator's tracker
+    /// but leaves GesturePerformer pointing at a stale / empty app reference.
+    var foregroundBundleId: String? { get }
 }
 
 // MARK: - GesturePerformer Protocol

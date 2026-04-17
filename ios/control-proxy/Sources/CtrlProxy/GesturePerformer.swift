@@ -1,7 +1,14 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
 #endif
+
+/// Logger for text-input focus diagnostics.
+/// See `Logging.swift` for the log-level contract shared across CtrlProxy.
+private let gestureLog = Logger(subsystem: ctrlProxyLogSubsystem, category: "GesturePerformer")
 
 /// Performs gestures and interactions using XCUITest APIs
 public class GesturePerformer: GesturePerforming {
@@ -52,46 +59,206 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Keyboard Focus Helpers
 
-        /// Check that some element in the app has keyboard focus.
-        /// Throws with a contextual error message if no focus is detected.
-        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
-            let hasFocus: Bool = runOnMainThread {
-                app.descendants(matching: .any)
+        /// Returns true if any text-input element in the snapshot has UIKit
+        /// first-responder focus (`snapshot.hasFocus`).
+        ///
+        /// Used as a fallback when the `hasKeyboardFocus == true` NSPredicate
+        /// returns no results — which happens with React Native `TextInput`
+        /// fields and other frameworks whose UITextField wrapper is the UIKit
+        /// first responder but does not propagate `hasKeyboardFocus` through
+        /// the XCTest accessibility bridge. `snapshot.hasFocus` reliably
+        /// reflects UIKit first-responder state, mirroring what
+        /// `ElementLocator` uses to populate `focused: true` in the hierarchy.
+        ///
+        /// For `.other` (RN wrapper views), require a non-empty `value` or
+        /// `placeholderValue` before treating the node as a text input —
+        /// otherwise any focused `.other` (a button, custom control, etc.)
+        /// would register as focused text and we'd try to delete from it.
+        ///
+        /// Depth-guarded at 64 to bound recursion on pathological trees.
+        private static func snapshotHasTextInputWithFocus(
+            _ snapshot: XCUIElementSnapshot,
+            depth: Int = 0
+        ) -> Bool {
+            if depth > 64 { return false }
+
+            let type = snapshot.elementType
+            let isKnownTextInput = type == .textField
+                || type == .textView
+                || type == .secureTextField
+            let isTextLikeOther = type == .other && snapshotLooksLikeTextInput(snapshot)
+
+            if (isKnownTextInput || isTextLikeOther) && snapshot.hasFocus {
+                return true
+            }
+            for child in snapshot.children {
+                if snapshotHasTextInputWithFocus(child, depth: depth + 1) { return true }
+            }
+            return false
+        }
+
+        /// Heuristic for treating an `.other`-typed snapshot as a text-input
+        /// wrapper. Text fields expose a non-empty `value` (current content)
+        /// or a `placeholderValue` (hint text); plain buttons / containers
+        /// do not. False positives would cause `clearViaDeletes` to send
+        /// delete keys to a non-text element.
+        private static func snapshotLooksLikeTextInput(_ snapshot: XCUIElementSnapshot) -> Bool {
+            if let value = snapshot.value as? String, !value.isEmpty {
+                return true
+            }
+            if let placeholder = snapshot.placeholderValue, !placeholder.isEmpty {
+                return true
+            }
+            return false
+        }
+
+        /// Detection strategies for keyboard focus, in order of cost:
+        ///
+        /// 1. `hasKeyboardFocus == true` NSPredicate — cheap, reliable for
+        ///    standard UIKit apps.
+        /// 2. Snapshot `hasFocus` traversal — catches React Native TextInputs
+        ///    and other frameworks whose first-responder status isn't
+        ///    exposed through `hasKeyboardFocus`.
+        /// 3. Keyboard-visibility probe — last-resort safety net; if the
+        ///    system keyboard is visible, something in the user-visible app
+        ///    must own first responder.
+        ///
+        /// Returns `(hasFocus, strategy)` so the caller can log which path
+        /// won. Query runs on the main thread.
+        private func detectKeyboardFocus(app: XCUIApplication) -> (Bool, String) {
+            return runOnMainThread { [springboard] in
+                // Strategy 1: predicate
+                let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                     .firstMatch
                     .exists
+                if byPredicate {
+                    return (true, "predicate")
+                }
+
+                // Strategy 2: snapshot.hasFocus traversal. Skip SpringBoard —
+                // the app we want is never SpringBoard in a text-input flow.
+                if app.identifier != "com.apple.springboard" {
+                    if let snapshot = try? app.snapshot(),
+                       GesturePerformer.snapshotHasTextInputWithFocus(snapshot) {
+                        return (true, "snapshot.hasFocus")
+                    }
+                }
+
+                // Strategy 3: keyboard-visibility probe. Covers the case
+                // where neither the predicate nor the snapshot picks up
+                // focus (e.g., unknown/stale foreground bundle ID) but the
+                // user-visible keyboard proves something owns first responder.
+                if springboard.keyboards.firstMatch.exists || app.keyboards.firstMatch.exists {
+                    return (true, "keyboard-visibility")
+                }
+
+                return (false, "none")
             }
+        }
+
+        /// Check that some element in the app has keyboard focus.
+        /// Throws with a contextual error message if no focus is detected.
+        /// On failure, the thrown error embeds a focus-diagnostic summary so
+        /// it surfaces in the MCP response — not just in device logs.
+        private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
+            let queryStart = Date()
+            let (hasFocus, strategy) = detectKeyboardFocus(app: app)
+            let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
+            let appLabel = runOnMainThread { app.label }
+            gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(appLabel, privacy: .public)")
+
             guard hasFocus else {
+                let diag = buildFocusDiagnostic(app: app, reason: "requireKeyboardFocus: \(context)")
+                gestureLog.error("\(diag, privacy: .public)")
                 throw GestureError.gestureFailed(
-                    "No element has keyboard focus — \(context)"
+                    "No element has keyboard focus — \(context). Diagnostic: \(diag)"
                 )
             }
         }
 
-        /// Tap an element and poll for keyboard focus (200ms timeout, 20ms intervals).
+        /// Tap an element and poll for keyboard focus (500ms timeout, 50ms
+        /// intervals). Uses the same 3-strategy detection as
+        /// `requireKeyboardFocus`. Timeout was extended from 200ms → 500ms
+        /// to accommodate the snapshot-based fallback, which does an extra
+        /// XPC round-trip per poll when the predicate misses.
+        ///
         /// Throws if the element does not receive focus after the tap.
         private func tapAndAwaitKeyboardFocus(
             app: XCUIApplication,
             element: XCUIElement,
             resourceId: String
         ) throws {
+            let tapStart = Date()
+            gestureLog.debug("tapAndAwaitKeyboardFocus begin resourceId=\(resourceId, privacy: .public) exists=\(element.exists, privacy: .public) isHittable=\(element.isHittable, privacy: .public) type=\(element.elementType.rawValue, privacy: .public)")
             element.tap()
 
-            let deadline = Date().addingTimeInterval(0.2)
+            let deadline = Date().addingTimeInterval(0.5)
             var hasFocus = false
+            var strategy = "none"
+            var iterations = 0
             while !hasFocus && Date() < deadline {
-                hasFocus = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    .firstMatch
-                    .exists
+                let result = detectKeyboardFocus(app: app)
+                hasFocus = result.0
+                strategy = result.1
+                iterations += 1
                 if !hasFocus {
-                    RunLoop.current.run(until: Date().addingTimeInterval(0.02))
+                    RunLoop.current.run(until: Date().addingTimeInterval(0.05))
                 }
             }
+            let elapsedMs = Int(Date().timeIntervalSince(tapStart) * 1000)
+            gestureLog.debug("tapAndAwaitKeyboardFocus done resourceId=\(resourceId, privacy: .public) hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) iterations=\(iterations, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)")
+
             guard hasFocus else {
+                let diag = buildFocusDiagnostic(app: app, reason: "tapAndAwaitKeyboardFocus: \(resourceId)")
+                gestureLog.error("\(diag, privacy: .public)")
                 throw GestureError.gestureFailed(
-                    "Element '\(resourceId)' did not receive keyboard focus after tap"
+                    "Element '\(resourceId)' did not receive keyboard focus after tap. Diagnostic: \(diag)"
                 )
+            }
+        }
+
+        /// Build a compact diagnostic string enumerating candidate text-entry
+        /// elements and their focus state, for #1925-style "no keyboard focus"
+        /// failures. Returned as a single line so it fits in a WebSocket error.
+        private func buildFocusDiagnostic(app: XCUIApplication, reason: String) -> String {
+            return runOnMainThread { [springboard] in
+                var parts: [String] = []
+                parts.append("reason=\"\(reason)\"")
+                parts.append("app.label=\"\(app.label)\"")
+                parts.append("app.identifier=\"\(app.identifier)\"")
+
+                let typesToProbe: [(String, XCUIElement.ElementType)] = [
+                    ("textFields", .textField),
+                    ("secureTextFields", .secureTextField),
+                    ("textViews", .textView),
+                    ("searchFields", .searchField),
+                ]
+
+                for (name, type) in typesToProbe {
+                    let query = app.descendants(matching: type)
+                    let count = query.count
+                    parts.append("\(name).count=\(count)")
+
+                    // Only introspect a small number to avoid heavy XPC.
+                    let cap = min(count, 5)
+                    if cap > 0 {
+                        for i in 0..<cap {
+                            let el = query.element(boundBy: i)
+                            let hasFocus = (el.value(forKey: "hasKeyboardFocus") as? Bool) ?? false
+                            let identifier = el.identifier
+                            let value = (el.value as? String) ?? ""
+                            let isSelected = el.isSelected
+                            let isHittable = el.isHittable
+                            let frame = el.frame
+                            parts.append("\(name)[\(i)]={id=\"\(identifier)\",hasKeyboardFocus=\(hasFocus),isSelected=\(isSelected),isHittable=\(isHittable),value.len=\(value.count),frame=\(Int(frame.origin.x)),\(Int(frame.origin.y)),\(Int(frame.size.width)),\(Int(frame.size.height))}")
+                        }
+                    }
+                }
+
+                parts.append("app.keyboards.count=\(app.keyboards.count)")
+                parts.append("springboard.keyboards.count=\(springboard.keyboards.count)")
+                return parts.joined(separator: " | ")
             }
         }
 
@@ -239,8 +406,30 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Text Input
 
+        /// Resolve the XCUIApplication to use for text-input accessibility queries.
+        ///
+        /// Prefers the ElementLocator's tracked foreground bundle ID over the
+        /// (possibly stale) self.application. See issue #1925: the MCP server
+        /// launches apps via `simctl launch`, which updates ElementLocator's
+        /// tracker (through the observe path) but does NOT reach CommandHandler's
+        /// handleLaunchApp, so GesturePerformer.application stays pinned at
+        /// whatever CtrlProxy.start() initialised it to (SpringBoard / the
+        /// test host). That stale reference then returns zero textFields /
+        /// zero keyboards, making every typeText fail with "No element has
+        /// keyboard focus" — even when the app demonstrably has a focused
+        /// text field and a visible keyboard.
+        ///
+        /// Coordinate-based gestures (tap/swipe/drag/pinch) deliberately use
+        /// the SpringBoard anchor and do NOT go through this method.
+        private func resolveTextInputApp() -> XCUIApplication? {
+            if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
+                return XCUIApplication(bundleIdentifier: bundleId)
+            }
+            return application
+        }
+
         public func typeText(text: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -252,7 +441,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func setText(resourceId: String, text: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
             guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
@@ -261,19 +450,164 @@ public class GesturePerformer: GesturePerforming {
 
             try runOnMainThread {
                 try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-
-                // Select all and delete existing text via Cmd+A, Delete (O(1))
-                if let existingText = element.value as? String, !existingText.isEmpty {
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
-                }
-
+                // Clear any existing text per-character so RN's onChangeText
+                // fires for each delete (see clearViaDeletes for rationale).
+                GesturePerformer.clearViaDeletes(element: element)
                 element.typeText(text)
             }
         }
 
+        /// Delete-burst size per iteration in `clearViaDeletes`. Sized to
+        /// stay under the empirically observed threshold where XCUITest's
+        /// typeText falls back to touch synthesis (XCTouchGesturePerformer)
+        /// during very long single-string bursts, which can trigger
+        /// spurious home-screen transitions. Overkill deletes on an empty
+        /// field are harmless no-ops.
+        private static let clearViaDeletesBurstSize = 50
+
+        /// Maximum loop iterations in `clearViaDeletes`. 20 × 50 = up to
+        /// 1000 chars clearable, which is far beyond any realistic form
+        /// field. The loop typically exits much earlier via the
+        /// no-progress or empty-value break conditions.
+        private static let clearViaDeletesMaxIterations = 20
+
+        /// Clear a text element by looping tap + delete-burst up to
+        /// `clearViaDeletesMaxIterations` times, with an early-exit when
+        /// `element.value` reports an empty string. Returns the
+        /// approximate number of delete keystrokes dispatched.
+        ///
+        /// **Why not Cmd+A + Delete?** Bypasses React Native's
+        /// `onChangeText` bridge — the native buffer clears but RN JS state
+        /// stays stale.
+        ///
+        /// **Why not an HID `Clear` keyboard event (WDA's fast path)?**
+        /// We tried it with `XCDeviceEvent` + `kHIDUsage_KeyboardClear`
+        /// (0x9C) and confirmed it dispatches successfully (native
+        /// UITextField buffer went from 162 → 0 chars in ~240ms per
+        /// `element.value`). But it's a strict regression for RN: the
+        /// event bypasses RN's `onChangeText` bridge exactly like
+        /// Cmd+A+Delete does, so RN's JS state stays stale and RN
+        /// restores the content on its next re-render. Worse, it breaks
+        /// the loop's progress detection because `element.value` ends up
+        /// reading the placeholder instead of the restored text, so the
+        /// loop runs to the iteration cap without making visible
+        /// progress. The per-char delete loop is the only path that
+        /// reliably fires `onChangeText`.
+        ///
+        /// **Why a loop?** A tap at `dx=0.95` does not reliably place the
+        /// cursor at end-of-content: when the text width exceeds the
+        /// field's visible width, the field scrolls to keep the cursor
+        /// visible, so the right-edge tap can land mid-text rather than in
+        /// trailing padding. A single 50-delete burst from a mid-text
+        /// cursor only consumes chars to the left of the cursor and then
+        /// no-ops on the remaining buffer. Iterating tap + burst lets us
+        /// chip away at the content regardless of cursor position.
+        ///
+        /// **Why only an isEmpty early-exit, no value-equality check?**
+        /// RN `TextInput` wrappers and `placeholderValue` both tend to
+        /// surface the accessibility identifier rather than the real text
+        /// buffer or true placeholder, which would false-positive either a
+        /// "no progress" or "matches placeholder" break after a single
+        /// iteration and leave residual content. Extra deletes on an
+        /// already-empty field are harmless no-ops, so we accept the
+        /// worst-case cost of running the full iteration count on RN
+        /// fields in exchange for correctness.
+        @discardableResult
+        private static func clearViaDeletes(element: XCUIElement) -> Int {
+            var totalDeleted = 0
+            for iteration in 0..<clearViaDeletesMaxIterations {
+                let current = (element.value as? String) ?? ""
+                gestureLog.debug("clearViaDeletes iter=\(iteration, privacy: .public) valueCount=\(current.count, privacy: .public)")
+                if current.isEmpty {
+                    break
+                }
+                element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+                element.typeText(String(
+                    repeating: XCUIKeyboardKey.delete.rawValue,
+                    count: clearViaDeletesBurstSize
+                ))
+                totalDeleted += clearViaDeletesBurstSize
+            }
+            return totalDeleted
+        }
+
+        /// Resolve the currently-focused text-input element for the bare
+        /// `clearText` / `selectAll` / `performImeAction` paths. Mirrors
+        /// `detectKeyboardFocus`'s first two strategies but returns the
+        /// actual `XCUIElement` so callers can dispatch `typeText` against
+        /// it (and have React Native's `onChangeText` bridge fire).
+        ///
+        /// Strategy 1 (predicate): `hasKeyboardFocus == true` — cheap, works
+        /// for standard UIKit apps.
+        ///
+        /// Strategy 2 (snapshot walk): iterate candidate text-input element
+        /// types (`textFields`, `secureTextFields`, `textViews`,
+        /// `searchFields`) and check each element's snapshot for
+        /// `hasFocus`. Catches RN `TextInput`s whose UITextField wrapper
+        /// doesn't propagate `hasKeyboardFocus` but does report
+        /// `snapshot.hasFocus`. More expensive (one `.snapshot()` per
+        /// candidate) but only runs when the predicate misses.
+        ///
+        /// Strategy 3 (`.other` snapshot walk): `detectKeyboardFocus` treats
+        /// focused `.other` snapshots as text inputs when they expose a
+        /// non-empty `value` or `placeholderValue` (see
+        /// `snapshotLooksLikeTextInput`). Mirror that here so flows where
+        /// focus is exposed only via an `.other` wrapper can be resolved —
+        /// otherwise `requireKeyboardFocus` passes and `clearText` throws
+        /// because this method returns nil.
+        ///
+        /// No keyboard-visibility fallback here: visibility proves focus
+        /// exists somewhere but doesn't name an element, and we need an
+        /// element to dispatch deletes against. Callers that hit that case
+        /// should use `clearText(resourceId:)` with a concrete selector.
+        private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
+            return runOnMainThread {
+                // Strategy 1: predicate
+                let byPredicate = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                if byPredicate.exists {
+                    return byPredicate
+                }
+
+                // Strategy 2: per-type snapshot traversal
+                let queries: [XCUIElementQuery] = [
+                    app.textFields,
+                    app.secureTextFields,
+                    app.textViews,
+                    app.searchFields,
+                ]
+                for query in queries {
+                    let count = query.count
+                    guard count > 0 else { continue }
+                    for i in 0..<count {
+                        let candidate = query.element(boundBy: i)
+                        guard let snap = try? candidate.snapshot() else { continue }
+                        if snap.hasFocus {
+                            return candidate
+                        }
+                    }
+                }
+
+                // Strategy 3: .other elements that look like text inputs
+                let otherQuery = app.otherElements
+                let otherCount = otherQuery.count
+                if otherCount > 0 {
+                    for i in 0..<otherCount {
+                        let candidate = otherQuery.element(boundBy: i)
+                        guard let snap = try? candidate.snapshot() else { continue }
+                        if snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap) {
+                            return candidate
+                        }
+                    }
+                }
+
+                return nil
+            }
+        }
+
         public func clearText(resourceId: String? = nil) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -281,26 +615,32 @@ public class GesturePerformer: GesturePerforming {
                 guard let element = elementLocator.findElement(byResourceId: resourceId) as? XCUIElement else {
                     throw GestureError.elementNotFound(resourceId)
                 }
-
                 try runOnMainThread {
                     try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-
-                    // Select all and delete via Cmd+A, Delete (O(1))
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
+                    _ = GesturePerformer.clearViaDeletes(element: element)
                 }
-            } else {
-                try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+                return
+            }
 
-                runOnMainThread {
-                    app.typeKey("a", modifierFlags: .command)
-                    app.typeKey(.delete, modifierFlags: [])
-                }
+            // Bare clearText: require focus (3-strategy), then resolve the
+            // focused element to dispatch per-character deletes against.
+            // Single code path — no Cmd+A/Delete fallback, because that
+            // path bypasses RN's onChangeText bridge.
+            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+            guard let focused = resolveFocusedTextElement(app: app) else {
+                let diag = buildFocusDiagnostic(app: app, reason: "clearText: focus confirmed but no XCUITest-visible element resolved")
+                gestureLog.error("\(diag, privacy: .public)")
+                throw GestureError.gestureFailed(
+                    "clearText could not resolve a focused text element. Pass resourceId to clear a specific field. Diagnostic: \(diag)"
+                )
+            }
+            _ = runOnMainThread {
+                GesturePerformer.clearViaDeletes(element: focused)
             }
         }
 
         public func selectAll() throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -312,7 +652,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func performImeAction(_ action: String) throws {
-            guard let app = application else {
+            guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
             }
 
@@ -437,7 +777,9 @@ public class GesturePerformer: GesturePerforming {
                 return nil
 
             case "paste":
-                guard let app = application else {
+                // Use foreground-app resolution (#1925) — the clipboard paste
+                // path also needs to query the correct app for hasKeyboardFocus.
+                guard let app = resolveTextInputApp() else {
                     throw GestureError.noApplication
                 }
                 let clipboardText: String? = runOnMainThread {

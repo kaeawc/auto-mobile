@@ -125,11 +125,14 @@ export class InputText extends BaseVisualChange {
     text: string,
     imeAction?: "done" | "next" | "search" | "send" | "go" | "previous"
   ): Promise<SendTextResult & { method?: "a11y" }> {
+    const startMs = Date.now();
+    logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);
+
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestSetText(text);
 
     if (!result.success) {
-      logger.error(`[InputText] CtrlProxy iOS setText failed: ${result.error}`);
+      logger.error(`[InputText] CtrlProxy iOS setText failed: ${result.error} totalMs=${Date.now() - startMs}`);
       return {
         success: false,
         text,
@@ -137,6 +140,8 @@ export class InputText extends BaseVisualChange {
         method: "a11y"
       };
     }
+
+    logger.debug(`[InputText] iOS setText ok totalMs=${Date.now() - startMs}`);
 
     // Handle IME action if specified (CtrlProxy iOS supports this)
     if (imeAction) {

@@ -442,24 +442,35 @@ export class SetUIState extends BaseVisualChange {
             return { success: false, error: "value is required for text fields" };
           }
 
+          const selectorDesc = this.describeSelector(fieldSpec.selector);
+
           // Tap to focus
+          logger.debug(`[SetUIState] text.tap selector=${selectorDesc}`);
+          const tapStart = Date.now();
           const tapResult = await tapOnElement.execute(
             this.buildTapOptions(fieldSpec.selector, "tap"),
             progress,
             signal
           );
+          logger.debug(`[SetUIState] text.tap done selector=${selectorDesc} success=${tapResult.success} totalMs=${Date.now() - tapStart}${tapResult.error ? ` error=${tapResult.error}` : ""}`);
           if (!tapResult.success) {
             return { success: false, error: `Failed to tap on field: ${tapResult.error}` };
           }
 
           // Clear existing text
+          logger.debug(`[SetUIState] text.clear selector=${selectorDesc}`);
+          const clearStart = Date.now();
           const clearResult = await clearText.execute(progress);
+          logger.debug(`[SetUIState] text.clear done selector=${selectorDesc} success=${clearResult.success} totalMs=${Date.now() - clearStart}${clearResult.error ? ` error=${clearResult.error}` : ""}`);
           if (!clearResult.success) {
             return { success: false, error: `Failed to clear text: ${clearResult.error}` };
           }
 
           // Input new text
+          logger.debug(`[SetUIState] text.input selector=${selectorDesc} textLength=${fieldSpec.value.length}`);
+          const inputStart = Date.now();
           const inputResult = await inputText.execute(fieldSpec.value);
+          logger.debug(`[SetUIState] text.input done selector=${selectorDesc} success=${inputResult.success} totalMs=${Date.now() - inputStart}${inputResult.error ? ` error=${inputResult.error}` : ""}`);
           if (!inputResult.success) {
             return { success: false, error: `Failed to input text: ${inputResult.error}` };
           }

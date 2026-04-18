@@ -6,7 +6,11 @@ public struct AutoMobileConfiguration: Sendable
   public let sessionTimeoutMs: Int
   public let eventProcessors: [any EventProcessing]
   public let maxPendingEvents: Int
-  public init( bufferSize: Int = 50, flushIntervalMs: Int = 500, maxBreadcrumbs: Int = 100, sessionTimeoutMs: Int = 30_000, eventProcessors: [any EventProcessing] = [], maxPendingEvents: Int = 500 )
+  public let enableCrashReporting: Bool
+  public let enableSignalHandlers: Bool
+  public let enableNetworkCapture: Bool
+  public let enableHangDetection: Bool
+  public init( bufferSize: Int = 50, flushIntervalMs: Int = 500, maxBreadcrumbs: Int = 100, sessionTimeoutMs: Int = 30_000, eventProcessors: [any EventProcessing] = [], maxPendingEvents: Int = 500, enableCrashReporting: Bool = true, enableSignalHandlers: Bool = false, enableNetworkCapture: Bool = true, enableHangDetection: Bool = true )
   public static let `default` = AutoMobileConfiguration()
 
 // AutoMobileSDK.swift
@@ -21,17 +25,16 @@ public final class AutoMobileSDK: @unchecked Sendable
   public func notifyNavigationEvent(_ event: NavigationEvent)
   public var listenerCount: Int
   public func currentSessionId() -> String?
+  public func addBreadcrumb( message: String, category: BreadcrumbCategory = .custom, metadata: [String: String] = [:] )
+  public func shutdown()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
   public var isInitialized: Bool
   public var configuration: AutoMobileConfiguration?
   public var bundleId: String?
-  public func getEventBuffer() -> SdkEventBuffer?
-  public var sdkContext: SdkContext?
   public func setUserId(_ userId: String?)
   public func setTag(_ key: String, value: String)
   public func removeTag(_ key: String)
-  public var dropCounter: (any DropCounting)?
   public var dropReport: [DropReason: Int]
 
 // Biometrics/AutoMobileBiometrics.swift
@@ -39,7 +42,7 @@ public enum BiometricResult: Sendable, Equatable
 public final class AutoMobileBiometrics: @unchecked Sendable
   public static let shared = AutoMobileBiometrics()
   public static let overrideNotification = Notification.Name( "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE" )
-  public func overrideResult(_ result: BiometricResult, ttlMs: Double = 5000)
+  public func overrideResult(_ result: BiometricResult, ttlMs: Int64 = 5000)
   public func consumeOverride() -> BiometricResult?
   public func clearOverride()
   public var hasOverride: Bool
@@ -63,16 +66,6 @@ public final class BreadcrumbTrail: BreadcrumbTracking, @unchecked Sendable
   public static func clearDisk(directory: URL? = nil)
 
 // Context/SdkContext.swift
-public final class SdkContext: @unchecked Sendable
-  public init()
-  public var sessionId: String?
-  public var userId: String?
-  public var appVersion: String?
-  public func setTag(_ key: String, value: String)
-  public func removeTag(_ key: String)
-  public func clearTags()
-  public func snapshot() -> SdkContextSnapshot
-  public func reset()
 public struct SdkContextSnapshot: Codable, Sendable, Equatable
   public let sessionId: String?
   public let userId: String?
@@ -86,22 +79,8 @@ public final class AutoMobileCrashes: @unchecked Sendable
   public var isInitialized: Bool
   public func enableSignalHandlers()
 
-// DateProvider.swift
-public protocol DateProvider: Sendable
-public struct SystemDateProvider: DateProvider, Sendable
-  public init()
-  public func now() -> Date
-
 // Events/DropCounter.swift
 public enum DropReason: String, Codable, Sendable, CaseIterable
-public protocol DropCounting: AnyObject, Sendable
-public extension DropCounting
-public final class DefaultDropCounter: DropCounting, @unchecked Sendable
-  public init()
-  public func increment(_ reason: DropReason)
-  public func increment(_ reason: DropReason, count: Int)
-  public func snapshot() -> [DropReason: Int]
-  public func reset()
 
 // Events/EventProcessor.swift
 public protocol EventProcessing: Sendable
@@ -110,7 +89,7 @@ public protocol EventProcessing: Sendable
 public protocol SdkEvent: Codable, Sendable
 public enum SdkEventType: String, Codable, Sendable
 public struct SdkNavigationEvent: SdkEvent
-  public let eventType: SdkEventType = .navigation
+  public private(set) var eventType: SdkEventType = .navigation
   public let timestamp: Int64
   public let destination: String
   public let source: NavigationSourceType
@@ -118,7 +97,7 @@ public struct SdkNavigationEvent: SdkEvent
   public let metadata: [String: String]
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), destination: String, source: NavigationSourceType, arguments: [String: String] = [:], metadata: [String: String] = [:] )
 public struct SdkHandledExceptionEvent: SdkEvent
-  public let eventType: SdkEventType = .handledException
+  public private(set) var eventType: SdkEventType = .handledException
   public let timestamp: Int64
   public let errorDomain: String
   public let errorMessage: String?
@@ -130,7 +109,7 @@ public struct SdkHandledExceptionEvent: SdkEvent
   public let deviceInfo: SdkDeviceInfo
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), errorDomain: String, errorMessage: String?, stackTrace: String, customMessage: String?, currentScreen: String?, bundleId: String, appVersion: String?, deviceInfo: SdkDeviceInfo )
 public struct SdkCrashEvent: SdkEvent
-  public let eventType: SdkEventType = .crash
+  public private(set) var eventType: SdkEventType = .crash
   public let timestamp: Int64
   public let errorDomain: String
   public let errorMessage: String?
@@ -141,14 +120,14 @@ public struct SdkCrashEvent: SdkEvent
   public let deviceInfo: SdkDeviceInfo
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), errorDomain: String, errorMessage: String?, stackTrace: String, currentScreen: String?, bundleId: String, appVersion: String?, deviceInfo: SdkDeviceInfo )
 public struct SdkHangEvent: SdkEvent
-  public let eventType: SdkEventType = .hang
+  public private(set) var eventType: SdkEventType = .hang
   public let timestamp: Int64
   public let durationMs: Double
   public let stackTrace: String?
   public let bundleId: String
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), durationMs: Double, stackTrace: String?, bundleId: String )
 public struct SdkNetworkRequestEvent: SdkEvent
-  public let eventType: SdkEventType = .networkRequest
+  public private(set) var eventType: SdkEventType = .networkRequest
   public let timestamp: Int64
   public let url: String
   public let method: String
@@ -166,7 +145,7 @@ public struct SdkNetworkRequestEvent: SdkEvent
   public let contentType: String?
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, host: String? = nil, path: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
 public struct SdkWebSocketFrameEvent: SdkEvent
-  public let eventType: SdkEventType = .webSocketFrame
+  public private(set) var eventType: SdkEventType = .webSocketFrame
   public let timestamp: Int64
   public let url: String
   public let direction: WebSocketFrameDirection
@@ -176,7 +155,7 @@ public struct SdkWebSocketFrameEvent: SdkEvent
 public enum WebSocketFrameDirection: String, Codable, Sendable
 public enum WebSocketFrameType: String, Codable, Sendable
 public struct SdkLogEvent: SdkEvent
-  public let eventType: SdkEventType = .log
+  public private(set) var eventType: SdkEventType = .log
   public let timestamp: Int64
   public let level: LogLevel
   public let tag: String?
@@ -185,23 +164,28 @@ public struct SdkLogEvent: SdkEvent
 public enum LogLevel: Int, Codable, Sendable, Comparable
   public static func < (lhs: LogLevel, rhs: LogLevel) -> Bool
 public struct SdkLifecycleEvent: SdkEvent
-  public let eventType: SdkEventType = .lifecycle
+  public private(set) var eventType: SdkEventType = .lifecycle
   public let timestamp: Int64
   public let state: String
   public let bundleId: String?
   public let details: [String: String]
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), state: String, bundleId: String? = nil, details: [String: String] = [:] )
 public struct SdkNotificationActionEvent: SdkEvent
-  public let eventType: SdkEventType = .notificationAction
+  public private(set) var eventType: SdkEventType = .notificationAction
   public let timestamp: Int64
   public let actionId: String
   public let notificationTitle: String?
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), actionId: String, notificationTitle: String? = nil )
 public struct SdkViewBodySnapshotEvent: SdkEvent
-  public let eventType: SdkEventType = .viewBodySnapshot
+  public private(set) var eventType: SdkEventType = .viewBodySnapshot
   public let timestamp: Int64
   public let snapshots: [ViewBodySnapshot]
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), snapshots: [ViewBodySnapshot] )
+public struct SdkViewHierarchyEvent: SdkEvent
+  public private(set) var eventType: SdkEventType = .viewHierarchy
+  public let timestamp: Int64
+  public let hierarchy: SdkViewHierarchy
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), hierarchy: SdkViewHierarchy )
 public struct ViewBodySnapshot: Codable, Sendable
   public let id: String
   public let viewName: String?
@@ -221,20 +205,20 @@ public struct SdkEventEnvelope: Codable, Sendable
   public let payload: Data
   public init<E: SdkEvent>(_ event: E) throws
 public struct SdkBroadcastEvent: SdkEvent
-  public let eventType: SdkEventType = .broadcast
+  public private(set) var eventType: SdkEventType = .broadcast
   public let timestamp: Int64
   public let action: String
   public let categories: [String]?
   public let infoKeyTypes: [String: String]?
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), action: String, categories: [String]? = nil, infoKeyTypes: [String: String]? = nil )
 public struct SdkInteractionEvent: SdkEvent
-  public let eventType: SdkEventType = .interaction
+  public private(set) var eventType: SdkEventType = .interaction
   public let timestamp: Int64
   public let interactionType: String
   public let properties: [String: String]
   public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), interactionType: String, properties: [String: String] = [:] )
 public struct SdkStorageChangedEvent: SdkEvent
-  public let eventType: SdkEventType = .storageChanged
+  public private(set) var eventType: SdkEventType = .storageChanged
   public let timestamp: Int64
   public let suiteName: String?
   public let key: String?
@@ -247,34 +231,6 @@ public struct SdkEventBatch: Codable, Sendable
   public let events: [SdkEventEnvelope]
   public let timestamp: Int64
   public init( bundleId: String?, events: [SdkEventEnvelope], timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000) )
-
-// Events/SdkEventBroadcaster.swift
-public protocol EventBroadcasting: Sendable
-public final class SdkEventBroadcaster: EventBroadcasting, @unchecked Sendable
-  public static let eventBatchNotification = Notification.Name( "dev.jasonpearson.automobile.sdk.EVENT_BATCH" )
-  public static let eventBatchUserInfoKey = "eventBatch"
-  public static let shared = SdkEventBroadcaster()
-  public var persistence: (any EventPersisting)?
-  public var retryPolicy: RetryPolicy = RetryPolicy()
-  public func setCtrlProxyUrl(_ url: URL?)
-  public func broadcastBatch(bundleId: String?, events: [any SdkEvent])
-  public func replayPending(bundleId: String?)
-
-// Events/SdkEventBuffer.swift
-public protocol EventBuffering: AnyObject, Sendable
-public final class SdkEventBuffer: EventBuffering, @unchecked Sendable
-  public init( maxBufferSize: Int = 50, flushIntervalMs: Int = 500, maxPendingEvents: Int = 500, processors: [any EventProcessing] = [], timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() }, dropCounter: (any DropCounting)? = nil, onFlush: @escaping @Sendable ([any SdkEvent]) throws -> Void )
-  public var isBufferEnabled: Bool
-  public func start()
-  public func stop()
-  public func add(_ event: any SdkEvent)
-  public func flush()
-  public func shutdown()
-public protocol TimerScheduling: AnyObject, Sendable
-public final class GCDTimer: TimerScheduling, @unchecked Sendable
-  public init()
-  public func schedule(intervalMs: Int, block: @escaping @Sendable () -> Void)
-  public func cancel()
 
 // Failures/AutoMobileFailures.swift
 public final class AutoMobileFailures: @unchecked Sendable
@@ -314,8 +270,18 @@ public final class AutoMobileInteractionTracker: @unchecked Sendable
   public func recordTap(from recognizer: UITapGestureRecognizer, in view: UIView)
 
 // Logging/AutoMobileLog.swift
+public struct LogFilter: Sendable
+  public let name: String
+  public let tagPattern: NSRegularExpression?
+  public let messagePattern: NSRegularExpression?
+  public let minLevel: LogLevel
+  public init( name: String, tagPattern: NSRegularExpression? = nil, messagePattern: NSRegularExpression? = nil, minLevel: LogLevel = .verbose )
 public final class AutoMobileLog: @unchecked Sendable
   public static let shared = AutoMobileLog()
+  public func addFilter( name: String, tagPattern: NSRegularExpression? = nil, messagePattern: NSRegularExpression? = nil, minLevel: LogLevel = .verbose )
+  public func removeFilter(name: String)
+  public func clearFilters()
+  public var filterNames: [String]
   public func v(_ tag: String? = nil, _ message: String)
   public func d(_ tag: String? = nil, _ message: String)
   public func i(_ tag: String? = nil, _ message: String)
@@ -357,6 +323,20 @@ public final class BlockNavigationListener: NavigationListener, @unchecked Senda
 public enum NavigationSource: String, Sendable, CaseIterable
 
 // Network/AutoMobileNetwork.swift
+public struct NetworkRequestRecord: Sendable
+  public let url: String
+  public let method: String
+  public var requestHeaders: [String: String]?
+  public var requestBodySize: Int?
+  public var statusCode: Int?
+  public var responseHeaders: [String: String]?
+  public var responseBodySize: Int?
+  public var durationMs: Double?
+  public var error: String?
+  public var requestBody: String?
+  public var responseBody: String?
+  public var contentType: String?
+  public init( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
 public final class AutoMobileNetwork: @unchecked Sendable
   public static let shared = AutoMobileNetwork()
   public static func isTextContentType(_ contentType: String?) -> Bool
@@ -366,6 +346,7 @@ public final class AutoMobileNetwork: @unchecked Sendable
   public func setCaptureBodies(_ capture: Bool)
   public func setMaxBodyBytes(_ bytes: Int)
   public func protocolClass() -> AnyClass
+  public func recordRequest(_ record: NetworkRequestRecord)
   public func recordRequest( url: String, method: String, requestHeaders: [String: String]? = nil, requestBodySize: Int? = nil, statusCode: Int? = nil, responseHeaders: [String: String]? = nil, responseBodySize: Int? = nil, durationMs: Double? = nil, error: String? = nil, requestBody: String? = nil, responseBody: String? = nil, contentType: String? = nil )
   public func recordWebSocketFrame( url: String, direction: WebSocketFrameDirection, frameType: WebSocketFrameType, payloadSize: Int? = nil )
 public class AutoMobileURLProtocol: URLProtocol
@@ -409,25 +390,6 @@ public final class AutoMobileOsEvents: @unchecked Sendable
   public static let shared = AutoMobileOsEvents()
   public var isEnabled: Bool
   public func setEnabled(_ enabled: Bool)
-
-// Persistence/EventPersistence.swift
-public protocol EventPersisting: AnyObject, Sendable
-public final class FileEventPersistence: EventPersisting, @unchecked Sendable
-  public init(directory: URL, dateProvider: DateProvider = SystemDateProvider())
-  public func persist(_ events: [any SdkEvent]) -> String?
-  public func loadPending() -> [(batchId: String, events: [any SdkEvent])]
-  public func removeBatch(_ batchId: String)
-  public func cleanup(maxAgeDays: Int = 7)
-
-// Session/SessionTracker.swift
-public protocol SessionTracking: AnyObject, Sendable
-public final class SessionTracker: SessionTracking, @unchecked Sendable
-public enum State
-  public init( timeoutMs: Int = 30_000, uuidProvider: @escaping () -> String = { UUID().uuidString }, timerFactory: @escaping () -> any TimerScheduling = { GCDTimer() } )
-  public func currentSessionId() -> String?
-  public func onForeground()
-  public func onBackground()
-  public func shutdown()
 
 // Storage/DatabaseInspector.swift
 public final class DatabaseInspector: @unchecked Sendable
@@ -501,7 +463,7 @@ public enum KeyValueType: String, Sendable
 public final class ViewBodyTracker: @unchecked Sendable
   public static let shared = ViewBodyTracker()
   public var isEnabled: Bool
-  public func setEnabled(_ enabled: Bool, timerFactory: (() -> any TimerScheduling)? = nil)
+  public func setEnabled(_ enabled: Bool)
   public func recordBodyEvaluation( id: String, viewName: String? = nil )
   public func recordDuration(id: String, durationMs: Double)
   public func getSnapshots() -> [ViewBodySnapshot]
@@ -511,3 +473,55 @@ public extension View
 public struct MeasureViewBody<Content: View>: View
   public init( id: String, viewName: String? = nil, @ViewBuilder content: @escaping () -> Content )
   public var body: some View
+
+// ViewHierarchy/SdkViewNode.swift
+public struct SdkViewHierarchy: Codable, Sendable
+  public let timestamp: Int64
+  public let bundleId: String?
+  public let screenScale: Float
+  public let screenWidth: Int
+  public let screenHeight: Int
+  public let root: SdkViewNode?
+  public init( timestamp: Int64 = Int64(Date().timeIntervalSince1970 * 1000), bundleId: String? = nil, screenScale: Float, screenWidth: Int, screenHeight: Int, root: SdkViewNode? )
+public struct SdkViewNode: Codable, Sendable
+  public let className: String
+  public let bounds: SdkBounds
+  public let accessibilityLabel: String?
+  public let accessibilityIdentifier: String?
+  public let isAccessibilityElement: Bool
+  public let accessibilityElementsHidden: Bool
+  public let accessibilityTraits: [String]
+  public let accessibilityCustomActions: [String]
+  public let gestureRecognizers: [SdkGestureInfo]
+  public let alpha: Float
+  public let backgroundColor: String?
+  public let cornerRadius: Float
+  public let isHidden: Bool
+  public let isUserInteractionEnabled: Bool
+  public let hasTapTarget: Bool
+  public let isOccluded: Bool
+  public let children: [SdkViewNode]?
+  public init( className: String, bounds: SdkBounds, accessibilityLabel: String? = nil, accessibilityIdentifier: String? = nil, isAccessibilityElement: Bool = false, accessibilityElementsHidden: Bool = false, accessibilityTraits: [String] = [], accessibilityCustomActions: [String] = [], gestureRecognizers: [SdkGestureInfo] = [], alpha: Float = 1.0, backgroundColor: String? = nil, cornerRadius: Float = 0, isHidden: Bool = false, isUserInteractionEnabled: Bool = true, hasTapTarget: Bool = false, isOccluded: Bool = false, children: [SdkViewNode]? = nil )
+public struct SdkBounds: Codable, Sendable, Hashable
+  public let left: Int
+  public let top: Int
+  public let right: Int
+  public let bottom: Int
+  public init(left: Int, top: Int, right: Int, bottom: Int)
+  public var width: Int
+  public var height: Int
+public struct SdkGestureInfo: Codable, Sendable
+  public let type: String
+  public let isEnabled: Bool
+  public init(type: String, isEnabled: Bool)
+
+// ViewHierarchy/ViewHierarchyTracker.swift
+public final class ViewHierarchyTracker: @unchecked Sendable
+  public static let shared = ViewHierarchyTracker()
+  public func getLatestHierarchy() -> SdkViewHierarchy?
+  public func walkNow() -> SdkViewHierarchy
+
+// ViewHierarchy/ViewHierarchyWalker.swift
+public enum ViewHierarchyWalker
+  public static func walk(bundleId: String? = nil) -> SdkViewHierarchy
+  public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int

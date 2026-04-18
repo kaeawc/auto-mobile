@@ -335,10 +335,13 @@ public final class AutoMobileNetwork: @unchecked Sendable {
             return AutoMobileNetwork.utf8String(from: data.prefix(maxBytes))
         }()
 
+        // Prefer task.countOfBytesReceived (full transfer size) over receivedData.count,
+        // since delegates often buffer only a prefix to avoid retaining large payloads.
         let responseBodySize: Int? = {
-            if let data = receivedData { return data.count }
             let received = Int(task.countOfBytesReceived)
-            return received > 0 ? received : nil
+            if received > 0 { return received }
+            if let data = receivedData { return data.count }
+            return nil
         }()
 
         recordRequest(NetworkRequestRecord(

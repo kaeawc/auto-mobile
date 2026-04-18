@@ -92,16 +92,25 @@ public final class AutoMobileSDK: @unchecked Sendable {
 
         // Initialize subsystems
         AutoMobileLog.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
-        AutoMobileNetwork.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        if configuration.enableNetworkCapture {
+            AutoMobileNetwork.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+        }
         AutoMobileFailures.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         let trail = BreadcrumbTrail(maxSize: configuration.maxBreadcrumbs)
         lock.lock()
         _breadcrumbTrail = trail
         lock.unlock()
 
-        AutoMobileCrashes.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
-        AutoMobileHangs.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
-        AutoMobileHangs.shared.startMonitoring()
+        if configuration.enableCrashReporting {
+            AutoMobileCrashes.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+            if configuration.enableSignalHandlers {
+                AutoMobileCrashes.shared.enableSignalHandlers()
+            }
+        }
+        if configuration.enableHangDetection {
+            AutoMobileHangs.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
+            AutoMobileHangs.shared.startMonitoring()
+        }
         AutoMobileOsEvents.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileNotificationObserver.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)
         AutoMobileInteractionTracker.shared.initialize(bundleId: resolvedBundleId, buffer: buffer)

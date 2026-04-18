@@ -6,7 +6,11 @@ public struct AutoMobileConfiguration: Sendable
   public let sessionTimeoutMs: Int
   public let eventProcessors: [any EventProcessing]
   public let maxPendingEvents: Int
-  public init( bufferSize: Int = 50, flushIntervalMs: Int = 500, maxBreadcrumbs: Int = 100, sessionTimeoutMs: Int = 30_000, eventProcessors: [any EventProcessing] = [], maxPendingEvents: Int = 500 )
+  public let enableCrashReporting: Bool
+  public let enableSignalHandlers: Bool
+  public let enableNetworkCapture: Bool
+  public let enableHangDetection: Bool
+  public init( bufferSize: Int = 50, flushIntervalMs: Int = 500, maxBreadcrumbs: Int = 100, sessionTimeoutMs: Int = 30_000, eventProcessors: [any EventProcessing] = [], maxPendingEvents: Int = 500, enableCrashReporting: Bool = true, enableSignalHandlers: Bool = false, enableNetworkCapture: Bool = true, enableHangDetection: Bool = true )
   public static let `default` = AutoMobileConfiguration()
 
 // AutoMobileSDK.swift

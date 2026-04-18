@@ -249,10 +249,20 @@ public final class AutoMobileSDK: @unchecked Sendable {
     /// Shuts down the SDK, releasing all resources.
     /// After calling this method, `initialize` may be called again to restart the SDK.
     public func shutdown() {
-        // Reset all subsystems in reverse initialization order
+        lock.lock()
+        let config = _configuration
+        lock.unlock()
+
+        // Reset all subsystems in reverse initialization order. Skip any
+        // subsystem that was never initialized (per configuration flags) so
+        // shutdown() does not clobber host-app handlers we never replaced.
         SwiftUINavigationAdapter.shared.stop()
-        AutoMobileCrashes.shared.reset()
-        AutoMobileHangs.shared.reset()
+        if config?.enableCrashReporting ?? true {
+            AutoMobileCrashes.shared.reset()
+        }
+        if config?.enableHangDetection ?? true {
+            AutoMobileHangs.shared.reset()
+        }
         AutoMobileOsEvents.shared.reset()
         AutoMobileNotificationObserver.shared.reset()
         AutoMobileInteractionTracker.shared.reset()
@@ -262,7 +272,9 @@ public final class AutoMobileSDK: @unchecked Sendable {
         #endif
         UserDefaultsInspector.shared.reset()
         DatabaseInspector.shared.reset()
-        AutoMobileNetwork.shared.reset()
+        if config?.enableNetworkCapture ?? true {
+            AutoMobileNetwork.shared.reset()
+        }
         AutoMobileFailures.shared.reset()
         AutoMobileBiometrics.shared.reset()
         AutoMobileLog.shared.reset()
@@ -319,6 +331,7 @@ public final class AutoMobileSDK: @unchecked Sendable {
         _isEnabled = enabled
         let buffer = eventBuffer
         let initialized = _isInitialized
+        let config = _configuration
         lock.unlock()
 
         buffer?.isBufferEnabled = enabled
@@ -328,13 +341,20 @@ public final class AutoMobileSDK: @unchecked Sendable {
             buffer?.stop()
         }
 
-        // Propagate to all subsystems (only if initialized)
+        // Propagate to all subsystems (only if initialized). Skip subsystems
+        // the host opted out of at init time so toggling setEnabled(true)
+        // cannot start a watchdog or register URLProtocol that the host
+        // explicitly disabled.
         guard initialized else { return }
-        AutoMobileHangs.shared.setEnabled(enabled)
+        if config?.enableHangDetection ?? true {
+            AutoMobileHangs.shared.setEnabled(enabled)
+        }
         AutoMobileOsEvents.shared.setEnabled(enabled)
         AutoMobileNotificationObserver.shared.setEnabled(enabled)
         AutoMobileInteractionTracker.shared.setEnabled(enabled)
-        AutoMobileNetwork.shared.setEnabled(enabled)
+        if config?.enableNetworkCapture ?? true {
+            AutoMobileNetwork.shared.setEnabled(enabled)
+        }
         // Crashes: signal handlers can't be safely uninstalled; the exception handler
         // already checks AutoMobileSDK.shared.isEnabled before posting events.
     }

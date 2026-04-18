@@ -525,3 +525,45 @@ public final class ViewHierarchyTracker: @unchecked Sendable
 public enum ViewHierarchyWalker
   public static func walk(bundleId: String? = nil) -> SdkViewHierarchy
   public static func computeHash(_ hierarchy: SdkViewHierarchy) -> Int
+
+// Public/AutoMobileAPI.swift
+public protocol AutoMobileAPI: AnyObject, Sendable
+  func initialize()
+  func initialize(configuration: AutoMobileConfiguration)
+  func shutdown()
+  var isEnabled: Bool { get }
+  func setEnabled(_ enabled: Bool)
+  var isInitialized: Bool { get }
+  func addNavigationListener(_ listener: NavigationListener)
+  @discardableResult func addNavigationListener(_ block: @escaping @Sendable (NavigationEvent) -> Void) -> NavigationListener
+  func removeNavigationListener(_ listener: NavigationListener)
+  func clearNavigationListeners()
+  func notifyNavigationEvent(_ event: NavigationEvent)
+  var listenerCount: Int { get }
+  func currentSessionId() -> String?
+  func addBreadcrumb(message: String, category: BreadcrumbCategory, metadata: [String: String])
+  func setUserId(_ userId: String?)
+  func setTag(_ key: String, value: String)
+  func removeTag(_ key: String)
+  var configuration: AutoMobileConfiguration? { get }
+  var bundleId: String? { get }
+  var dropReport: [DropReason: Int] { get }
+
+// Public/DefaultAutoMobileAPI.swift
+public final class DefaultAutoMobileAPI: AutoMobileAPI, @unchecked Sendable
+  public init()
+
+// Public/AutoMobileNetworkAPI.swift
+public protocol AutoMobileNetworkAPI: AnyObject, Sendable
+  func recordRequest(_ record: NetworkRequestRecord)
+  func setCaptureHeaders(_ enabled: Bool)
+  func setCaptureBodies(_ enabled: Bool)
+public final class DefaultAutoMobileNetworkAPI: AutoMobileNetworkAPI, @unchecked Sendable
+  public init()
+
+// Public/AutoMobileCrashesAPI.swift
+public protocol AutoMobileCrashesAPI: AnyObject, Sendable
+  func enableSignalHandlers()
+  func setCurrentScreenProvider(_ provider: (@Sendable () -> String?)?)
+public final class DefaultAutoMobileCrashesAPI: AutoMobileCrashesAPI, @unchecked Sendable
+  public init()

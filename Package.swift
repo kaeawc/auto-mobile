@@ -9,11 +9,23 @@ let package = Package(
     ],
     products: [
         .library(
+            name: "AutoMobileSDK",
+            targets: ["AutoMobileSDK"]
+        ),
+        .library(
             name: "XCTestRunner",
             targets: ["XCTestRunner"]
         ),
     ],
+    dependencies: [
+        .package(url: "https://github.com/apple/swift-docc-plugin", from: "1.4.3"),
+    ],
     targets: [
+        .target(
+            name: "AutoMobileSDK",
+            path: "ios/auto-mobile-sdk/Sources/AutoMobileSDK",
+            resources: [.process("PrivacyInfo.xcprivacy")]
+        ),
         .target(
             name: "XCTestRunner",
             path: "ios/XCTestRunner/Sources/XCTestRunner"

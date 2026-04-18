@@ -5551,6 +5551,10 @@
           },
           "additionalProperties": false
         },
+        "preTapStability": {
+          "description": "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content.",
+          "type": "boolean"
+        },
         "platform": {
           "type": "string",
           "enum": [

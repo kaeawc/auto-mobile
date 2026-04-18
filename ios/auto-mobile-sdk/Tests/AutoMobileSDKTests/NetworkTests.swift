@@ -161,4 +161,85 @@ final class AutoMobileNetworkTests: XCTestCase {
         XCTAssertEqual(event?.frameType, .text)
         XCTAssertEqual(event?.payloadSize, 256)
     }
+
+    // MARK: - recordFromTask (delegate-based API)
+
+    func testRecordFromTaskWithError() {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        AutoMobileNetwork.shared.setCaptureHeaders(true)
+
+        var request = URLRequest(url: URL(string: "https://api.example.com/fail")!)
+        request.httpMethod = "POST"
+        request.setValue("Bearer token", forHTTPHeaderField: "Authorization")
+        let task = URLSession.shared.dataTask(with: request)
+
+        let startTime = Date(timeIntervalSinceNow: -0.25)
+        let error = URLError(.notConnectedToInternet)
+        AutoMobileNetwork.shared.recordFromTask(task, startTime: startTime, receivedData: nil, error: error)
+
+        buffer.flush()
+
+        XCTAssertEqual(collector.events.count, 1)
+        let event = collector.events.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(event?.url, "https://api.example.com/fail")
+        XCTAssertEqual(event?.method, "POST")
+        XCTAssertNotNil(event?.error)
+        XCTAssertNil(event?.statusCode)
+        XCTAssertEqual(event?.requestHeaders?["Authorization"], "Bearer token")
+        XCTAssertNotNil(event?.durationMs)
+        XCTAssertGreaterThan(event?.durationMs ?? 0, 0)
+    }
+
+    func testRecordFromTaskSuccessWithoutResponseStillRecords() {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+
+        var request = URLRequest(url: URL(string: "https://api.example.com/users?page=1")!)
+        request.httpMethod = "GET"
+        let task = URLSession.shared.dataTask(with: request)
+
+        AutoMobileNetwork.shared.recordFromTask(
+            task,
+            startTime: Date(timeIntervalSinceNow: -0.1),
+            receivedData: nil,
+            error: nil
+        )
+
+        buffer.flush()
+
+        XCTAssertEqual(collector.events.count, 1)
+        let event = collector.events.first as? SdkNetworkRequestEvent
+        XCTAssertEqual(event?.url, "https://api.example.com/users?page=1")
+        XCTAssertEqual(event?.method, "GET")
+        XCTAssertEqual(event?.host, "api.example.com")
+        XCTAssertEqual(event?.path, "/users")
+        XCTAssertNotNil(event?.durationMs)
+    }
+
+    func testRecordFromTaskShortCircuitsWhenDisabled() {
+        let collector = EventCollector()
+        let buffer = SdkEventBuffer(maxBufferSize: 100, flushIntervalMs: 60000) { events in
+            collector.collect(events)
+        }
+        AutoMobileNetwork.shared.initialize(bundleId: "test", buffer: buffer)
+        AutoMobileNetwork.shared.setEnabled(false)
+
+        let task = URLSession.shared.dataTask(with: URL(string: "https://api.example.com/x")!)
+        AutoMobileNetwork.shared.recordFromTask(
+            task,
+            startTime: Date(),
+            receivedData: nil,
+            error: URLError(.timedOut)
+        )
+
+        buffer.flush()
+        XCTAssertEqual(collector.events.count, 0)
+    }
 }

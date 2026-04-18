@@ -123,6 +123,18 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertFalse(AutoMobileCrashes.shared.isInitialized)
     }
 
+    func testSignalHandlersRequireCrashReporting() {
+        // enableSignalHandlers is a no-op when crash reporting is disabled:
+        // signal handlers can't usefully run without the exception handler
+        // having been installed.
+        let config = AutoMobileConfiguration(
+            enableCrashReporting: false,
+            enableSignalHandlers: true
+        )
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        XCTAssertFalse(AutoMobileCrashes.shared.isInitialized)
+    }
+
     func testDisablingHangDetectionSkipsMonitoring() {
         let config = AutoMobileConfiguration(enableHangDetection: false)
         AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)

@@ -428,6 +428,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // Execute the tool
           logger.info(`[PLAN_STEP_${i + 1}] Calling ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`);
           const response = await tool.handler(parsedParams, undefined, signal);
+          throwIfAborted(signal);
 
           // Extract the actual tool result from the response.
           // Tool handlers return MCP-formatted responses via createJSONToolResponse():
@@ -907,6 +908,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             `[PARALLEL_EXEC][${device}] Executing ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`
           );
           const response = await tool.handler(parsedParams, undefined, signal);
+          throwIfAborted(signal);
 
           // Unwrap MCP-formatted responses (same as sequential path) so that
           // failures inside { content: [{ text: '{"success":false,...}' }] }

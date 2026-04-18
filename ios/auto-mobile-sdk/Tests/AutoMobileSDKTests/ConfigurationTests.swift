@@ -165,6 +165,29 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(before, after)
     }
 
+    func testRepeatedShutdownPreservesHostExceptionHandler() {
+        let sentinel: @convention(c) (NSException) -> Void = { _ in }
+        let previous = NSGetUncaughtExceptionHandler()
+        NSSetUncaughtExceptionHandler(sentinel)
+        defer { NSSetUncaughtExceptionHandler(previous) }
+
+        let before = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+
+        let config = AutoMobileConfiguration(enableCrashReporting: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        AutoMobileSDK.shared.shutdown()
+        // Second shutdown after _configuration has been cleared must remain
+        // safe and must not clobber the host app's handler.
+        AutoMobileSDK.shared.shutdown()
+
+        let after = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+        XCTAssertEqual(before, after)
+    }
+
     func testSetEnabledRespectsHangDetectionOptOut() {
         let config = AutoMobileConfiguration(enableHangDetection: false)
         AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)

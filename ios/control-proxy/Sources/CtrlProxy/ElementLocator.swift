@@ -49,7 +49,7 @@ public class ElementLocator: ElementLocating {
         /// The foreground app we're currently observing (not springboard)
         /// At most one instance besides springboard should exist
         private var foregroundApp: XCUIApplication?
-        private var foregroundBundleId: String?
+        public private(set) var foregroundBundleId: String?
 
         /// Springboard app for detecting foreground app - always kept
         private lazy var springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -1175,6 +1175,8 @@ public class ElementLocator: ElementLocating {
         public func awaitAppState(bundleId _: String, expectedState _: AppStateExpectation) -> Bool {
             return true
         }
+
+        public var foregroundBundleId: String? { nil }
     #endif
 
     // MARK: - Same-Type Child Collapsing & Sibling Dedup

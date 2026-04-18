@@ -143,6 +143,7 @@ nav:
               - 'CI Integration': design-docs/plat/android/junit-runner/ci-integration.md
               - 'CI daemon logs': design-docs/plat/android/junit-runner/ci-daemon-logs.md
               - 'Plan failure observation': design-docs/plat/android/junit-runner/ci-plan-failure-observation.md
+              - 'Diagnosing daemon connectivity': design-docs/plat/android/junit-runner/diagnosing-daemon-mcp-connectivity.md
               - 'CI app launch troubleshooting': design-docs/plat/android/junit-runner/ci-troubleshooting-app-launch.md
               - 'Agent brief (app not foreground)': design-docs/plat/android/junit-runner/agent-brief-app-not-foreground.md
             - 'IDE Plugin':
@@ -157,6 +158,7 @@ nav:
               - 'Biometrics stubbing': design-docs/plat/android/biometrics.md
               - 'Notification triggering': design-docs/plat/android/notifications.md
               - 'System tray lookFor': design-docs/plat/android/system-tray-lookfor.md
+              - 'tapOn pre-tap stability': design-docs/plat/android/tapOn-pre-tap-stability-and-search-flakes.md
               - 'Clipboard tool': design-docs/plat/android/clipboard.md
             - 'Feature Ideas':
               - 'Overview': design-docs/plat/android/feature-ideas.md

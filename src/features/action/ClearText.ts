@@ -106,19 +106,21 @@ export class ClearText extends BaseVisualChange {
    * Execute iOS-specific clear text using CtrlProxy iOS.
    */
   private async executeiOSClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
+    const startMs = Date.now();
+    logger.debug(`[ClearText] iOS begin`);
     try {
       const client = IOSCtrlProxyClient.getInstance(this.device);
       const result = await client.requestClearText();
 
       if (result.success) {
-        logger.info(`[ClearText] Cleared text via CtrlProxy iOS`);
+        logger.info(`[ClearText] Cleared text via CtrlProxy iOS totalMs=${Date.now() - startMs}`);
         return { success: true };
       }
 
-      logger.warn(`[ClearText] CtrlProxy iOS clear failed: ${result.error}`);
+      logger.warn(`[ClearText] CtrlProxy iOS clear failed: ${result.error} totalMs=${Date.now() - startMs}`);
       return { success: false, error: result.error };
     } catch (error) {
-      logger.error(`[ClearText] CtrlProxy iOS exception: ${error}`);
+      logger.error(`[ClearText] CtrlProxy iOS exception: ${error} totalMs=${Date.now() - startMs}`);
       return { success: false, error: String(error) };
     }
   }

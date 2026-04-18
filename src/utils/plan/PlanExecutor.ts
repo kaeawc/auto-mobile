@@ -160,8 +160,11 @@ export class DefaultPlanExecutor implements PlanExecutor {
       return;
     }
     const tr = toolResult as Record<string, unknown>;
-    if (tr.tapDebug !== undefined && tr.tapDebug !== null) {
-      details.tapDebug = tr.tapDebug;
+    const payload = (tr.structuredContent && typeof tr.structuredContent === "object")
+      ? tr.structuredContent as Record<string, unknown>
+      : tr;
+    if (payload.tapDebug !== undefined && payload.tapDebug !== null) {
+      details.tapDebug = payload.tapDebug;
     }
   }
 

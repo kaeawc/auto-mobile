@@ -7,6 +7,7 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, BaseResult, ActionTimingResult } from "./types";
 import { createMessage } from "../DeviceServiceUtils";
+import { logger } from "../../../utils/logger";
 
 export class SharedTextDelegate {
   protected readonly context: DelegateContext;
@@ -26,13 +27,20 @@ export class SharedTextDelegate {
     perf?: PerformanceTracker,
     dismissKeyboard: boolean = false
   ): Promise<BaseResult> {
+    const startMs = Date.now();
     this.context.cancelScreenshotBackoff();
 
-    if (!await this.context.ensureConnected(perf)) {
+    const connected = await (perf
+      ? perf.track("ensureConnected", () => this.context.ensureConnected(perf))
+      : this.context.ensureConnected(perf));
+    if (!connected) {
+      logger.warn(`[SharedTextDelegate] requestSetText aborted: not connected (resourceId=${resourceId ?? "nil"})`);
       return { success: false, totalTimeMs: 0, error: "Not connected" };
     }
 
     const requestId = this.context.requestManager.generateId("setText");
+    logger.debug(`[SharedTextDelegate] requestSetText send requestId=${requestId} resourceId=${resourceId ?? "nil"} textLength=${text.length} dismissKeyboard=${dismissKeyboard} timeoutMs=${timeoutMs}`);
+
     const promise = this.context.requestManager.register<BaseResult>(
       requestId,
       "set_text",
@@ -54,7 +62,11 @@ export class SharedTextDelegate {
 
     const msg = createMessage("request_set_text", requestId, params);
     this.context.getWebSocket()?.send(msg);
-    return promise;
+    const result = await (perf
+      ? perf.track("setText.awaitResponse", () => promise)
+      : promise);
+    logger.debug(`[SharedTextDelegate] requestSetText done requestId=${requestId} success=${result.success} totalMs=${Date.now() - startMs}${result.error ? ` error=${result.error}` : ""}`);
+    return result;
   }
 
   async requestClearText(
@@ -70,13 +82,20 @@ export class SharedTextDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<ActionTimingResult> {
+    const startMs = Date.now();
     this.context.cancelScreenshotBackoff();
 
-    if (!await this.context.ensureConnected(perf)) {
+    const connected = await (perf
+      ? perf.track("ensureConnected", () => this.context.ensureConnected(perf))
+      : this.context.ensureConnected(perf));
+    if (!connected) {
+      logger.warn(`[SharedTextDelegate] requestImeAction aborted: not connected (action=${action})`);
       return { success: false, action, totalTimeMs: 0, error: "Not connected" };
     }
 
     const requestId = this.context.requestManager.generateId("imeAction");
+    logger.debug(`[SharedTextDelegate] requestImeAction send requestId=${requestId} action=${action} timeoutMs=${timeoutMs}`);
+
     const promise = this.context.requestManager.register<ActionTimingResult>(
       requestId,
       "ime_action",
@@ -91,20 +110,31 @@ export class SharedTextDelegate {
 
     const msg = createMessage("request_ime_action", requestId, { action });
     this.context.getWebSocket()?.send(msg);
-    return promise;
+    const result = await (perf
+      ? perf.track("imeAction.awaitResponse", () => promise)
+      : promise);
+    logger.debug(`[SharedTextDelegate] requestImeAction done requestId=${requestId} action=${action} success=${result.success} totalMs=${Date.now() - startMs}${result.error ? ` error=${result.error}` : ""}`);
+    return result;
   }
 
   async requestSelectAll(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<BaseResult> {
+    const startMs = Date.now();
     this.context.cancelScreenshotBackoff();
 
-    if (!await this.context.ensureConnected(perf)) {
+    const connected = await (perf
+      ? perf.track("ensureConnected", () => this.context.ensureConnected(perf))
+      : this.context.ensureConnected(perf));
+    if (!connected) {
+      logger.warn(`[SharedTextDelegate] requestSelectAll aborted: not connected`);
       return { success: false, totalTimeMs: 0, error: "Not connected" };
     }
 
     const requestId = this.context.requestManager.generateId("selectAll");
+    logger.debug(`[SharedTextDelegate] requestSelectAll send requestId=${requestId} timeoutMs=${timeoutMs}`);
+
     const promise = this.context.requestManager.register<BaseResult>(
       requestId,
       "select_all",
@@ -118,6 +148,10 @@ export class SharedTextDelegate {
 
     const msg = createMessage("request_select_all", requestId);
     this.context.getWebSocket()?.send(msg);
-    return promise;
+    const result = await (perf
+      ? perf.track("selectAll.awaitResponse", () => promise)
+      : promise);
+    logger.debug(`[SharedTextDelegate] requestSelectAll done requestId=${requestId} success=${result.success} totalMs=${Date.now() - startMs}${result.error ? ` error=${result.error}` : ""}`);
+    return result;
   }
 }

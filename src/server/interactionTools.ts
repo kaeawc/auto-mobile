@@ -145,9 +145,9 @@ const tapOnBaseSchema = z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
   }).optional().describe("Poll for element before tapping"),
   preTapStability: z.boolean().optional().describe(
-    "Refresh the accessibility hierarchy before tapping and require consecutive " +
-    "re-finds with stable bounds (±3px) before dispatching the gesture. Prevents tapping " +
-    "stale coordinates when the UI is still settling. Off by default."
+    "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with " +
+    "stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still " +
+    "settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content."
   ),
   platform: platformSchema
 }).strict();
@@ -441,6 +441,7 @@ export function registerInteractionTools() {
       clickable: args.clickable,
       scrollableContainer: args.scrollableContainer,
       siblingOfText: args.siblingOfText,
+      preTapStability: args.preTapStability,
     }, progress);
 
     const searchStats = result.searchUntil;

@@ -8,7 +8,7 @@
 - **`daemon.log`** shows the foreground package as **`com.google.android.apps.nexuslauncher`** (or another launcher), not your `applicationId`.
 - **`observe`** can still **pass** while the wrong screen is visible (valid snapshot ≠ your app’s UI).
 - Later steps (`tapOn`, `waitFor`) **fail** because elements exist only in your app.
-- **`failedStep.failureObservation`** in the plan result shows **launcher `packageName`** at failure time (see [Plan failure observation](ci-plan-failure-observation.md)).
+- **`failedStep.failureObservation`** in the plan result shows **launcher `packageName`** at failure time.
 
 **Goal:** Decide whether the problem is **your APK / activity lifecycle** (crash, immediate finish, wrong component) vs **test plan assertions** that allow the launcher. Collect evidence the app team can act on.
 
@@ -166,7 +166,6 @@ Immediately after `launchApp`, wait for something **only your app** can show (re
 
 ## Full AutoMobile / CI context
 
-- [Plan failure observation](ci-plan-failure-observation.md) — read **`failureObservation`** in JUnit / `executePlan` output (launcher vs app at capture time)
 - [CI app launch troubleshooting](ci-troubleshooting-app-launch.md) — CtrlProxy alignment, daemon flags, `daemon.log`, emulator checks outside AutoMobile
 - [CI daemon logs](ci-daemon-logs.md) — capturing **`daemon.log`** from CI
 

@@ -181,7 +181,7 @@ and the plan will **stop** (by design). Fix the plan order:
 2. **`tapOn`** the row using the **exact visible text** from the hierarchy (often the full URL).
 
 If some builds skip the dialog, a single linear plan cannot express OR; keep CI on one deterministic
-startup path or split tests. See [Plan failure observation → Server picker](ci-plan-failure-observation.md#server-picker-before-login).
+startup path or split tests.
 
 !!! warning "`waitFor` requires `text` or `elementId`"
     Providing only `timeout` in `waitFor` is a validation error. You must include either `text`

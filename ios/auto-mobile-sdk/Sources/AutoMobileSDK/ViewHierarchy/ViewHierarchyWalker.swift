@@ -111,6 +111,8 @@ public enum ViewHierarchyWalker {
         }
         let hasTap = hasOwnInteractiveAction(view)
         let bgColor = hexColor(view.backgroundColor) ?? hexColor(view.layer.backgroundColor.flatMap { UIColor(cgColor: $0) })
+        let borderColor = view.layer.borderWidth > 0 ? hexColor(view.layer.borderColor.flatMap { UIColor(cgColor: $0) }) : nil
+        let borderWidth = sanitizeFloat(Float(view.layer.borderWidth))
 
         // Walk children front-to-back for opaque overlay tracking.
         // Always use UIView.subviews — accessibilityElements may contain
@@ -141,6 +143,24 @@ public enum ViewHierarchyWalker {
         // Reverse back to natural subview order for output
         childNodes.reverse()
 
+        // Walk layer-only sublayers (SwiftUI shapes render as CALayer without backing UIView).
+        // Exclude layers that belong to subviews since those are already represented as SdkViewNodes.
+        let subviewLayerIds = Set(subviews.map { ObjectIdentifier($0.layer) })
+        if let sublayers = view.layer.sublayers {
+            for sublayer in sublayers {
+                if subviewLayerIds.contains(ObjectIdentifier(sublayer)) { continue }
+                if let layerNode = walkLayer(
+                    sublayer,
+                    hostLayer: view.layer,
+                    rootView: rootView,
+                    rootBounds: rootBounds,
+                    depth: depth + 1
+                ) {
+                    childNodes.append(layerNode)
+                }
+            }
+        }
+
         // Propagate any new opaque overlays discovered in children
         opaqueOverlays = childOpaqueOverlays
 
@@ -157,10 +177,97 @@ public enum ViewHierarchyWalker {
             alpha: sanitizeFloat(Float(view.alpha)),
             backgroundColor: bgColor,
             cornerRadius: sanitizeFloat(Float(view.layer.cornerRadius)),
+            borderColor: borderColor,
+            borderWidth: borderWidth,
+            isLayerNode: false,
             isHidden: view.isHidden,
             isUserInteractionEnabled: view.isUserInteractionEnabled,
             hasTapTarget: hasTap,
             isOccluded: occluded,
+            children: childNodes.isEmpty ? nil : childNodes
+        )
+    }
+
+    // MARK: - Recursive Layer Walk
+
+    /// Walk a CALayer that has no backing UIView (e.g. SwiftUI shape rendering).
+    /// Emits a synthetic SdkViewNode describing the layer's visual properties.
+    private static func walkLayer(
+        _ layer: CALayer,
+        hostLayer: CALayer,
+        rootView: UIView,
+        rootBounds: CGRect,
+        depth: Int
+    ) -> SdkViewNode? {
+        guard depth < maxDepth else { return nil }
+        guard !layer.isHidden, layer.opacity > 0 else { return nil }
+
+        // Convert layer frame to root-view coordinates.
+        // layer.frame is expressed in its superlayer's coordinate space.
+        let frameInRoot: CGRect
+        if let superlayer = layer.superlayer {
+            let converted = superlayer.convert(layer.frame, to: rootView.layer)
+            frameInRoot = CGRect(
+                x: converted.origin.x.rounded(),
+                y: converted.origin.y.rounded(),
+                width: converted.size.width.rounded(),
+                height: converted.size.height.rounded()
+            )
+        } else {
+            frameInRoot = layer.frame
+        }
+
+        guard frameInRoot.width > 0, frameInRoot.height > 0 else { return nil }
+        guard rootBounds.intersects(frameInRoot) else { return nil }
+
+        let hasAnyVisual = layer.backgroundColor != nil
+            || layer.cornerRadius > 0
+            || layer.borderWidth > 0
+            || layer is CAShapeLayer
+            || layer is CAGradientLayer
+
+        // Recurse into sublayers first so we can decide whether to emit this node
+        var childNodes: [SdkViewNode] = []
+        if let sublayers = layer.sublayers {
+            for sub in sublayers {
+                if let childNode = walkLayer(
+                    sub,
+                    hostLayer: hostLayer,
+                    rootView: rootView,
+                    rootBounds: rootBounds,
+                    depth: depth + 1
+                ) {
+                    childNodes.append(childNode)
+                }
+            }
+        }
+
+        // Skip purely structural layer nodes with no visual properties and no interesting children.
+        guard hasAnyVisual || !childNodes.isEmpty else { return nil }
+
+        let bgColor = hexColor(layer.backgroundColor.flatMap { UIColor(cgColor: $0) })
+        let borderColor = layer.borderWidth > 0 ? hexColor(layer.borderColor.flatMap { UIColor(cgColor: $0) }) : nil
+
+        return SdkViewNode(
+            className: String(describing: type(of: layer)),
+            bounds: sdkBounds(from: frameInRoot),
+            accessibilityLabel: nil,
+            accessibilityIdentifier: layer.name,
+            isAccessibilityElement: false,
+            accessibilityElementsHidden: false,
+            accessibilityTraits: [],
+            accessibilityCustomActions: [],
+            gestureRecognizers: [],
+            alpha: sanitizeFloat(layer.opacity),
+            backgroundColor: bgColor,
+            cornerRadius: sanitizeFloat(Float(layer.cornerRadius)),
+            borderColor: borderColor,
+            borderWidth: sanitizeFloat(Float(layer.borderWidth)),
+            isLayerNode: true,
+            isHidden: layer.isHidden,
+            isUserInteractionEnabled: false,
+            hasTapTarget: false,
+            isOccluded: false,
             children: childNodes.isEmpty ? nil : childNodes
         )
     }

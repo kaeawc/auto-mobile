@@ -49,6 +49,7 @@ function parseArgs(): {
   skipCtrlProxyDownload: boolean;
   dismissKeyboardAfterInput: boolean;
   mcpRecording: boolean;
+  navigationScreenshots: boolean;
   noProxy: boolean;
   noDaemon: boolean;
   } {
@@ -105,6 +106,7 @@ function parseArgs(): {
   const networkMockable = args.includes("--network-mockable");
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
   const mcpRecording = args.includes("--mcp-recording");
+  const navigationScreenshots = !args.includes("--no-navigation-screenshots");
   let planExecutionLockScope: PlanExecutionLockScope = "session";
   const videoRecordingDefaults: VideoRecordingConfigInput = {};
 
@@ -298,6 +300,7 @@ function parseArgs(): {
     networkMockable,
     dismissKeyboardAfterInput,
     mcpRecording,
+    navigationScreenshots,
     noProxy,
     noDaemon,
   };
@@ -368,6 +371,7 @@ async function main() {
       networkMockable,
       dismissKeyboardAfterInput,
       mcpRecording,
+      navigationScreenshots,
       noProxy,
       noDaemon,
     } = parseArgs();
@@ -421,6 +425,11 @@ async function main() {
       }
       await featureFlagService.setFlag(key, true, config);
       logger.info(`Feature flag enabled (${flagLabel})`);
+    }
+
+    if (!navigationScreenshots) {
+      await featureFlagService.setFlag("navigation-screenshots", false);
+      logger.info("Navigation screenshots disabled (--no-navigation-screenshots)");
     }
 
     if (daemonMode) {

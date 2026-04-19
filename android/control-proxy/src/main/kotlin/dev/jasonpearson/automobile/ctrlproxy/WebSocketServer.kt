@@ -262,11 +262,11 @@ class WebSocketServer(
                     val connectionId = connectionCount.incrementAndGet()
                     Log.d(TAG, "Client #$connectionId connected")
 
-                    synchronized(connections) { connections.add(this) }
-
                     try {
-                      // Send initial connection message
+                      // Send connection greeting before registering for broadcasts
                       send(Frame.Text("""{"type":"connected","id":$connectionId}"""))
+
+                      synchronized(connections) { connections.add(this) }
 
                       // Listen for incoming messages
                       for (frame in incoming) {

@@ -28,6 +28,7 @@ import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostCon
 import { isRunningInDocker } from "../../../utils/dockerEnv";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
+import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
 import {
   HierarchyNavigationDetector,
@@ -648,44 +649,41 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
             const navSource = (p.source as string) ?? null;
             const navArgs = (p.arguments as Record<string, string>) ?? null;
             const navMeta = (p.metadata as Record<string, string>) ?? null;
-            // Capture screenshot FIRST, then record with URI so the push includes it
             let screenshotUri: string | null = null;
             if (applicationId && destination) {
-              try {
-                const path = await this.captureNavigationScreenshot(applicationId, destination);
-                if (path) {
-                // Record in navigation graph to get the node ID for the URI
-                  await this.getNavigationGraphManager().recordNavigationEvent({
-                    applicationId, destination, source: navSource,
-                    arguments: navArgs ?? {}, metadata: navMeta ?? {},
-                    triggeringInteraction: null,
-                  });
-                  await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
-                  // Look up the node ID for the screenshot URI
-                  try {
-                    const { getDatabase } = await import("../../../db");
-                    const db = getDatabase();
-                    const node = await db
-                      .selectFrom("navigation_nodes")
-                      .select(["id"])
-                      .where("app_id", "=", applicationId)
-                      .where("screen_name", "=", destination)
-                      .executeTakeFirst();
-                    if (node) {
-                      screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
-                    }
-                  } catch { /* non-fatal */ }
-                }
-              } catch { /* non-fatal — record event even without screenshot */ }
-            }
-            // Only publish if we have a screenshot
-            if (screenshotUri) {
-              await recorder.recordNavigationEvent({
-                timestamp: ts, applicationId,
-                destination, source: navSource, arguments: navArgs, metadata: navMeta,
-                screenshotUri,
+              await this.getNavigationGraphManager().recordNavigationEvent({
+                applicationId, destination, source: navSource,
+                arguments: navArgs ?? {}, metadata: navMeta ?? {},
+                triggeringInteraction: null,
               });
+
+              if (serverConfig.isNavigationScreenshotsEnabled()) {
+                try {
+                  const path = await this.captureNavigationScreenshot(applicationId, destination);
+                  if (path) {
+                    await this.getNavigationGraphManager().updateNodeScreenshot(applicationId, destination, path);
+                    try {
+                      const { getDatabase } = await import("../../../db");
+                      const db = getDatabase();
+                      const node = await db
+                        .selectFrom("navigation_nodes")
+                        .select(["id"])
+                        .where("app_id", "=", applicationId)
+                        .where("screen_name", "=", destination)
+                        .executeTakeFirst();
+                      if (node) {
+                        screenshotUri = `automobile:navigation/nodes/${node.id}/screenshot`;
+                      }
+                    } catch { /* non-fatal */ }
+                  }
+                } catch { /* non-fatal */ }
+              }
             }
+            await recorder.recordNavigationEvent({
+              timestamp: ts, applicationId,
+              destination, source: navSource, arguments: navArgs, metadata: navMeta,
+              screenshotUri,
+            });
             break;
           }
           case "custom": {

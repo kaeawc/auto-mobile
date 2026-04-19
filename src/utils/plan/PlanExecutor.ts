@@ -519,6 +519,35 @@ export class DefaultPlanExecutor implements PlanExecutor {
             };
           }
 
+          if (observeTimedOut) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
+            debugSteps.push({
+              step: `Execute step ${i + 1}: ${step.tool}`,
+              status: "failed",
+              durationMs: this.timer.now() - stepStartTime,
+              details: {
+                params: step.params,
+                error: errorMsg,
+              }
+            });
+
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: plan.steps.length,
+              failedStep: {
+                stepIndex: i,
+                tool: step.tool,
+                error: errorMsg,
+              },
+              debug: {
+                executionTimeMs: this.timer.now() - startTime,
+                steps: debugSteps
+              }
+            };
+          }
+
           const completedDetails: Record<string, unknown> = {
             params: step.params,
           };
@@ -969,6 +998,24 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 tool: step.tool,
                 error: errorMsg,
                 ...(failureObservation ? { failureObservation } : {}),
+              },
+            };
+          }
+
+          const observeTimedOutParallel =
+            step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+          if (observeTimedOutParallel) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: track.length,
+              failedStep: {
+                stepIndex: planIndex,
+                trackIndex,
+                tool: step.tool,
+                error: errorMsg,
               },
             };
           }

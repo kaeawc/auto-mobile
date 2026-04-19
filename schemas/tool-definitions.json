@@ -5402,7 +5402,7 @@
   },
   {
     "name": "systemTray",
-    "description": "System tray actions for notifications (open/find/tap/dismiss/clearAll)",
+    "description": "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5411,12 +5411,13 @@
           "type": "string",
           "enum": [
             "open",
+            "close",
             "find",
             "tap",
             "dismiss",
             "clearAll"
           ],
-          "description": "Action: open=expand tray, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
+          "description": "Action: open=expand tray, close=collapse tray/shade, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
         },
         "notification": {
           "description": "Notification criteria to match",

@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `systemTray` MCP tool is fully implemented with open/find/tap/dismiss/clearAll actions. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `systemTray` MCP tool is fully implemented with open/close/find/tap/dismiss/clearAll actions. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Goal
 
@@ -13,7 +13,7 @@ notification by text.
 
 ```typescript
 systemTray({
-  action: "open" | "find" | "tap" | "dismiss" | "clearAll",
+  action: "open" | "close" | "find" | "tap" | "dismiss" | "clearAll",
   notification?: {
     title?: string,
     body?: string,
@@ -29,7 +29,7 @@ systemTray({
 Open/close the tray (preferred, emulator):
 
 - `adb -s <device> shell cmd statusbar expand-notifications`
-- `adb -s <device> shell cmd statusbar collapse`
+- `adb -s <device> shell cmd statusbar collapse` (also exposed as `systemTray` action `close`)
 
 Fallback (gesture):
 
@@ -68,7 +68,7 @@ Notes:
 
 ## Plan
 
-1. Add `systemTray` with open/find/tap/dismiss/clearAll actions.
+1. Add `systemTray` with open/close/find/tap/dismiss/clearAll actions.
 2. Use accessibility node search to match notification text.
 3. Return structured match details for action chaining.
 

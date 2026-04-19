@@ -72,6 +72,7 @@ import {
   waitForNotificationMatch,
   resolveSystemTrayAwaitTimeout,
   ensureSystemTrayOpen,
+  ensureSystemTrayClosed,
   resolveNotificationTapElement,
   resolveNotificationSwipeElement,
   tapElement,
@@ -325,8 +326,8 @@ const systemTrayNotificationSchema = z.object({
 });
 
 const systemTraySchemaBase = z.object({
-  action: z.enum(["open", "find", "tap", "dismiss", "clearAll"]).describe(
-    "Action: open=expand tray, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
+  action: z.enum(["open", "close", "find", "tap", "dismiss", "clearAll"]).describe(
+    "Action: open=expand tray, close=collapse tray/shade, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
   ),
   notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
   awaitTimeout: z.number().optional().describe("Timeout in ms to wait for notification (default: 5000)"),
@@ -336,7 +337,7 @@ const systemTraySchemaBase = z.object({
 export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase).superRefine((value, ctx) => {
   const notification = value.notification ?? {};
 
-  if (value.action === "open") {
+  if (value.action === "open" || value.action === "close") {
     return;
   }
 
@@ -544,6 +545,18 @@ export function registerInteractionTools() {
           message: result.skipped
             ? "System tray already open; no swipe needed"
             : "Opened system tray by swiping down from the status bar",
+          observation: result.observation,
+          success: true,
+          skipped: result.skipped
+        });
+      }
+
+      if (args.action === "close") {
+        const result = await ensureSystemTrayClosed(device, awaitTimeoutMs, progress);
+        return createJSONToolResponse({
+          message: result.skipped
+            ? "System tray already closed; no collapse needed"
+            : "Closed system tray (collapsed notification shade)",
           observation: result.observation,
           success: true,
           skipped: result.skipped
@@ -952,7 +965,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "systemTray",
-    "System tray actions for notifications (open/find/tap/dismiss/clearAll)",
+    "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
     true // Supports progress notifications

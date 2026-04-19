@@ -5,6 +5,7 @@ import {
   waitForNotificationMatch
 } from "../../src/server/interactionTools";
 import {
+  ensureSystemTrayClosed,
   ensureSystemTrayOpen,
   tapElement,
   swipeElement,
@@ -214,6 +215,57 @@ describe("systemTray find", () => {
   });
 });
 
+describe("Android systemTray close", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("collapses shade when tray is open", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Note")),
+      createObservation(createTrayHierarchy("Note")),
+      createObservation(createClosedHierarchy())
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = ensureSystemTrayClosed(device, 500);
+
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.closed).toBe(true);
+    expect(result.skipped).toBe(false);
+    expect(fakeAdb.wasCommandExecuted("cmd statusbar collapse")).toBe(true);
+  });
+
+  test("skips collapse when tray is already closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([createObservation(createClosedHierarchy())]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await ensureSystemTrayClosed(device, 500);
+
+    expect(result.closed).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(fakeAdb.wasCommandExecuted("cmd statusbar collapse")).toBe(false);
+  });
+});
+
 // ============================================================================
 // iOS tests
 // ============================================================================
@@ -334,6 +386,58 @@ describe("iOS systemTray open", () => {
     const result = await ensureSystemTrayOpen(iosDevice, 2000);
 
     expect(result.opened).toBe(false);
+    expect(result.skipped).toBe(true);
+    expect(fakeIosClient.swipeCalls.length).toBe(0);
+  });
+});
+
+describe("iOS systemTray close", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("swipes up to close notification center when open", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createIosObservation(createIosNotificationCenterHierarchy("Test")),
+      createIosObservation(createIosNotificationCenterHierarchy("Test")),
+      createIosObservation(createIosAppHierarchy())
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = ensureSystemTrayClosed(iosDevice, 2000);
+
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.closed).toBe(true);
+    expect(result.skipped).toBe(false);
+    expect(fakeIosClient.swipeCalls.length).toBe(1);
+    expect(fakeIosClient.swipeCalls[0].y1).toBeGreaterThan(fakeIosClient.swipeCalls[0].y2);
+  });
+
+  test("skips swipe when notification center is already closed", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeIosClient = new FakeIosClient();
+    const fakeObserveScreen = new SequencedObserveScreen([createIosObservation(createIosAppHierarchy())]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      iosClientFactory: () => fakeIosClient,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await ensureSystemTrayClosed(iosDevice, 2000);
+
+    expect(result.closed).toBe(false);
     expect(result.skipped).toBe(true);
     expect(fakeIosClient.swipeCalls.length).toBe(0);
   });

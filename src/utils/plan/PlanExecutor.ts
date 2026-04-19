@@ -1002,24 +1002,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
             };
           }
 
-          const observeTimedOutParallel =
-            step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
-          if (observeTimedOutParallel) {
-            const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
-            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: track.length,
-              failedStep: {
-                stepIndex: planIndex,
-                trackIndex,
-                tool: step.tool,
-                error: errorMsg,
-              },
-            };
-          }
-
           executedSteps++;
           logger.debug(
             `[PARALLEL_EXEC][${device}] Step completed successfully. Executed: ${executedSteps}/${track.length}`

@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { DaemonResponse } from "../../src/daemon/types";
+import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -30,19 +30,13 @@ function createFakeDaemonState() {
   };
 }
 
-function sendToolsCall(socketPath: string, toolName: string): Promise<DaemonResponse> {
+function sendRequest(socketPath: string, request: DaemonRequest): Promise<DaemonResponse> {
   return new Promise((resolve, reject) => {
     const client = new Socket();
     let buffer = "";
 
     client.connect(socketPath, () => {
-      const request = JSON.stringify({
-        id: randomUUID(),
-        type: "mcp_request",
-        method: "tools/call",
-        params: { name: toolName, arguments: {} },
-      });
-      client.write(request + "\n");
+      client.write(JSON.stringify(request) + "\n");
     });
 
     client.on("data", data => {
@@ -68,6 +62,15 @@ function sendToolsCall(socketPath: string, toolName: string): Promise<DaemonResp
         reject(new Error("Connection closed without response"));
       }
     });
+  });
+}
+
+function sendToolsCall(socketPath: string, toolName: string): Promise<DaemonResponse> {
+  return sendRequest(socketPath, {
+    id: randomUUID(),
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: toolName, arguments: {} },
   });
 }
 
@@ -129,5 +132,63 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("queued request fails fast when queue wait exceeds its timeout", async () => {
+    let callCount = 0;
+    let releaseBlockingRequest: () => void = () => {};
+    const blockingPromise = new Promise<void>(r => { releaseBlockingRequest = r; });
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          callCount++;
+          if (callCount === 1) {
+            await blockingPromise;
+          }
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    // First request: blocks in callTool until we release it
+    const first = sendToolsCall(socketPath, "observe");
+
+    // Yield to the real event loop so the first request enters callTool
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(r => setImmediate(r));
+    }
+
+    // Second request: has a short timeout (500ms) that will expire in the queue
+    const second = sendRequest(socketPath, {
+      id: randomUUID(),
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "observe", arguments: {} },
+      timeoutMs: 500,
+    });
+
+    // Yield to let socket data reach the server
+    for (let i = 0; i < 10; i++) {
+      await new Promise<void>(r => setImmediate(r));
+    }
+
+    // Advance time past the second request's timeout while it's queued
+    fakeTimer.advanceTime(600);
+
+    // Release the blocking request
+    releaseBlockingRequest();
+
+    const [firstResult, secondResult] = await Promise.all([first, second]);
+
+    expect(firstResult.success).toBe(true);
+    expect(secondResult.success).toBe(false);
+    expect(secondResult.error).toContain("waiting in queue");
   });
 });

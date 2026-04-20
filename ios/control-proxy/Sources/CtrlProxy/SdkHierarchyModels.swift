@@ -27,6 +27,9 @@ public struct SdkViewNode: Codable, Sendable {
     public let alpha: Float
     public let backgroundColor: String?
     public let cornerRadius: Float
+    public let borderColor: String?
+    public let borderWidth: Float
+    public let isLayerNode: Bool
     public let isHidden: Bool
     public let isUserInteractionEnabled: Bool
     public let hasTapTarget: Bool
@@ -46,6 +49,9 @@ public struct SdkViewNode: Codable, Sendable {
         alpha: Float = 1.0,
         backgroundColor: String? = nil,
         cornerRadius: Float = 0,
+        borderColor: String? = nil,
+        borderWidth: Float = 0,
+        isLayerNode: Bool = false,
         isHidden: Bool = false,
         isUserInteractionEnabled: Bool = true,
         hasTapTarget: Bool = false,
@@ -64,11 +70,47 @@ public struct SdkViewNode: Codable, Sendable {
         self.alpha = alpha
         self.backgroundColor = backgroundColor
         self.cornerRadius = cornerRadius
+        self.borderColor = borderColor
+        self.borderWidth = borderWidth
+        self.isLayerNode = isLayerNode
         self.isHidden = isHidden
         self.isUserInteractionEnabled = isUserInteractionEnabled
         self.hasTapTarget = hasTapTarget
         self.isOccluded = isOccluded
         self.children = children
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case className, bounds, accessibilityLabel, accessibilityIdentifier,
+             isAccessibilityElement, accessibilityElementsHidden,
+             accessibilityTraits, accessibilityCustomActions, gestureRecognizers,
+             alpha, backgroundColor, cornerRadius,
+             borderColor, borderWidth, isLayerNode,
+             isHidden, isUserInteractionEnabled, hasTapTarget, isOccluded, children
+    }
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.className = try c.decode(String.self, forKey: .className)
+        self.bounds = try c.decode(SdkBounds.self, forKey: .bounds)
+        self.accessibilityLabel = try c.decodeIfPresent(String.self, forKey: .accessibilityLabel)
+        self.accessibilityIdentifier = try c.decodeIfPresent(String.self, forKey: .accessibilityIdentifier)
+        self.isAccessibilityElement = try c.decodeIfPresent(Bool.self, forKey: .isAccessibilityElement) ?? false
+        self.accessibilityElementsHidden = try c.decodeIfPresent(Bool.self, forKey: .accessibilityElementsHidden) ?? false
+        self.accessibilityTraits = try c.decodeIfPresent([String].self, forKey: .accessibilityTraits) ?? []
+        self.accessibilityCustomActions = try c.decodeIfPresent([String].self, forKey: .accessibilityCustomActions) ?? []
+        self.gestureRecognizers = try c.decodeIfPresent([SdkGestureInfo].self, forKey: .gestureRecognizers) ?? []
+        self.alpha = try c.decodeIfPresent(Float.self, forKey: .alpha) ?? 1.0
+        self.backgroundColor = try c.decodeIfPresent(String.self, forKey: .backgroundColor)
+        self.cornerRadius = try c.decodeIfPresent(Float.self, forKey: .cornerRadius) ?? 0
+        self.borderColor = try c.decodeIfPresent(String.self, forKey: .borderColor)
+        self.borderWidth = try c.decodeIfPresent(Float.self, forKey: .borderWidth) ?? 0
+        self.isLayerNode = try c.decodeIfPresent(Bool.self, forKey: .isLayerNode) ?? false
+        self.isHidden = try c.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false
+        self.isUserInteractionEnabled = try c.decodeIfPresent(Bool.self, forKey: .isUserInteractionEnabled) ?? true
+        self.hasTapTarget = try c.decodeIfPresent(Bool.self, forKey: .hasTapTarget) ?? false
+        self.isOccluded = try c.decodeIfPresent(Bool.self, forKey: .isOccluded) ?? false
+        self.children = try c.decodeIfPresent([SdkViewNode].self, forKey: .children)
     }
 }
 

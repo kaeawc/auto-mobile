@@ -28,6 +28,7 @@ class ServerConfig {
   private _networkMockableEnabled: boolean = false;
   private _mcpRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
+  private _navigationScreenshotsEnabled: boolean = true;
 
   private constructor() {}
 
@@ -144,6 +145,14 @@ class ServerConfig {
 
   isDismissKeyboardAfterInputEnabled(): boolean {
     return this._dismissKeyboardAfterInputEnabled;
+  }
+
+  setNavigationScreenshotsEnabled(enabled: boolean): void {
+    this._navigationScreenshotsEnabled = enabled;
+  }
+
+  isNavigationScreenshotsEnabled(): boolean {
+    return this._navigationScreenshotsEnabled;
   }
 
 }

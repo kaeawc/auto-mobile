@@ -165,6 +165,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
     }
   }
 
+  private static readonly FAILURE_OBSERVATION_TIMEOUT_MS = 3000;
+
   private async captureFailureObservation(
     platform: string,
     deviceId: string | undefined,
@@ -184,7 +186,18 @@ export class DefaultPlanExecutor implements PlanExecutor {
         enhancedParams.sessionUuid = sessionUuid;
       }
       const parsedParams = observeTool.schema.parse(enhancedParams);
-      const response = await observeTool.handler(parsedParams, undefined, undefined);
+
+      let timeoutHandle: ReturnType<typeof setTimeout> | null = null;
+      const response = await Promise.race([
+        observeTool.handler(parsedParams, undefined, undefined),
+        new Promise<never>((_, reject) => {
+          timeoutHandle = this.timer.setTimeout(() => {
+            reject(new Error("failure observation timed out"));
+          }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
+        }),
+      ]);
+      if (timeoutHandle) clearTimeout(timeoutHandle);
+
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {
         return { capturedAtMs: Date.now(), observeError: "observe returned empty payload" };

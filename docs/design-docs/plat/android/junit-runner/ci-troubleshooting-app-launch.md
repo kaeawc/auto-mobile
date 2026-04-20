@@ -13,7 +13,7 @@ Grab **everything you can** from the same failing CI run; each source answers a 
 | **CI job log** | Gradle, stderr lines like **`Logs: …/daemon.log`**, step ordering, env | First signal: *what* failed and whether the daemon log path was printed |
 | **`daemon.log`** | `[LaunchApp]`, CtrlProxy, MCP tool errors, timeouts | *How* AutoMobile drove the device and what the daemon rejected |
 | **JUnit / Gradle test output** | Failed test class, failed plan step, runner messages | *Which* YAML step failed and how the JUnit runner reported it |
-| **`failedStep.failureObservation`** (in `executePlan` JSON / JUnit failure blob) | Full hierarchy at failure time (`packageName`, nodes) | *What* was on screen when the step failed (launcher vs your app) — see [Plan failure observation](ci-plan-failure-observation.md) |
+| **`failedStep.failureObservation`** (in `executePlan` JSON / JUnit failure blob) | Full hierarchy at failure time (`packageName`, nodes) | *What* was on screen when the step failed (launcher vs your app) |
 | **`logcat` (device)** | `FATAL EXCEPTION`, `AndroidRuntime`, stack traces for your package | *Why* the app exited or never held the foreground |
 
 **Reading order:** CI log + JUnit output → **`daemon.log`** → **`logcat`** (or reproduce launch locally with adb if CI did not save logcat). If you only keep two artifacts, prefer **`daemon.log`** and **`logcat`** (or CI log if logcat is unavailable).
@@ -155,7 +155,7 @@ bunx @kaeawc/auto-mobile@latest --daemon start --no-ui-perf-mode
 
 A plain **`observe`** step **succeeds** whenever the device returns a valid snapshot. If your app **crashed** and the **launcher** is showing, **`observe` still succeeds**—so the plan can advance and **`tapOn`** / **`waitFor`** targets never match your app.
 
-A step with **`waitFor`** may still be treated as **successful** in the plan executor even when the wait **timed out** (`awaitTimeout: true`) in some daemon versions—so **`PLAN_STEP_N observe completed. Response success: true`** is not always proof the condition held. When available, prefer **`failedStep.failureObservation`** on the final error to see the **actual** tree at failure time ([Plan failure observation](ci-plan-failure-observation.md)).
+A step with **`waitFor`** may still be treated as **successful** in the plan executor even when the wait **timed out** (`awaitTimeout: true`) in some daemon versions—so **`PLAN_STEP_N observe completed. Response success: true`** is not always proof the condition held. When available, prefer **`failedStep.failureObservation`** on the final error to see the **actual** tree at failure time.
 
 ### 4.2 Prefer app-specific assertions
 
@@ -187,7 +187,6 @@ Treat **`launchApp` returning success** as “start was attempted,” not “you
 
 ## Related
 
-- [Plan failure observation](ci-plan-failure-observation.md) — **`failureObservation`** in JUnit / `executePlan` JSON, launcher vs app, empty text digests
 - [Agent brief: app not foreground](agent-brief-app-not-foreground.md) — **shareable** short playbook for app/IDE agents (`pidof`, `dumpsys`, wide logcat, YAML `waitFor`)
 - [CI daemon logs](ci-daemon-logs.md) — capture `daemon.log` in GitLab / GitHub
 - [CI Integration](ci-integration.md) — emulator.wtf, `AUTOMOBILE_CTRL_PROXY_APK_PATH`, Gradle wiring

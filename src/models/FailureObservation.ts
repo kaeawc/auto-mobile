@@ -17,9 +17,4 @@ export interface FailureObservationSummary {
   resourceIdsSample?: string[];
   /** Present when observe failed or payload could not be parsed. */
   observeError?: string;
-  /**
-   * Android-only: raw XML from `adb shell uiautomator dump /dev/tty` captured when an observe
-   * waitFor timed out (plan executor). Large; compare to {@link viewHierarchy} / CtrlProxy tree.
-   */
-  uiAutomatorDumpXml?: string;
 }

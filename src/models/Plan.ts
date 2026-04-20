@@ -48,10 +48,7 @@ export interface PlanExecutionResult {
   };
   deviceMapping?: Record<string, string>; // Maps device labels to device IDs (e.g., {"A": "emulator-5554", "B": "emulator-5556"})
   perDeviceResults?: Map<string, DeviceExecutionResult>; // For multi-device plans
-  /**
-   * Per-step trace for single-device sequential plans (`debug.steps`, `tapDebug` on `tapOn`, etc.).
-   * Omitted for multi-device parallel execution.
-   */
+  /** Per-step trace (always populated by the executor; may include `stepObservation` when `captureObserveSteps` is set). */
   debug?: ExecutePlanDebugInfo;
 }
 

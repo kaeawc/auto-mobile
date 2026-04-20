@@ -22,7 +22,6 @@ import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
 } from "./summarizeFailureObservation";
-import { captureUiAutomatorDumpForFailure } from "./captureUiAutomatorDumpForFailure";
 
 /**
  * Interface for plan execution
@@ -68,24 +67,22 @@ export class DefaultPlanExecutor implements PlanExecutor {
   /**
    * Extract the actual tool result from an MCP-formatted response.
    *
-   * Tool handlers may return:
-   * - `createStructuredToolResponse()`: `{ structuredContent, content, success? }` — prefer
-   *   `structuredContent` so fields like `tapDebug` are visible (top-level `success` mirrors
-   *   the inner object and must not short-circuit unwrapping).
-   * - `createJSONToolResponse()`: `{ content: [{ type: "text", text: "<json>" }] }`
-   * - A plain `{ success, ... }` object (no `content` array)
+   * Tool handlers return responses wrapped by createJSONToolResponse():
+   *   { content: [{ type: "text", text: '{"success": false, "error": "..."}' }] }
+   *
+   * This method unwraps the MCP content envelope to get the actual result object
+   * (e.g., { success: false, error: "Element not found" }).
+   *
+   * If the response already has "success" at the top level (not wrapped), it is
+   * returned as-is for backward compatibility.
    */
   private extractToolResult(response: any): any {
     if (!response || typeof response !== "object") {
       return response;
     }
 
-    const structured = response.structuredContent;
-    if (structured && typeof structured === "object" && "success" in structured) {
-      return structured;
-    }
-
-    if ("success" in response && !Array.isArray(response.content)) {
+    // If "success" exists at the top level, the response is already unwrapped
+    if ("success" in response) {
       return response;
     }
 
@@ -149,7 +146,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
   /**
    * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
-   * (e.g. Android `tapOn` → `tapDebug`).
+   * (e.g. Android `tapOn` -> `tapDebug`).
    */
   private mergeToolDiagnosticsIntoStepDetails(
     toolName: string,
@@ -227,18 +224,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
       if (failedTool === "observe" && failureToolResponse !== undefined) {
         const raw = this.parseStructuredToolPayload(failureToolResponse);
         if (raw) {
-          const summary = summarizeObserveResultForFailure(raw);
-          if (
-            platform === "android" &&
-            deviceId &&
-            raw.awaitTimeout === true
-          ) {
-            const dump = await captureUiAutomatorDumpForFailure(deviceId, signal);
-            if (dump) {
-              return { ...summary, uiAutomatorDumpXml: dump };
-            }
-          }
-          return summary;
+          return summarizeObserveResultForFailure(raw);
         }
         return {
           capturedAtMs: Date.now(),
@@ -461,7 +447,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
               step: `Execute step ${i + 1}: ${step.tool}`,
               status: "failed",
               durationMs: this.timer.now() - stepStartTime,
-              details: failedToolDetails
+              details: failedToolDetails,
             });
 
             return {
@@ -472,44 +458,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 stepIndex: i,
                 tool: step.tool,
                 error: String(errorMsg),
-                ...(failureObservation ? { failureObservation } : {})
-              },
-              debug: {
-                executionTimeMs: this.timer.now() - startTime,
-                steps: debugSteps
-              }
-            };
-          }
-
-          if (observeTimedOut) {
-            const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
-            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
-            const failureObservation = await this.buildFailureObservationContext(
-              step.tool,
-              response,
-              platform,
-              deviceId,
-              sessionUuid,
-            );
-            debugSteps.push({
-              step: `Execute step ${i + 1}: ${step.tool}`,
-              status: "failed",
-              durationMs: this.timer.now() - stepStartTime,
-              details: {
-                params: step.params,
-                error: errorMsg,
-                ...(failureObservation ? { failureObservation } : {})
-              }
-            });
-
-            return {
-              success: false,
-              executedSteps,
-              totalSteps: plan.steps.length,
-              failedStep: {
-                stepIndex: i,
-                tool: step.tool,
-                error: errorMsg,
                 ...(failureObservation ? { failureObservation } : {})
               },
               debug: {
@@ -563,7 +511,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
               completedDetails.stepObservation = stepObservation;
             }
           }
-
           this.mergeToolDiagnosticsIntoStepDetails(step.tool, toolResult, completedDetails);
 
           debugSteps.push({
@@ -981,13 +928,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
           if (observeTimedOutParallel) {
             const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
             logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
-            const failureObservation = await this.buildFailureObservationContext(
-              step.tool,
-              response,
-              platform,
-              deviceId,
-              sessionUuid,
-            );
             return {
               success: false,
               executedSteps,
@@ -997,7 +937,6 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 trackIndex,
                 tool: step.tool,
                 error: errorMsg,
-                ...(failureObservation ? { failureObservation } : {}),
               },
             };
           }

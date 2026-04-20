@@ -14,10 +14,6 @@ export interface PlanStepLifecycleContext {
 }
 
 export interface PlanExecutionOptions {
-  /**
-   * When set, successful `observe` steps include `debug.steps[n].details.stepObservation`.
-   * Ignored for multi-device (parallel) plans.
-   */
   captureObserveSteps?: CaptureObserveStepMode;
 
   /**

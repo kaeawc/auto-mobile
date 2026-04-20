@@ -13,6 +13,8 @@ exclude = [
     "^https?://example\\.com",
     # Ignore links to private fork repos (issues may not be publicly accessible)
     "^https://github\\.com/jasonpearson/",
+    # Docker Hub returns transient 500s that fail link checks
+    "^https://hub\\.docker\\.com/",
 ]
 
 # Exclude specific paths

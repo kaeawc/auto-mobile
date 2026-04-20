@@ -51,6 +51,9 @@ export class DefaultFeatureFlagApplier implements FeatureFlagApplier {
       case "mcp-recording":
         serverConfig.setMcpRecordingEnabled(enabled);
         break;
+      case "navigation-screenshots":
+        serverConfig.setNavigationScreenshotsEnabled(enabled);
+        break;
     }
   }
 }

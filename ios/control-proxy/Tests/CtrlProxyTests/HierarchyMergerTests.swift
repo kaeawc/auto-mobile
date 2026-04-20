@@ -630,4 +630,98 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertEqual(result.screenHeight, 812)
         XCTAssertEqual(result.fallbackToSpringboard, true)
     }
+
+    // MARK: - Layer-only Nodes (SwiftUI shapes via CALayer)
+
+    func testLayerNodeBorderAndLayerFlagSurfaceInExtras() {
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 95, top: 202, right: 295, bottom: 402)
+        )
+        let layerNode = SdkViewNode(
+            className: "CAShapeLayer",
+            bounds: SdkBounds(left: 95, top: 202, right: 295, bottom: 402),
+            alpha: 0.7,
+            backgroundColor: "#FF000080",
+            cornerRadius: 20,
+            borderColor: "#00FF00FF",
+            borderWidth: 2,
+            isLayerNode: true
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: layerNode)
+        )
+
+        let extras = result.hierarchy?.extras
+        XCTAssertEqual(extras?["sdk.backgroundColor"], "#FF000080")
+        XCTAssertEqual(extras?["sdk.cornerRadius"], "20.0")
+        XCTAssertEqual(extras?["sdk.borderColor"], "#00FF00FF")
+        XCTAssertEqual(extras?["sdk.borderWidth"], "2.0")
+        XCTAssertEqual(extras?["sdk.isLayerNode"], "true")
+    }
+
+    func testLayerOnlyChildInjectedWhenAbsentFromXcuitest() {
+        // XCUITest sees only the container; SDK walker reports a CALayer shape child.
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let shapeLayer = SdkViewNode(
+            className: "CAShapeLayer",
+            bounds: SdkBounds(left: 95, top: 202, right: 295, bottom: 402),
+            backgroundColor: "#FF000080",
+            cornerRadius: 20,
+            isLayerNode: true
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [shapeLayer]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let injected = result.hierarchy?.node?.first
+        XCTAssertNotNil(injected, "Layer-only shape should be injected as a child")
+        XCTAssertEqual(injected?.className, "CAShapeLayer")
+        XCTAssertEqual(injected?.extras?["sdk.source"], "sdkWalker")
+        XCTAssertEqual(injected?.extras?["sdk.isLayerNode"], "true")
+        XCTAssertEqual(injected?.extras?["sdk.backgroundColor"], "#FF000080")
+        XCTAssertEqual(injected?.extras?["sdk.cornerRadius"], "20.0")
+    }
+
+    func testLayerNodeBorderOnlyIsWorthInjecting() {
+        // Verifies isWorthInjecting treats border-only nodes as meaningful.
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844)
+        )
+        let borderOnly = SdkViewNode(
+            className: "CALayer",
+            bounds: SdkBounds(left: 50, top: 50, right: 150, bottom: 150),
+            borderColor: "#123456FF",
+            borderWidth: 1,
+            isLayerNode: true
+        )
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: [borderOnly]
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        let injected = result.hierarchy?.node?.first
+        XCTAssertNotNil(injected)
+        XCTAssertEqual(injected?.extras?["sdk.borderColor"], "#123456FF")
+        XCTAssertEqual(injected?.extras?["sdk.borderWidth"], "1.0")
+    }
 }

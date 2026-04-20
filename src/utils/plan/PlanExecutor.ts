@@ -131,6 +131,20 @@ export class DefaultPlanExecutor implements PlanExecutor {
   }
 
   /**
+   * Observe with waitFor returns awaitTimeout: true when the condition is not met within the timeout.
+   * The handler does not set success: false, so the executor must treat that as a failed step.
+   */
+  private observeWaitForTimedOut(response: unknown): { awaitDuration?: number } | null {
+    const payload = this.parseStructuredToolPayload(response);
+    if (!payload || payload.awaitTimeout !== true) {
+      return null;
+    }
+    return {
+      awaitDuration: typeof payload.awaitDuration === "number" ? payload.awaitDuration : undefined
+    };
+  }
+
+  /**
    * Copies tool-specific diagnostics into executePlan `debug.steps[n].details`
    * (e.g. Android `tapOn` -> `tapDebug`).
    */
@@ -400,6 +414,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // Execute the tool
           logger.info(`[PLAN_STEP_${i + 1}] Calling ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`);
           const response = await tool.handler(parsedParams, undefined, signal);
+          throwIfAborted(signal);
 
           // Extract the actual tool result from the response.
           // Tool handlers return MCP-formatted responses via createJSONToolResponse():
@@ -407,6 +422,8 @@ export class DefaultPlanExecutor implements PlanExecutor {
           // We need to unwrap this to check the actual success/failure status.
           const toolResult = this.extractToolResult(response);
           logger.info(`[PLAN_STEP_${i + 1}] ${step.tool} completed. Response success: ${toolResult?.success !== false ? "true" : "FALSE"}`);
+
+          const observeTimedOut = step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
 
           // Check if the response indicates failure
           if (toolResult && typeof toolResult === "object" && "success" in toolResult && toolResult.success === false) {
@@ -442,6 +459,35 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 tool: step.tool,
                 error: String(errorMsg),
                 ...(failureObservation ? { failureObservation } : {})
+              },
+              debug: {
+                executionTimeMs: this.timer.now() - startTime,
+                steps: debugSteps
+              }
+            };
+          }
+
+          if (observeTimedOut) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOut.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PLAN_STEP_${i + 1}] FAILED: ${step.tool} - ${errorMsg}`);
+            debugSteps.push({
+              step: `Execute step ${i + 1}: ${step.tool}`,
+              status: "failed",
+              durationMs: this.timer.now() - stepStartTime,
+              details: {
+                params: step.params,
+                error: errorMsg,
+              }
+            });
+
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: plan.steps.length,
+              failedStep: {
+                stepIndex: i,
+                tool: step.tool,
+                error: errorMsg,
               },
               debug: {
                 executionTimeMs: this.timer.now() - startTime,
@@ -838,6 +884,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
             `[PARALLEL_EXEC][${device}] Executing ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`
           );
           const response = await tool.handler(parsedParams, undefined, signal);
+          throwIfAborted(signal);
 
           // Unwrap MCP-formatted responses (same as sequential path) so that
           // failures inside { content: [{ text: '{"success":false,...}' }] }
@@ -872,6 +919,24 @@ export class DefaultPlanExecutor implements PlanExecutor {
                 tool: step.tool,
                 error: errorMsg,
                 ...(failureObservation ? { failureObservation } : {}),
+              },
+            };
+          }
+
+          const observeTimedOutParallel =
+            step.tool === "observe" ? this.observeWaitForTimedOut(response) : null;
+          if (observeTimedOutParallel) {
+            const errorMsg = `observe waitFor timed out after ${observeTimedOutParallel.awaitDuration ?? "unknown"}ms`;
+            logger.error(`[PARALLEL_EXEC][${device}] Tool failed: ${errorMsg}`);
+            return {
+              success: false,
+              executedSteps,
+              totalSteps: track.length,
+              failedStep: {
+                stepIndex: planIndex,
+                trackIndex,
+                tool: step.tool,
+                error: errorMsg,
               },
             };
           }

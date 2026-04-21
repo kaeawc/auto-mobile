@@ -5,6 +5,8 @@ import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import { GrantIosSimulatorPermissions } from "../features/action/GrantIosSimulatorPermissions";
+import { IosSimulatorPermissions, type IosSimulatorPermissionAction } from "../features/action/IosSimulatorPermissions";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import {
@@ -63,6 +65,28 @@ export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
 
 export const listAppsSchema = z.object({}).passthrough();
 
+export const grantIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  permissions: z.array(z.string().min(1))
+    .min(1)
+    .describe("simctl privacy services to grant, for example: camera, microphone, photos, contacts, location, userTracking"),
+}));
+
+export const setIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  action: z.enum(["grant", "revoke", "reset"]).describe("Permission action to apply via simctl privacy"),
+  permissions: z.array(z.string().min(1))
+    .min(1)
+    .describe("simctl privacy services to change, for example: camera, microphone, photos, contacts, location, all"),
+}));
+
+export const getIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  permissions: z.array(z.string().min(1))
+    .optional()
+    .describe("Optional simctl privacy services to query. If omitted, returns all TCC rows for the app."),
+}));
+
 // Export interfaces for type safety
 export interface AppActionArgs {
   appId: string;
@@ -81,6 +105,22 @@ export interface InstallAppArgs {
 export interface UninstallAppArgs {
   appId: string;
   keepData?: boolean;
+}
+
+export interface GrantIosSimulatorPermissionsArgs {
+  appId: string;
+  permissions: string[];
+}
+
+export interface SetIosSimulatorPermissionsArgs {
+  appId: string;
+  action: IosSimulatorPermissionAction;
+  permissions: string[];
+}
+
+export interface GetIosSimulatorPermissionsArgs {
+  appId: string;
+  permissions?: string[];
 }
 
 // Register tools
@@ -217,6 +257,51 @@ export function registerAppTools(
     }
   };
 
+  const grantIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: GrantIosSimulatorPermissionsArgs
+  ) => {
+    const grantPermissions = new GrantIosSimulatorPermissions(device);
+    const result = await grantPermissions.execute(args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Granted ${result.grantedCount} iOS simulator permission(s) to ${args.appId}`
+        : result.error ?? `Failed to grant ${result.failedCount} iOS simulator permission(s) to ${args.appId}`,
+      ...result
+    });
+  };
+
+  const setIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: SetIosSimulatorPermissionsArgs
+  ) => {
+    const permissions = new IosSimulatorPermissions(device);
+    const result = await permissions.setPermissions(args.action, args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `${args.action} applied to ${result.changedCount} iOS simulator permission(s) for ${args.appId}`
+        : result.error ?? `Failed to ${args.action} ${result.failedCount} iOS simulator permission(s) for ${args.appId}`,
+      ...result
+    });
+  };
+
+  const getIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: GetIosSimulatorPermissionsArgs
+  ) => {
+    const permissions = new IosSimulatorPermissions(device);
+    const result = await permissions.getPermissions(args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Read ${result.permissions.length} iOS simulator permission state row(s) for ${args.appId}`
+        : result.error ?? `Failed to read iOS simulator permission state for ${args.appId}`,
+      ...result
+    });
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -251,5 +336,26 @@ export function registerAppTools(
     "Guide for listing apps via MCP resources",
     listAppsSchema,
     listAppsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "grantIosSimulatorPermissions",
+    "Grant iOS simulator privacy permissions to an app via xcrun simctl privacy",
+    grantIosSimulatorPermissionsSchema,
+    grantIosSimulatorPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setIosSimulatorPermissions",
+    "Grant, revoke, or reset iOS simulator privacy permissions via xcrun simctl privacy",
+    setIosSimulatorPermissionsSchema,
+    setIosSimulatorPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getIosSimulatorPermissions",
+    "Read iOS simulator privacy permission state from the simulator TCC database",
+    getIosSimulatorPermissionsSchema,
+    getIosSimulatorPermissionsHandler
   );
 }

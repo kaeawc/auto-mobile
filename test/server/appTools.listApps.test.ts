@@ -104,3 +104,60 @@ describe("listApps tool", () => {
     expect(JSON.parse(content!.text)).toEqual(payload);
   });
 });
+
+describe("grantIosSimulatorPermissions tool", () => {
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+    registerAppTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+  });
+
+  test("registers a device-aware schema for iOS simulator permission grants", () => {
+    const tool = ToolRegistry.getTool("grantIosSimulatorPermissions");
+
+    expect(tool).toBeDefined();
+    expect(tool?.requiresDevice).toBe(true);
+    expect(() => tool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["camera", "microphone"],
+      deviceId: "12345678-1234-1234-1234-123456789ABC"
+    })).not.toThrow();
+    expect(() => tool!.schema.parse({
+      appId: "com.example.app",
+      permissions: []
+    })).toThrow();
+  });
+
+  test("registers broader set/query iOS simulator permission tools", () => {
+    const setTool = ToolRegistry.getTool("setIosSimulatorPermissions");
+    const getTool = ToolRegistry.getTool("getIosSimulatorPermissions");
+
+    expect(setTool).toBeDefined();
+    expect(setTool?.requiresDevice).toBe(true);
+    expect(() => setTool!.schema.parse({
+      appId: "com.example.app",
+      action: "revoke",
+      permissions: ["camera"]
+    })).not.toThrow();
+    expect(() => setTool!.schema.parse({
+      appId: "com.example.app",
+      action: "deny",
+      permissions: ["camera"]
+    })).toThrow();
+
+    expect(getTool).toBeDefined();
+    expect(getTool?.requiresDevice).toBe(true);
+    expect(() => getTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["camera", "microphone"]
+    })).not.toThrow();
+    expect(() => getTool!.schema.parse({
+      appId: "com.example.app"
+    })).not.toThrow();
+  });
+});

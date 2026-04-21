@@ -855,6 +855,92 @@
     }
   },
   {
+    "name": "getIosSimulatorPermissions",
+    "description": "Read iOS simulator privacy permission state from the simulator TCC database",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "description": "Optional simctl privacy services to query. If omitted, returns all TCC rows for the app.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "grantIosSimulatorPermissions",
+    "description": "Grant iOS simulator privacy permissions to an app via xcrun simctl privacy",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to grant, for example: camera, microphone, photos, contacts, location, userTracking"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "permissions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "highlight",
     "description": "Draw a visual highlight around a UI element on the device screen for debugging.",
     "inputSchema": {
@@ -1912,6 +1998,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1929,6 +2046,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [
@@ -4242,6 +4390,60 @@
       "required": [
         "deviceId",
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setIosSimulatorPermissions",
+    "description": "Grant, revoke, or reset iOS simulator privacy permissions via xcrun simctl privacy",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action to apply via simctl privacy"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to change, for example: camera, microphone, photos, contacts, location, all"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "action",
+        "permissions"
       ],
       "additionalProperties": false
     }

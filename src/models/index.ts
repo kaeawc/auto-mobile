@@ -28,6 +28,7 @@ export * from "./ExitDialogResult";
 export * from "./FingerPath";
 export * from "./FocusOnResult";
 export * from "./GetAccessibilityFocusResult";
+export * from "./GrantIosSimulatorPermissionsResult";
 export * from "./GestureOptions";
 export * from "./GfxMetrics";
 export * from "./HomeScreenResult";

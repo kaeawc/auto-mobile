@@ -897,6 +897,43 @@
     }
   },
   {
+    "name": "getDeviceState",
+    "description": "Read device-level state such as Do Not Disturb",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "include": {
+          "description": "Optional device state fields to read. Currently supports doNotDisturb.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "doNotDisturb"
+            ]
+          }
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "getIosSimulatorPermissions",
     "description": "Read iOS simulator privacy permission state from the simulator TCC database",
     "inputSchema": {
@@ -914,6 +951,41 @@
             "type": "string",
             "minLength": 1
           }
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getNotificationPolicy",
+    "description": "Read app notification policy state, including Android Do Not Disturb policy access",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
         },
         "sessionUuid": {
           "description": "Session UUID for device targeting",
@@ -4638,6 +4710,54 @@
     }
   },
   {
+    "name": "setDeviceState",
+    "description": "Set device-level state such as Do Not Disturb",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "doNotDisturb": {
+          "description": "Do Not Disturb state to apply.",
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "description": "Enable or disable Do Not Disturb. If true without mode, uses the strictest available DND mode.",
+              "type": "boolean"
+            },
+            "mode": {
+              "description": "Do Not Disturb mode: off, none/total silence, priority, or alarms.",
+              "type": "string",
+              "enum": [
+                "off",
+                "none",
+                "priority",
+                "alarms"
+              ]
+            }
+          },
+          "additionalProperties": false
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "setIosSimulatorPermissions",
     "description": "Grant, revoke, or reset iOS simulator privacy permissions via xcrun simctl privacy",
     "inputSchema": {
@@ -4687,6 +4807,46 @@
         "appId",
         "action",
         "permissions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setNotificationPolicy",
+    "description": "Set app notification policy state, including Android Do Not Disturb policy access",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "policyAccess": {
+          "type": "boolean",
+          "description": "Android only: allow or revoke app notification policy / DND access"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "policyAccess"
       ],
       "additionalProperties": false
     }

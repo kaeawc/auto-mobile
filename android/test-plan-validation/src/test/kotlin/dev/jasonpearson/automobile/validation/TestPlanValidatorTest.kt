@@ -521,6 +521,21 @@ class TestPlanValidatorTest {
           - tool: getAppPermissions
             params:
               appId: com.example.app
+          - tool: getDeviceState
+            params:
+              include:
+                - doNotDisturb
+          - tool: setDeviceState
+            params:
+              doNotDisturb:
+                mode: priority
+          - tool: getNotificationPolicy
+            params:
+              appId: com.example.app
+          - tool: setNotificationPolicy
+            params:
+              appId: com.example.app
+              policyAccess: true
           - tool: grantIosSimulatorPermissions
             params:
               appId: com.example.app

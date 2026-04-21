@@ -132,6 +132,30 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate device state and notification policy steps", () => {
+      const yaml = `
+name: state-and-policy
+steps:
+  - tool: getDeviceState
+    include:
+      - doNotDisturb
+  - tool: setDeviceState
+    doNotDisturb:
+      mode: priority
+  - tool: getNotificationPolicy
+    appId: com.example.app
+  - tool: setNotificationPolicy
+    appId: com.example.app
+    policyAccess: true
+  - tool: setDeviceState
+    params:
+      doNotDisturb:
+        enabled: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should validate iOS simulator permission compatibility steps", () => {
       const yaml = `
 name: ios-permissions
@@ -376,6 +400,16 @@ name: bad-set-permissions
 steps:
   - tool: setAppPermissions
     appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject setDeviceState with no state", () => {
+      const yaml = `
+name: bad-set-device-state
+steps:
+  - tool: setDeviceState
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);

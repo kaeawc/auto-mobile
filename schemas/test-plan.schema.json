@@ -677,6 +677,83 @@
           "if": {
             "properties": {
               "tool": {
+                "const": "getNotificationPolicy"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setNotificationPolicy"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "policyAccess": {
+                "type": "boolean",
+                "description": "Android only: allow or revoke app notification policy / DND access"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "policyAccess"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
                 "const": "setAndroidNotificationPolicyAccess"
               }
             },
@@ -1025,6 +1102,69 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getDeviceState"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getDeviceStateParams"
+              },
+              "include": {
+                "type": "array",
+                "description": "Optional device state fields to read",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "doNotDisturb"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setDeviceState"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setDeviceStateParams"
+              },
+              "doNotDisturb": {
+                "$ref": "#/$defs/doNotDisturbStateInput"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "doNotDisturb"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
         }
       ]
     },
@@ -1335,6 +1475,108 @@
       },
       "additionalProperties": true,
       "description": "Parameters for highlight"
+    },
+    "doNotDisturbStateInput": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable or disable Do Not Disturb"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "none",
+            "priority",
+            "alarms"
+          ],
+          "description": "Do Not Disturb mode"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "enabled"
+          ]
+        },
+        {
+          "required": [
+            "mode"
+          ]
+        }
+      ],
+      "description": "Do Not Disturb state input"
+    },
+    "getDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "doNotDisturb"
+            ]
+          },
+          "description": "Optional device state fields to read"
+        }
+      },
+      "description": "Parameters for getDeviceState"
+    },
+    "setDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "doNotDisturb": {
+          "$ref": "#/$defs/doNotDisturbStateInput"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "doNotDisturb"
+          ]
+        }
+      ],
+      "description": "Parameters for setDeviceState"
+    },
+    "getNotificationPolicyParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        }
+      },
+      "description": "Parameters for getNotificationPolicy"
+    },
+    "setNotificationPolicyParams": {
+      "type": "object",
+      "required": [
+        "appId",
+        "policyAccess"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "policyAccess": {
+          "type": "boolean",
+          "description": "Android only: allow or revoke app notification policy / DND access"
+        }
+      },
+      "description": "Parameters for setNotificationPolicy"
     },
     "setAppPermissionsParams": {
       "type": "object",

@@ -2,6 +2,7 @@ import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError } from "../models/ActionableError";
 import { SystemConfigurationManager } from "../features/utility/SystemConfigurationManager";
+import { DeviceState } from "../features/utility/DeviceState";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
@@ -30,6 +31,27 @@ export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocaliz
   message: "At least one of locale, timeZone, textDirection, timeFormat, or calendarSystem must be provided."
 });
 
+const doNotDisturbStateInputSchema = z.object({
+  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb. If true without mode, uses the strictest available DND mode."),
+  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode: off, none/total silence, priority, or alarms.")
+}).refine(values => values.enabled !== undefined || values.mode !== undefined, {
+  message: "Provide enabled or mode for doNotDisturb"
+});
+
+export const getDeviceStateSchema = addDeviceTargetingToSchema(z.object({
+  include: z.array(z.enum(["doNotDisturb"]))
+    .optional()
+    .describe("Optional device state fields to read. Currently supports doNotDisturb.")
+}));
+
+export const setDeviceStateSchema = addDeviceTargetingToSchema(z.object({
+  doNotDisturb: doNotDisturbStateInputSchema
+    .optional()
+    .describe("Do Not Disturb state to apply.")
+})).refine(values => values.doNotDisturb !== undefined, {
+  message: "At least one device state field must be provided"
+});
+
 // Export interfaces for type safety
 export interface SetActiveDeviceArgs {
   deviceId: string;
@@ -45,6 +67,10 @@ export interface ChangeLocalizationArgs {
   calendarSystem?: string;
   restartApp?: string;
 }
+
+export type GetDeviceStateArgs = z.infer<typeof getDeviceStateSchema>;
+
+export type SetDeviceStateArgs = z.infer<typeof setDeviceStateSchema>;
 
 // Register tools
 export function registerUtilityTools() {
@@ -163,6 +189,32 @@ export function registerUtilityTools() {
     });
   };
 
+  const getDeviceStateHandler = async (device: BootedDevice, _args: GetDeviceStateArgs) => {
+    const deviceState = new DeviceState(device);
+    const result = await deviceState.getState();
+
+    return createJSONToolResponse({
+      message: result.success
+        ? "Read device state"
+        : result.error ?? "Failed to read device state",
+      ...result,
+    });
+  };
+
+  const setDeviceStateHandler = async (device: BootedDevice, args: SetDeviceStateArgs) => {
+    const deviceState = new DeviceState(device);
+    const result = await deviceState.setState({
+      doNotDisturb: args.doNotDisturb,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? "Applied device state"
+        : result.error ?? "Failed to apply device state",
+      ...result,
+    });
+  };
+
   // Register with the tool registry
   ToolRegistry.register(
     "setActiveDevice",
@@ -176,5 +228,19 @@ export function registerUtilityTools() {
     "Change locale, time zone, text direction, time format, and calendar system",
     changeLocalizationSchema,
     changeLocalizationHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getDeviceState",
+    "Read device-level state such as Do Not Disturb",
+    getDeviceStateSchema,
+    getDeviceStateHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setDeviceState",
+    "Set device-level state such as Do Not Disturb",
+    setDeviceStateSchema,
+    setDeviceStateHandler
   );
 }

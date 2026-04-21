@@ -38,6 +38,6 @@ export const IOS_CTRL_PROXY_RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
 export const IOS_CTRL_PROXY_IPA_URL: string = IOS_CTRL_PROXY_RELEASE_VERSION === LATEST_RELEASE_VERSION
   ? "https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy.ipa"
   : `https://github.com/kaeawc/auto-mobile/releases/download/v${IOS_CTRL_PROXY_RELEASE_VERSION}/control-proxy.ipa`;
-export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = "09a7e53dfce28d8ca9d1c42156e8903239338ea5dc1b53f98966610cf24f6451"; // Empty = skip verification (local dev only)
+export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = "198e0599342475f1e7e642a341f9a888202baf50ec216f554a958c1feb6525b3"; // Empty = skip verification (local dev only)
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
 export const IOS_CTRL_PROXY_RUNNER_SHA256: string = ""; // SHA256 of runner binary (CtrlProxyUITests-Runner), empty = skip verification

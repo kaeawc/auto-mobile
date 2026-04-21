@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 #
-# Run TypeScript tests with Bun coverage and tolerate Bun's WriteFailed bug only
-# when tests completed successfully.
+# Run TypeScript tests with Bun coverage. Coverage output is intentionally
+# written to a log file instead of streamed live because Bun can hit WriteFailed
+# when GitHub Actions receives the large coverage table.
 #
 # Usage:
 #   scripts/ci/run-ts-coverage.sh [log-file]
@@ -12,17 +13,20 @@ log_file="${1:-ci-logs/ts-coverage.log}"
 mkdir -p "$(dirname "${log_file}")"
 
 set +e
-bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage 2>&1 | tee "${log_file}"
-status=${PIPESTATUS[0]}
+bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage > "${log_file}" 2>&1
+status=$?
 set -e
 
 if [[ "${status}" -eq 0 ]]; then
+  tail -n 80 "${log_file}"
   exit 0
 fi
 
 if rg -q 'error: An internal error occurred \(WriteFailed\)' "${log_file}" && rg -q '0 fail' "${log_file}"; then
   echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
+  tail -n 80 "${log_file}"
   exit 0
 fi
 
+tail -n 200 "${log_file}"
 exit "${status}"

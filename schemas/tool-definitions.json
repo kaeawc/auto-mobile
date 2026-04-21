@@ -821,6 +821,48 @@
     }
   },
   {
+    "name": "getAppPermissions",
+    "description": "Read app permission state on Android devices and iOS simulators",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "App package ID or bundle identifier"
+        },
+        "permissions": {
+          "description": "Optional permission names or simulator privacy services to query. If omitted, returns known permission rows.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "getDeepLinks",
     "description": "Query deep links for app",
     "inputSchema": {
@@ -850,6 +892,142 @@
       },
       "required": [
         "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "getIosSimulatorPermissions",
+    "description": "Read iOS simulator privacy permission state from the simulator TCC database",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "description": "Optional simctl privacy services to query. If omitted, returns all TCC rows for the app.",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "grantAndroidPermissions",
+    "description": "Grant Android runtime permissions via `adb shell pm grant --user …` (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name) to receive permissions"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Runtime permission names to grant via `adb shell pm grant --user …`"
+        },
+        "userId": {
+          "description": "Android user id for `pm grant --user` (default: 0, or inferred from foreground app / work profile)",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "permissions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "grantIosSimulatorPermissions",
+    "description": "Grant iOS simulator privacy permissions to an app via xcrun simctl privacy",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to grant, for example: camera, microphone, photos, contacts, location, userTracking"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "permissions"
       ],
       "additionalProperties": false
     }
@@ -1912,6 +2090,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1929,6 +2138,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [
@@ -4247,6 +4487,211 @@
     }
   },
   {
+    "name": "setAndroidNotificationPolicyAccess",
+    "description": "Set notification policy / Do Not Disturb access via `cmd notification allow_dnd` or `disallow_dnd` (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name)"
+        },
+        "allowed": {
+          "type": "boolean",
+          "description": "true = `cmd notification allow_dnd` (notification policy / DND access); false = `cmd notification disallow_dnd` (best-effort revoke)"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "allowed"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setAndroidScheduleExactAlarmAppOp",
+    "description": "Set UID-level SCHEDULE_EXACT_ALARM appop to allow or deny (`appops set --uid …`; deny API 31+ only, best-effort) (Android only)",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "Android applicationId (package name); used as `appops set --uid` target like FUB test helpers"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "allow = UID `SCHEDULE_EXACT_ALARM` allow (strict); deny = UID deny on API 31+ only (best-effort), skipped below API 31"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "mode"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setAppPermissions",
+    "description": "Grant, revoke, reset, or configure app permissions on Android devices and iOS simulators",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "App package ID or bundle identifier"
+        },
+        "action": {
+          "description": "Permission action. Defaults to grant. Android runtime permissions currently support grant only; iOS simulators support grant/revoke/reset.",
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ]
+        },
+        "permissions": {
+          "description": "Runtime permissions or simulator privacy services to change",
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "userId": {
+          "description": "Android user id for runtime permission grants",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "notificationPolicyAccess": {
+          "description": "Android only: set notification policy / DND access",
+          "type": "boolean"
+        },
+        "scheduleExactAlarm": {
+          "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop",
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ]
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "setIosSimulatorPermissions",
+    "description": "Grant, revoke, or reset iOS simulator privacy permissions via xcrun simctl privacy",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "description": "iOS app bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action to apply via simctl privacy"
+        },
+        "permissions": {
+          "minItems": 1,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to change, for example: camera, microphone, photos, contacts, location, all"
+        },
+        "sessionUuid": {
+          "description": "Session UUID for device targeting",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep physical Android devices awake during the session (default: true)",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device identifier for targeting a specific device",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "action",
+        "permissions"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "shake",
     "description": "Shake device",
     "inputSchema": {
@@ -5402,7 +5847,7 @@
   },
   {
     "name": "systemTray",
-    "description": "System tray actions for notifications (open/find/tap/dismiss/clearAll)",
+    "description": "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -5411,12 +5856,13 @@
           "type": "string",
           "enum": [
             "open",
+            "close",
             "find",
             "tap",
             "dismiss",
             "clearAll"
           ],
-          "description": "Action: open=expand tray, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
+          "description": "Action: open=expand tray, close=collapse tray/shade, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
         },
         "notification": {
           "description": "Notification criteria to match",
@@ -5550,6 +5996,10 @@
             }
           },
           "additionalProperties": false
+        },
+        "preTapStability": {
+          "description": "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content.",
+          "type": "boolean"
         },
         "platform": {
           "type": "string",

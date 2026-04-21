@@ -271,6 +271,91 @@ public final class AutoMobileNetwork: @unchecked Sendable {
         return nil
     }
 
+    /// Record a completed network task from `URLSessionDelegate` callbacks.
+    ///
+    /// This is the recommended integration path for apps that already have their
+    /// own `URLSession` delegate or a competing `URLProtocol` chain. It avoids
+    /// the conflicts that arise when multiple `URLProtocol` subclasses are
+    /// registered on the same session.
+    ///
+    /// Call this from your delegate's completion handler:
+    /// ```swift
+    /// func urlSession(_ session: URLSession, task: URLSessionTask,
+    ///                 didCompleteWithError error: Error?) {
+    ///     AutoMobileNetwork.shared.recordFromTask(
+    ///         task,
+    ///         startTime: taskStartTimes[task]!,
+    ///         receivedData: taskData[task],
+    ///         error: error
+    ///     )
+    /// }
+    /// ```
+    ///
+    /// - Parameters:
+    ///   - task: The completed `URLSessionTask`.
+    ///   - startTime: When the task started, used to compute `durationMs`.
+    ///   - receivedData: Accumulated response body data, if the delegate buffered it.
+    ///   - error: The task's completion error, if any.
+    public func recordFromTask(
+        _ task: URLSessionTask,
+        startTime: Date,
+        receivedData: Data?,
+        error: Error?
+    ) {
+        let durationMs = Date().timeIntervalSince(startTime) * 1000
+        let originalRequest = task.originalRequest
+        let url = originalRequest?.url?.absoluteString ?? task.currentRequest?.url?.absoluteString ?? ""
+        let method = originalRequest?.httpMethod ?? task.currentRequest?.httpMethod ?? "GET"
+
+        if let error = error {
+            recordRequest(NetworkRequestRecord(
+                url: url,
+                method: method,
+                requestHeaders: originalRequest?.allHTTPHeaderFields,
+                requestBodySize: originalRequest?.httpBody?.count ?? Int(task.countOfBytesSent),
+                durationMs: durationMs,
+                error: error.localizedDescription
+            ))
+            return
+        }
+
+        let httpResponse = task.response as? HTTPURLResponse
+        let contentType = httpResponse?.value(forHTTPHeaderField: "Content-Type")
+
+        let maxBytes = maxBodyBytes
+        let requestBody: String? = originalRequest?.httpBody.flatMap { data in
+            AutoMobileNetwork.isTextContentType(originalRequest?.value(forHTTPHeaderField: "Content-Type"))
+                ? AutoMobileNetwork.utf8String(from: data.prefix(maxBytes))
+                : nil
+        }
+
+        let responseBody: String? = {
+            guard let data = receivedData, !data.isEmpty,
+                  AutoMobileNetwork.isTextContentType(contentType) else { return nil }
+            return AutoMobileNetwork.utf8String(from: data.prefix(maxBytes))
+        }()
+
+        let responseBodySize: Int? = {
+            if let data = receivedData { return data.count }
+            let received = Int(task.countOfBytesReceived)
+            return received > 0 ? received : nil
+        }()
+
+        recordRequest(NetworkRequestRecord(
+            url: url,
+            method: method,
+            requestHeaders: originalRequest?.allHTTPHeaderFields,
+            requestBodySize: originalRequest?.httpBody?.count ?? (task.countOfBytesSent > 0 ? Int(task.countOfBytesSent) : nil),
+            statusCode: httpResponse?.statusCode,
+            responseHeaders: httpResponse?.allHeaderFields as? [String: String],
+            responseBodySize: responseBodySize,
+            durationMs: durationMs,
+            requestBody: requestBody,
+            responseBody: responseBody,
+            contentType: contentType
+        ))
+    }
+
     /// Record a WebSocket frame event.
     ///
     /// - Parameters:

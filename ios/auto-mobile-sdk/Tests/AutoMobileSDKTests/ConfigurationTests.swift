@@ -96,6 +96,110 @@ final class ConfigurationTests: XCTestCase {
         XCTAssertEqual(config.sessionTimeoutMs, 1)
     }
 
+    func testSubsystemFlagDefaults() {
+        let config = AutoMobileConfiguration()
+        XCTAssertTrue(config.enableCrashReporting)
+        XCTAssertFalse(config.enableSignalHandlers)
+        XCTAssertTrue(config.enableNetworkCapture)
+        XCTAssertTrue(config.enableHangDetection)
+    }
+
+    func testSubsystemFlagsCustomValues() {
+        let config = AutoMobileConfiguration(
+            enableCrashReporting: false,
+            enableSignalHandlers: true,
+            enableNetworkCapture: false,
+            enableHangDetection: false
+        )
+        XCTAssertFalse(config.enableCrashReporting)
+        XCTAssertTrue(config.enableSignalHandlers)
+        XCTAssertFalse(config.enableNetworkCapture)
+        XCTAssertFalse(config.enableHangDetection)
+    }
+
+    func testDisablingCrashReportingSkipsInitialization() {
+        let config = AutoMobileConfiguration(enableCrashReporting: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        XCTAssertFalse(AutoMobileCrashes.shared.isInitialized)
+    }
+
+    func testSignalHandlersRequireCrashReporting() {
+        // enableSignalHandlers is a no-op when crash reporting is disabled:
+        // signal handlers can't usefully run without the exception handler
+        // having been installed.
+        let config = AutoMobileConfiguration(
+            enableCrashReporting: false,
+            enableSignalHandlers: true
+        )
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        XCTAssertFalse(AutoMobileCrashes.shared.isInitialized)
+    }
+
+    func testDisablingHangDetectionSkipsMonitoring() {
+        let config = AutoMobileConfiguration(enableHangDetection: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        XCTAssertFalse(AutoMobileHangs.shared.isMonitoring)
+    }
+
+    func testShutdownPreservesHostExceptionHandlerWhenCrashReportingDisabled() {
+        // Simulate a host-app crash reporter (Sentry/Crashlytics/Bugsnag).
+        let sentinel: @convention(c) (NSException) -> Void = { _ in }
+        let previous = NSGetUncaughtExceptionHandler()
+        NSSetUncaughtExceptionHandler(sentinel)
+        defer { NSSetUncaughtExceptionHandler(previous) }
+
+        let before = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+        XCTAssertNotNil(before)
+
+        let config = AutoMobileConfiguration(enableCrashReporting: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        AutoMobileSDK.shared.shutdown()
+
+        // Shutdown must not clobber the host app's handler when we never
+        // installed our own.
+        let after = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+        XCTAssertEqual(before, after)
+    }
+
+    func testRepeatedShutdownPreservesHostExceptionHandler() {
+        let sentinel: @convention(c) (NSException) -> Void = { _ in }
+        let previous = NSGetUncaughtExceptionHandler()
+        NSSetUncaughtExceptionHandler(sentinel)
+        defer { NSSetUncaughtExceptionHandler(previous) }
+
+        let before = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+
+        let config = AutoMobileConfiguration(enableCrashReporting: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        AutoMobileSDK.shared.shutdown()
+        // Second shutdown after _configuration has been cleared must remain
+        // safe and must not clobber the host app's handler.
+        AutoMobileSDK.shared.shutdown()
+
+        let after = unsafeBitCast(
+            NSGetUncaughtExceptionHandler(), to: UnsafeRawPointer?.self
+        )
+        XCTAssertEqual(before, after)
+    }
+
+    func testSetEnabledRespectsHangDetectionOptOut() {
+        let config = AutoMobileConfiguration(enableHangDetection: false)
+        AutoMobileSDK.shared.initialize(bundleId: "com.test.app", configuration: config)
+        XCTAssertFalse(AutoMobileHangs.shared.isMonitoring)
+
+        AutoMobileSDK.shared.setEnabled(false)
+        AutoMobileSDK.shared.setEnabled(true)
+
+        // Toggling enable/disable must not start a watchdog the host opted out of.
+        XCTAssertFalse(AutoMobileHangs.shared.isMonitoring)
+    }
+
     func testResetClearsConfiguration() {
         AutoMobileSDK.shared.initialize(bundleId: "com.test.app")
         XCTAssertNotNil(AutoMobileSDK.shared.configuration)

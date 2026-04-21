@@ -116,6 +116,8 @@ export interface DaemonOptions {
   skipCtrlProxyDownload?: boolean;
   /** Enable MCP recording feature flag */
   mcpRecording?: boolean;
+  /** Disable navigation screenshots */
+  noNavigationScreenshots?: boolean;
 }
 
 /**

@@ -5,9 +5,12 @@ import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import { AppPermissions } from "../features/action/AppPermissions";
 import { GrantAndroidPermissions } from "../features/action/GrantAndroidPermissions";
 import { SetAndroidNotificationPolicyAccess } from "../features/action/SetAndroidNotificationPolicyAccess";
 import { SetAndroidScheduleExactAlarmAppOp } from "../features/action/SetAndroidScheduleExactAlarmAppOp";
+import { GrantIosSimulatorPermissions } from "../features/action/GrantIosSimulatorPermissions";
+import { IosSimulatorPermissions } from "../features/action/IosSimulatorPermissions";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import {
@@ -64,6 +67,51 @@ export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
   keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
 }));
 
+const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
+
+export const setAppPermissionsSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("App package ID or bundle identifier"),
+    action: appPermissionActionSchema
+      .optional()
+      .describe("Permission action. Defaults to grant. Android runtime permissions currently support grant only; iOS simulators support grant/revoke/reset."),
+    permissions: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Runtime permissions or simulator privacy services to change"),
+    userId: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Android user id for runtime permission grants"),
+    notificationPolicyAccess: z
+      .boolean()
+      .optional()
+      .describe("Android only: set notification policy / DND access"),
+    scheduleExactAlarm: z
+      .enum(["allow", "deny"])
+      .optional()
+      .describe("Android only: set UID-level SCHEDULE_EXACT_ALARM appop"),
+  })
+).refine(
+  args =>
+    (args.permissions !== undefined && args.permissions.length > 0) ||
+    args.notificationPolicyAccess !== undefined ||
+    args.scheduleExactAlarm !== undefined,
+  "Provide at least one permission or platform-specific permission option"
+);
+
+export const getAppPermissionsSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("App package ID or bundle identifier"),
+    permissions: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Optional permission names or simulator privacy services to query. If omitted, returns known permission rows."),
+  })
+);
+
 export const grantAndroidPermissionsSchema = addDeviceTargetingToSchema(
   z.object({
     appId: z.string().describe("Android applicationId (package name) to receive permissions"),
@@ -107,6 +155,28 @@ export const setAndroidScheduleExactAlarmAppOpSchema = addDeviceTargetingToSchem
 
 export const listAppsSchema = z.object({}).passthrough();
 
+export const grantIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  permissions: z.array(z.string().min(1))
+    .min(1)
+    .describe("simctl privacy services to grant, for example: camera, microphone, photos, contacts, location, userTracking"),
+}));
+
+export const setIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  action: z.enum(["grant", "revoke", "reset"]).describe("Permission action to apply via simctl privacy"),
+  permissions: z.array(z.string().min(1))
+    .min(1)
+    .describe("simctl privacy services to change, for example: camera, microphone, photos, contacts, location, all"),
+}));
+
+export const getIosSimulatorPermissionsSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().describe("iOS app bundle identifier"),
+  permissions: z.array(z.string().min(1))
+    .optional()
+    .describe("Optional simctl privacy services to query. If omitted, returns all TCC rows for the app."),
+}));
+
 // Export interfaces for type safety
 export interface AppActionArgs {
   appId: string;
@@ -127,11 +197,21 @@ export interface UninstallAppArgs {
   keepData?: boolean;
 }
 
+export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
+
+export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
+
 export type GrantAndroidPermissionsArgs = z.infer<typeof grantAndroidPermissionsSchema>;
 
 export type SetAndroidNotificationPolicyAccessArgs = z.infer<typeof setAndroidNotificationPolicyAccessSchema>;
 
 export type SetAndroidScheduleExactAlarmAppOpArgs = z.infer<typeof setAndroidScheduleExactAlarmAppOpSchema>;
+
+export type GrantIosSimulatorPermissionsArgs = z.infer<typeof grantIosSimulatorPermissionsSchema>;
+
+export type SetIosSimulatorPermissionsArgs = z.infer<typeof setIosSimulatorPermissionsSchema>;
+
+export type GetIosSimulatorPermissionsArgs = z.infer<typeof getIosSimulatorPermissionsSchema>;
 
 // Register tools
 export function registerAppTools(
@@ -267,6 +347,38 @@ export function registerAppTools(
     }
   };
 
+  const setAppPermissionsHandler = async (device: BootedDevice, args: SetAppPermissionsArgs) => {
+    const permissions = new AppPermissions(device);
+    const result = await permissions.setPermissions(args.appId, {
+      action: args.action,
+      permissions: args.permissions,
+      userId: args.userId,
+      notificationPolicyAccess: args.notificationPolicyAccess,
+      scheduleExactAlarm: args.scheduleExactAlarm,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
+        : result.error ?? `Failed to apply app permission changes for ${args.appId}`,
+      ...result,
+    });
+  };
+
+  const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {
+    const permissions = new AppPermissions(device);
+    const result = await permissions.getPermissions(args.appId, {
+      permissions: args.permissions,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Read ${result.permissions.length} app permission state row(s) for ${args.appId}`
+        : result.error ?? `Failed to read app permission state for ${args.appId}`,
+      ...result,
+    });
+  };
+
   const grantAndroidPermissionsHandler = async (device: BootedDevice, args: GrantAndroidPermissionsArgs) => {
     try {
       const grantAndroidPermissions = new GrantAndroidPermissions(device);
@@ -336,6 +448,51 @@ export function registerAppTools(
     }
   };
 
+  const grantIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: GrantIosSimulatorPermissionsArgs
+  ) => {
+    const grantPermissions = new GrantIosSimulatorPermissions(device);
+    const result = await grantPermissions.execute(args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Granted ${result.grantedCount} iOS simulator permission(s) to ${args.appId}`
+        : result.error ?? `Failed to grant ${result.failedCount} iOS simulator permission(s) to ${args.appId}`,
+      ...result
+    });
+  };
+
+  const setIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: SetIosSimulatorPermissionsArgs
+  ) => {
+    const permissions = new IosSimulatorPermissions(device);
+    const result = await permissions.setPermissions(args.action, args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `${args.action} applied to ${result.changedCount} iOS simulator permission(s) for ${args.appId}`
+        : result.error ?? `Failed to ${args.action} ${result.failedCount} iOS simulator permission(s) for ${args.appId}`,
+      ...result
+    });
+  };
+
+  const getIosSimulatorPermissionsHandler = async (
+    device: BootedDevice,
+    args: GetIosSimulatorPermissionsArgs
+  ) => {
+    const permissions = new IosSimulatorPermissions(device);
+    const result = await permissions.getPermissions(args.appId, args.permissions);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Read ${result.permissions.length} iOS simulator permission state row(s) for ${args.appId}`
+        : result.error ?? `Failed to read iOS simulator permission state for ${args.appId}`,
+      ...result
+    });
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -366,6 +523,20 @@ export function registerAppTools(
   );
 
   ToolRegistry.registerDeviceAware(
+    "setAppPermissions",
+    "Grant, revoke, reset, or configure app permissions on Android devices and iOS simulators",
+    setAppPermissionsSchema,
+    setAppPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getAppPermissions",
+    "Read app permission state on Android devices and iOS simulators",
+    getAppPermissionsSchema,
+    getAppPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
     "grantAndroidPermissions",
     "Grant Android runtime permissions via `adb shell pm grant --user …` (Android only)",
     grantAndroidPermissionsSchema,
@@ -391,5 +562,26 @@ export function registerAppTools(
     "Guide for listing apps via MCP resources",
     listAppsSchema,
     listAppsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "grantIosSimulatorPermissions",
+    "Grant iOS simulator privacy permissions to an app via xcrun simctl privacy",
+    grantIosSimulatorPermissionsSchema,
+    grantIosSimulatorPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setIosSimulatorPermissions",
+    "Grant, revoke, or reset iOS simulator privacy permissions via xcrun simctl privacy",
+    setIosSimulatorPermissionsSchema,
+    setIosSimulatorPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getIosSimulatorPermissions",
+    "Read iOS simulator privacy permission state from the simulator TCC database",
+    getIosSimulatorPermissionsSchema,
+    getIosSimulatorPermissionsHandler
   );
 }

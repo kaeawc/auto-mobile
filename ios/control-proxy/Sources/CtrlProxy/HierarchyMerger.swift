@@ -248,6 +248,15 @@ public enum HierarchyMerger {
         if node.cornerRadius > 0 {
             extras["sdk.cornerRadius"] = String(node.cornerRadius)
         }
+        if let borderColor = node.borderColor {
+            extras["sdk.borderColor"] = borderColor
+        }
+        if node.borderWidth > 0 {
+            extras["sdk.borderWidth"] = String(node.borderWidth)
+        }
+        if node.isLayerNode {
+            extras["sdk.isLayerNode"] = "true"
+        }
         extras["sdk.isAccessibilityElement"] = String(node.isAccessibilityElement)
         if node.accessibilityElementsHidden {
             extras["sdk.accessibilityElementsHidden"] = "true"
@@ -416,9 +425,13 @@ public enum HierarchyMerger {
         if node.hasTapTarget { return true }
         if node.accessibilityElementsHidden { return true }
         if node.isAccessibilityElement { return true }
-        // Has meaningful visual properties (background, corner radius)
+        // Has meaningful visual properties (background, corner radius, border)
         if node.backgroundColor != nil { return true }
         if node.cornerRadius > 0 { return true }
+        if node.borderColor != nil { return true }
+        if node.borderWidth > 0 { return true }
+        // Layer-only node surfaces SwiftUI shape visuals that UIView walking misses.
+        if node.isLayerNode { return true }
         // Has non-trivial children worth surfacing
         if let children = node.children, children.contains(where: { isWorthInjecting($0) }) {
             return true
@@ -446,6 +459,15 @@ public enum HierarchyMerger {
         extras["sdk.alpha"] = String(node.alpha)
         if node.cornerRadius > 0 {
             extras["sdk.cornerRadius"] = String(node.cornerRadius)
+        }
+        if let borderColor = node.borderColor {
+            extras["sdk.borderColor"] = borderColor
+        }
+        if node.borderWidth > 0 {
+            extras["sdk.borderWidth"] = String(node.borderWidth)
+        }
+        if node.isLayerNode {
+            extras["sdk.isLayerNode"] = "true"
         }
         extras["sdk.isAccessibilityElement"] = String(node.isAccessibilityElement)
         if node.accessibilityElementsHidden {

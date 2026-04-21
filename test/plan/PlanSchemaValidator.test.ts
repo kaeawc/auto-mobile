@@ -104,6 +104,54 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate reusable app permission set/query steps", () => {
+      const yaml = `
+name: reusable-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+    notificationPolicyAccess: true
+    scheduleExactAlarm: allow
+  - tool: getAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+  - tool: setAppPermissions
+    params:
+      appId: com.example.app
+      action: revoke
+      permissions:
+        - camera
+  - tool: getAppPermissions
+    params:
+      appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate iOS simulator permission compatibility steps", () => {
+      const yaml = `
+name: ios-permissions
+steps:
+  - tool: grantIosSimulatorPermissions
+    appId: com.example.app
+    permissions:
+      - camera
+  - tool: setIosSimulatorPermissions
+    appId: com.example.app
+    action: revoke
+    permissions:
+      - microphone
+  - tool: getIosSimulatorPermissions
+    appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should validate plan with merge keys", () => {
       const yaml = `
 name: merge-keys-test
@@ -317,6 +365,17 @@ steps:
   - tool: grantAndroidPermissions
     appId: com.example.app
     permissions: []
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject setAppPermissions with no operation", () => {
+      const yaml = `
+name: bad-set-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(false);

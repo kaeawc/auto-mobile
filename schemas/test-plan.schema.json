@@ -425,6 +425,183 @@
           "if": {
             "properties": {
               "tool": {
+                "const": "setAppPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "grant",
+                  "revoke",
+                  "reset"
+                ],
+                "description": "Permission action. Defaults to grant."
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Runtime permissions or simulator privacy services to change",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "userId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Android user id for runtime permission grants"
+              },
+              "notificationPolicyAccess": {
+                "type": "boolean",
+                "description": "Android only: set notification policy / DND access"
+              },
+              "scheduleExactAlarm": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ],
+                "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "notificationPolicyAccess"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "scheduleExactAlarm"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getAppPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Optional permission names or simulator privacy services to query",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
                 "const": "grantAndroidPermissions"
               }
             },
@@ -620,6 +797,225 @@
                 "required": [
                   "appId",
                   "mode"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "grantIosSimulatorPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/grantIosSimulatorPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "iOS app bundle identifier",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "description": "simctl privacy services to grant",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setIosSimulatorPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setIosSimulatorPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "iOS app bundle identifier",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "grant",
+                  "revoke",
+                  "reset"
+                ],
+                "description": "Permission action to apply via simctl privacy"
+              },
+              "permissions": {
+                "type": "array",
+                "description": "simctl privacy services to change",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "action",
+                  "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getIosSimulatorPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getIosSimulatorPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "iOS app bundle identifier",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Optional simctl privacy services to query",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId"
                 ]
               },
               {
@@ -940,6 +1336,145 @@
       "additionalProperties": true,
       "description": "Parameters for highlight"
     },
+    "setAppPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action. Defaults to grant."
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Runtime permissions or simulator privacy services to change"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Android user id for runtime permission grants"
+        },
+        "notificationPolicyAccess": {
+          "type": "boolean",
+          "description": "Android only: set notification policy / DND access"
+        },
+        "scheduleExactAlarm": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "permissions"
+          ]
+        },
+        {
+          "required": [
+            "notificationPolicyAccess"
+          ]
+        },
+        {
+          "required": [
+            "scheduleExactAlarm"
+          ]
+        }
+      ],
+      "description": "Parameters for setAppPermissions"
+    },
+    "getAppPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional permission names or simulator privacy services to query"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for getAppPermissions"
+    },
     "grantAndroidPermissionsParams": {
       "type": "object",
       "required": [
@@ -1085,6 +1620,162 @@
         }
       },
       "description": "Parameters for setAndroidScheduleExactAlarmAppOp (Android only)"
+    },
+    "grantIosSimulatorPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId",
+        "permissions"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to grant"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for grantIosSimulatorPermissions (iOS simulator only)"
+    },
+    "setIosSimulatorPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId",
+        "action",
+        "permissions"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "iOS app bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action to apply via simctl privacy"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "simctl privacy services to change"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for setIosSimulatorPermissions (iOS simulator only)"
+    },
+    "getIosSimulatorPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "iOS app bundle identifier"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional simctl privacy services to query"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for getIosSimulatorPermissions (iOS simulator only)"
     },
     "expectation": {
       "type": "object",

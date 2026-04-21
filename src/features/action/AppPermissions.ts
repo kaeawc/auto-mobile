@@ -1,0 +1,320 @@
+import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import type { BootedDevice, ExecResult } from "../../models";
+import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
+import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
+import { SetAndroidScheduleExactAlarmAppOp, type ScheduleExactAlarmAppOpMode } from "./SetAndroidScheduleExactAlarmAppOp";
+import {
+  IosSimulatorPermissions,
+  type IosSimulatorPermissionAction,
+  type TccPermissionReader
+} from "./IosSimulatorPermissions";
+
+export type AppPermissionAction = IosSimulatorPermissionAction;
+
+export interface SetAppPermissionsInput {
+  action?: AppPermissionAction;
+  permissions?: string[];
+  userId?: number;
+  notificationPolicyAccess?: boolean;
+  scheduleExactAlarm?: ScheduleExactAlarmAppOpMode;
+}
+
+export interface GetAppPermissionsInput {
+  permissions?: string[];
+}
+
+export type AppPermissionState = "granted" | "denied" | "unknown" | "limited";
+
+export interface AppPermissionStateResult {
+  permission: string;
+  state: AppPermissionState;
+  service?: string;
+  source: "androidRuntime" | "iosTcc";
+  authValue?: number;
+  raw?: Record<string, string | number | boolean | null>;
+}
+
+export interface AppPermissionOperationResult {
+  operationId: string;
+  success: boolean;
+  changedCount: number;
+  failedCount: number;
+  skipped?: boolean;
+  result?: unknown;
+  error?: string;
+}
+
+export interface SetAppPermissionsResult {
+  success: boolean;
+  appId: string;
+  deviceId: string;
+  platform: "android" | "ios";
+  action: AppPermissionAction;
+  changedCount: number;
+  failedCount: number;
+  operations: AppPermissionOperationResult[];
+  error?: string;
+}
+
+export interface GetAppPermissionsResult {
+  success: boolean;
+  appId: string;
+  deviceId: string;
+  platform: "android" | "ios";
+  permissions: AppPermissionStateResult[];
+  error?: string;
+}
+
+interface IosSimulatorPrivacyClient {
+  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+}
+
+export interface AppPermissionsDependencies {
+  adbFactory?: AdbClientFactory;
+  simctl?: IosSimulatorPrivacyClient | null;
+  tccReader?: TccPermissionReader | null;
+}
+
+function normalizePermissions(permissions: string[] | undefined): string[] {
+  return (permissions ?? [])
+    .map(permission => permission.trim())
+    .filter(permission => permission.length > 0);
+}
+
+function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {
+  const permissions = new Map<string, AppPermissionStateResult>();
+  const permissionLine = /^\s*([A-Za-z0-9_.]+):\s+granted=(true|false)\b(.*)$/;
+
+  for (const line of output.split(/\r?\n/)) {
+    const match = line.match(permissionLine);
+    if (!match) {
+      continue;
+    }
+
+    const [, permission, granted, rest] = match;
+    permissions.set(permission, {
+      permission,
+      state: granted === "true" ? "granted" : "denied",
+      source: "androidRuntime",
+      raw: {
+        granted: granted === "true",
+        flags: rest.trim() || null,
+      },
+    });
+  }
+
+  return permissions;
+}
+
+export class AppPermissions {
+  private device: BootedDevice;
+
+  private adbFactory: AdbClientFactory;
+
+  private simctl: IosSimulatorPrivacyClient | null;
+
+  private tccReader: TccPermissionReader | null;
+
+  constructor(device: BootedDevice, dependencies: AppPermissionsDependencies = {}) {
+    this.device = device;
+    this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
+    this.simctl = dependencies.simctl ?? null;
+    this.tccReader = dependencies.tccReader ?? null;
+  }
+
+  async setPermissions(appId: string, input: SetAppPermissionsInput): Promise<SetAppPermissionsResult> {
+    const action = input.action ?? "grant";
+    return this.device.platform === "ios"
+      ? this.setIosPermissions(appId, action, input)
+      : this.setAndroidPermissions(appId, action, input);
+  }
+
+  async getPermissions(appId: string, input: GetAppPermissionsInput = {}): Promise<GetAppPermissionsResult> {
+    return this.device.platform === "ios"
+      ? this.getIosPermissions(appId, input)
+      : this.getAndroidPermissions(appId, input);
+  }
+
+  private async setIosPermissions(
+    appId: string,
+    action: AppPermissionAction,
+    input: SetAppPermissionsInput
+  ): Promise<SetAppPermissionsResult> {
+    const permissions = normalizePermissions(input.permissions);
+    const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
+    const result = await iosPermissions.setPermissions(action, appId, permissions);
+
+    return {
+      success: result.success,
+      appId: result.appId,
+      deviceId: result.deviceId,
+      platform: result.platform,
+      action,
+      changedCount: result.changedCount,
+      failedCount: result.failedCount,
+      operations: result.results.map(permissionResult => ({
+        operationId: `ios_simctl_privacy:${action}:${permissionResult.permission}`,
+        success: permissionResult.success,
+        changedCount: permissionResult.success ? 1 : 0,
+        failedCount: permissionResult.success ? 0 : 1,
+        result: permissionResult,
+        ...(permissionResult.error ? { error: permissionResult.error } : {}),
+      })),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
+
+  private async setAndroidPermissions(
+    appId: string,
+    action: AppPermissionAction,
+    input: SetAppPermissionsInput
+  ): Promise<SetAppPermissionsResult> {
+    const permissions = normalizePermissions(input.permissions);
+    const operations: AppPermissionOperationResult[] = [];
+
+    if (permissions.length > 0) {
+      if (action !== "grant") {
+        operations.push({
+          operationId: `android_runtime_permissions:${action}`,
+          success: false,
+          changedCount: 0,
+          failedCount: permissions.length,
+          error: "Android runtime permission mutations currently support action=grant only",
+        });
+      } else {
+        const grantResult = await new GrantAndroidPermissions(this.device, this.adbFactory).execute(appId, {
+          permissions,
+          userId: input.userId,
+        });
+        const changedCount = grantResult.results.filter(result => result.success && !result.skipped).length;
+        const failedCount = grantResult.results.filter(result => result.countsTowardSuccess && !result.success && !result.skipped).length;
+        operations.push({
+          operationId: "android_runtime_permissions:grant",
+          success: grantResult.success,
+          changedCount,
+          failedCount,
+          result: grantResult,
+          ...(grantResult.error ? { error: grantResult.error } : {}),
+        });
+      }
+    }
+
+    if (input.notificationPolicyAccess !== undefined) {
+      const result = await new SetAndroidNotificationPolicyAccess(this.device, this.adbFactory).execute(appId, {
+        allowed: input.notificationPolicyAccess,
+      });
+      operations.push({
+        operationId: "android_notification_policy_access",
+        success: result.success,
+        changedCount: result.success ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        result,
+        ...(result.error ? { error: result.error } : {}),
+      });
+    }
+
+    if (input.scheduleExactAlarm !== undefined) {
+      const result = await new SetAndroidScheduleExactAlarmAppOp(this.device, this.adbFactory).execute(appId, {
+        mode: input.scheduleExactAlarm,
+      });
+      operations.push({
+        operationId: "android_schedule_exact_alarm_appop",
+        success: result.success,
+        changedCount: result.success && !result.skipped ? 1 : 0,
+        failedCount: result.success ? 0 : 1,
+        skipped: result.skipped,
+        result,
+        ...(result.error ? { error: result.error } : {}),
+      });
+    }
+
+    if (operations.length === 0) {
+      operations.push({
+        operationId: "app_permissions:no_operation",
+        success: false,
+        changedCount: 0,
+        failedCount: 1,
+        error: "Provide at least one permission or Android-specific permission option",
+      });
+    }
+
+    const failedOperations = operations.filter(operation => !operation.success);
+
+    return {
+      success: failedOperations.length === 0,
+      appId,
+      deviceId: this.device.deviceId,
+      platform: "android",
+      action,
+      changedCount: operations.reduce((sum, operation) => sum + operation.changedCount, 0),
+      failedCount: operations.reduce((sum, operation) => sum + operation.failedCount, 0),
+      operations,
+      ...(failedOperations.length > 0
+        ? { error: failedOperations.map(operation => operation.error ?? operation.operationId).join("; ") }
+        : {}),
+    };
+  }
+
+  private async getIosPermissions(appId: string, input: GetAppPermissionsInput): Promise<GetAppPermissionsResult> {
+    const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
+    const result = await iosPermissions.getPermissions(appId, normalizePermissions(input.permissions));
+
+    return {
+      success: result.success,
+      appId: result.appId,
+      deviceId: result.deviceId,
+      platform: result.platform,
+      permissions: result.permissions.map(permission => ({
+        permission: permission.permission,
+        service: permission.service,
+        state: permission.state,
+        source: "iosTcc",
+        ...(permission.authValue === undefined ? {} : { authValue: permission.authValue }),
+        ...(permission.raw ? { raw: permission.raw } : {}),
+      })),
+      ...(result.error ? { error: result.error } : {}),
+    };
+  }
+
+  private async getAndroidPermissions(appId: string, input: GetAppPermissionsInput): Promise<GetAppPermissionsResult> {
+    const normalizedAppId = appId.trim();
+    const requestedPermissions = normalizePermissions(input.permissions);
+
+    if (!normalizedAppId) {
+      return this.androidQueryFailure(normalizedAppId, "appId must be a non-empty Android package name");
+    }
+
+    try {
+      const adb: AdbExecutor = this.adbFactory.create(this.device);
+      const result = await adb.executeCommand(`shell dumpsys package ${normalizedAppId}`, undefined, undefined, true);
+      const parsed = parseAndroidRuntimePermissions(result.stdout ?? "");
+      const permissionNames = requestedPermissions.length > 0 ? requestedPermissions : [...parsed.keys()];
+
+      return {
+        success: true,
+        appId: normalizedAppId,
+        deviceId: this.device.deviceId,
+        platform: "android",
+        permissions: permissionNames.map(permission => parsed.get(permission) ?? {
+          permission,
+          state: "unknown",
+          source: "androidRuntime",
+        }),
+      };
+    } catch (error) {
+      return this.androidQueryFailure(normalizedAppId, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private androidQueryFailure(appId: string, error: string): GetAppPermissionsResult {
+    return {
+      success: false,
+      appId,
+      deviceId: this.device.deviceId,
+      platform: "android",
+      permissions: [],
+      error,
+    };
+  }
+}

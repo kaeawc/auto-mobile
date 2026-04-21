@@ -105,7 +105,7 @@ describe("listApps tool", () => {
   });
 });
 
-describe("grantIosSimulatorPermissions tool", () => {
+describe("app permission tools", () => {
   beforeEach(() => {
     ToolRegistry.clearTools();
     resetListAppsToolDependencies();
@@ -117,27 +117,9 @@ describe("grantIosSimulatorPermissions tool", () => {
     resetListAppsToolDependencies();
   });
 
-  test("registers a device-aware schema for iOS simulator permission grants", () => {
-    const tool = ToolRegistry.getTool("grantIosSimulatorPermissions");
-
-    expect(tool).toBeDefined();
-    expect(tool?.requiresDevice).toBe(true);
-    expect(() => tool!.schema.parse({
-      appId: "com.example.app",
-      permissions: ["camera", "microphone"],
-      deviceId: "12345678-1234-1234-1234-123456789ABC"
-    })).not.toThrow();
-    expect(() => tool!.schema.parse({
-      appId: "com.example.app",
-      permissions: []
-    })).toThrow();
-  });
-
-  test("registers broader set/query iOS simulator permission tools", () => {
+  test("registers cross-platform set/query permission tools", () => {
     const setAppTool = ToolRegistry.getTool("setAppPermissions");
     const getAppTool = ToolRegistry.getTool("getAppPermissions");
-    const setTool = ToolRegistry.getTool("setIosSimulatorPermissions");
-    const getTool = ToolRegistry.getTool("getIosSimulatorPermissions");
 
     expect(setAppTool).toBeDefined();
     expect(setAppTool?.requiresDevice).toBe(true);
@@ -155,6 +137,11 @@ describe("grantIosSimulatorPermissions tool", () => {
       notificationPolicyAccess: true,
       scheduleExactAlarm: "allow"
     })).not.toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["android.permission.POST_NOTIFICATIONS"],
+      userId: 10,
+    })).not.toThrow();
 
     expect(getAppTool).toBeDefined();
     expect(getAppTool?.requiresDevice).toBe(true);
@@ -165,28 +152,14 @@ describe("grantIosSimulatorPermissions tool", () => {
     expect(() => getAppTool!.schema.parse({
       appId: "com.example.app"
     })).not.toThrow();
+  });
 
-    expect(setTool).toBeDefined();
-    expect(setTool?.requiresDevice).toBe(true);
-    expect(() => setTool!.schema.parse({
-      appId: "com.example.app",
-      action: "revoke",
-      permissions: ["camera"]
-    })).not.toThrow();
-    expect(() => setTool!.schema.parse({
-      appId: "com.example.app",
-      action: "deny",
-      permissions: ["camera"]
-    })).toThrow();
-
-    expect(getTool).toBeDefined();
-    expect(getTool?.requiresDevice).toBe(true);
-    expect(() => getTool!.schema.parse({
-      appId: "com.example.app",
-      permissions: ["camera", "microphone"]
-    })).not.toThrow();
-    expect(() => getTool!.schema.parse({
-      appId: "com.example.app"
-    })).not.toThrow();
+  test("does not register platform-named permission tools", () => {
+    expect(ToolRegistry.getTool("grantAndroidPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("setAndroidNotificationPolicyAccess")).toBeUndefined();
+    expect(ToolRegistry.getTool("setAndroidScheduleExactAlarmAppOp")).toBeUndefined();
+    expect(ToolRegistry.getTool("grantIosSimulatorPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("setIosSimulatorPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("getIosSimulatorPermissions")).toBeUndefined();
   });
 });

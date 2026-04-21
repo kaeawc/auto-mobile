@@ -65,11 +65,11 @@ steps:
       expect(result.valid).toBe(true);
     });
 
-    it("should validate grantAndroidPermissions step with inline appId and permissions", () => {
+    it("should validate setAppPermissions step with inline appId and permissions", () => {
       const yaml = `
 name: grant-plan
 steps:
-  - tool: grantAndroidPermissions
+  - tool: setAppPermissions
     appId: com.example.app
     permissions:
       - android.permission.POST_NOTIFICATIONS
@@ -79,26 +79,26 @@ steps:
       expect(result.valid).toBe(true);
     });
 
-    it("should validate explicit Android permission / appop steps in sequence", () => {
+    it("should validate cross-platform permission / appop steps in sequence", () => {
       const yaml = `
 name: grant-explicit
 steps:
-  - tool: setAndroidNotificationPolicyAccess
+  - tool: setNotificationPolicy
     appId: com.example.app
-    allowed: false
-  - tool: setAndroidScheduleExactAlarmAppOp
+    policyAccess: false
+  - tool: setAppPermissions
     appId: com.example.app
-    mode: deny
-  - tool: grantAndroidPermissions
+    scheduleExactAlarm: deny
+  - tool: setAppPermissions
     appId: com.example.app
     permissions:
       - android.permission.POST_NOTIFICATIONS
-  - tool: setAndroidNotificationPolicyAccess
+  - tool: setNotificationPolicy
     appId: com.example.app
-    allowed: true
-  - tool: setAndroidScheduleExactAlarmAppOp
+    policyAccess: true
+  - tool: setAppPermissions
     appId: com.example.app
-    mode: allow
+    scheduleExactAlarm: allow
 `;
       const result = validator.validateYaml(yaml);
       expect(result.valid).toBe(true);
@@ -156,20 +156,21 @@ steps:
       expect(result.valid).toBe(true);
     });
 
-    it("should validate iOS simulator permission compatibility steps", () => {
+    it("should validate iOS simulator permissions through cross-platform permission tools", () => {
       const yaml = `
 name: ios-permissions
 steps:
-  - tool: grantIosSimulatorPermissions
+  - tool: setAppPermissions
     appId: com.example.app
+    action: grant
     permissions:
       - camera
-  - tool: setIosSimulatorPermissions
+  - tool: setAppPermissions
     appId: com.example.app
     action: revoke
     permissions:
       - microphone
-  - tool: getIosSimulatorPermissions
+  - tool: getAppPermissions
     appId: com.example.app
 `;
       const result = validator.validateYaml(yaml);
@@ -382,11 +383,11 @@ invalidField: value
       }
     });
 
-    it("should reject grantAndroidPermissions with empty permissions array", () => {
+    it("should reject setAppPermissions with empty permissions array", () => {
       const yaml = `
 name: bad-grant
 steps:
-  - tool: grantAndroidPermissions
+  - tool: setAppPermissions
     appId: com.example.app
     permissions: []
 `;

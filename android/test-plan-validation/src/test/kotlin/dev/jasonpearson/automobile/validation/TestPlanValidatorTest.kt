@@ -536,18 +536,13 @@ class TestPlanValidatorTest {
             params:
               appId: com.example.app
               policyAccess: true
-          - tool: grantIosSimulatorPermissions
-            params:
-              appId: com.example.app
-              permissions:
-                - camera
-          - tool: setIosSimulatorPermissions
+          - tool: setAppPermissions
             params:
               appId: com.example.app
               action: revoke
               permissions:
                 - camera
-          - tool: getIosSimulatorPermissions
+          - tool: getAppPermissions
             params:
               appId: com.example.app
               permissions:

@@ -15,8 +15,8 @@ export const DEVICE_LABEL_DESCRIPTION =
  */
 export function addSessionUuidToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
   return schema.extend({
-    sessionUuid: z.string().optional().describe("Session UUID for device targeting"),
-    keepScreenAwake: z.boolean().optional().describe("Keep physical Android devices awake during the session (default: true)"),
+    sessionUuid: z.string().optional().describe("Session UUID"),
+    keepScreenAwake: z.boolean().optional().describe("Keep device awake"),
   }) as z.ZodObject<any>;
 }
 
@@ -41,7 +41,7 @@ function addDeviceLabelToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObj
  */
 function addDeviceIdToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
   return schema.extend({
-    deviceId: z.string().optional().describe("Device identifier for targeting a specific device"),
+    deviceId: z.string().optional().describe("Device ID"),
   }) as z.ZodObject<any>;
 }
 

@@ -38,7 +38,7 @@ const executePlanSchema = z.object({
   startStep: z.number().default(0).describe("Start step index (0-based, default: 0)"),
   platform: z.enum(["android", "ios"]).describe("Target platform"),
   sessionUuid: z.string().optional().describe("Session UUID for parallel execution"),
-  keepScreenAwake: z.boolean().optional().describe("Keep physical Android devices awake during the session (default: true)"),
+  keepScreenAwake: z.boolean().optional().describe("Keep device awake"),
   deviceId: z.string().optional().describe("Device ID"),
   device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
   devices: z.array(z.string()).optional().describe("Device labels for multi-device plans"),

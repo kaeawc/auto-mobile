@@ -21,9 +21,9 @@ runs:
     - name: "Install dependencies"
       shell: ${{ inputs.shell }}
       run: |
-        bun install --frozen-lockfile || {
+        bun install --frozen-lockfile --force || {
           bun pm cache rm
-          bun install --frozen-lockfile
+          bun install --frozen-lockfile --force
         }
         echo "$GITHUB_WORKSPACE/node_modules/.bin" >> "$GITHUB_PATH"
 

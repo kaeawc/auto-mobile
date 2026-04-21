@@ -38,11 +38,11 @@
           "type": "number"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -50,7 +50,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -112,11 +112,11 @@
           "minLength": 1
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -124,7 +124,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -150,11 +150,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -162,7 +162,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -202,11 +202,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -214,7 +214,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -346,11 +346,11 @@
           }
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -358,7 +358,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -491,11 +491,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -503,7 +503,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -544,7 +544,7 @@
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "deviceId": {
@@ -840,11 +840,11 @@
           }
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -852,7 +852,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -874,11 +874,11 @@
           "description": "App package ID"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -886,7 +886,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -914,11 +914,11 @@
           }
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -926,7 +926,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -946,11 +946,11 @@
           "description": "App package ID or bundle identifier"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -958,7 +958,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -984,7 +984,7 @@
           "description": "Target platform"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         },
         "timeoutMs": {
@@ -1615,11 +1615,11 @@
           ]
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1649,11 +1649,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1661,7 +1661,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1699,11 +1699,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1711,7 +1711,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1759,11 +1759,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1771,7 +1771,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1794,11 +1794,11 @@
           "description": "Path to app artifact (.apk for Android, .app bundle for iOS simulator, .ipa for iOS physical device)"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1806,7 +1806,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1841,11 +1841,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1853,7 +1853,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -1925,11 +1925,11 @@
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -1937,7 +1937,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -2119,11 +2119,11 @@
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -2131,7 +2131,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3866,11 +3866,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -3878,7 +3878,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -3972,11 +3972,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -3984,7 +3984,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4061,11 +4061,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4073,7 +4073,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4114,11 +4114,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4126,7 +4126,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4166,11 +4166,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4178,7 +4178,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4205,11 +4205,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4217,7 +4217,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4326,11 +4326,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4338,7 +4338,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4365,11 +4365,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4377,7 +4377,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4407,11 +4407,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         }
       },
@@ -4469,11 +4469,11 @@
           ]
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4481,7 +4481,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4520,11 +4520,11 @@
           "additionalProperties": false
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4532,7 +4532,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4556,11 +4556,11 @@
           "description": "Android only: allow or revoke app notification policy / DND access"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4568,7 +4568,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4603,11 +4603,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4615,7 +4615,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -4865,11 +4865,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -4877,7 +4877,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -5788,11 +5788,11 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -5800,7 +5800,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -5906,11 +5906,11 @@
           "description": "Element text"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -5918,7 +5918,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         },
         "tapClickableParent": {
@@ -6929,11 +6929,11 @@
           "description": "App package ID"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -6941,7 +6941,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -6967,11 +6967,11 @@
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {
@@ -6979,7 +6979,7 @@
           "type": "string"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         }
       },
@@ -7013,7 +7013,7 @@
           "description": "Target platform"
         },
         "deviceId": {
-          "description": "Device identifier for targeting a specific device",
+          "description": "Device ID",
           "type": "string"
         },
         "recordingId": {
@@ -7683,11 +7683,11 @@
           }
         },
         "sessionUuid": {
-          "description": "Session UUID for device targeting",
+          "description": "Session UUID",
           "type": "string"
         },
         "keepScreenAwake": {
-          "description": "Keep physical Android devices awake during the session (default: true)",
+          "description": "Keep device awake",
           "type": "boolean"
         },
         "device": {

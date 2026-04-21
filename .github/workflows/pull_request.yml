@@ -887,37 +887,10 @@ jobs:
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Tests with Coverage"
-        shell: bash
-        run: |
-          set -o pipefail
-          mkdir -p ci-logs
-          set +e
-          bun test --coverage --coverage-reporter=lcov --coverage-dir=coverage 2>&1 | tee ci-logs/ts-coverage.log
-          status=${PIPESTATUS[0]}
-          set -e
-          if [ "$status" -ne 0 ]; then
-            if rg -q 'error: An internal error occurred \(WriteFailed\)' ci-logs/ts-coverage.log && rg -q '0 fail' ci-logs/ts-coverage.log; then
-              echo "::warning::Bun coverage ended with WriteFailed after tests passed; continuing to verify coverage output"
-            else
-              exit "$status"
-            fi
-          fi
+        run: bash scripts/ci/run-ts-coverage.sh
 
       - name: "Verify Coverage Output"
-        run: |
-          if [ ! -f coverage/lcov.info ]; then
-            # Bun may leave an atomic-write temp file without renaming it
-            tmp=$(find coverage/ -name '.lcov.info.*.tmp' 2>/dev/null | head -1)
-            if [ -n "$tmp" ]; then
-              echo "Recovering coverage from temp file: $tmp"
-              mv "$tmp" coverage/lcov.info
-            else
-              echo "::error::coverage/lcov.info not found"
-              ls -la coverage/ 2>/dev/null || echo "coverage/ directory does not exist"
-              exit 1
-            fi
-          fi
-          echo "Coverage file size: $(wc -c < coverage/lcov.info) bytes"
+        run: bash scripts/ci/verify-ts-coverage-output.sh
 
       - name: "Upload Coverage"
         uses: actions/upload-artifact@v6

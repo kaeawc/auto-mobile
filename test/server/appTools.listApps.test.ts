@@ -104,3 +104,62 @@ describe("listApps tool", () => {
     expect(JSON.parse(content!.text)).toEqual(payload);
   });
 });
+
+describe("app permission tools", () => {
+  beforeEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+    registerAppTools();
+  });
+
+  afterEach(() => {
+    ToolRegistry.clearTools();
+    resetListAppsToolDependencies();
+  });
+
+  test("registers cross-platform set/query permission tools", () => {
+    const setAppTool = ToolRegistry.getTool("setAppPermissions");
+    const getAppTool = ToolRegistry.getTool("getAppPermissions");
+
+    expect(setAppTool).toBeDefined();
+    expect(setAppTool?.requiresDevice).toBe(true);
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["camera"],
+      action: "grant"
+    })).not.toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: []
+    })).toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      notificationPolicyAccess: true,
+      scheduleExactAlarm: "allow"
+    })).not.toThrow();
+    expect(() => setAppTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["android.permission.POST_NOTIFICATIONS"],
+      userId: 10,
+    })).not.toThrow();
+
+    expect(getAppTool).toBeDefined();
+    expect(getAppTool?.requiresDevice).toBe(true);
+    expect(() => getAppTool!.schema.parse({
+      appId: "com.example.app",
+      permissions: ["camera"]
+    })).not.toThrow();
+    expect(() => getAppTool!.schema.parse({
+      appId: "com.example.app"
+    })).not.toThrow();
+  });
+
+  test("does not register platform-named permission tools", () => {
+    expect(ToolRegistry.getTool("grantAndroidPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("setAndroidNotificationPolicyAccess")).toBeUndefined();
+    expect(ToolRegistry.getTool("setAndroidScheduleExactAlarmAppOp")).toBeUndefined();
+    expect(ToolRegistry.getTool("grantIosSimulatorPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("setIosSimulatorPermissions")).toBeUndefined();
+    expect(ToolRegistry.getTool("getIosSimulatorPermissions")).toBeUndefined();
+  });
+});

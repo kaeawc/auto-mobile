@@ -513,6 +513,40 @@ class TestPlanValidatorTest {
           - tool: launchApp
             params:
               appId: com.example.app
+          - tool: setAppPermissions
+            params:
+              appId: com.example.app
+              permissions:
+                - camera
+          - tool: getAppPermissions
+            params:
+              appId: com.example.app
+          - tool: getDeviceState
+            params:
+              include:
+                - doNotDisturb
+          - tool: setDeviceState
+            params:
+              doNotDisturb:
+                mode: priority
+          - tool: getNotificationPolicy
+            params:
+              appId: com.example.app
+          - tool: setNotificationPolicy
+            params:
+              appId: com.example.app
+              policyAccess: true
+          - tool: setAppPermissions
+            params:
+              appId: com.example.app
+              action: revoke
+              permissions:
+                - camera
+          - tool: getAppPermissions
+            params:
+              appId: com.example.app
+              permissions:
+                - camera
         """
             .trimIndent()
 

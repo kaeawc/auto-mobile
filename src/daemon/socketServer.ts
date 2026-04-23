@@ -37,13 +37,7 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { CtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
-/**
- * Idle timeout for daemon RPC sockets. Must exceed the longest permitted forward timeout —
- * `executePlan` is allowed up to `MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS` of silence on the wire
- * while the plan runs — plus headroom for queue wait and response serialization. If this
- * is ever shorter than the per-request timeout, long-running `tools/call` responses get
- * forcibly disconnected mid-flight and never deliver to the client.
- */
+/** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 
 /**
@@ -148,9 +142,6 @@ export class UnixSocketServer {
 
     let buffer = "";
 
-    // Belt-and-braces FD cleanup: if a peer stops reading/writing for this long, destroy
-    // the socket. Prevents accepted sockets from piling up when a peer disappears without
-    // a clean close (kernel keeps the unix FD half-open otherwise).
     socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     socket.on("timeout", () => {
       logger.warn(
@@ -203,13 +194,6 @@ export class UnixSocketServer {
     });
   }
 
-  /**
-   * Write a response to a client socket. Centralizes all writes so destroyed-socket checks
-   * and error cleanup live in one place. Backpressure (`write()` returning false) is not
-   * treated as a fatal signal — large MCP payloads legitimately cross the write high-water
-   * mark on healthy clients. Truly stalled peers are reaped by the socket's idle timeout
-   * configured in `handleConnection()`.
-   */
   private writeResponse(socket: Socket, sessionId: string, response: DaemonResponse): void {
     if (socket.destroyed) {
       return;

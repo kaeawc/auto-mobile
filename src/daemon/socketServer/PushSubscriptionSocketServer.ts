@@ -311,10 +311,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         if (result) {
           subscriber.lastActivity = this.timer.now();
         } else {
-          // Backpressure is not a death signal — healthy clients hit it under load.
-          // Register a drain listener so we bump `lastActivity` when the kernel buffer
-          // clears. A genuinely dead peer never drains; the keepalive `timeoutMs` check
-          // above is what eventually destroys it.
+          // write()=false is not a death signal — wait for drain; truly dead peers get reaped by timeoutMs.
           this.armDrainListener(subscriber);
         }
         sentCount++;
@@ -336,11 +333,6 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     return sentCount;
   }
 
-  /**
-   * Register a one-shot `'drain'` listener on a backpressured subscriber so we update
-   * `lastActivity` once the kernel buffer clears. Idempotent per subscriber — `drainPending`
-   * guards against stacking listeners on repeated backpressure.
-   */
   private armDrainListener(subscriber: Subscriber<TFilter>): void {
     if (subscriber.drainPending) {
       return;

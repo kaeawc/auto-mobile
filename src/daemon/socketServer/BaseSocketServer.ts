@@ -169,15 +169,7 @@ export abstract class BaseSocketServer {
     // Default: no-op
   }
 
-  /**
-   * Send a JSON response to a socket.
-   *
-   * Returns the result of the underlying `socket.write()` so callers can detect backpressure
-   * (`false`) and apply policy (drop the peer, pause pushes, etc.). Returns `false` if the
-   * socket is already destroyed. This return value is the primary signal used to catch
-   * vanished peers — `socket.write()` does not throw when a peer stops draining, it just
-   * returns `false` and lets the internal buffer grow, which is how FDs leaked previously.
-   */
+  /** Returns `socket.write()` result so callers can react to backpressure; `false` if destroyed. */
   protected sendJson(socket: Socket, data: unknown): boolean {
     if (socket.destroyed) {
       return false;

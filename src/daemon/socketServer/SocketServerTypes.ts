@@ -38,12 +38,7 @@ export interface Subscriber<TFilter = unknown> {
   filter: TFilter;
   /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
   backfilling: boolean;
-  /**
-   * True while a `'drain'` listener has been registered on this subscriber's socket. Set when
-   * `write()` returns `false` so we don't stack multiple listeners on repeated backpressure.
-   * The listener bumps `lastActivity`, letting the existing keepalive timeout path decide
-   * whether the peer is genuinely dead.
-   */
+  /** Guards against stacking multiple `'drain'` listeners when the socket stays backpressured. */
   drainPending: boolean;
 }
 
@@ -73,10 +68,7 @@ export const DEFAULT_KEEPALIVE_CONFIG: KeepaliveConfig = {
   timeoutMs: 30_000,
 };
 
-/**
- * Default idle timeout applied to accepted sockets by `BaseSocketServer`.
- * If no data is read or written for this long, the socket is destroyed to release its FD.
- */
+/** Idle I/O timeout after which `BaseSocketServer` destroys an accepted socket to release its FD. */
 export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**

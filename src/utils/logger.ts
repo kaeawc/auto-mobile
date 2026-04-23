@@ -95,19 +95,8 @@ export function parseAutomobileLogLevel(value: string | undefined): LogLevel | n
   }
 }
 
-/**
- * If `process.env.AUTOMOBILE_LOG_LEVEL` is set to a recognized level, apply it to the global logger.
- * Intended for CI / daemon runs (quiet INFO chatter while keeping WARN/ERROR).
- */
-export function applyAutomobileLogLevelFromEnvironment(): void {
-  const parsed = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL);
-  if (parsed !== null) {
-    currentLogLevel = parsed;
-  }
-}
-
-// Default to INFO level in production, can be overridden
-let currentLogLevel: LogLevel = LogLevel.INFO;
+// Default to INFO level; overridable via AUTOMOBILE_LOG_LEVEL env var (quiet INFO chatter in CI / daemon runs).
+let currentLogLevel: LogLevel = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL) ?? LogLevel.INFO;
 
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;

@@ -44,7 +44,7 @@ export interface IosSimulatorPermissionQueryResult {
   error?: string;
 }
 
-interface IosSimulatorPrivacyClient {
+export interface IosSimulatorPrivacyClient {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
 }
 
@@ -90,8 +90,8 @@ function quoteSimctlArg(value: string): string {
   return `"${value.replace(/(["\\])/g, "\\$1")}"`;
 }
 
-function normalizePermissions(permissions: string[]): string[] {
-  return permissions
+export function normalizePermissions(permissions: string[] | undefined): string[] {
+  return (permissions ?? [])
     .map(permission => permission.trim())
     .filter(permission => permission.length > 0);
 }
@@ -214,32 +214,27 @@ export class IosSimulatorPermissions {
       };
     }
 
-    const results = [];
-
-    for (const permission of normalizedPermissions) {
-      try {
-        const command = [
-          "privacy",
-          quoteSimctlArg(this.device.deviceId),
-          action,
-          quoteSimctlArg(permission),
-          quoteSimctlArg(normalizedAppId)
-        ].join(" ");
-        const result = await this.simctl.executeCommand(command);
-        results.push({
-          permission,
-          success: true,
-          stdout: result.stdout,
-          stderr: result.stderr
-        });
-      } catch (error) {
-        results.push({
-          permission,
-          success: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
+    const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
+      normalizedPermissions.map(async permission => {
+        try {
+          const command = [
+            "privacy",
+            quoteSimctlArg(this.device.deviceId),
+            action,
+            quoteSimctlArg(permission),
+            quoteSimctlArg(normalizedAppId)
+          ].join(" ");
+          const result = await this.simctl.executeCommand(command);
+          return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
+        } catch (error) {
+          return {
+            permission,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+      })
+    );
 
     const failedCount = results.filter(result => !result.success).length;
 

@@ -1,9 +1,5 @@
-import type { BootedDevice, ExecResult, GrantIosSimulatorPermissionsResult } from "../../models";
-import { IosSimulatorPermissions } from "./IosSimulatorPermissions";
-
-interface IosSimulatorPrivacyClient {
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
-}
+import type { BootedDevice, GrantIosSimulatorPermissionsResult } from "../../models";
+import { IosSimulatorPermissions, type IosSimulatorPrivacyClient } from "./IosSimulatorPermissions";
 
 export class GrantIosSimulatorPermissions {
   private permissions: IosSimulatorPermissions;

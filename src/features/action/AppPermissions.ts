@@ -1,12 +1,14 @@
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice, ExecResult } from "../../models";
+import type { BootedDevice } from "../../models";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
 import { SetAndroidScheduleExactAlarmAppOp, type ScheduleExactAlarmAppOpMode } from "./SetAndroidScheduleExactAlarmAppOp";
 import {
   IosSimulatorPermissions,
+  normalizePermissions,
   type IosSimulatorPermissionAction,
+  type IosSimulatorPrivacyClient,
   type TccPermissionReader
 } from "./IosSimulatorPermissions";
 
@@ -66,20 +68,10 @@ export interface GetAppPermissionsResult {
   error?: string;
 }
 
-interface IosSimulatorPrivacyClient {
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
-}
-
 export interface AppPermissionsDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
-}
-
-function normalizePermissions(permissions: string[] | undefined): string[] {
-  return (permissions ?? [])
-    .map(permission => permission.trim())
-    .filter(permission => permission.length > 0);
 }
 
 function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {

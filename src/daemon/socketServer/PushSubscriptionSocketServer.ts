@@ -122,10 +122,18 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         timestamp: now,
       };
       try {
-        this.sendJson(subscriber.socket, pingMessage);
+        const ok = this.sendJson(subscriber.socket, pingMessage);
+        if (!ok) {
+          this.armDrainListener(subscriber);
+        }
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to ping ${subscriptionId}: ${error}`);
         deadSubscribers.push(subscriptionId);
+        try {
+          subscriber.socket.destroy();
+        } catch {
+          // Ignore
+        }
       }
     }
 
@@ -192,6 +200,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       lastActivity: this.timer.now(),
       filter,
       backfilling: false,
+      drainPending: false,
     });
 
     const response: SubscriptionResponse = {
@@ -301,11 +310,19 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         const result = subscriber.socket.write(json);
         if (result) {
           subscriber.lastActivity = this.timer.now();
+        } else {
+          // write()=false is not a death signal — wait for drain; truly dead peers get reaped by timeoutMs.
+          this.armDrainListener(subscriber);
         }
         sentCount++;
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to send to ${subscriptionId}: ${error}`);
         deadSubscribers.push(subscriptionId);
+        try {
+          subscriber.socket.destroy();
+        } catch {
+          // Ignore
+        }
       }
     }
 
@@ -314,6 +331,21 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     }
 
     return sentCount;
+  }
+
+  private armDrainListener(subscriber: Subscriber<TFilter>): void {
+    if (subscriber.drainPending) {
+      return;
+    }
+    const socket = subscriber.socket;
+    if (typeof socket.once !== "function") {
+      return;
+    }
+    subscriber.drainPending = true;
+    socket.once("drain", () => {
+      subscriber.drainPending = false;
+      subscriber.lastActivity = this.timer.now();
+    });
   }
 
   /**

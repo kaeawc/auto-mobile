@@ -8,7 +8,7 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
-import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMs, MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS } from "./mcpRequestTimeout";
 import {
   DaemonRequest,
   DaemonResponse,
@@ -37,6 +37,8 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { CtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
+/** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
+const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -140,6 +142,14 @@ export class UnixSocketServer {
 
     let buffer = "";
 
+    socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
+    socket.on("timeout", () => {
+      logger.warn(
+        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`
+      );
+      socket.destroy();
+    });
+
     socket.on("data", async data => {
       buffer += data.toString();
 
@@ -156,7 +166,7 @@ export class UnixSocketServer {
           const request: DaemonRequest = JSON.parse(line);
           requestId = request.id;
           const response = await this.handleRequest(sessionId, request);
-          socket.write(JSON.stringify(response) + "\n");
+          this.writeResponse(socket, sessionId, response);
         } catch (error) {
           logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
           const errorResponse: DaemonResponse = {
@@ -165,7 +175,7 @@ export class UnixSocketServer {
             success: false,
             error: error instanceof Error ? error.message : String(error),
           };
-          socket.write(JSON.stringify(errorResponse) + "\n");
+          this.writeResponse(socket, sessionId, errorResponse);
         }
       }
     });
@@ -178,7 +188,29 @@ export class UnixSocketServer {
     socket.on("error", error => {
       logger.error(`Socket error for ${sessionId}:`, error);
       this.sessions.delete(sessionId);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
     });
+  }
+
+  private writeResponse(socket: Socket, sessionId: string, response: DaemonResponse): void {
+    if (socket.destroyed) {
+      return;
+    }
+    try {
+      const ok = socket.write(JSON.stringify(response) + "\n");
+      if (!ok) {
+        logger.debug(
+          `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`
+        );
+      }
+    } catch (error) {
+      logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    }
   }
 
   /**

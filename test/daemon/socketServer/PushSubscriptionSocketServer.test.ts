@@ -62,6 +62,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
         packageName: options.packageName ?? null,
       },
       backfilling: false,
+      drainPending: false,
     });
 
     return { socket, subscriptionId };
@@ -289,6 +290,83 @@ describe("PushSubscriptionSocketServer", () => {
       server.pushData(data);
 
       expect(server.getSubscriberCount()).toBe(0);
+    });
+
+    it("destroys throwing-push subscribers to release the FD", () => {
+      const { socket } = server.simulateSubscription({});
+      socket.write = () => {
+        throw new Error("Connection broken");
+      };
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+
+      expect(socket.destroyed).toBe(true);
+    });
+  });
+
+  describe("backpressure handling", () => {
+    it("does not drop healthy subscribers that return false from write()", () => {
+      const { socket } = server.simulateSubscription({});
+      // Simulate a large payload crossing the high-water mark — write() returns false
+      // but the peer is otherwise healthy and sending pongs.
+      socket.write = () => false;
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+      server.pushData(data);
+      server.pushData(data);
+      server.pushData(data);
+
+      expect(server.getSubscriberCount()).toBe(1);
+      expect(socket.destroyed).toBe(false);
+    });
+
+    it("bumps lastActivity when a backpressured socket drains", () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      timer.setCurrentTime(1_000);
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+
+      timer.setCurrentTime(5_000);
+      // Peer finally drains — our listener should bump lastActivity.
+      socket.emit("drain");
+
+      const subscriber = (server as any).subscribers.get(subscriptionId);
+      expect(subscriber.lastActivity).toBe(5_000);
+      expect(subscriber.drainPending).toBe(false);
+    });
+
+    it("still destroys peers via the keepalive idle timeout when they never drain", () => {
+      const { socket } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      server.pushData({ deviceId: "device-1", packageName: "com.app", value: 42 });
+      expect(server.getSubscriberCount()).toBe(1);
+
+      // No drain ever fires. After 31s with no activity, the timeoutMs path reaps it.
+      timer.advanceTimersByTime(31_000);
+      server.triggerKeepalive();
+
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(socket.destroyed).toBe(true);
+    });
+
+    it("does not stack multiple drain listeners on repeated backpressure", () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+      server.pushData(data);
+      server.pushData(data);
+
+      // Should only have one drain listener attached.
+      expect(socket.listenerCount("drain")).toBe(1);
+      const subscriber = (server as any).subscribers.get(subscriptionId);
+      expect(subscriber.drainPending).toBe(true);
     });
   });
 });

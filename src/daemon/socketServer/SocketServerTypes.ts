@@ -38,6 +38,8 @@ export interface Subscriber<TFilter = unknown> {
   filter: TFilter;
   /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
   backfilling: boolean;
+  /** Guards against stacking multiple `'drain'` listeners when the socket stays backpressured. */
+  drainPending: boolean;
 }
 
 /**
@@ -65,6 +67,9 @@ export const DEFAULT_KEEPALIVE_CONFIG: KeepaliveConfig = {
   intervalMs: 10_000,
   timeoutMs: 30_000,
 };
+
+/** Idle I/O timeout after which `BaseSocketServer` destroys an accepted socket to release its FD. */
+export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Get the socket path based on environment mode.

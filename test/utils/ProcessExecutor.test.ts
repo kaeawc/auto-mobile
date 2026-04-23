@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import process from "process";
 import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 
@@ -53,7 +54,7 @@ describe("DefaultHostCommandExecutor", function () {
   });
 
   test("executeCommand passes multiple args", async function () {
-    const result = await executor.executeCommand("/bin/sh", ["-c", "echo foo bar"]);
+    const result = await executor.executeCommand(process.execPath, ["-e", "console.log('foo bar')"]);
     expect(result.stdout.trim()).toBe("foo bar");
   });
 });

@@ -134,6 +134,27 @@ export class AppPermissions {
     input: SetAppPermissionsInput
   ): Promise<SetAppPermissionsResult> {
     const permissions = normalizePermissions(input.permissions);
+    const unsupportedFields: string[] = [];
+    if (input.notificationPolicyAccess !== undefined) {
+      unsupportedFields.push("notificationPolicyAccess");
+    }
+    if (input.scheduleExactAlarm !== undefined) {
+      unsupportedFields.push("scheduleExactAlarm");
+    }
+    if (unsupportedFields.length > 0) {
+      const error = `setAppPermissions does not support the following fields on iOS: ${unsupportedFields.join(", ")}`;
+      return {
+        success: false,
+        appId,
+        deviceId: this.device.deviceId,
+        platform: "ios",
+        action,
+        changedCount: 0,
+        failedCount: 0,
+        operations: [],
+        error,
+      };
+    }
     const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 

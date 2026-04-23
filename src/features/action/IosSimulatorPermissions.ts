@@ -124,6 +124,17 @@ function stateFromAuthValue(value: number | null | undefined): IosSimulatorPermi
   return "unknown";
 }
 
+// Legacy TCC schema uses `allowed` (0/1) instead of `auth_value` (0/2/3).
+function stateFromAllowed(value: number | null | undefined): IosSimulatorPermissionState["state"] {
+  if (value === 1) {
+    return "granted";
+  }
+  if (value === 0) {
+    return "denied";
+  }
+  return "unknown";
+}
+
 export class SqliteTccPermissionReader implements TccPermissionReader {
   async readPermissions(deviceId: string, appId: string, permissions?: string[]): Promise<TccPermissionRow[]> {
     const tccPath = join(
@@ -282,12 +293,15 @@ export class IosSimulatorPermissions {
         platform: this.device.platform,
         permissions: uniqueServices.map(service => {
           const row = rowByService.get(service);
-          const authValue = row?.auth_value ?? row?.allowed ?? null;
+          const authValue = row?.auth_value ?? null;
+          const allowed = row?.allowed ?? null;
+          const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(allowed);
+          const authValueForResult = authValue ?? allowed;
           return {
             permission: permissionForTccService(service),
             service,
-            state: stateFromAuthValue(authValue),
-            ...(authValue === null ? {} : { authValue }),
+            state,
+            ...(authValueForResult === null ? {} : { authValue: authValueForResult }),
             ...(row ? { raw: row as Record<string, string | number | null> } : {})
           };
         })

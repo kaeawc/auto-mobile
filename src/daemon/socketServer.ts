@@ -8,7 +8,7 @@ import {
   type StreamableHTTPReconnectionOptions,
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
-import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { resolveMcpRequestTimeoutMs, MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS } from "./mcpRequestTimeout";
 import {
   DaemonRequest,
   DaemonResponse,
@@ -37,7 +37,14 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { CtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
-import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./socketServer/SocketServerTypes";
+/**
+ * Idle timeout for daemon RPC sockets. Must exceed the longest permitted forward timeout —
+ * `executePlan` is allowed up to `MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS` of silence on the wire
+ * while the plan runs — plus headroom for queue wait and response serialization. If this
+ * is ever shorter than the per-request timeout, long-running `tools/call` responses get
+ * forcibly disconnected mid-flight and never deliver to the client.
+ */
+const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -144,10 +151,10 @@ export class UnixSocketServer {
     // Belt-and-braces FD cleanup: if a peer stops reading/writing for this long, destroy
     // the socket. Prevents accepted sockets from piling up when a peer disappears without
     // a clean close (kernel keeps the unix FD half-open otherwise).
-    socket.setTimeout(DEFAULT_SOCKET_IDLE_TIMEOUT_MS);
+    socket.setTimeout(DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS);
     socket.on("timeout", () => {
       logger.warn(
-        `Daemon RPC socket ${sessionId} idle timeout after ${DEFAULT_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`
+        `Daemon RPC socket ${sessionId} idle timeout after ${DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`
       );
       socket.destroy();
     });

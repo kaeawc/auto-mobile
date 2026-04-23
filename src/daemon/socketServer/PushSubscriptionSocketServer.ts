@@ -121,11 +121,38 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         type: "ping",
         timestamp: now,
       };
+      let pingOk = false;
       try {
-        this.sendJson(subscriber.socket, pingMessage);
+        pingOk = this.sendJson(subscriber.socket, pingMessage);
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to ping ${subscriptionId}: ${error}`);
         deadSubscribers.push(subscriptionId);
+        try {
+          subscriber.socket.destroy();
+        } catch {
+          // Ignore
+        }
+        continue;
+      }
+
+      if (pingOk) {
+        subscriber.consecutiveBackpressuredWrites = 0;
+      } else {
+        subscriber.consecutiveBackpressuredWrites += 1;
+        if (
+          subscriber.consecutiveBackpressuredWrites >= this.keepaliveConfig.backpressureThreshold
+        ) {
+          logger.warn(
+            `[${this.serverName}] Subscriber ${subscriptionId} backpressured for ` +
+              `${subscriber.consecutiveBackpressuredWrites} consecutive pings, destroying`
+          );
+          deadSubscribers.push(subscriptionId);
+          try {
+            subscriber.socket.destroy();
+          } catch {
+            // Ignore
+          }
+        }
       }
     }
 
@@ -192,6 +219,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       lastActivity: this.timer.now(),
       filter,
       backfilling: false,
+      consecutiveBackpressuredWrites: 0,
     });
 
     const response: SubscriptionResponse = {
@@ -301,11 +329,34 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         const result = subscriber.socket.write(json);
         if (result) {
           subscriber.lastActivity = this.timer.now();
+          subscriber.consecutiveBackpressuredWrites = 0;
+        } else {
+          subscriber.consecutiveBackpressuredWrites += 1;
+          if (
+            subscriber.consecutiveBackpressuredWrites >= this.keepaliveConfig.backpressureThreshold
+          ) {
+            logger.warn(
+              `[${this.serverName}] Subscriber ${subscriptionId} backpressured on ` +
+                `${subscriber.consecutiveBackpressuredWrites} consecutive pushes, destroying`
+            );
+            deadSubscribers.push(subscriptionId);
+            try {
+              subscriber.socket.destroy();
+            } catch {
+              // Ignore
+            }
+            continue;
+          }
         }
         sentCount++;
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to send to ${subscriptionId}: ${error}`);
         deadSubscribers.push(subscriptionId);
+        try {
+          subscriber.socket.destroy();
+        } catch {
+          // Ignore
+        }
       }
     }
 

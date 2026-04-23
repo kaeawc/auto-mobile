@@ -37,6 +37,7 @@ import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceM
 import { CtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
+import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./socketServer/SocketServerTypes";
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -140,6 +141,17 @@ export class UnixSocketServer {
 
     let buffer = "";
 
+    // Belt-and-braces FD cleanup: if a peer stops reading/writing for this long, destroy
+    // the socket. Prevents accepted sockets from piling up when a peer disappears without
+    // a clean close (kernel keeps the unix FD half-open otherwise).
+    socket.setTimeout(DEFAULT_SOCKET_IDLE_TIMEOUT_MS);
+    socket.on("timeout", () => {
+      logger.warn(
+        `Daemon RPC socket ${sessionId} idle timeout after ${DEFAULT_SOCKET_IDLE_TIMEOUT_MS}ms, destroying`
+      );
+      socket.destroy();
+    });
+
     socket.on("data", async data => {
       buffer += data.toString();
 
@@ -156,7 +168,7 @@ export class UnixSocketServer {
           const request: DaemonRequest = JSON.parse(line);
           requestId = request.id;
           const response = await this.handleRequest(sessionId, request);
-          socket.write(JSON.stringify(response) + "\n");
+          this.writeResponse(socket, sessionId, response);
         } catch (error) {
           logger.error(`Error processing request ${requestId} from ${sessionId}:`, error);
           const errorResponse: DaemonResponse = {
@@ -165,7 +177,7 @@ export class UnixSocketServer {
             success: false,
             error: error instanceof Error ? error.message : String(error),
           };
-          socket.write(JSON.stringify(errorResponse) + "\n");
+          this.writeResponse(socket, sessionId, errorResponse);
         }
       }
     });
@@ -178,7 +190,34 @@ export class UnixSocketServer {
     socket.on("error", error => {
       logger.error(`Socket error for ${sessionId}:`, error);
       this.sessions.delete(sessionId);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
     });
+  }
+
+  /**
+   * Write a response to a client socket. Centralizes all writes so backpressure handling,
+   * destroyed-socket checks, and error cleanup live in one place. If `socket.write()` returns
+   * false (peer not draining), we destroy the socket rather than letting the buffer grow
+   * unbounded — the alternative leaks FDs, as seen in issue #2008.
+   */
+  private writeResponse(socket: Socket, sessionId: string, response: DaemonResponse): void {
+    if (socket.destroyed) {
+      return;
+    }
+    try {
+      const ok = socket.write(JSON.stringify(response) + "\n");
+      if (!ok) {
+        logger.warn(`Daemon RPC socket ${sessionId} backpressured, destroying to release FD`);
+        socket.destroy();
+      }
+    } catch (error) {
+      logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);
+      if (!socket.destroyed) {
+        socket.destroy();
+      }
+    }
   }
 
   /**

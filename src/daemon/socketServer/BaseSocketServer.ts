@@ -4,6 +4,7 @@ import { unlink, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
 
 /**
  * Abstract base class for Unix domain socket servers.
@@ -14,11 +15,18 @@ export abstract class BaseSocketServer {
   protected readonly socketPath: string;
   protected readonly timer: Timer;
   protected readonly serverName: string;
+  protected readonly idleTimeoutMs: number;
 
-  constructor(socketPath: string, timer: Timer = defaultTimer, serverName: string = "Socket") {
+  constructor(
+    socketPath: string,
+    timer: Timer = defaultTimer,
+    serverName: string = "Socket",
+    idleTimeoutMs: number = DEFAULT_SOCKET_IDLE_TIMEOUT_MS
+  ) {
     this.socketPath = socketPath;
     this.timer = timer;
     this.serverName = serverName;
+    this.idleTimeoutMs = idleTimeoutMs;
   }
 
   /**
@@ -84,6 +92,16 @@ export abstract class BaseSocketServer {
    */
   protected handleConnection(socket: Socket): void {
     let buffer = "";
+
+    if (this.idleTimeoutMs > 0 && typeof socket.setTimeout === "function") {
+      socket.setTimeout(this.idleTimeoutMs);
+      socket.on("timeout", () => {
+        logger.warn(
+          `[${this.serverName}] Idle timeout after ${this.idleTimeoutMs}ms, destroying socket`
+        );
+        socket.destroy();
+      });
+    }
 
     socket.on("data", data => {
       buffer += data.toString();
@@ -153,11 +171,18 @@ export abstract class BaseSocketServer {
 
   /**
    * Send a JSON response to a socket.
+   *
+   * Returns the result of the underlying `socket.write()` so callers can detect backpressure
+   * (`false`) and apply policy (drop the peer, pause pushes, etc.). Returns `false` if the
+   * socket is already destroyed. This return value is the primary signal used to catch
+   * vanished peers — `socket.write()` does not throw when a peer stops draining, it just
+   * returns `false` and lets the internal buffer grow, which is how FDs leaked previously.
    */
-  protected sendJson(socket: Socket, data: unknown): void {
-    if (!socket.destroyed) {
-      socket.write(JSON.stringify(data) + "\n");
+  protected sendJson(socket: Socket, data: unknown): boolean {
+    if (socket.destroyed) {
+      return false;
     }
+    return socket.write(JSON.stringify(data) + "\n");
   }
 
   /**

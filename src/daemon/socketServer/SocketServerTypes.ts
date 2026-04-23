@@ -38,6 +38,13 @@ export interface Subscriber<TFilter = unknown> {
   filter: TFilter;
   /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
   backfilling: boolean;
+  /**
+   * Count of consecutive writes (pings or pushes) that have returned `false` (backpressure).
+   * Resets to 0 on any write that returns `true`. When it crosses the configured threshold the
+   * subscriber is treated as dead and its socket is destroyed — this is the signal that detects
+   * peers that silently disappeared without closing.
+   */
+  consecutiveBackpressuredWrites: number;
 }
 
 /**
@@ -56,6 +63,12 @@ export interface KeepaliveConfig {
   intervalMs: number;
   /** Time without activity before considering subscriber dead */
   timeoutMs: number;
+  /**
+   * Number of consecutive backpressured writes (write() returning false) before a
+   * subscriber is treated as dead and destroyed. Catches vanished peers that never
+   * raise `error`/`close` but also never drain.
+   */
+  backpressureThreshold: number;
 }
 
 /**
@@ -64,7 +77,14 @@ export interface KeepaliveConfig {
 export const DEFAULT_KEEPALIVE_CONFIG: KeepaliveConfig = {
   intervalMs: 10_000,
   timeoutMs: 30_000,
+  backpressureThreshold: 3,
 };
+
+/**
+ * Default idle timeout applied to accepted sockets by `BaseSocketServer`.
+ * If no data is read or written for this long, the socket is destroyed to release its FD.
+ */
+export const DEFAULT_SOCKET_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 
 /**
  * Get the socket path based on environment mode.

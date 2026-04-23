@@ -62,6 +62,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
         packageName: options.packageName ?? null,
       },
       backfilling: false,
+      consecutiveBackpressuredWrites: 0,
     });
 
     return { socket, subscriptionId };
@@ -289,6 +290,74 @@ describe("PushSubscriptionSocketServer", () => {
       server.pushData(data);
 
       expect(server.getSubscriberCount()).toBe(0);
+    });
+
+    it("destroys throwing-push subscribers to release the FD", () => {
+      const { socket } = server.simulateSubscription({});
+      socket.write = () => {
+        throw new Error("Connection broken");
+      };
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+
+      expect(socket.destroyed).toBe(true);
+    });
+  });
+
+  describe("backpressure handling", () => {
+    it("drops subscribers after repeated backpressured pushes", () => {
+      const { socket } = server.simulateSubscription({});
+      // Simulate a vanished peer: write() always returns false (buffer fills, no drain).
+      socket.write = () => false;
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+
+      // Default threshold is 3 — first two are tolerated, third trips destroy.
+      server.pushData(data);
+      server.pushData(data);
+      expect(server.getSubscriberCount()).toBe(1);
+      expect(socket.destroyed).toBe(false);
+
+      server.pushData(data);
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(socket.destroyed).toBe(true);
+    });
+
+    it("resets the backpressure counter when a push finally succeeds", () => {
+      const { socket } = server.simulateSubscription({});
+      let shouldBackpressure = true;
+      socket.write = () => !shouldBackpressure;
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+      server.pushData(data);
+
+      shouldBackpressure = false;
+      server.pushData(data);
+
+      shouldBackpressure = true;
+      server.pushData(data);
+      server.pushData(data);
+
+      // Would have been destroyed by now without the reset (5 backpressured writes total).
+      expect(server.getSubscriberCount()).toBe(1);
+      expect(socket.destroyed).toBe(false);
+    });
+
+    it("drops subscribers after repeated backpressured pings", () => {
+      const { socket } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      // Three keepalive cycles of backpressured pings should destroy the subscriber.
+      timer.advanceTimersByTime(1_000);
+      server.triggerKeepalive();
+      server.triggerKeepalive();
+      expect(server.getSubscriberCount()).toBe(1);
+
+      server.triggerKeepalive();
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(socket.destroyed).toBe(true);
     });
   });
 });

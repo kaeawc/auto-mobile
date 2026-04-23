@@ -41,6 +41,7 @@ class TestableTelemetryPushSocketServer extends TelemetryPushSocketServer {
         sessionId: null,
       },
       backfilling: false,
+      consecutiveBackpressuredWrites: 0,
     });
     return { socket, subscriptionId };
   }

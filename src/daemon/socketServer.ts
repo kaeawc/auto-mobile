@@ -197,10 +197,11 @@ export class UnixSocketServer {
   }
 
   /**
-   * Write a response to a client socket. Centralizes all writes so backpressure handling,
-   * destroyed-socket checks, and error cleanup live in one place. If `socket.write()` returns
-   * false (peer not draining), we destroy the socket rather than letting the buffer grow
-   * unbounded — the alternative leaks FDs, as seen in issue #2008.
+   * Write a response to a client socket. Centralizes all writes so destroyed-socket checks
+   * and error cleanup live in one place. Backpressure (`write()` returning false) is not
+   * treated as a fatal signal — large MCP payloads legitimately cross the write high-water
+   * mark on healthy clients. Truly stalled peers are reaped by the socket's idle timeout
+   * configured in `handleConnection()`.
    */
   private writeResponse(socket: Socket, sessionId: string, response: DaemonResponse): void {
     if (socket.destroyed) {
@@ -209,8 +210,9 @@ export class UnixSocketServer {
     try {
       const ok = socket.write(JSON.stringify(response) + "\n");
       if (!ok) {
-        logger.warn(`Daemon RPC socket ${sessionId} backpressured, destroying to release FD`);
-        socket.destroy();
+        logger.debug(
+          `Daemon RPC socket ${sessionId} backpressured; awaiting drain (idle timeout still armed)`
+        );
       }
     } catch (error) {
       logger.warn(`Daemon RPC write failed for ${sessionId}: ${error}`);

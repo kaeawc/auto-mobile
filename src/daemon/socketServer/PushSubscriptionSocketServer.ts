@@ -121,9 +121,11 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         type: "ping",
         timestamp: now,
       };
-      let pingOk = false;
       try {
-        pingOk = this.sendJson(subscriber.socket, pingMessage);
+        const ok = this.sendJson(subscriber.socket, pingMessage);
+        if (!ok) {
+          this.armDrainListener(subscriber);
+        }
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to ping ${subscriptionId}: ${error}`);
         deadSubscribers.push(subscriptionId);
@@ -131,27 +133,6 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
           subscriber.socket.destroy();
         } catch {
           // Ignore
-        }
-        continue;
-      }
-
-      if (pingOk) {
-        subscriber.consecutiveBackpressuredWrites = 0;
-      } else {
-        subscriber.consecutiveBackpressuredWrites += 1;
-        if (
-          subscriber.consecutiveBackpressuredWrites >= this.keepaliveConfig.backpressureThreshold
-        ) {
-          logger.warn(
-            `[${this.serverName}] Subscriber ${subscriptionId} backpressured for ` +
-              `${subscriber.consecutiveBackpressuredWrites} consecutive pings, destroying`
-          );
-          deadSubscribers.push(subscriptionId);
-          try {
-            subscriber.socket.destroy();
-          } catch {
-            // Ignore
-          }
         }
       }
     }
@@ -219,7 +200,7 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
       lastActivity: this.timer.now(),
       filter,
       backfilling: false,
-      consecutiveBackpressuredWrites: 0,
+      drainPending: false,
     });
 
     const response: SubscriptionResponse = {
@@ -329,24 +310,12 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
         const result = subscriber.socket.write(json);
         if (result) {
           subscriber.lastActivity = this.timer.now();
-          subscriber.consecutiveBackpressuredWrites = 0;
         } else {
-          subscriber.consecutiveBackpressuredWrites += 1;
-          if (
-            subscriber.consecutiveBackpressuredWrites >= this.keepaliveConfig.backpressureThreshold
-          ) {
-            logger.warn(
-              `[${this.serverName}] Subscriber ${subscriptionId} backpressured on ` +
-                `${subscriber.consecutiveBackpressuredWrites} consecutive pushes, destroying`
-            );
-            deadSubscribers.push(subscriptionId);
-            try {
-              subscriber.socket.destroy();
-            } catch {
-              // Ignore
-            }
-            continue;
-          }
+          // Backpressure is not a death signal — healthy clients hit it under load.
+          // Register a drain listener so we bump `lastActivity` when the kernel buffer
+          // clears. A genuinely dead peer never drains; the keepalive `timeoutMs` check
+          // above is what eventually destroys it.
+          this.armDrainListener(subscriber);
         }
         sentCount++;
       } catch (error) {
@@ -365,6 +334,26 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
     }
 
     return sentCount;
+  }
+
+  /**
+   * Register a one-shot `'drain'` listener on a backpressured subscriber so we update
+   * `lastActivity` once the kernel buffer clears. Idempotent per subscriber — `drainPending`
+   * guards against stacking listeners on repeated backpressure.
+   */
+  private armDrainListener(subscriber: Subscriber<TFilter>): void {
+    if (subscriber.drainPending) {
+      return;
+    }
+    const socket = subscriber.socket;
+    if (typeof socket.once !== "function") {
+      return;
+    }
+    subscriber.drainPending = true;
+    socket.once("drain", () => {
+      subscriber.drainPending = false;
+      subscriber.lastActivity = this.timer.now();
+    });
   }
 
   /**

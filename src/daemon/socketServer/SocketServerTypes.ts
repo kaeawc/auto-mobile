@@ -39,12 +39,12 @@ export interface Subscriber<TFilter = unknown> {
   /** When true, this subscriber is receiving backfill data and should be skipped by live pushes. */
   backfilling: boolean;
   /**
-   * Count of consecutive writes (pings or pushes) that have returned `false` (backpressure).
-   * Resets to 0 on any write that returns `true`. When it crosses the configured threshold the
-   * subscriber is treated as dead and its socket is destroyed — this is the signal that detects
-   * peers that silently disappeared without closing.
+   * True while a `'drain'` listener has been registered on this subscriber's socket. Set when
+   * `write()` returns `false` so we don't stack multiple listeners on repeated backpressure.
+   * The listener bumps `lastActivity`, letting the existing keepalive timeout path decide
+   * whether the peer is genuinely dead.
    */
-  consecutiveBackpressuredWrites: number;
+  drainPending: boolean;
 }
 
 /**
@@ -63,12 +63,6 @@ export interface KeepaliveConfig {
   intervalMs: number;
   /** Time without activity before considering subscriber dead */
   timeoutMs: number;
-  /**
-   * Number of consecutive backpressured writes (write() returning false) before a
-   * subscriber is treated as dead and destroyed. Catches vanished peers that never
-   * raise `error`/`close` but also never drain.
-   */
-  backpressureThreshold: number;
 }
 
 /**
@@ -77,7 +71,6 @@ export interface KeepaliveConfig {
 export const DEFAULT_KEEPALIVE_CONFIG: KeepaliveConfig = {
   intervalMs: 10_000,
   timeoutMs: 30_000,
-  backpressureThreshold: 3,
 };
 
 /**

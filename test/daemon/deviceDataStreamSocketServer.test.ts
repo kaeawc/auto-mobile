@@ -40,7 +40,7 @@ class TestableDeviceDataStreamSocketServer extends DeviceDataStreamSocketServer 
         deviceId: options.deviceId ?? null,
       },
       backfilling: false,
-      consecutiveBackpressuredWrites: 0,
+      drainPending: false,
     });
     return { socket, subscriptionId };
   }

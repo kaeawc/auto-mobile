@@ -62,7 +62,7 @@ class TestablePushSubscriptionServer extends PushSubscriptionSocketServer<TestFi
         packageName: options.packageName ?? null,
       },
       backfilling: false,
-      consecutiveBackpressuredWrites: 0,
+      drainPending: false,
     });
 
     return { socket, subscriptionId };
@@ -306,58 +306,67 @@ describe("PushSubscriptionSocketServer", () => {
   });
 
   describe("backpressure handling", () => {
-    it("drops subscribers after repeated backpressured pushes", () => {
+    it("does not drop healthy subscribers that return false from write()", () => {
       const { socket } = server.simulateSubscription({});
-      // Simulate a vanished peer: write() always returns false (buffer fills, no drain).
+      // Simulate a large payload crossing the high-water mark — write() returns false
+      // but the peer is otherwise healthy and sending pongs.
       socket.write = () => false;
 
       const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
-
-      // Default threshold is 3 — first two are tolerated, third trips destroy.
       server.pushData(data);
       server.pushData(data);
-      expect(server.getSubscriberCount()).toBe(1);
-      expect(socket.destroyed).toBe(false);
-
-      server.pushData(data);
-      expect(server.getSubscriberCount()).toBe(0);
-      expect(socket.destroyed).toBe(true);
-    });
-
-    it("resets the backpressure counter when a push finally succeeds", () => {
-      const { socket } = server.simulateSubscription({});
-      let shouldBackpressure = true;
-      socket.write = () => !shouldBackpressure;
-
-      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
       server.pushData(data);
       server.pushData(data);
 
-      shouldBackpressure = false;
-      server.pushData(data);
-
-      shouldBackpressure = true;
-      server.pushData(data);
-      server.pushData(data);
-
-      // Would have been destroyed by now without the reset (5 backpressured writes total).
       expect(server.getSubscriberCount()).toBe(1);
       expect(socket.destroyed).toBe(false);
     });
 
-    it("drops subscribers after repeated backpressured pings", () => {
+    it("bumps lastActivity when a backpressured socket drains", () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      timer.setCurrentTime(1_000);
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+
+      timer.setCurrentTime(5_000);
+      // Peer finally drains — our listener should bump lastActivity.
+      socket.emit("drain");
+
+      const subscriber = (server as any).subscribers.get(subscriptionId);
+      expect(subscriber.lastActivity).toBe(5_000);
+      expect(subscriber.drainPending).toBe(false);
+    });
+
+    it("still destroys peers via the keepalive idle timeout when they never drain", () => {
       const { socket } = server.simulateSubscription({});
       socket.write = () => false;
 
-      // Three keepalive cycles of backpressured pings should destroy the subscriber.
-      timer.advanceTimersByTime(1_000);
-      server.triggerKeepalive();
-      server.triggerKeepalive();
+      server.pushData({ deviceId: "device-1", packageName: "com.app", value: 42 });
       expect(server.getSubscriberCount()).toBe(1);
 
+      // No drain ever fires. After 31s with no activity, the timeoutMs path reaps it.
+      timer.advanceTimersByTime(31_000);
       server.triggerKeepalive();
+
       expect(server.getSubscriberCount()).toBe(0);
       expect(socket.destroyed).toBe(true);
+    });
+
+    it("does not stack multiple drain listeners on repeated backpressure", () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+      socket.write = () => false;
+
+      const data: TestPushData = { deviceId: "device-1", packageName: "com.app", value: 42 };
+      server.pushData(data);
+      server.pushData(data);
+      server.pushData(data);
+
+      // Should only have one drain listener attached.
+      expect(socket.listenerCount("drain")).toBe(1);
+      const subscriber = (server as any).subscribers.get(subscriptionId);
+      expect(subscriber.drainPending).toBe(true);
     });
   });
 });

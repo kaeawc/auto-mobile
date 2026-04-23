@@ -57,7 +57,7 @@ class TestablePerformancePushSocketServer extends PerformancePushSocketServer {
         packageName: options.packageName ?? null,
       },
       backfilling: false,
-      consecutiveBackpressuredWrites: 0,
+      drainPending: false,
     });
 
     return { socket, subscriptionId };

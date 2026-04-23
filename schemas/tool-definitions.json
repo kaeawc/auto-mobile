@@ -623,6 +623,14 @@
         "cleanupClearAppData": {
           "description": "Clear app data on cleanup",
           "type": "boolean"
+        },
+        "captureObserveSteps": {
+          "description": "Single-device plans only: attach each successful observe step snapshot to executePlan result `debug.steps[n].details.stepObservation` (`summary` = metadata + element samples; `full` = includes viewHierarchy). Ignored for multi-device plans.",
+          "type": "string",
+          "enum": [
+            "summary",
+            "full"
+          ]
         }
       },
       "required": [
@@ -667,7 +675,8 @@
             },
             "device": {
               "type": "string"
-            }
+            },
+            "failureObservation": {}
           },
           "required": [
             "stepIndex",
@@ -1912,6 +1921,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [
@@ -1929,6 +1969,37 @@
                 "timeout": {
                   "description": "Wait timeout ms (default: 5000)",
                   "type": "number"
+                },
+                "container": {
+                  "description": "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView).",
+                  "anyOf": [
+                    {
+                      "type": "object",
+                      "properties": {
+                        "elementId": {
+                          "type": "string",
+                          "description": "Container resource ID"
+                        }
+                      },
+                      "required": [
+                        "elementId"
+                      ],
+                      "additionalProperties": false
+                    },
+                    {
+                      "type": "object",
+                      "properties": {
+                        "text": {
+                          "type": "string",
+                          "description": "Container text"
+                        }
+                      },
+                      "required": [
+                        "text"
+                      ],
+                      "additionalProperties": false
+                    }
+                  ]
                 }
               },
               "required": [

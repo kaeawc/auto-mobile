@@ -142,6 +142,20 @@ export class DeviceState {
       };
     }
 
+    const { enabled, mode } = input.doNotDisturb;
+    if (enabled !== undefined && mode !== undefined) {
+      const impliesOff = enabled === false;
+      const modeIsOff = mode === "off";
+      if (impliesOff !== modeIsOff) {
+        return {
+          success: false,
+          deviceId: this.device.deviceId,
+          platform: this.device.platform,
+          error: `doNotDisturb.enabled=${enabled} conflicts with doNotDisturb.mode="${mode}"`,
+        };
+      }
+    }
+
     const doNotDisturb = this.device.platform === "android"
       ? await this.setAndroidDoNotDisturb(input.doNotDisturb)
       : await this.setIosDoNotDisturb(input.doNotDisturb);

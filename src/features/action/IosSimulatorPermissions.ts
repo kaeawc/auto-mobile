@@ -44,7 +44,7 @@ export interface IosSimulatorPermissionQueryResult {
   error?: string;
 }
 
-interface IosSimulatorPrivacyClient {
+export interface IosSimulatorPrivacyClient {
   executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
 }
 
@@ -90,8 +90,8 @@ function quoteSimctlArg(value: string): string {
   return `"${value.replace(/(["\\])/g, "\\$1")}"`;
 }
 
-function normalizePermissions(permissions: string[]): string[] {
-  return permissions
+export function normalizePermissions(permissions: string[] | undefined): string[] {
+  return (permissions ?? [])
     .map(permission => permission.trim())
     .filter(permission => permission.length > 0);
 }
@@ -120,6 +120,17 @@ function stateFromAuthValue(value: number | null | undefined): IosSimulatorPermi
   }
   if (value === 3) {
     return "limited";
+  }
+  return "unknown";
+}
+
+// Legacy TCC schema uses `allowed` (0/1) instead of `auth_value` (0/2/3).
+function stateFromAllowed(value: number | null | undefined): IosSimulatorPermissionState["state"] {
+  if (value === 1) {
+    return "granted";
+  }
+  if (value === 0) {
+    return "denied";
   }
   return "unknown";
 }
@@ -214,32 +225,27 @@ export class IosSimulatorPermissions {
       };
     }
 
-    const results = [];
-
-    for (const permission of normalizedPermissions) {
-      try {
-        const command = [
-          "privacy",
-          quoteSimctlArg(this.device.deviceId),
-          action,
-          quoteSimctlArg(permission),
-          quoteSimctlArg(normalizedAppId)
-        ].join(" ");
-        const result = await this.simctl.executeCommand(command);
-        results.push({
-          permission,
-          success: true,
-          stdout: result.stdout,
-          stderr: result.stderr
-        });
-      } catch (error) {
-        results.push({
-          permission,
-          success: false,
-          error: error instanceof Error ? error.message : String(error)
-        });
-      }
-    }
+    const results: IosSimulatorPermissionCommandResult[] = await Promise.all(
+      normalizedPermissions.map(async permission => {
+        try {
+          const command = [
+            "privacy",
+            quoteSimctlArg(this.device.deviceId),
+            action,
+            quoteSimctlArg(permission),
+            quoteSimctlArg(normalizedAppId)
+          ].join(" ");
+          const result = await this.simctl.executeCommand(command);
+          return { permission, success: true, stdout: result.stdout, stderr: result.stderr };
+        } catch (error) {
+          return {
+            permission,
+            success: false,
+            error: error instanceof Error ? error.message : String(error)
+          };
+        }
+      })
+    );
 
     const failedCount = results.filter(result => !result.success).length;
 
@@ -287,12 +293,15 @@ export class IosSimulatorPermissions {
         platform: this.device.platform,
         permissions: uniqueServices.map(service => {
           const row = rowByService.get(service);
-          const authValue = row?.auth_value ?? row?.allowed ?? null;
+          const authValue = row?.auth_value ?? null;
+          const allowed = row?.allowed ?? null;
+          const state = authValue !== null ? stateFromAuthValue(authValue) : stateFromAllowed(allowed);
+          const authValueForResult = authValue ?? allowed;
           return {
             permission: permissionForTccService(service),
             service,
-            state: stateFromAuthValue(authValue),
-            ...(authValue === null ? {} : { authValue }),
+            state,
+            ...(authValueForResult === null ? {} : { authValue: authValueForResult }),
             ...(row ? { raw: row as Record<string, string | number | null> } : {})
           };
         })

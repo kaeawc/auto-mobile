@@ -33,34 +33,52 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function collectPolicyAccessSection(lines: string[]): { headerIdx: number; sectionLines: string[] } | null {
+  const headerRe = /mPolicyAccess|policy\s+access/i;
+  for (let i = 0; i < lines.length; i++) {
+    if (!headerRe.test(lines[i])) {
+      continue;
+    }
+    const headerIndent = lines[i].match(/^\s*/)![0].length;
+    const sectionLines: string[] = [lines[i]];
+    for (let j = i + 1; j < lines.length; j++) {
+      const line = lines[j];
+      if (line.trim().length === 0) {
+        continue;
+      }
+      const indent = line.match(/^\s*/)![0].length;
+      if (indent <= headerIndent) {
+        break;
+      }
+      sectionLines.push(line);
+    }
+    return { headerIdx: i, sectionLines };
+  }
+  return null;
+}
+
 function parseAndroidPolicyAccess(output: string, appId: string): NotificationPolicyAccessState {
-  const policyAccessLine = output
-    .split(/\r?\n/)
-    .find(line => /mPolicyAccess|policy\s+access/i.test(line) && line.includes(appId));
+  const lines = output.split(/\r?\n/);
+  const section = collectPolicyAccessSection(lines);
 
-  if (policyAccessLine) {
-    const appPattern = new RegExp(`(^|[^A-Za-z0-9_.])${escapeRegExp(appId)}([^A-Za-z0-9_.]|$)`);
+  if (!section) {
     return {
       supported: true,
-      allowed: appPattern.test(policyAccessLine),
+      allowed: null,
       method: "android_dumpsys_notification",
-      rawValue: policyAccessLine.trim(),
+      warning: "Could not find notification policy access state in dumpsys notification output",
     };
   }
 
-  if (/mPolicyAccess|policy\s+access/i.test(output)) {
-    return {
-      supported: true,
-      allowed: false,
-      method: "android_dumpsys_notification",
-    };
-  }
-
+  const sectionText = section.sectionLines.join("\n");
+  const appPattern = new RegExp(`(^|[^A-Za-z0-9_.])${escapeRegExp(appId)}([^A-Za-z0-9_.]|$)`);
+  const allowed = appPattern.test(sectionText);
+  const matchLine = section.sectionLines.find(line => appPattern.test(line));
   return {
     supported: true,
-    allowed: null,
+    allowed,
     method: "android_dumpsys_notification",
-    warning: "Could not find notification policy access state in dumpsys notification output",
+    rawValue: (matchLine ?? section.sectionLines[0]).trim(),
   };
 }
 

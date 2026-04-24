@@ -490,6 +490,7 @@ async function main() {
         predictiveUi,
         rawElementSearch,
         skipCtrlProxyDownload,
+        noNavigationScreenshots: !navigationScreenshots,
       };
 
       if (useProxyMode) {

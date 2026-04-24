@@ -1,12 +1,14 @@
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { BootedDevice, ExecResult } from "../../models";
+import type { BootedDevice } from "../../models";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
 import { SetAndroidScheduleExactAlarmAppOp, type ScheduleExactAlarmAppOpMode } from "./SetAndroidScheduleExactAlarmAppOp";
 import {
   IosSimulatorPermissions,
+  normalizePermissions,
   type IosSimulatorPermissionAction,
+  type IosSimulatorPrivacyClient,
   type TccPermissionReader
 } from "./IosSimulatorPermissions";
 
@@ -66,20 +68,10 @@ export interface GetAppPermissionsResult {
   error?: string;
 }
 
-interface IosSimulatorPrivacyClient {
-  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
-}
-
 export interface AppPermissionsDependencies {
   adbFactory?: AdbClientFactory;
   simctl?: IosSimulatorPrivacyClient | null;
   tccReader?: TccPermissionReader | null;
-}
-
-function normalizePermissions(permissions: string[] | undefined): string[] {
-  return (permissions ?? [])
-    .map(permission => permission.trim())
-    .filter(permission => permission.length > 0);
 }
 
 function parseAndroidRuntimePermissions(output: string): Map<string, AppPermissionStateResult> {
@@ -142,6 +134,27 @@ export class AppPermissions {
     input: SetAppPermissionsInput
   ): Promise<SetAppPermissionsResult> {
     const permissions = normalizePermissions(input.permissions);
+    const unsupportedFields: string[] = [];
+    if (input.notificationPolicyAccess !== undefined) {
+      unsupportedFields.push("notificationPolicyAccess");
+    }
+    if (input.scheduleExactAlarm !== undefined) {
+      unsupportedFields.push("scheduleExactAlarm");
+    }
+    if (unsupportedFields.length > 0) {
+      const error = `setAppPermissions does not support the following fields on iOS: ${unsupportedFields.join(", ")}`;
+      return {
+        success: false,
+        appId,
+        deviceId: this.device.deviceId,
+        platform: "ios",
+        action,
+        changedCount: 0,
+        failedCount: 0,
+        operations: [],
+        error,
+      };
+    }
     const iosPermissions = new IosSimulatorPermissions(this.device, this.simctl, this.tccReader);
     const result = await iosPermissions.setPermissions(action, appId, permissions);
 
@@ -288,7 +301,14 @@ export class AppPermissions {
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
       const result = await adb.executeCommand(`shell dumpsys package ${normalizedAppId}`, undefined, undefined, true);
-      const parsed = parseAndroidRuntimePermissions(result.stdout ?? "");
+      const stdout = result.stdout ?? "";
+      if (/Unable to find package/i.test(stdout)) {
+        return this.androidQueryFailure(normalizedAppId, `Package not installed: ${normalizedAppId}`);
+      }
+      const parsed = parseAndroidRuntimePermissions(stdout);
+      if (parsed.size === 0 && !/Package \[/.test(stdout)) {
+        return this.androidQueryFailure(normalizedAppId, `Package lookup returned no data for ${normalizedAppId}`);
+      }
       const permissionNames = requestedPermissions.length > 0 ? requestedPermissions : [...parsed.keys()];
 
       return {

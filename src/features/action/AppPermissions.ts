@@ -301,7 +301,14 @@ export class AppPermissions {
     try {
       const adb: AdbExecutor = this.adbFactory.create(this.device);
       const result = await adb.executeCommand(`shell dumpsys package ${normalizedAppId}`, undefined, undefined, true);
-      const parsed = parseAndroidRuntimePermissions(result.stdout ?? "");
+      const stdout = result.stdout ?? "";
+      if (/Unable to find package/i.test(stdout)) {
+        return this.androidQueryFailure(normalizedAppId, `Package not installed: ${normalizedAppId}`);
+      }
+      const parsed = parseAndroidRuntimePermissions(stdout);
+      if (parsed.size === 0 && !/Package \[/.test(stdout)) {
+        return this.androidQueryFailure(normalizedAppId, `Package lookup returned no data for ${normalizedAppId}`);
+      }
       const permissionNames = requestedPermissions.length > 0 ? requestedPermissions : [...parsed.keys()];
 
       return {

@@ -12,9 +12,9 @@ const WITHIN_EPSILON_BOUNDS: Element["bounds"] = { left: 11, top: 21, right: 111
 
 function makeElement(bounds: Element["bounds"]): Element {
   return {
-    text: "Contact Name",
+    "text": "Contact Name",
     "resource-id": "com.app:id/contact_row",
-    class: "android.widget.TextView",
+    "class": "android.widget.TextView",
     bounds
   } as Element;
 }

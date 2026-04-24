@@ -65,8 +65,38 @@ export const LogLevel = {
 
 export type LogLevel = typeof LogLevel[keyof typeof LogLevel];
 
-// Default to INFO level in production, can be overridden
-let currentLogLevel: LogLevel = LogLevel.INFO;
+/**
+ * Parse `AUTOMOBILE_LOG_LEVEL` values: debug, info, warn|warning, error, none|silent.
+ * Returns null if unset, blank, or unrecognized (caller keeps current level).
+ */
+export function parseAutomobileLogLevel(value: string | undefined): LogLevel | null {
+  if (value === undefined) {
+    return null;
+  }
+  const v = value.trim().toLowerCase();
+  if (v.length === 0) {
+    return null;
+  }
+  switch (v) {
+    case "debug":
+      return LogLevel.DEBUG;
+    case "info":
+      return LogLevel.INFO;
+    case "warn":
+    case "warning":
+      return LogLevel.WARN;
+    case "error":
+      return LogLevel.ERROR;
+    case "none":
+    case "silent":
+      return LogLevel.NONE;
+    default:
+      return null;
+  }
+}
+
+// Default to INFO level; overridable via AUTOMOBILE_LOG_LEVEL env var (quiet INFO chatter in CI / daemon runs).
+let currentLogLevel: LogLevel = parseAutomobileLogLevel(process.env.AUTOMOBILE_LOG_LEVEL) ?? LogLevel.INFO;
 
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;

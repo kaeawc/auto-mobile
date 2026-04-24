@@ -380,6 +380,33 @@ const expandSystemTray = async (device: BootedDevice, screenWidth?: number, scre
   }
 };
 
+const collapseSystemTray = async (device: BootedDevice, screenWidth?: number, screenHeight?: number): Promise<void> => {
+  if (device.platform === "ios") {
+    if (!screenWidth || !screenHeight) {
+      throw new ActionableError("Screen dimensions required to close iOS Notification Center");
+    }
+    const client = getIosClient(device);
+    await client.requestSwipe(
+      Math.floor(screenWidth * 0.5), Math.floor(screenHeight * 0.65),
+      Math.floor(screenWidth * 0.5), Math.floor(screenHeight * 0.08),
+      300
+    );
+    return;
+  }
+
+  if (device.platform !== "android") {
+    return;
+  }
+
+  try {
+    const { adbFactory } = getSystemTrayDependencies();
+    const adb = adbFactory(device);
+    await adb.executeCommand("shell cmd statusbar collapse");
+  } catch (error) {
+    throw new ActionableError(`Failed to collapse system tray: ${error}`);
+  }
+};
+
 const parseAppLabelFromDumpsys = (stdout: string): string | null => {
   const lines = stdout.split("\n").map(line => line.trim()).filter(Boolean);
   const parseLine = (line: string): string | null => {
@@ -968,6 +995,27 @@ const waitForSystemTrayOpen = async (
   return observation;
 };
 
+const waitForSystemTrayClosed = async (
+  observeScreen: SystemTrayObserver,
+  minTimestamp: number,
+  awaitTimeoutMs: number,
+  platform?: Platform
+): Promise<ObserveResult> => {
+  const { timer } = getSystemTrayDependencies();
+  const startTime = timer.now();
+  let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+
+  while (timer.now() - startTime < awaitTimeoutMs) {
+    if (!isSystemTrayOpen(observation.viewHierarchy, platform)) {
+      return observation;
+    }
+    await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
+    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+  }
+
+  return observation;
+};
+
 export const ensureSystemTrayOpen = async (
   device: BootedDevice,
   awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
@@ -1026,6 +1074,71 @@ export const ensureSystemTrayOpen = async (
   return {
     observation: awaitedObservation ?? observation,
     opened: true,
+    skipped: false,
+    minTimestamp
+  };
+};
+
+export const ensureSystemTrayClosed = async (
+  device: BootedDevice,
+  awaitTimeoutMs: number = DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS,
+  _progress?: ProgressCallback
+): Promise<{
+  observation?: ObserveResult;
+  closed: boolean;
+  skipped: boolean;
+  minTimestamp: number;
+}> => {
+  const { observeScreenFactory, timer } = getSystemTrayDependencies();
+  const observeScreen = observeScreenFactory(device);
+  let observation: ObserveResult | undefined;
+  let minTimestamp = 0;
+
+  if (device.platform === "ios") {
+    minTimestamp = timer.now();
+    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    if (!isSystemTrayOpen(observation.viewHierarchy, "ios")) {
+      return { observation, closed: false, skipped: true, minTimestamp };
+    }
+    const screenWidth = observation.screenSize?.width;
+    const screenHeight = observation.screenSize?.height;
+    await collapseSystemTray(device, screenWidth, screenHeight);
+    minTimestamp = timer.now();
+    const awaitedObservation = await waitForSystemTrayClosed(
+      observeScreen, minTimestamp, awaitTimeoutMs, "ios"
+    );
+    const finalObservation = awaitedObservation ?? observation;
+    return {
+      observation: finalObservation,
+      closed: !isSystemTrayOpen(finalObservation.viewHierarchy, "ios"),
+      skipped: false,
+      minTimestamp
+    };
+  }
+
+  if (device.platform === "android") {
+    minTimestamp = await resolveSystemTrayObservationTimestamp(device);
+    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    if (!isSystemTrayOpen(observation.viewHierarchy)) {
+      return { observation, closed: false, skipped: true, minTimestamp };
+    }
+  }
+
+  await collapseSystemTray(device);
+  if (device.platform === "android") {
+    minTimestamp = await resolveSystemTrayObservationTimestamp(device);
+  }
+
+  const awaitedObservation = await waitForSystemTrayClosed(
+    observeScreen,
+    minTimestamp,
+    awaitTimeoutMs
+  );
+
+  const finalObservation = awaitedObservation ?? observation;
+  return {
+    observation: finalObservation,
+    closed: finalObservation ? !isSystemTrayOpen(finalObservation.viewHierarchy, device.platform) : false,
     skipped: false,
     minTimestamp
   };

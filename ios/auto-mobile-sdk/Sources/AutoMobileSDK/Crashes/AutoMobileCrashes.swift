@@ -131,6 +131,14 @@ public final class AutoMobileCrashes: @unchecked Sendable {
 
     internal func reset() {
         lock.lock()
+        // If we were never initialized (e.g. host opted out via
+        // enableCrashReporting: false, or shutdown() is called a second time),
+        // do nothing — we never installed a handler, and clobbering the
+        // current handler would destroy the host app's crash reporter.
+        guard _isInitialized else {
+            lock.unlock()
+            return
+        }
         _isInitialized = false
         bundleId = nil
         buffer = nil

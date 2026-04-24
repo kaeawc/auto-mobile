@@ -623,6 +623,14 @@
         "cleanupClearAppData": {
           "description": "Clear app data on cleanup",
           "type": "boolean"
+        },
+        "captureObserveSteps": {
+          "description": "Single-device plans only: attach each successful observe step snapshot to executePlan result `debug.steps[n].details.stepObservation` (`summary` = metadata + element samples; `full` = includes viewHierarchy). Ignored for multi-device plans.",
+          "type": "string",
+          "enum": [
+            "summary",
+            "full"
+          ]
         }
       },
       "required": [
@@ -667,7 +675,8 @@
             },
             "device": {
               "type": "string"
-            }
+            },
+            "failureObservation": {}
           },
           "required": [
             "stepIndex",

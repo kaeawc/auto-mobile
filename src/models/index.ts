@@ -90,6 +90,7 @@ export * from "./ViewHierarchyResult";
 export * from "./Plan";
 export * from "./ExportPlanResult";
 export * from "./ExecutePlanResult";
+export * from "./FailureObservation";
 export * from "./RawViewHierarchyResult";
 export * from "./DebugSearchResult";
 export * from "./BugReportResult";

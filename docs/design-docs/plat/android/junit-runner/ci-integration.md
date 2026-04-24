@@ -485,8 +485,89 @@ replace the `adb wait-for-device` block with a step that starts your emulator. E
       adb shell 'while [ "$(getprop sys.boot_completed)" != "1" ]; do sleep 2; done'
 ```
 
+## Pre-release AutoMobile daemon (consumer app / GitLab CI)
+
+Use this when you need a **fixed or unreleased** AutoMobile build (for example a daemon **loopback / `ConnectionRefused`** fix) **before** it appears on npm as `@kaeawc/auto-mobile`.
+
+The JUnit runner can start the daemon from a **local checkout** instead of `bunx @kaeawc/auto-mobile@latest` when **`dist/src/index.js`** exists in that tree.
+
+**Branch with the loopback fix (until merge + npm release):** clone **`https://github.com/kaeawc/auto-mobile.git`** at **`ryebread/connection_refused_in_ci_fix`**. After that lands on **`main`** and is published, switch the clone to **`--branch main`** (or drop this section and use npm only).
+
+### 1. Add the AutoMobile repo to your pipeline
+
+Pick one:
+
+| Approach | Outline |
+|----------|---------|
+| **Git submodule** | Add the repo as a submodule pinned to the commit you need; clone recursively in CI. |
+| **Clone step** | `git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp` (or another branch / SHA once merged). |
+| **CI job artifact** | Another pipeline builds AutoMobile and passes `dist/` + `package.json` + lockfile as an artifact; extract beside your app. |
+
+The path you will pass to the runner must be the **repository root** (the directory that contains **`dist/src/index.js`** after build).
+
+### 2. Build AutoMobile on the runner
+
+The image must have **Bun** (or Node, if your runner resolves the daemon entrypoint to `node`; the JUnit runner prefers `bun` when present). From the AutoMobile root:
+
+```bash
+cd /path/to/auto-mobile-mcp
+bun install
+bun run build
+```
+
+Confirm **`dist/src/index.js`** exists.
+
+### 3. Point Gradle / JVM tests at that tree
+
+Set **one** of:
+
+- **Environment:** `AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH=/absolute/path/to/auto-mobile-mcp`
+- **Gradle (e.g. `build.gradle.kts` on the `test` task):** `systemProperty("automobile.daemon.local.project.path", "/absolute/path/to/auto-mobile-mcp")`
+
+Optional for Android CI:
+
+- **Soft keyboard:** JVM system property **`automobile.daemon.dismiss.keyboard.after.input=true`** so the runner appends **`--dismiss-keyboard-after-input`** on daemon **`start` / `restart`** (e.g. `-D…` on `./gradlew`, or `systemProperty` for unit test workers).
+- **UI perf audit noise (`PerformanceAudit`, `J.create`, screenshot cancel):** **`AUTOMOBILE_DAEMON_NO_UI_PERF=true`** (or **`automobile.daemon.no.ui.perf.mode=true`**) so the runner appends **`--no-ui-perf-mode`** on **`start` / `restart`** (same as a manual pre-start).
+
+See the JUnit runner README for details.
+
+Use an **absolute** path in CI so Gradle workers do not depend on a fragile working directory.
+
+**GitLab CI sketch:** clone or submodule AutoMobile into a known directory next to your app, build it, then export the variable for the Android test job:
+
+```yaml
+variables:
+  AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH: "${CI_PROJECT_DIR}/auto-mobile-mcp"
+  # Optional: no-ui-perf via env (see JUnit runner README). Dismiss-keyboard uses -D on Gradle below.
+  AUTOMOBILE_DAEMON_NO_UI_PERF: "true"
+
+android-ui-tests:
+  before_script:
+    # Omit if you use a submodule and fetch it before this job.
+    - test -d auto-mobile-mcp || git clone --depth 1 --branch ryebread/connection_refused_in_ci_fix https://github.com/kaeawc/auto-mobile.git auto-mobile-mcp
+    - cd "${CI_PROJECT_DIR}/auto-mobile-mcp" && bun install && bun run build
+  script:
+    - ./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true :your-module:connectedCheck   # or your AutoMobile JUnit task
+```
+
+Use **`main`** instead of **`ryebread/connection_refused_in_ci_fix`** after the fix is merged. Adjust paths, Gradle task name, and image (Bun + Android SDK + emulator or ADB session) to match your project.
+
+### 4. Run your existing UI test task
+
+No change to test code is required if you already use the AutoMobile JUnit runner; it will run:
+
+`bun /absolute/path/to/auto-mobile-mcp/dist/src/index.js --daemon restart` (or equivalent) instead of the npm package.
+
+### 5. After the fix is published
+
+Remove the env var / system property and rely on **`bunx @kaeawc/auto-mobile@latest`** again, or pin **`@kaeawc/auto-mobile@<version>`** in your process once you upgrade.
+
+---
+
 ## See also
 
 - [Project Setup](project-setup.md) — Gradle config, SNAPSHOT dependency, local dev
 - [Writing Tests](writing-tests.md) — `@AutoMobileTest` parameters, YAML plan reference
+- [CI daemon logs](ci-daemon-logs.md) — finding and capturing `daemon.log` in CI
+- [CI app launch troubleshooting](ci-troubleshooting-app-launch.md) — adb, CtrlProxy, daemon flags, plan assertions
 - [CtrlProxy](../control-proxy.md) — Accessibility service setup and version management

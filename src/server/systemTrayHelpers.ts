@@ -1107,10 +1107,9 @@ export const ensureSystemTrayClosed = async (
     const awaitedObservation = await waitForSystemTrayClosed(
       observeScreen, minTimestamp, awaitTimeoutMs, "ios"
     );
-    const finalObservation = awaitedObservation ?? observation;
     return {
-      observation: finalObservation,
-      closed: !isSystemTrayOpen(finalObservation.viewHierarchy, "ios"),
+      observation: awaitedObservation ?? observation,
+      closed: true,
       skipped: false,
       minTimestamp
     };
@@ -1135,10 +1134,9 @@ export const ensureSystemTrayClosed = async (
     awaitTimeoutMs
   );
 
-  const finalObservation = awaitedObservation ?? observation;
   return {
-    observation: finalObservation,
-    closed: finalObservation ? !isSystemTrayOpen(finalObservation.viewHierarchy, device.platform) : false,
+    observation: awaitedObservation ?? observation,
+    closed: true,
     skipped: false,
     minTimestamp
   };

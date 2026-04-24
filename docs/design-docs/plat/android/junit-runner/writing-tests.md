@@ -125,8 +125,11 @@ point in the plan. The step succeeds whenever the device returns a valid UI snap
 
 **Assertion model:** a plain `observe` always passes as long as the device responds. To assert that
 specific content is present, use `waitFor` — the step fails (and the test fails) if the element does
-not appear within the timeout. This is the primary assertion mechanism in YAML plans: structure your
-plan so that required elements are named in `waitFor` clauses at the points where they must appear.
+not appear within the timeout. The daemon’s **`executePlan`** treats an **`observe`** whose
+**`waitFor` timed out** (`awaitTimeout: true` in the tool result) as a **failed step** and stops the
+plan; you cannot rely on “timing out then continuing.” This is the primary assertion mechanism in YAML
+plans: structure your plan so that required elements are named in `waitFor` clauses at the points where
+they must appear.
 
 ```yaml
 - tool: observe
@@ -146,6 +149,39 @@ To wait for a specific element before proceeding, use `waitFor` with either `ele
     elementId: "com.example.app:id/main_content"
     timeout: 8000
 ```
+
+#### `waitFor.container` (scoping duplicate ids)
+
+When the same **`elementId`** appears in many rows (e.g. **`…/id/name`** in a **`RecyclerView`**),
+a bare **`waitFor`** can match the **first** node in the tree, not the row you care about. Optional
+**`container`** scopes the search (same shape as **`tapOn` `container`**: provide **exactly one** of
+**`elementId`** or **`text`**):
+
+```yaml
+- tool: observe
+  waitFor:
+    elementId: "com.example.app:id/name"
+    timeout: 10000
+    container:
+      elementId: "com.example.app:id/search_results_list"
+```
+
+#### Login flows and server picker {#observe-login-server-picker}
+
+After **`launchApp`** with **cleared app data**, some apps show a **server / environment picker
+dialog** before the main login layout. The focused hierarchy may contain **`Choose Server API`** and
+a list such as **`…/id/select_dialog_listview`** with full URL rows (**`https://…/v1/`**), while
+**`mainBG`** or **`emailEditText`** only exist **after** that dialog is dismissed.
+
+If your first **`waitFor`** targets **`mainBG`** but the dialog is on top, **`waitFor` will time out**
+and the plan will **stop** (by design). Fix the plan order:
+
+1. **`waitFor`** for the dialog (e.g. **`text: "Choose Server API"`** or
+   **`elementId: …/id/select_dialog_listview`**).
+2. **`tapOn`** the row using the **exact visible text** from the hierarchy (often the full URL).
+
+If some builds skip the dialog, a single linear plan cannot express OR; keep CI on one deterministic
+startup path or split tests.
 
 !!! warning "`waitFor` requires `text` or `elementId`"
     Providing only `timeout` in `waitFor` is a validation error. You must include either `text`
@@ -438,7 +474,7 @@ app/build/reports/tests/testDebugUnitTest/index.html  # HTML report
 | Symptom | Likely cause |
 |---|---|
 | Step fails with `element not found` | Wrong `text` or `elementId`; try `observe` first and inspect the hierarchy |
-| `waitFor` times out | Screen transition is slower than the timeout; increase `timeout` in `waitFor` |
+| `observe waitFor timed out after …ms` | Wrong condition for the **current** screen (e.g. waiting for **`mainBG`** while a **server picker** dialog is focused), or transition slower than **`timeout`** — inspect **`failureObservation.viewHierarchy`**; fix **`waitFor`** target or increase **`timeout`** |
 | `terminateApp` fails immediately | App APK not installed; run `adb install` before tests |
 | All steps fail with connection error | Daemon not running; start with `auto-mobile --daemon-mode &` |
 | Plan fails validation before running | Schema error; see the [Plan validation](#plan-validation) table above |

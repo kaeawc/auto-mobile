@@ -104,7 +104,6 @@ Use the `executePlan` MCP tool directly:
 await executePlan({
   planContent: yamlPlanString,
   platform: "android",
-  cleanupAppId: "com.example.app"
 })
 ```
 
@@ -207,7 +206,7 @@ Use descriptive names for test plans:
 3. **Add assertions** - Include `observe` steps to verify expected state
 4. **Handle waits** - Use `await` parameters for elements that load asynchronously
 5. **Keep tests focused** - Each plan should test one specific flow
-6. **Add cleanup** - Use `cleanupAppId` to terminate app after test
+6. **Add cleanup** - Use `terminateApp` steps to clean up after the test
 
 ## Troubleshooting
 

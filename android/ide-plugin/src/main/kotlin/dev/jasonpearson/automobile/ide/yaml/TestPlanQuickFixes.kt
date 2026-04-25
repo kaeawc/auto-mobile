@@ -4,6 +4,7 @@ import com.intellij.codeInspection.LocalQuickFix
 import com.intellij.codeInspection.ProblemDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.psi.util.PsiTreeUtil
+import dev.jasonpearson.automobile.validation.ValidTools
 import dev.jasonpearson.automobile.validation.ValidationError as TestPlanValidationError
 import dev.jasonpearson.automobile.validation.ValidationSeverity
 import org.jetbrains.yaml.YAMLElementGenerator
@@ -122,56 +123,9 @@ class FixToolNameQuickFix(private val currentName: String, private val suggested
 /** Factory to create quick fixes based on validation errors */
 object TestPlanQuickFixFactory {
 
-  // Valid AutoMobile tool names (should match TestPlanValidator.VALID_TOOLS)
-  private val VALID_TOOLS =
-      setOf(
-          "launchApp",
-          "terminateApp",
-          "installApp",
-          "tapOn",
-          "swipeOn",
-          "pinchOn",
-          "dragAndDrop",
-          "inputText",
-          "clearText",
-          "selectAllText",
-          "imeAction",
-          "keyboard",
-          "pressButton",
-          "pressKey",
-          "homeScreen",
-          "recentApps",
-          "openLink",
-          "navigateTo",
-          "observe",
-          "listDevices",
-          "startDevice",
-          "killDevice",
-          "setActiveDevice",
-          "rotate",
-          "shake",
-          "systemTray",
-          "changeLocalization",
-          "executePlan",
-          "criticalSection",
-          "getDeepLinks",
-          "getNavigationGraph",
-          "explore",
-          "identifyInteractions",
-          "captureDeviceSnapshot",
-          "restoreDeviceSnapshot",
-          "listSnapshots",
-          "deleteSnapshot",
-          "videoRecording",
-          "listDeviceImages",
-          "debugSearch",
-          "bugReport",
-          "doctor",
-      )
-
   /** Find similar tool names using Levenshtein distance */
   private fun findSimilarTools(toolName: String, maxDistance: Int = 3): List<String> {
-    return VALID_TOOLS.map { validTool ->
+    return ValidTools.TOOLS.map { validTool ->
           validTool to levenshteinDistance(toolName.lowercase(), validTool.lowercase())
         }
         .filter { (_, distance) -> distance <= maxDistance }

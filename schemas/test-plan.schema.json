@@ -420,6 +420,323 @@
               }
             ]
           }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setAppPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "action": {
+                "type": "string",
+                "enum": [
+                  "grant",
+                  "revoke",
+                  "reset"
+                ],
+                "description": "Permission action. Defaults to grant."
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Runtime permissions or simulator privacy services to change",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "userId": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "Android user id for runtime permission grants"
+              },
+              "notificationPolicyAccess": {
+                "type": "boolean",
+                "description": "Android only: set notification policy / DND access"
+              },
+              "scheduleExactAlarm": {
+                "type": "string",
+                "enum": [
+                  "allow",
+                  "deny"
+                ],
+                "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "permissions"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "notificationPolicyAccess"
+                ]
+              },
+              {
+                "required": [
+                  "appId",
+                  "scheduleExactAlarm"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getAppPermissions"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getAppPermissionsParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "permissions": {
+                "type": "array",
+                "description": "Optional permission names or simulator privacy services to query",
+                "minItems": 1,
+                "items": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "platform": {
+                "type": "string",
+                "enum": [
+                  "android",
+                  "ios"
+                ],
+                "description": "Platform"
+              },
+              "sessionUuid": {
+                "type": "string",
+                "description": "Session UUID for device targeting"
+              },
+              "keepScreenAwake": {
+                "type": "boolean",
+                "description": "Keep physical Android devices awake during the session (default: true)"
+              },
+              "device": {
+                "type": "string",
+                "description": "Device label for multi-device plans (e.g., \"A\", \"B\")"
+              },
+              "deviceId": {
+                "type": "string",
+                "description": "Device ID override"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getNotificationPolicy"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setNotificationPolicy"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setNotificationPolicyParams"
+              },
+              "appId": {
+                "type": "string",
+                "description": "App package ID or bundle identifier",
+                "minLength": 1
+              },
+              "policyAccess": {
+                "type": "boolean",
+                "description": "Android only: allow or revoke app notification policy / DND access"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "appId",
+                  "policyAccess"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "getDeviceState"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/getDeviceStateParams"
+              },
+              "include": {
+                "type": "array",
+                "description": "Optional device state fields to read",
+                "items": {
+                  "type": "string",
+                  "enum": [
+                    "doNotDisturb"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "tool": {
+                "const": "setDeviceState"
+              }
+            },
+            "required": [
+              "tool"
+            ]
+          },
+          "then": {
+            "properties": {
+              "params": {
+                "$ref": "#/$defs/setDeviceStateParams"
+              },
+              "doNotDisturb": {
+                "$ref": "#/$defs/doNotDisturbStateInput"
+              }
+            },
+            "anyOf": [
+              {
+                "required": [
+                  "doNotDisturb"
+                ]
+              },
+              {
+                "required": [
+                  "params"
+                ]
+              }
+            ]
+          }
         }
       ]
     },
@@ -730,6 +1047,247 @@
       },
       "additionalProperties": true,
       "description": "Parameters for highlight"
+    },
+    "doNotDisturbStateInput": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Enable or disable Do Not Disturb"
+        },
+        "mode": {
+          "type": "string",
+          "enum": [
+            "off",
+            "none",
+            "priority",
+            "alarms"
+          ],
+          "description": "Do Not Disturb mode"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "enabled"
+          ]
+        },
+        {
+          "required": [
+            "mode"
+          ]
+        }
+      ],
+      "description": "Do Not Disturb state input"
+    },
+    "getDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "include": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "doNotDisturb"
+            ]
+          },
+          "description": "Optional device state fields to read"
+        }
+      },
+      "description": "Parameters for getDeviceState"
+    },
+    "setDeviceStateParams": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "doNotDisturb": {
+          "$ref": "#/$defs/doNotDisturbStateInput"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "doNotDisturb"
+          ]
+        }
+      ],
+      "description": "Parameters for setDeviceState"
+    },
+    "getNotificationPolicyParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        }
+      },
+      "description": "Parameters for getNotificationPolicy"
+    },
+    "setNotificationPolicyParams": {
+      "type": "object",
+      "required": [
+        "appId",
+        "policyAccess"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "policyAccess": {
+          "type": "boolean",
+          "description": "Android only: allow or revoke app notification policy / DND access"
+        }
+      },
+      "description": "Parameters for setNotificationPolicy"
+    },
+    "setAppPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "grant",
+            "revoke",
+            "reset"
+          ],
+          "description": "Permission action. Defaults to grant."
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Runtime permissions or simulator privacy services to change"
+        },
+        "userId": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Android user id for runtime permission grants"
+        },
+        "notificationPolicyAccess": {
+          "type": "boolean",
+          "description": "Android only: set notification policy / DND access"
+        },
+        "scheduleExactAlarm": {
+          "type": "string",
+          "enum": [
+            "allow",
+            "deny"
+          ],
+          "description": "Android only: set UID-level SCHEDULE_EXACT_ALARM appop"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "anyOf": [
+        {
+          "required": [
+            "permissions"
+          ]
+        },
+        {
+          "required": [
+            "notificationPolicyAccess"
+          ]
+        },
+        {
+          "required": [
+            "scheduleExactAlarm"
+          ]
+        }
+      ],
+      "description": "Parameters for setAppPermissions"
+    },
+    "getAppPermissionsParams": {
+      "type": "object",
+      "required": [
+        "appId"
+      ],
+      "additionalProperties": true,
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App package ID or bundle identifier"
+        },
+        "permissions": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "description": "Optional permission names or simulator privacy services to query"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Platform"
+        },
+        "sessionUuid": {
+          "type": "string",
+          "description": "Session UUID for device targeting"
+        },
+        "keepScreenAwake": {
+          "type": "boolean",
+          "description": "Keep physical Android devices awake during the session (default: true)"
+        },
+        "device": {
+          "type": "string",
+          "description": "Device label for multi-device plans"
+        },
+        "deviceId": {
+          "type": "string",
+          "description": "Device ID override"
+        }
+      },
+      "description": "Parameters for getAppPermissions"
     },
     "expectation": {
       "type": "object",

@@ -1,6 +1,7 @@
 export * from "./AccessibilityResult";
 export * from "./ActionableError";
 export * from "./ActiveWindowInfo";
+export * from "./AndroidDeviceShellToolResult";
 export * from "./AndroidUser";
 export * from "./BackStack";
 export * from "./BiometricAuthResult";
@@ -28,7 +29,9 @@ export * from "./ExitDialogResult";
 export * from "./FingerPath";
 export * from "./FocusOnResult";
 export * from "./GetAccessibilityFocusResult";
+export * from "./GrantIosSimulatorPermissionsResult";
 export * from "./GestureOptions";
+export * from "./GrantAndroidPermissionsResult";
 export * from "./GfxMetrics";
 export * from "./HomeScreenResult";
 export * from "./ImeActionResult";

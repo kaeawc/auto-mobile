@@ -65,6 +65,118 @@ steps:
       expect(result.valid).toBe(true);
     });
 
+    it("should validate setAppPermissions step with inline appId and permissions", () => {
+      const yaml = `
+name: grant-plan
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+    label: Grant notifications
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate cross-platform permission / appop steps in sequence", () => {
+      const yaml = `
+name: grant-explicit
+steps:
+  - tool: setNotificationPolicy
+    appId: com.example.app
+    policyAccess: false
+  - tool: setAppPermissions
+    appId: com.example.app
+    scheduleExactAlarm: deny
+  - tool: setAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+  - tool: setNotificationPolicy
+    appId: com.example.app
+    policyAccess: true
+  - tool: setAppPermissions
+    appId: com.example.app
+    scheduleExactAlarm: allow
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate reusable app permission set/query steps", () => {
+      const yaml = `
+name: reusable-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+    notificationPolicyAccess: true
+    scheduleExactAlarm: allow
+  - tool: getAppPermissions
+    appId: com.example.app
+    permissions:
+      - android.permission.POST_NOTIFICATIONS
+  - tool: setAppPermissions
+    params:
+      appId: com.example.app
+      action: revoke
+      permissions:
+        - camera
+  - tool: getAppPermissions
+    params:
+      appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate device state and notification policy steps", () => {
+      const yaml = `
+name: state-and-policy
+steps:
+  - tool: getDeviceState
+    include:
+      - doNotDisturb
+  - tool: setDeviceState
+    doNotDisturb:
+      mode: priority
+  - tool: getNotificationPolicy
+    appId: com.example.app
+  - tool: setNotificationPolicy
+    appId: com.example.app
+    policyAccess: true
+  - tool: setDeviceState
+    params:
+      doNotDisturb:
+        enabled: false
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
+    it("should validate iOS simulator permissions through cross-platform permission tools", () => {
+      const yaml = `
+name: ios-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    action: grant
+    permissions:
+      - camera
+  - tool: setAppPermissions
+    appId: com.example.app
+    action: revoke
+    permissions:
+      - microphone
+  - tool: getAppPermissions
+    appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(true);
+    });
+
     it("should validate plan with merge keys", () => {
       const yaml = `
 name: merge-keys-test
@@ -269,6 +381,39 @@ invalidField: value
         expect(error.field).toBeDefined();
         expect(error.message).toBeDefined();
       }
+    });
+
+    it("should reject setAppPermissions with empty permissions array", () => {
+      const yaml = `
+name: bad-grant
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+    permissions: []
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject setAppPermissions with no operation", () => {
+      const yaml = `
+name: bad-set-permissions
+steps:
+  - tool: setAppPermissions
+    appId: com.example.app
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
+    });
+
+    it("should reject setDeviceState with no state", () => {
+      const yaml = `
+name: bad-set-device-state
+steps:
+  - tool: setDeviceState
+`;
+      const result = validator.validateYaml(yaml);
+      expect(result.valid).toBe(false);
     });
   });
 

@@ -760,23 +760,31 @@ export class Daemon {
         const activeRecordings = await listActiveVideoRecordings();
 
         const missingByDevice = new Map<string, string[]>();
-
+        const candidateDeviceIds = new Set<string>();
         for (const recording of activeRecordings) {
-          if (bootedDeviceIds.has(recording.deviceId)) {
-            this.deviceDisconnectMisses.delete(recording.deviceId);
+          candidateDeviceIds.add(recording.deviceId);
+        }
+        for (const deviceId of this.sessionManager.getAssignedDevices()) {
+          candidateDeviceIds.add(deviceId);
+        }
+
+        for (const deviceId of candidateDeviceIds) {
+          if (bootedDeviceIds.has(deviceId)) {
+            this.deviceDisconnectMisses.delete(deviceId);
             continue;
           }
-
-          const misses = (this.deviceDisconnectMisses.get(recording.deviceId) ?? 0) + 1;
-          this.deviceDisconnectMisses.set(recording.deviceId, misses);
+          const misses = (this.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
+          this.deviceDisconnectMisses.set(deviceId, misses);
           if (misses < DEVICE_DISCONNECT_MISS_THRESHOLD) {
             continue;
           }
+          missingByDevice.set(deviceId, []);
+        }
 
-          if (!missingByDevice.has(recording.deviceId)) {
-            missingByDevice.set(recording.deviceId, []);
+        for (const recording of activeRecordings) {
+          if (missingByDevice.has(recording.deviceId)) {
+            missingByDevice.get(recording.deviceId)!.push(recording.recordingId);
           }
-          missingByDevice.get(recording.deviceId)!.push(recording.recordingId);
         }
 
         for (const [deviceId, recordingIds] of missingByDevice.entries()) {

@@ -15,6 +15,8 @@ export class FakeSimCtlClient {
   private installedApps: any[] = [];
   private containerPaths = new Map<string, string>();
   private containerErrors = new Map<string, Error>();
+  private commandResults = new Map<string, ExecResult>();
+  private commandErrors = new Map<string, Error>();
   private methodCalls = new Map<string, Array<Record<string, unknown>>>();
   private openSimulatorAppError: Error | null = null;
 
@@ -42,6 +44,20 @@ export class FakeSimCtlClient {
     this.containerErrors.set(bundleId, error);
   }
 
+  setCommandError(command: string, error: Error): void {
+    this.commandErrors.set(command, error);
+  }
+
+  setCommandResult(command: string, stdout: string, stderr: string = ""): void {
+    this.commandResults.set(command, {
+      stdout,
+      stderr,
+      toString: () => stdout,
+      trim: () => stdout.trim(),
+      includes: (value: string) => stdout.includes(value),
+    });
+  }
+
   getMethodCalls(methodName: string): Array<Record<string, unknown>> {
     return this.methodCalls.get(methodName) ?? [];
   }
@@ -55,6 +71,16 @@ export class FakeSimCtlClient {
 
   async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
     this.recordCall("executeCommand", { command, timeoutMs });
+    const commandError = this.commandErrors.get(command);
+    if (commandError) {
+      throw commandError;
+    }
+
+    const commandResult = this.commandResults.get(command);
+    if (commandResult) {
+      return commandResult;
+    }
+
     const match = command.match(/get_app_container\s+\"([^\"]+)\"\s+\"([^\"]+)\"\s+data/);
     const bundleId = match?.[2];
     if (bundleId) {

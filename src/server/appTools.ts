@@ -5,6 +5,7 @@ import { LaunchApp } from "../features/action/LaunchApp";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { InstallApp } from "../features/action/InstallApp";
 import { UninstallApp } from "../features/action/UninstallApp";
+import { AppPermissions } from "../features/action/AppPermissions";
 import { createJSONToolResponse, DefaultToolResponseFormatter, ToolResponseFormatter } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import {
@@ -61,6 +62,51 @@ export const uninstallAppSchema = addDeviceTargetingToSchema(z.object({
   keepData: z.boolean().optional().describe("Keep app data after uninstall (Android only, default false)"),
 }));
 
+const appPermissionActionSchema = z.enum(["grant", "revoke", "reset"]);
+
+export const setAppPermissionsSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("App package ID or bundle identifier"),
+    action: appPermissionActionSchema
+      .optional()
+      .describe("Permission action. Defaults to grant. Android runtime permissions currently support grant only; iOS simulators support grant/revoke/reset."),
+    permissions: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Runtime permissions or simulator privacy services to change"),
+    userId: z
+      .number()
+      .int()
+      .nonnegative()
+      .optional()
+      .describe("Android user id for runtime permission grants"),
+    notificationPolicyAccess: z
+      .boolean()
+      .optional()
+      .describe("Android only: set notification policy / DND access"),
+    scheduleExactAlarm: z
+      .enum(["allow", "deny"])
+      .optional()
+      .describe("Android only: set UID-level SCHEDULE_EXACT_ALARM appop"),
+  })
+).refine(
+  args =>
+    (args.permissions !== undefined && args.permissions.length > 0) ||
+    args.notificationPolicyAccess !== undefined ||
+    args.scheduleExactAlarm !== undefined,
+  "Provide at least one permission or platform-specific permission option"
+);
+
+export const getAppPermissionsSchema = addDeviceTargetingToSchema(
+  z.object({
+    appId: z.string().describe("App package ID or bundle identifier"),
+    permissions: z
+      .array(z.string().min(1))
+      .optional()
+      .describe("Optional permission names or simulator privacy services to query. If omitted, returns known permission rows."),
+  })
+);
+
 export const listAppsSchema = z.object({}).passthrough();
 
 // Export interfaces for type safety
@@ -82,6 +128,10 @@ export interface UninstallAppArgs {
   appId: string;
   keepData?: boolean;
 }
+
+export type SetAppPermissionsArgs = z.infer<typeof setAppPermissionsSchema>;
+
+export type GetAppPermissionsArgs = z.infer<typeof getAppPermissionsSchema>;
 
 // Register tools
 export function registerAppTools(
@@ -217,6 +267,38 @@ export function registerAppTools(
     }
   };
 
+  const setAppPermissionsHandler = async (device: BootedDevice, args: SetAppPermissionsArgs) => {
+    const permissions = new AppPermissions(device);
+    const result = await permissions.setPermissions(args.appId, {
+      action: args.action,
+      permissions: args.permissions,
+      userId: args.userId,
+      notificationPolicyAccess: args.notificationPolicyAccess,
+      scheduleExactAlarm: args.scheduleExactAlarm,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Applied ${result.changedCount} app permission change(s) for ${args.appId}`
+        : result.error ?? `Failed to apply app permission changes for ${args.appId}`,
+      ...result,
+    });
+  };
+
+  const getAppPermissionsHandler = async (device: BootedDevice, args: GetAppPermissionsArgs) => {
+    const permissions = new AppPermissions(device);
+    const result = await permissions.getPermissions(args.appId, {
+      permissions: args.permissions,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Read ${result.permissions.length} app permission state row(s) for ${args.appId}`
+        : result.error ?? `Failed to read app permission state for ${args.appId}`,
+      ...result,
+    });
+  };
+
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "launchApp",
@@ -244,6 +326,20 @@ export function registerAppTools(
     "Uninstall app by package name or bundle identifier",
     uninstallAppSchema,
     uninstallAppHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setAppPermissions",
+    "Grant, revoke, reset, or configure app permissions on Android devices and iOS simulators",
+    setAppPermissionsSchema,
+    setAppPermissionsHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getAppPermissions",
+    "Read app permission state on Android devices and iOS simulators",
+    getAppPermissionsSchema,
+    getAppPermissionsHandler
   );
 
   ToolRegistry.register(

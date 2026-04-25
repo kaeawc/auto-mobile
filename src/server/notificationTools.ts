@@ -4,6 +4,7 @@ import { ActionableError, BootedDevice, Platform } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import { PostNotification, PostNotificationOptions } from "../features/utility/PostNotification";
+import { NotificationPolicy } from "../features/utility/NotificationPolicy";
 
 export interface PostNotificationArgs extends PostNotificationOptions {
   platform: Platform;
@@ -25,6 +26,19 @@ export const postNotificationSchema = addDeviceTargetingToSchema(
     platform: platformSchema
   })
 );
+
+export const getNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().min(1).describe("App package ID or bundle identifier"),
+}));
+
+export const setNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().min(1).describe("App package ID or bundle identifier"),
+  policyAccess: z.boolean().describe("Android only: allow or revoke app notification policy / DND access"),
+}));
+
+export type GetNotificationPolicyArgs = z.infer<typeof getNotificationPolicySchema>;
+
+export type SetNotificationPolicyArgs = z.infer<typeof setNotificationPolicySchema>;
 
 export function registerNotificationTools() {
   const postNotificationHandler = async (device: BootedDevice, args: PostNotificationArgs) => {
@@ -52,10 +66,50 @@ export function registerNotificationTools() {
     }
   };
 
+  const getNotificationPolicyHandler = async (device: BootedDevice, args: GetNotificationPolicyArgs) => {
+    const notificationPolicy = new NotificationPolicy(device);
+    const result = await notificationPolicy.getPolicy(args.appId);
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `Read notification policy for ${args.appId}`
+        : result.error ?? `Failed to read notification policy for ${args.appId}`,
+      ...result,
+    });
+  };
+
+  const setNotificationPolicyHandler = async (device: BootedDevice, args: SetNotificationPolicyArgs) => {
+    const notificationPolicy = new NotificationPolicy(device);
+    const result = await notificationPolicy.setPolicy(args.appId, {
+      policyAccess: args.policyAccess,
+    });
+
+    return createJSONToolResponse({
+      message: result.success
+        ? `${args.policyAccess ? "Allowed" : "Revoked"} notification policy access for ${args.appId}`
+        : result.error ?? `Failed to set notification policy for ${args.appId}`,
+      ...result,
+    });
+  };
+
   ToolRegistry.registerDeviceAware(
     "postNotification",
     "Post a notification from the app-under-test when AutoMobile SDK hooks are installed.",
     postNotificationSchema,
     postNotificationHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "getNotificationPolicy",
+    "Read app notification policy state, including Android Do Not Disturb policy access",
+    getNotificationPolicySchema,
+    getNotificationPolicyHandler
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "setNotificationPolicy",
+    "Set app notification policy state, including Android Do Not Disturb policy access",
+    setNotificationPolicySchema,
+    setNotificationPolicyHandler
   );
 }

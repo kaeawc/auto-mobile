@@ -38,14 +38,18 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
  * - pinned version (e.g. "0.0.18") → exact match lookup
  * - unknown version or empty registry → ""
  */
-export function resolveChecksum(version: string, platform: "android" | "ios"): string {
-  if (RELEASE_CHECKSUM_REGISTRY.length === 0) {
+export function resolveChecksum(
+  version: string,
+  platform: "android" | "ios",
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  if (registry.length === 0) {
     return "";
   }
   const normalized = version.trim().toLowerCase();
   const entry = normalized === LATEST_RELEASE_VERSION
-    ? RELEASE_CHECKSUM_REGISTRY[0]
-    : RELEASE_CHECKSUM_REGISTRY.find(e => e.version === version);
+    ? registry[0]
+    : registry.find(e => e.version === version);
   if (!entry) {
     return "";
   }

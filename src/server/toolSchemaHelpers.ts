@@ -61,5 +61,5 @@ function addPlatformToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject
  * Helper to add sessionUuid + device label + deviceId + platform fields to tool schemas.
  */
 export function addDeviceTargetingToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return addDeviceIdToSchema(addDeviceLabelToSchema(addSessionUuidToSchema(addPlatformToSchema(schema))));
+  return addPlatformToSchema(addDeviceIdToSchema(addDeviceLabelToSchema(addSessionUuidToSchema(schema))));
 }

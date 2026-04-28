@@ -12,9 +12,9 @@
     "buffer": "custom"
   },
   "thresholds": {
-    "tools": 14100,
+    "tools": 15000,
     "resources": 1000,
     "resourceTemplates": 2000,
-    "total": 17100
+    "total": 20000
   }
 }

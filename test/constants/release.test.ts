@@ -20,8 +20,8 @@ describe("resolveChecksum", function() {
   });
 
   test("pinned 0.0.18 resolves to its specific checksums", function() {
-    expect(resolveChecksum("0.0.18", "android")).toBe("8ecd4e6a33d6158188535d9020d7145bc7038de3c1ff551a0474f08de401c7b1");
-    expect(resolveChecksum("0.0.18", "ios")).toBe("e27ef949c6d68ffe19097a0db84284598b9ad0f3b04e887c68a9a04cf9425825");
+    expect(resolveChecksum("0.0.18", "android")).toBe("fd3c8d9f0b8542eaad56c78b18cf8e5666367b04ae8c4af74d8aa6dd1c8d1834");
+    expect(resolveChecksum("0.0.18", "ios")).toBe("2a5eec63bce2f9dfc227c0732fcce67378305e945604d5eedd0e3df48e37fd39");
   });
 
   test("pinned 0.0.17 resolves to its specific checksums, not latest", function() {

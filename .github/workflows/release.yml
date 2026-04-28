@@ -73,14 +73,14 @@ jobs:
       - name: "Verify APK SHA256 matches source"
         id: verify_checksum
         run: |
-          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy-debug.apk APK_SHA256_CHECKSUM | tee /tmp/apk-verify.log
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy-debug.apk android | tee /tmp/apk-verify.log
           CHECKSUM=$(grep '^checksum=' /tmp/apk-verify.log | cut -d= -f2)
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
 
       - name: "Verify CtrlProxy iOS IPA SHA256 matches source"
         id: verify_ipa_checksum
         run: |
-          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa IOS_CTRL_PROXY_SHA256_CHECKSUM | tee /tmp/ipa-verify.log
+          bash scripts/ci/verify-artifact-sha256.sh /tmp/control-proxy.ipa ios | tee /tmp/ipa-verify.log
           CHECKSUM=$(grep '^checksum=' /tmp/ipa-verify.log | cut -d= -f2)
           echo "checksum=$CHECKSUM" >> $GITHUB_OUTPUT
 

@@ -11,19 +11,28 @@ ios_runner_sha256="${IOS_CTRL_PROXY_RUNNER_SHA256:-}"
 
 max_registry_entries=100
 
-if [ -z "$release_version" ] || [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ]; then
-  echo "INFO: RELEASE_VERSION, APK_SHA256_CHECKSUM, and IOS_CTRL_PROXY_SHA256_CHECKSUM are all required"
-  echo "   Set all three to add a new registry entry"
+# Determine mode:
+#   - All three set: add new registry entry
+#   - Checksums only (no version): update registry[0] checksums in place
+#   - Nothing set: no-op
+has_checksums=false
+if [ -n "$apk_checksum" ] || [ -n "$ios_checksum" ]; then
+  has_checksums=true
+fi
+
+if [ -z "$release_version" ] && [ "$has_checksums" = "false" ]; then
+  echo "INFO: No release environment variables set - using default constants"
   exit 0
 fi
 
-if ! [[ "$apk_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+# Validate checksums
+if [ -n "$apk_checksum" ] && ! [[ "$apk_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: APK_SHA256_CHECKSUM must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${apk_checksum}"
   exit 1
 fi
 
-if ! [[ "$ios_checksum" =~ ^[a-f0-9]{64}$ ]]; then
+if [ -n "$ios_checksum" ] && ! [[ "$ios_checksum" =~ ^[a-f0-9]{64}$ ]]; then
   echo "ERROR: IOS_CTRL_PROXY_SHA256_CHECKSUM must be a valid SHA256 hash (64 hex characters)"
   echo "   Got: ${ios_checksum}"
   exit 1
@@ -41,73 +50,100 @@ if [ -n "$ios_runner_sha256" ] && ! [[ "$ios_runner_sha256" =~ ^[a-f0-9]{64}$ ]]
   exit 1
 fi
 
-if grep -q "version: \"${release_version}\"" "$constants_path"; then
-  echo "INFO: Version ${release_version} already exists in registry — skipping"
-  exit 0
-fi
-
-new_entry="  {
-    version: \"${release_version}\",
-    apkSha256: \"${apk_checksum}\",
-    ipaSha256: \"${ios_checksum}\",
-  },"
-
 tmp_file="$(mktemp)"
 trap 'rm -f "$tmp_file"' EXIT
 
 cp "$constants_path" "$tmp_file"
 
-# Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
-# Match the line "export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = ["
-# and insert the new entry on the next line
-if [[ "$(uname)" == "Darwin" ]]; then
-  sed -i "" "/^export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[$/a\\
+sed_inplace() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    sed -i "" "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
+sed_inplace_extended() {
+  if [[ "$(uname)" == "Darwin" ]]; then
+    sed -E -i "" "$@"
+  else
+    sed -E -i "$@"
+  fi
+}
+
+if [ -n "$release_version" ]; then
+  # Mode: add new registry entry (requires all three)
+  if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ]; then
+    echo "ERROR: RELEASE_VERSION requires both APK_SHA256_CHECKSUM and IOS_CTRL_PROXY_SHA256_CHECKSUM"
+    exit 1
+  fi
+
+  if grep -q "version: \"${release_version}\"" "$constants_path"; then
+    echo "INFO: Version ${release_version} already exists in registry — skipping"
+    exit 0
+  fi
+
+  new_entry="  {
+    version: \"${release_version}\",
+    apkSha256: \"${apk_checksum}\",
+    ipaSha256: \"${ios_checksum}\",
+  },"
+
+  # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
+  sed_inplace "/^export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[$/a\\
 ${new_entry}
 " "$tmp_file"
-else
-  sed -i "/^export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[$/a\\
-${new_entry}" "$tmp_file"
-fi
 
-# Cap registry at max_registry_entries by counting entries and removing excess from the end
-entry_count=$(grep -c 'version: "' "$tmp_file" || true)
-if [ "$entry_count" -gt "$max_registry_entries" ]; then
-  excess=$((entry_count - max_registry_entries))
-  # Remove the last N entries (each entry is 5 lines: {, version, apkSha256, ipaSha256, },)
-  for ((i = 0; i < excess; i++)); do
-    # Find the last occurrence of a registry entry block and remove it
-    # Work backwards: find last "  }," before "];" and remove the 5-line block
-    if [[ "$(uname)" == "Darwin" ]]; then
-      # Find the line number of the last "version:" in the registry
-      last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
-      # The block starts 1 line before (the "{" line) and ends 2 lines after (the "}," line)
-      start_line=$((last_version_line - 1))
-      end_line=$((last_version_line + 3))
-      sed -i "" "${start_line},${end_line}d" "$tmp_file"
-    else
+  # Cap registry at max_registry_entries
+  entry_count=$(grep -c 'version: "' "$tmp_file" || true)
+  if [ "$entry_count" -gt "$max_registry_entries" ]; then
+    excess=$((entry_count - max_registry_entries))
+    for ((i = 0; i < excess; i++)); do
       last_version_line=$(grep -n 'version: "' "$tmp_file" | tail -1 | cut -d: -f1)
       start_line=$((last_version_line - 1))
       end_line=$((last_version_line + 3))
-      sed -i "${start_line},${end_line}d" "$tmp_file"
+      sed_inplace "${start_line},${end_line}d" "$tmp_file"
+    done
+  fi
+
+  echo "Updated release constants:"
+  echo "   Added registry entry for version: ${release_version}"
+  echo "   APK checksum: ${apk_checksum}"
+  echo "   iOS checksum: ${ios_checksum}"
+else
+  # Mode: update registry[0] checksums in place (nightly/checksum-only)
+  if [ -n "$apk_checksum" ]; then
+    first_apk_line=$(grep -n 'apkSha256:' "$tmp_file" | head -1 | cut -d: -f1)
+    if [ -n "$first_apk_line" ]; then
+      sed_inplace_extended "${first_apk_line}s/apkSha256: \"[a-f0-9]{64}\"/apkSha256: \"${apk_checksum}\"/" "$tmp_file"
     fi
-  done
+  fi
+
+  if [ -n "$ios_checksum" ]; then
+    first_ipa_line=$(grep -n 'ipaSha256:' "$tmp_file" | head -1 | cut -d: -f1)
+    if [ -n "$first_ipa_line" ]; then
+      sed_inplace_extended "${first_ipa_line}s/ipaSha256: \"[a-f0-9]{64}\"/ipaSha256: \"${ios_checksum}\"/" "$tmp_file"
+    fi
+  fi
+
+  echo "Updated release constants:"
+  if [ -n "$apk_checksum" ]; then
+    echo "   APK checksum (registry[0]): ${apk_checksum}"
+  fi
+  if [ -n "$ios_checksum" ]; then
+    echo "   iOS checksum (registry[0]): ${ios_checksum}"
+  fi
 fi
 
 # Update optional scalar constants
 if [ -n "$ios_app_hash" ]; then
-  if [[ "$(uname)" == "Darwin" ]]; then
-    sed -E -i "" "s/^export const IOS_CTRL_PROXY_APP_HASH: string = \".*\";/export const IOS_CTRL_PROXY_APP_HASH: string = \"${ios_app_hash}\";/" "$tmp_file"
-  else
-    sed -E -i "s/^export const IOS_CTRL_PROXY_APP_HASH: string = \".*\";/export const IOS_CTRL_PROXY_APP_HASH: string = \"${ios_app_hash}\";/" "$tmp_file"
-  fi
+  sed_inplace_extended "s/^export const IOS_CTRL_PROXY_APP_HASH: string = \".*\";/export const IOS_CTRL_PROXY_APP_HASH: string = \"${ios_app_hash}\";/" "$tmp_file"
+  echo "   iOS app hash: ${ios_app_hash}"
 fi
 
 if [ -n "$ios_runner_sha256" ]; then
-  if [[ "$(uname)" == "Darwin" ]]; then
-    sed -E -i "" "s/^export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \".*\";/export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${ios_runner_sha256}\";/" "$tmp_file"
-  else
-    sed -E -i "s/^export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \".*\";/export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${ios_runner_sha256}\";/" "$tmp_file"
-  fi
+  sed_inplace_extended "s/^export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \".*\";/export const IOS_CTRL_PROXY_RUNNER_SHA256: string = \"${ios_runner_sha256}\";/" "$tmp_file"
+  echo "   iOS runner SHA256: ${ios_runner_sha256}"
 fi
 
 if cmp -s "$constants_path" "$tmp_file"; then
@@ -118,14 +154,4 @@ fi
 mv "$tmp_file" "$constants_path"
 trap - EXIT
 
-echo "Updated release constants:"
-echo "   Added registry entry for version: ${release_version}"
-echo "   APK checksum: ${apk_checksum}"
-echo "   iOS checksum: ${ios_checksum}"
-if [ -n "$ios_app_hash" ]; then
-  echo "   iOS app hash: ${ios_app_hash}"
-fi
-if [ -n "$ios_runner_sha256" ]; then
-  echo "   iOS runner SHA256: ${ios_runner_sha256}"
-fi
 echo "   File: ${constants_path}"

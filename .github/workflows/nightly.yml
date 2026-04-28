@@ -53,8 +53,8 @@ jobs:
       - name: "Get current SHA256 values from source"
         id: current
         run: |
-          APK_CURRENT=$(grep 'APK_SHA256_CHECKSUM' src/constants/release.ts | sed 's/.*"\([^"]*\)".*/\1/')
-          IPA_CURRENT=$(grep 'IOS_CTRL_PROXY_SHA256_CHECKSUM' src/constants/release.ts | sed 's/.*"\([^"]*\)".*/\1/')
+          APK_CURRENT=$(grep 'apkSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
+          IPA_CURRENT=$(grep 'ipaSha256' src/constants/release.ts | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
           echo "apk_sha256=$APK_CURRENT" >> $GITHUB_OUTPUT
           echo "ipa_sha256=$IPA_CURRENT" >> $GITHUB_OUTPUT
           echo "Current APK SHA256: ${APK_CURRENT:-(empty)}"

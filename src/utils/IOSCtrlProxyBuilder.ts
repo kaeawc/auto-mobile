@@ -9,8 +9,9 @@ import {
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_RUNNER_SHA256,
-  IOS_CTRL_PROXY_SHA256_CHECKSUM,
-  usesMutableLatestRelease
+  LATEST_RELEASE_VERSION,
+  resolveChecksum,
+  resolveLatestVersion
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -299,8 +300,8 @@ export class IOSCtrlProxyBuilder {
         logger.info("[IOSCtrlProxyBuilder] CtrlProxy checksum mismatch, need download");
         return true;
       }
-    } else if (!metadata || metadata.version !== IOS_CTRL_PROXY_RELEASE_VERSION) {
-      logger.info("[IOSCtrlProxyBuilder] CtrlProxy version mismatch, need download");
+    } else if (!metadata) {
+      logger.info("[IOSCtrlProxyBuilder] CtrlProxy metadata missing, need download");
       return true;
     }
 
@@ -576,10 +577,10 @@ export class IOSCtrlProxyBuilder {
 
   private getExpectedChecksum(): string {
     const override = IOSCtrlProxyBuilder.expectedChecksumOverride;
-    if (override === null && usesMutableLatestRelease(IOS_CTRL_PROXY_RELEASE_VERSION)) {
-      return "";
+    if (override !== null) {
+      return override;
     }
-    return override ?? IOS_CTRL_PROXY_SHA256_CHECKSUM ?? "";
+    return resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
   }
 
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {
@@ -618,17 +619,25 @@ export class IOSCtrlProxyBuilder {
       await fs.copyFile(overridePath, bundlePath);
     } else {
       const expectedChecksum = this.getExpectedChecksum();
-      const metadata = await this.readBundleMetadata();
-      const versionMismatch = !metadata || metadata.version !== IOS_CTRL_PROXY_RELEASE_VERSION;
       const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
 
-      if (!bundleReady || (expectedChecksum.length === 0 && versionMismatch)) {
-        logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
-          url: this.getBundleUrl(),
-          destination: bundlePath,
-          reason: bundleReady ? "version-mismatch" : "missing-or-invalid"
-        });
-        await this.downloader.download(this.getBundleUrl(), bundlePath);
+      if (!bundleReady) {
+        const isLatest = IOS_CTRL_PROXY_RELEASE_VERSION.trim().toLowerCase() === LATEST_RELEASE_VERSION;
+        const cachedBundleExists = await this.isBundleValid(bundlePath, "");
+        try {
+          logger.info("[IOSCtrlProxyBuilder] Downloading CtrlProxy bundle", {
+            url: this.getBundleUrl(),
+            destination: bundlePath,
+            reason: "checksum-mismatch-or-missing"
+          });
+          await this.downloader.download(this.getBundleUrl(), bundlePath);
+        } catch (error) {
+          if (isLatest && cachedBundleExists) {
+            logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${error instanceof Error ? error.message : String(error)}`);
+            return bundlePath;
+          }
+          throw error;
+        }
       }
     }
 
@@ -680,7 +689,7 @@ export class IOSCtrlProxyBuilder {
     const appHashes = await this.computeAppHashes();
     const metadata: IOSCtrlProxyBundleMetadata = {
       checksum: this.getExpectedChecksum() || null,
-      version: IOS_CTRL_PROXY_RELEASE_VERSION,
+      version: resolveLatestVersion(),
       extractedAt: new Date().toISOString(),
       appHashes
     };

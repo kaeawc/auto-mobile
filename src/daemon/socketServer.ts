@@ -23,13 +23,11 @@ import type { FeatureFlagKey } from "../features/featureFlags/FeatureFlagDefinit
 import { getMcpServerVersion } from "../utils/mcpVersion";
 import {
   RELEASE_VERSION,
-  APK_SHA256_CHECKSUM,
   APK_URL,
   IOS_CTRL_PROXY_RELEASE_VERSION,
-  IOS_CTRL_PROXY_SHA256_CHECKSUM,
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_APP_HASH,
-  usesMutableLatestRelease,
+  resolveChecksum,
 } from "../constants/release";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
@@ -387,13 +385,13 @@ export class UnixSocketServer {
           releaseVersion: RELEASE_VERSION,
           android: {
             ctrlProxy: {
-              expectedSha256: usesMutableLatestRelease(RELEASE_VERSION) ? "" : APK_SHA256_CHECKSUM,
+              expectedSha256: resolveChecksum(RELEASE_VERSION, "android"),
               url: APK_URL,
             },
           },
           ios: {
             xcTestService: {
-              expectedSha256: usesMutableLatestRelease(IOS_CTRL_PROXY_RELEASE_VERSION) ? "" : IOS_CTRL_PROXY_SHA256_CHECKSUM,
+              expectedSha256: resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios"),
               expectedAppHash: IOS_CTRL_PROXY_APP_HASH,
               url: IOS_CTRL_PROXY_IPA_URL,
             },

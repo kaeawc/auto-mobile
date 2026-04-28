@@ -53,7 +53,7 @@ function addPlatformToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject
     return schema;
   }
   return schema.extend({
-    platform: platformSchema.optional().describe("Target platform (android or ios)"),
+    platform: platformSchema.optional(),
   }) as z.ZodObject<any>;
 }
 

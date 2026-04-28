@@ -196,7 +196,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
           }, DefaultPlanExecutor.FAILURE_OBSERVATION_TIMEOUT_MS);
         }),
       ]);
-      if (timeoutHandle) clearTimeout(timeoutHandle);
+      if (timeoutHandle) {clearTimeout(timeoutHandle);}
 
       const raw = this.parseStructuredToolPayload(response);
       if (!raw) {

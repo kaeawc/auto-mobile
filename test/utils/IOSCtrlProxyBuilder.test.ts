@@ -387,7 +387,7 @@ describe("IOSCtrlProxyBuilder", function() {
       expect(result.error).toContain("checksum verification failed");
     });
 
-    test("should redownload when version changes without checksum", async function() {
+    test("should redownload when checksum changes", async function() {
       const derivedDataPath = path.join(tempDir, "DerivedData");
       const cacheDir = path.join(tempDir, "cache");
       await fs.mkdir(cacheDir, { recursive: true });
@@ -396,11 +396,21 @@ describe("IOSCtrlProxyBuilder", function() {
       await fs.writeFile(existingBundle, "a".repeat(12000));
       await fs.writeFile(
         path.join(cacheDir, "ctrl-proxy-ios-bundle.json"),
-        JSON.stringify({ checksum: null, version: "old", extractedAt: new Date().toISOString() })
+        JSON.stringify({ checksum: "old-checksum", version: "0.0.17", extractedAt: new Date().toISOString() })
       );
 
+      let callCount = 0;
       const downloader = new FakeIOSCtrlProxyBundleDownloader();
-      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("");
+      const origComputeSha = downloader.computeFileSha256.bind(downloader);
+      downloader.computeFileSha256 = async (filePath: string) => {
+        callCount++;
+        if (callCount === 1) {
+          return { checksum: "old-checksum", source: "node" as const };
+        }
+        return origComputeSha(filePath);
+      };
+      downloader.checksum = "new-checksum";
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("new-checksum");
       const builder = IOSCtrlProxyBuilder.getInstance(
         {
           derivedDataPath,

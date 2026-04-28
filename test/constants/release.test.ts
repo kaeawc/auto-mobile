@@ -1,16 +1,35 @@
 import { describe, expect, test } from "bun:test";
-import { usesMutableLatestRelease } from "../../src/constants/release";
+import { resolveChecksum, resolveLatestVersion, RELEASE_CHECKSUM_REGISTRY } from "../../src/constants/release";
 
 describe("release constants helpers", function() {
-  test("treats latest release references as mutable", function() {
-    expect(usesMutableLatestRelease("latest")).toBe(true);
-    expect(usesMutableLatestRelease("LATEST")).toBe(true);
-    expect(usesMutableLatestRelease(" latest ")).toBe(true);
+  test("resolveChecksum returns registry[0] for latest", function() {
+    const expected = RELEASE_CHECKSUM_REGISTRY[0];
+    expect(resolveChecksum("latest", "android")).toBe(expected.apkSha256);
+    expect(resolveChecksum("latest", "ios")).toBe(expected.ipaSha256);
   });
 
-  test("does not treat pinned release references as mutable", function() {
-    expect(usesMutableLatestRelease("0.0.15")).toBe(false);
-    expect(usesMutableLatestRelease("v0.0.15")).toBe(false);
-    expect(usesMutableLatestRelease("")).toBe(false);
+  test("resolveChecksum is case-insensitive for latest", function() {
+    const expected = RELEASE_CHECKSUM_REGISTRY[0];
+    expect(resolveChecksum("LATEST", "android")).toBe(expected.apkSha256);
+    expect(resolveChecksum(" latest ", "ios")).toBe(expected.ipaSha256);
+  });
+
+  test("resolveChecksum returns exact match for pinned version", function() {
+    const entry = RELEASE_CHECKSUM_REGISTRY[0];
+    expect(resolveChecksum(entry.version, "android")).toBe(entry.apkSha256);
+    expect(resolveChecksum(entry.version, "ios")).toBe(entry.ipaSha256);
+  });
+
+  test("resolveChecksum returns empty string for unknown version", function() {
+    expect(resolveChecksum("99.99.99", "android")).toBe("");
+    expect(resolveChecksum("99.99.99", "ios")).toBe("");
+  });
+
+  test("resolveChecksum returns empty string for empty input", function() {
+    expect(resolveChecksum("", "android")).toBe("");
+  });
+
+  test("resolveLatestVersion returns first registry entry version", function() {
+    expect(resolveLatestVersion()).toBe(RELEASE_CHECKSUM_REGISTRY[0].version);
   });
 });

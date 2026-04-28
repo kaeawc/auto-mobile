@@ -6,9 +6,8 @@ import * as path from "path";
 import { BootedDevice } from "../models";
 import {
   APK_URL,
-  APK_SHA256_CHECKSUM,
   RELEASE_VERSION,
-  usesMutableLatestRelease
+  resolveChecksum
 } from "../constants/release";
 import AdmZip from "adm-zip";
 import crypto from "crypto";
@@ -1358,7 +1357,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     if (this.shouldSkipChecksum()) {
       return "";
     }
-    return AndroidCtrlProxyManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
+    return AndroidCtrlProxyManager.expectedChecksumOverride ?? resolveChecksum(RELEASE_VERSION, "android");
   }
 
   private isNetworkError(message: string): boolean {
@@ -1393,10 +1392,6 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const explicitSkip = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM ??
       process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     if (explicitSkip && (explicitSkip === "1" || explicitSkip.toLowerCase() === "true")) {
-      return true;
-    }
-    if (AndroidCtrlProxyManager.expectedChecksumOverride === null &&
-        usesMutableLatestRelease(RELEASE_VERSION)) {
       return true;
     }
     return this.getApkPathOverride() !== null;

@@ -30,6 +30,11 @@ export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = [
     apkSha256: "8ecd4e6a33d6158188535d9020d7145bc7038de3c1ff551a0474f08de401c7b1",
     ipaSha256: "e27ef949c6d68ffe19097a0db84284598b9ad0f3b04e887c68a9a04cf9425825",
   },
+  {
+    version: "0.0.17",
+    apkSha256: "916033440931666644474f227c8e39d13d9c80c3515e4292cc5581fd5bd4cc2f",
+    ipaSha256: "e4dcf064d024f2371b8fd79281000e2d49751ef95b8817d1494d685aeda746ac",
+  },
 ];
 
 /**

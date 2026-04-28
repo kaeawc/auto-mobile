@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Verify that a built artifact's SHA256 matches the checksum stored in src/constants/release.ts.
+# Verify that a built artifact's SHA256 matches the checksum stored in the
+# RELEASE_CHECKSUM_REGISTRY in src/constants/release.ts.
 #
-# Usage: verify-artifact-sha256.sh <artifact-path> <constant-name>
+# Usage: verify-artifact-sha256.sh <artifact-path> <platform>
+#
+# Platform is "android" or "ios", which selects apkSha256 or ipaSha256
+# from the first (newest) registry entry.
 #
 # Example:
-#   verify-artifact-sha256.sh /tmp/control-proxy-debug.apk APK_SHA256_CHECKSUM
-#   verify-artifact-sha256.sh /tmp/control-proxy.ipa IOS_CTRL_PROXY_SHA256_CHECKSUM
+#   verify-artifact-sha256.sh /tmp/control-proxy-debug.apk android
+#   verify-artifact-sha256.sh /tmp/control-proxy.ipa ios
 set -euo pipefail
 
-ARTIFACT_PATH="${1:?Usage: verify-artifact-sha256.sh <artifact-path> <constant-name>}"
-CONSTANT_NAME="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <constant-name>}"
+ARTIFACT_PATH="${1:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
+PLATFORM="${2:?Usage: verify-artifact-sha256.sh <artifact-path> <platform>}"
 
 RELEASE_TS="src/constants/release.ts"
 
@@ -26,12 +30,21 @@ fi
 BUILT_SHA256=$(sha256sum "$ARTIFACT_PATH" | cut -d' ' -f1)
 echo "Built artifact SHA256: $BUILT_SHA256"
 
-SOURCE_SHA256=$(grep "$CONSTANT_NAME" "$RELEASE_TS" | sed 's/.*"\([^"]*\)".*/\1/')
+if [ "$PLATFORM" = "android" ]; then
+  FIELD="apkSha256"
+elif [ "$PLATFORM" = "ios" ]; then
+  FIELD="ipaSha256"
+else
+  echo "ERROR: Platform must be 'android' or 'ios', got '$PLATFORM'"
+  exit 1
+fi
+
+SOURCE_SHA256=$(grep "$FIELD" "$RELEASE_TS" | head -1 | sed 's/.*"\([a-f0-9]\{64\}\)".*/\1/')
 echo "Source SHA256:         $SOURCE_SHA256"
 
 if [ -z "$SOURCE_SHA256" ]; then
   echo ""
-  echo "ERROR: No SHA256 checksum found for $CONSTANT_NAME in source."
+  echo "ERROR: No SHA256 checksum found for $FIELD in RELEASE_CHECKSUM_REGISTRY."
   echo ""
   echo "A release cannot proceed without a checksum in $RELEASE_TS."
   echo "Please:"
@@ -42,7 +55,7 @@ fi
 
 if [ "$BUILT_SHA256" != "$SOURCE_SHA256" ]; then
   echo ""
-  echo "ERROR: SHA256 mismatch for $CONSTANT_NAME!"
+  echo "ERROR: SHA256 mismatch for $FIELD!"
   echo ""
   echo "The built artifact has a different checksum than what's in source."
   echo "This likely means the source code changed after the last"

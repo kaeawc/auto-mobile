@@ -344,8 +344,10 @@ export class IOSCtrlProxyBuilder {
     }
 
     try {
-      const bundlePath = await perf.track("downloadBundle", () => this.ensureBundleDownloaded());
-      await perf.track("extractBundle", () => this.extractBundle(bundlePath));
+      const { bundlePath, usedCachedFallback } = await perf.track("downloadBundle", () => this.ensureBundleDownloaded());
+      if (!usedCachedFallback) {
+        await perf.track("extractBundle", () => this.extractBundle(bundlePath));
+      }
 
       // Clear cached paths to force rediscovery
       this.cachedBuildProductsPath.clear();
@@ -605,7 +607,7 @@ export class IOSCtrlProxyBuilder {
     return "";
   }
 
-  private async ensureBundleDownloaded(): Promise<string> {
+  private async ensureBundleDownloaded(): Promise<{ bundlePath: string; usedCachedFallback: boolean }> {
     await fs.mkdir(this.config.bundleCacheDir, { recursive: true });
     const bundlePath = this.getBundlePath();
 
@@ -634,7 +636,7 @@ export class IOSCtrlProxyBuilder {
         } catch (error) {
           if (isLatest && cachedBundleExists) {
             logger.warn(`[IOSCtrlProxyBuilder] Download failed, using cached bundle: ${error instanceof Error ? error.message : String(error)}`);
-            return bundlePath;
+            return { bundlePath, usedCachedFallback: true };
           }
           throw error;
         }
@@ -642,7 +644,7 @@ export class IOSCtrlProxyBuilder {
     }
 
     await this.verifyBundle(bundlePath);
-    return bundlePath;
+    return { bundlePath, usedCachedFallback: false };
   }
 
   private async isBundleValid(bundlePath: string, expectedChecksum: string): Promise<boolean> {

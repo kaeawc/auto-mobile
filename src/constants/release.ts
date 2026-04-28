@@ -75,11 +75,20 @@ export function resolveLatestVersion(): string {
 // --- Backward-compatible exports derived from registry[0] ---
 
 export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
-export const APK_URL: string = `https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy-debug.apk`;
+
+function buildReleaseAssetUrl(filename: string): string {
+  const version = resolveLatestVersion();
+  if (version === LATEST_RELEASE_VERSION) {
+    return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
+  }
+  return `https://github.com/kaeawc/auto-mobile/releases/download/${version}/${filename}`;
+}
+
+export const APK_URL: string = buildReleaseAssetUrl("control-proxy-debug.apk");
 export const APK_SHA256_CHECKSUM: string = resolveChecksum(LATEST_RELEASE_VERSION, "android");
 
 export const IOS_CTRL_PROXY_RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
-export const IOS_CTRL_PROXY_IPA_URL: string = "https://github.com/kaeawc/auto-mobile/releases/latest/download/control-proxy.ipa";
+export const IOS_CTRL_PROXY_IPA_URL: string = buildReleaseAssetUrl("control-proxy.ipa");
 export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveChecksum(LATEST_RELEASE_VERSION, "ios");
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
 export const IOS_CTRL_PROXY_RUNNER_SHA256: string = ""; // SHA256 of runner binary (CtrlProxyUITests-Runner), empty = skip verification

@@ -46,8 +46,17 @@ function addDeviceIdToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject
 }
 
 /**
- * Helper to add sessionUuid + device label + deviceId fields to tool schemas.
+ * Helper to add platform field to tool schemas.
+ */
+function addPlatformToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
+  return schema.extend({
+    platform: platformSchema.optional().describe("Target platform (android or ios)"),
+  }) as z.ZodObject<any>;
+}
+
+/**
+ * Helper to add sessionUuid + device label + deviceId + platform fields to tool schemas.
  */
 export function addDeviceTargetingToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
-  return addDeviceIdToSchema(addDeviceLabelToSchema(addSessionUuidToSchema(schema)));
+  return addPlatformToSchema(addDeviceIdToSchema(addDeviceLabelToSchema(addSessionUuidToSchema(schema))));
 }

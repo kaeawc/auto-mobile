@@ -38,6 +38,22 @@ describe("addDeviceTargetingToSchema", () => {
     expect(result.success).toBe(true);
   });
 
+  test("accepts platform for device-aware targeting", () => {
+    const result = extended.safeParse({
+      bundleId: "com.example.app",
+      platform: "ios",
+    });
+    expect(result.success).toBe(true);
+  });
+
+  test("rejects invalid platform value", () => {
+    const result = extended.safeParse({
+      bundleId: "com.example.app",
+      platform: "windows",
+    });
+    expect(result.success).toBe(false);
+  });
+
   test("accepts all device targeting fields together", () => {
     const result = extended.safeParse({
       bundleId: "com.example.app",
@@ -45,6 +61,7 @@ describe("addDeviceTargetingToSchema", () => {
       device: "A",
       sessionUuid: "abc-123",
       keepScreenAwake: true,
+      platform: "android",
     });
     expect(result.success).toBe(true);
   });

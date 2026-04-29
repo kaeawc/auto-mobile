@@ -473,7 +473,9 @@ export class SimCtlClient implements SimCtl {
     try {
       await this.execAsync("xcrun", ["simctl", "--version"]);
       return true;
-    } catch {
+    } catch (err) {
+      logger.warn(`[iOS] isLocalSimctlAvailable failed: ${err instanceof Error ? `${err.message} (code=${(err as NodeJS.ErrnoException).code}, syscall=${(err as NodeJS.ErrnoException).syscall}, path=${(err as NodeJS.ErrnoException).path})` : String(err)}`);
+      logger.warn(`[iOS] PATH at failure: ${process.env.PATH ?? "(unset)"}`);
       return false;
     }
   }

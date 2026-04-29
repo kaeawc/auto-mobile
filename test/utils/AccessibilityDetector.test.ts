@@ -56,6 +56,10 @@ class FakeAdbExecutor implements AdbExecutor {
     return null;
   }
 
+  async getAdbPathOnly(): Promise<string> {
+    return "adb";
+  }
+
   getCallCount(): number {
     return this.callCount;
   }

@@ -222,4 +222,8 @@ export class FakeAdbExecutor implements AdbExecutor {
   async getDeviceTimestampMs(): Promise<number> {
     return this.deviceTimestampMs ?? Date.now();
   }
+
+  async getAdbPathOnly(): Promise<string> {
+    return "adb";
+  }
 }

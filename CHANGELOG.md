@@ -1,5 +1,22 @@
 # Changelog
 
+## [v0.0.19] - 2026-04-29
+### Other
+- Daemon leaks unix-domain socket FDs; accepted peers never closed (backpressure + keepalive gap) ([#2008](https://github.com/kaeawc/auto-mobile/issues/2008))
+- CI cannot configure daemon flags without pre-starting manually - no JUnit runner integration ([#1971](https://github.com/kaeawc/auto-mobile/issues/1971))
+- No way to programmatically close the notification shade - pressButton "back" is fragile ([#1969](https://github.com/kaeawc/auto-mobile/issues/1969))
+- No MCP tool for granting Android runtime permissions - permission dialogs block CI tests ([#1965](https://github.com/kaeawc/auto-mobile/issues/1965))
+- observe waitFor matches wrong element in lists - no way to scope by container ([#1962](https://github.com/kaeawc/auto-mobile/issues/1962))
+- No screen state captured when executePlan step fails - blind debugging in CI ([#1957](https://github.com/kaeawc/auto-mobile/issues/1957))
+- tapOn silently taps stale coordinates when accessibility tree changes between observe and tap ([#1948](https://github.com/kaeawc/auto-mobile/issues/1948))
+- Emulator crash leaves active sessions hanging until full MCP timeout ([#1945](https://github.com/kaeawc/auto-mobile/issues/1945))
+- ECONNREFUSED on daemon MCP hop due to IPv4/IPv6 mismatch on Linux CI ([#1938](https://github.com/kaeawc/auto-mobile/issues/1938))
+- Add AutoMobileAPI protocol and default implementation for dependency injection ([#1937](https://github.com/kaeawc/auto-mobile/issues/1937))
+- Add delegate-based network recording API as primary integration path ([#1936](https://github.com/kaeawc/auto-mobile/issues/1936))
+- Add configuration options to disable crash/signal handler subsystems ([#1935](https://github.com/kaeawc/auto-mobile/issues/1935))
+- Add AutoMobileSDK product to root Package.swift for SPM consumers ([#1934](https://github.com/kaeawc/auto-mobile/issues/1934))
+- iOS SDK walker: surface visual properties for pure SwiftUI shapes via CALayer introspection ([#1926](https://github.com/kaeawc/auto-mobile/issues/1926))
+
 ## [v0.0.18] - 2026-04-17
 ### Other
 - iOS: text entry fails despite focused UITextField with react native ([#1925](https://github.com/kaeawc/auto-mobile/issues/1925))

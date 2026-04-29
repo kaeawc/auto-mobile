@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { z } from "zod";
-import { addDeviceTargetingToSchema } from "../../src/server/toolSchemaHelpers";
+import { addDeviceTargetingToSchema, platformSchema } from "../../src/server/toolSchemaHelpers";
 
 describe("addDeviceTargetingToSchema", () => {
   const baseSchema = z.object({
@@ -72,5 +72,26 @@ describe("addDeviceTargetingToSchema", () => {
       unknownField: "surprise",
     });
     expect(result.success).toBe(false);
+  });
+
+  test("preserves existing platform definition instead of overwriting", () => {
+    const schemaWithRequiredPlatform = z.object({
+      bundleId: z.string(),
+      platform: platformSchema.default("android"),
+    }).strict();
+
+    const extendedWithPlatform = addDeviceTargetingToSchema(schemaWithRequiredPlatform);
+
+    const withDefault = extendedWithPlatform.safeParse({ bundleId: "com.example.app" });
+    expect(withDefault.success).toBe(true);
+    if (withDefault.success) {
+      expect(withDefault.data.platform).toBe("android");
+    }
+
+    const withExplicit = extendedWithPlatform.safeParse({ bundleId: "com.example.app", platform: "ios" });
+    expect(withExplicit.success).toBe(true);
+    if (withExplicit.success) {
+      expect(withExplicit.data.platform).toBe("ios");
+    }
   });
 });

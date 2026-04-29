@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.20] - 2026-04-29
+### Other
+- No changes.
+
 ## [v0.0.19] - 2026-04-29
 ### Other
 - Daemon leaks unix-domain socket FDs; accepted peers never closed (backpressure + keepalive gap) ([#2008](https://github.com/kaeawc/auto-mobile/issues/2008))

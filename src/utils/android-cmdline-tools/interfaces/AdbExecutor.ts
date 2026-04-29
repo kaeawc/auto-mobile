@@ -50,4 +50,10 @@ export interface AdbExecutor {
    * @returns Promise with { packageName: string, userId: number } or null if no app in foreground
    */
   getForegroundApp(): Promise<{ packageName: string; userId: number } | null>;
+
+  /**
+   * Resolve and return the path to the `adb` binary without executing a command.
+   * Used by diagnostics (doctor) to surface the detected path.
+   */
+  getAdbPathOnly(): Promise<string>;
 }

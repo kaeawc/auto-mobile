@@ -211,6 +211,14 @@ export class AdbClient implements AdbExecutor {
   }
 
   /**
+   * Public accessor for the resolved adb path. Same detection as `ensureAdbPath`,
+   * exposed for diagnostics that want the path without running an adb command.
+   */
+  async getAdbPathOnly(): Promise<string> {
+    return this.ensureAdbPath();
+  }
+
+  /**
    * Ensure ADB path is properly detected and cached
    */
   private async ensureAdbPath(): Promise<string> {

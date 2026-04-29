@@ -1,4 +1,9 @@
 #!/usr/bin/env bun
+import { bootstrapEnvironment } from "./utils/envBootstrap";
+
+// Run before any other imports that may resolve tool paths at module load time.
+bootstrapEnvironment();
+
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { createMcpServer } from "./server";
 import { createProxyMcpServer } from "./server/proxyServer";

@@ -37,7 +37,6 @@ import { registerDeepLinkTools } from "../src/server/deepLinkTools";
 import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerPlanTools } from "../src/server/planTools";
 import { registerDoctorTools } from "../src/server/doctorTools";
-import { registerFeatureFlagTools } from "../src/server/featureFlagTools";
 
 import fs from "node:fs";
 import path from "node:path";
@@ -264,7 +263,6 @@ function registerAllTools(): void {
   registerNavigationTools();
   registerPlanTools();
   registerDoctorTools();
-  registerFeatureFlagTools();
 }
 
 /**

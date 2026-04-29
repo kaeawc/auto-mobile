@@ -4147,58 +4147,6 @@
     }
   },
   {
-    "name": "pressKey",
-    "description": "Press hardware key",
-    "inputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "key": {
-          "type": "string",
-          "enum": [
-            "home",
-            "back",
-            "menu",
-            "power",
-            "volume_up",
-            "volume_down",
-            "recent"
-          ],
-          "description": "Key to press"
-        },
-        "platform": {
-          "type": "string",
-          "enum": [
-            "android",
-            "ios"
-          ],
-          "description": "Target platform"
-        },
-        "sessionUuid": {
-          "description": "Session UUID",
-          "type": "string"
-        },
-        "keepScreenAwake": {
-          "description": "Keep device awake",
-          "type": "boolean"
-        },
-        "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
-          "type": "string"
-        },
-        "deviceId": {
-          "description": "Device ID",
-          "type": "string"
-        }
-      },
-      "required": [
-        "key",
-        "platform"
-      ],
-      "additionalProperties": false
-    }
-  },
-  {
     "name": "recentApps",
     "description": "Open recent apps",
     "inputSchema": {

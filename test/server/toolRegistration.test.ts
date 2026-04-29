@@ -324,7 +324,7 @@ describe("Tool Registration Validation (Unit Tests)", () => {
     });
 
     test("should validate critical tools from issue #745", () => {
-      const criticalTools = ["clearText", "selectAllText", "pressButton", "systemTray", "pressKey"];
+      const criticalTools = ["clearText", "selectAllText", "pressButton", "systemTray"];
 
       criticalTools.forEach(toolName => {
         fakeRegistry.register({
@@ -599,7 +599,6 @@ describe("Tool Registration Validation (Integration Tests)", () => {
     snapshot: () => import("../../src/server/snapshotTools"),
     videoRecording: () => import("../../src/server/videoRecordingTools"),
     criticalSection: () => import("../../src/server/criticalSectionTools"),
-    featureFlag: () => import("../../src/server/featureFlagTools"),
     doctor: () => import("../../src/server/doctorTools"),
     plan: () => import("../../src/server/planTools"),
   };
@@ -608,7 +607,7 @@ describe("Tool Registration Validation (Integration Tests)", () => {
 
   test("should verify critical tools from issue #745 exist in actual code", async () => {
     const interactionTools = await actualModules.interaction();
-    const criticalSchemas = ["clearTextSchema", "selectAllTextSchema", "pressButtonSchema", "systemTraySchema", "pressKeySchema"];
+    const criticalSchemas = ["clearTextSchema", "selectAllTextSchema", "pressButtonSchema", "systemTraySchema"];
 
     criticalSchemas.forEach(schemaName => {
       expect(interactionTools).toHaveProperty(schemaName);

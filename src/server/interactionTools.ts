@@ -47,7 +47,6 @@ import type {
   PressButtonArgs,
   SystemTrayNotificationArgs,
   SystemTrayArgs,
-  PressKeyArgs,
   InputTextArgs,
   OpenLinkArgs,
   TapOnArgs,
@@ -89,7 +88,6 @@ export type {
   PressButtonArgs,
   SystemTrayNotificationArgs,
   SystemTrayArgs,
-  PressKeyArgs,
   InputTextArgs,
   OpenLinkArgs,
   TapOnArgs,
@@ -363,12 +361,6 @@ export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase)
     });
   }
 });
-
-export const pressKeySchema = addDeviceTargetingToSchema(z.object({
-  key: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"])
-    .describe("Key to press"),
-  platform: platformSchema
-}));
 
 export const stopAppSchema = addDeviceTargetingToSchema(z.object({
   appId: z.string().describe("App package ID"),
@@ -767,19 +759,6 @@ export function registerInteractionTools() {
     });
   };
 
-  // Press key handler
-  const pressKeyHandler = async (device: BootedDevice, args: PressKeyArgs, progress?: ProgressCallback) => {
-    RecompositionTracker.getInstance().recordInteraction();
-    const pressButton = new PressButton(device);
-    const result = await pressButton.execute(args.key, progress);
-
-    return createJSONToolResponse({
-      message: `Pressed key ${args.key}`,
-      observation: result.observation,
-      ...result
-    });
-  };
-
   // Input text handler
   const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
     RecompositionTracker.getInstance().recordInteraction();
@@ -968,15 +947,6 @@ export function registerInteractionTools() {
     "System tray actions for notifications (open/close/find/tap/dismiss/clearAll)",
     systemTraySchema,
     systemTrayHandler,
-    true // Supports progress notifications
-  );
-
-  // Phase 1: Core Command Renames
-  ToolRegistry.registerDeviceAware(
-    "pressKey",
-    "Press hardware key",
-    pressKeySchema,
-    pressKeyHandler,
     true // Supports progress notifications
   );
 

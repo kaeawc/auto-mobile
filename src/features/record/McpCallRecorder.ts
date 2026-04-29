@@ -17,7 +17,6 @@ export const PLAN_RELEVANT_TOOLS = new Set([
   "inputText",
   "clearText",
   "pressButton",
-  "pressKey",
   "dragAndDrop",
   "pinchOn",
   "imeAction",

@@ -172,7 +172,7 @@ describe("PLAN_RELEVANT_TOOLS", () => {
   test("includes core interaction tools", () => {
     const expected = [
       "tapOn", "swipeOn", "inputText", "clearText",
-      "pressButton", "pressKey", "dragAndDrop", "pinchOn", "imeAction",
+      "pressButton", "dragAndDrop", "pinchOn", "imeAction",
     ];
     for (const tool of expected) {
       expect(PLAN_RELEVANT_TOOLS.has(tool)).toBe(true);

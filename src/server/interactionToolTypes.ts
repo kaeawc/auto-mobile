@@ -35,11 +35,6 @@ export interface SystemTrayArgs {
   platform: Platform;
 }
 
-export interface PressKeyArgs {
-  key: "home" | "back" | "menu" | "power" | "volume_up" | "volume_down" | "recent";
-  platform: Platform;
-}
-
 export interface InputTextArgs {
   text: string;
   imeAction?: "done" | "next" | "search" | "send" | "go" | "previous";

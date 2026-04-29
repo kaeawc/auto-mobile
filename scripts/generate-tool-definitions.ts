@@ -19,7 +19,6 @@ import { registerNavigationTools } from "../src/server/navigationTools";
 import { registerNotificationTools } from "../src/server/notificationTools";
 import { registerPlanTools } from "../src/server/planTools";
 import { registerDoctorTools } from "../src/server/doctorTools";
-import { registerFeatureFlagTools } from "../src/server/featureFlagTools";
 import { registerCriticalSectionTools } from "../src/server/criticalSectionTools";
 import { registerVideoRecordingTools } from "../src/server/videoRecordingTools";
 import { registerSnapshotTools } from "../src/server/snapshotTools";
@@ -40,7 +39,6 @@ function registerAllTools(): void {
   registerNotificationTools();
   registerPlanTools();
   registerDoctorTools();
-  registerFeatureFlagTools();
   registerCriticalSectionTools();
   registerVideoRecordingTools();
   registerSnapshotTools();

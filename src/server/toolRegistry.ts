@@ -308,7 +308,7 @@ class ToolRegistryClass {
         // as they don't represent replayable in-app navigation paths
         const navigationRelevantTools = [
           "tapOn", "swipeOn", "pinchOn", "dragAndDrop",
-          "pressButton", "pressKey", "inputText", "clearText", "imeAction"
+          "pressButton", "inputText", "clearText", "imeAction"
         ];
         if (navigationRelevantTools.includes(name)) {
           // Extract UI state from the most recent cached observation

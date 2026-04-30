@@ -514,11 +514,34 @@ public class GesturePerformer: GesturePerforming {
         /// fields in exchange for correctness.
         @discardableResult
         private static func clearViaDeletes(element: XCUIElement) -> Int {
+            // Some native text inputs (notably UISearchBar) surface their
+            // `placeholderValue` as `value` once the buffer is empty rather
+            // than returning an empty string. Without an additional exit,
+            // the loop runs the full iteration cap (~6s of no-op deletes)
+            // and the proxy round-trip exceeds the MCP request timeout.
+            //
+            // The doc above warned that a naive `value == placeholderValue`
+            // check would false-positive on RN wrappers, where both `value`
+            // and `placeholderValue` may equal the accessibility identifier
+            // and stay constant throughout typing. Guard the placeholder
+            // check by also requiring a *change* in `value` since the
+            // previous iteration — i.e., we observed real progress. RN's
+            // value never changes between iterations (its JS state restores
+            // the buffer), so the guard suppresses the false positive.
+            let placeholder = element.placeholderValue
             var totalDeleted = 0
+            var previousValue: String? = nil
             for iteration in 0..<clearViaDeletesMaxIterations {
                 let current = (element.value as? String) ?? ""
                 gestureLog.debug("clearViaDeletes iter=\(iteration, privacy: .public) valueCount=\(current.count, privacy: .public)")
                 if current.isEmpty {
+                    break
+                }
+                if let placeholder = placeholder,
+                   current == placeholder,
+                   let previous = previousValue,
+                   previous != current
+                {
                     break
                 }
                 element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
@@ -527,6 +550,7 @@ public class GesturePerformer: GesturePerforming {
                     count: clearViaDeletesBurstSize
                 ))
                 totalDeleted += clearViaDeletesBurstSize
+                previousValue = current
             }
             return totalDeleted
         }
@@ -754,12 +778,52 @@ public class GesturePerformer: GesturePerforming {
 
         // MARK: - Clipboard
 
+        /// Shadow of the most recent value this runner wrote via `copy` (or
+        /// cleared via `clear`). Used as a fallback for `get` and `paste`
+        /// when iOS's privacy-gated pasteboard read on a UI-test runner
+        /// hangs on a `Paste from <app>` system alert that no user is
+        /// available to dismiss. Without this, `runOnMainThread`'s
+        /// `DispatchQueue.main.sync` blocks indefinitely.
+        private static var clipboardShadow: String?
+        private static let clipboardShadowQueue = DispatchQueue(label: "com.automobile.ctrlproxy.clipboard-shadow")
+
+        private static func readShadow() -> String? {
+            clipboardShadowQueue.sync { clipboardShadow }
+        }
+
+        private static func writeShadow(_ value: String?) {
+            clipboardShadowQueue.sync { clipboardShadow = value }
+        }
+
+        /// Read `UIPasteboard.general.string` with a bounded timeout. The
+        /// pasteboard read can deadlock the runner on iOS 16+ when a
+        /// privacy alert is presented but no user is available to dismiss
+        /// it. Returns nil on timeout instead of blocking forever.
+        private static func readPasteboardWithTimeout(_ timeout: DispatchTimeInterval) -> String? {
+            // Skip the read entirely if there are no strings — `hasStrings`
+            // is a non-prompting synchronous check.
+            guard UIPasteboard.general.hasStrings else { return nil }
+            let semaphore = DispatchSemaphore(value: 0)
+            let box = NSMutableArray() // Heap-allocated holder so the closure can write past return
+            DispatchQueue.global(qos: .userInitiated).async {
+                if let str = UIPasteboard.general.string {
+                    box.add(str)
+                }
+                semaphore.signal()
+            }
+            if semaphore.wait(timeout: .now() + timeout) == .timedOut {
+                return nil
+            }
+            return box.firstObject as? String
+        }
+
         public func clipboard(action: String, text: String?) throws -> String? {
             switch action {
             case "get":
-                return runOnMainThread {
-                    UIPasteboard.general.string
-                }
+                let live = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
+                let shadow = GesturePerformer.readShadow()
+                if let live = live, !live.isEmpty { return live }
+                return shadow
 
             case "copy":
                 guard let text = text else {
@@ -768,12 +832,14 @@ public class GesturePerformer: GesturePerforming {
                 runOnMainThread {
                     UIPasteboard.general.string = text
                 }
+                GesturePerformer.writeShadow(text)
                 return nil
 
             case "clear":
                 runOnMainThread {
                     UIPasteboard.general.items = []
                 }
+                GesturePerformer.writeShadow(nil)
                 return nil
 
             case "paste":
@@ -782,12 +848,13 @@ public class GesturePerformer: GesturePerforming {
                 guard let app = resolveTextInputApp() else {
                     throw GestureError.noApplication
                 }
-                let clipboardText: String? = runOnMainThread {
-                    UIPasteboard.general.string
-                }
+                // Use bounded read; fall back to shadow if iOS gates the read.
+                let pasteboardLive = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
+                let clipboardText = pasteboardLive ?? GesturePerformer.readShadow()
                 guard let pasteText = clipboardText, !pasteText.isEmpty else {
                     throw GestureError.clipboardEmpty
                 }
+                _ = pasteText
 
                 try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pasting")
 

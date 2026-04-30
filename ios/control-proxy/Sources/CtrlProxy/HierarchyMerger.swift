@@ -198,6 +198,7 @@ public enum HierarchyMerger {
 
         return UIElementInfo(
             text: element.text,
+            value: element.value,
             textSize: element.textSize,
             contentDesc: element.contentDesc,
             resourceId: element.resourceId,
@@ -353,6 +354,7 @@ public enum HierarchyMerger {
             }
             return UIElementInfo(
                 text: element.text,
+                value: element.value,
                 textSize: element.textSize,
                 contentDesc: element.contentDesc,
                 resourceId: element.resourceId,
@@ -387,6 +389,7 @@ public enum HierarchyMerger {
 
         return UIElementInfo(
             text: element.text,
+            value: element.value,
             textSize: element.textSize,
             contentDesc: element.contentDesc,
             resourceId: element.resourceId,

@@ -304,4 +304,47 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(ResponseType.screenshot.rawValue, "screenshot")
         XCTAssertEqual(ResponseType.launchAppResult.rawValue, "launch_app_result")
     }
+
+    // MARK: - UIElementInfo value field
+
+    func testUIElementInfoValueFieldEncodesUnderValueKey() throws {
+        let info = UIElementInfo(
+            text: "Search videos",
+            value: "hello iOS",
+            hintText: "Search videos"
+        )
+
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let data = try encoder.encode(info)
+        let json = String(data: data, encoding: .utf8) ?? ""
+
+        XCTAssertTrue(json.contains("\"value\":\"hello iOS\""), "value should be serialized: \(json)")
+        XCTAssertTrue(json.contains("\"text\":\"Search videos\""), "text should still be present: \(json)")
+        XCTAssertTrue(json.contains("\"hint-text\":\"Search videos\""), "hint-text should be present: \(json)")
+    }
+
+    func testUIElementInfoValueFieldOmittedWhenNil() throws {
+        let info = UIElementInfo(text: "Just a label")
+
+        let data = try JSONEncoder().encode(info)
+        let json = String(data: data, encoding: .utf8) ?? ""
+
+        XCTAssertFalse(json.contains("\"value\""), "value should be omitted when nil: \(json)")
+    }
+
+    func testUIElementInfoValueRoundTrips() throws {
+        let original = UIElementInfo(
+            text: "Email",
+            value: "user@example.com",
+            password: "false"
+        )
+
+        let data = try JSONEncoder().encode(original)
+        let decoded = try JSONDecoder().decode(UIElementInfo.self, from: data)
+
+        XCTAssertEqual(decoded.text, "Email")
+        XCTAssertEqual(decoded.value, "user@example.com")
+        XCTAssertEqual(decoded.password, "false")
+    }
 }

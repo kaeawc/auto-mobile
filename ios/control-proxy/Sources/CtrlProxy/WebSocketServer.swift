@@ -187,7 +187,9 @@ public class WebSocketServer: WebSocketServing {
         encoder.outputFormatting = .sortedKeys
 
         if var wsResponse = response as? WebSocketResponse {
-            // Inject perfTiming if present and response doesn't already have it
+            // Inject perfTiming if present and response doesn't already have it.
+            // Preserve the existing `text` payload — handlers like `clipboard get`
+            // populate it and we must not drop it during the rebuild.
             if perfTiming != nil && wsResponse.perfTiming == nil {
                 wsResponse = WebSocketResponse(
                     type: wsResponse.type,
@@ -196,6 +198,7 @@ public class WebSocketServer: WebSocketServing {
                     success: wsResponse.success,
                     totalTimeMs: wsResponse.totalTimeMs ?? totalTimeMs,
                     error: wsResponse.error,
+                    text: wsResponse.text,
                     perfTiming: perfTiming
                 )
             }

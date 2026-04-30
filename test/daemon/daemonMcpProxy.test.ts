@@ -1,87 +1,13 @@
 import { describe, expect, test, spyOn } from "bun:test";
 import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
-import { DaemonManager } from "../../src/daemon/manager";
-import type { DaemonClientLike } from "../../src/daemon/client";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
+import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
+import { FakeDaemonManager } from "../fakes/FakeDaemonManager";
+import { FakeDaemonClient } from "../fakes/FakeDaemonClient";
 
-/**
- * Fake DaemonClient for testing
- */
-class FakeDaemonClient implements DaemonClientLike {
-  readonly callToolCalls: Array<{ toolName: string; params: Record<string, any> }> = [];
-  readonly readResourceCalls: string[] = [];
-  readonly callDaemonMethodCalls: Array<{ method: string; params: Record<string, any> }> = [];
-  private connected = false;
-  private toolResult: any;
-  private resourceResult: any;
-  private daemonMethodResults: Map<string, any> = new Map();
-  shouldFailConnect = false;
-
-  constructor(options: {
-    toolResult?: any;
-    resourceResult?: any;
-    daemonMethodResults?: Map<string, any>;
-  } = {}) {
-    this.toolResult = options.toolResult ?? { content: [{ type: "text", text: "success" }] };
-    this.resourceResult = options.resourceResult ?? { contents: [{ uri: "test", text: "test" }] };
-    this.daemonMethodResults = options.daemonMethodResults ?? new Map();
-  }
-
-  async connect(): Promise<void> {
-    if (this.shouldFailConnect) {
-      throw new DaemonUnavailableError("Connection failed");
-    }
-    this.connected = true;
-  }
-
-  async close(): Promise<void> {
-    this.connected = false;
-  }
-
-  async callTool(toolName: string, params: Record<string, any>): Promise<any> {
-    this.callToolCalls.push({ toolName, params });
-    return this.toolResult;
-  }
-
-  async readResource(uri: string): Promise<any> {
-    this.readResourceCalls.push(uri);
-    return this.resourceResult;
-  }
-
-  async callDaemonMethod(method: string, params: Record<string, any>): Promise<any> {
-    this.callDaemonMethodCalls.push({ method, params });
-    return this.daemonMethodResults.get(method) ?? {};
-  }
-
-  isConnected(): boolean {
-    return this.connected;
-  }
-}
-
-/**
- * Fake DaemonManager for testing
- */
-class FakeDaemonManager extends DaemonManager {
-  statusResult = { running: true, pid: 1234, port: 3000, socketPath: "/tmp/test.sock" };
-  startCalled = false;
-  waitForReadyResult = true;
-
-  constructor() {
-    super();
-  }
-
-  override async status() {
-    return this.statusResult;
-  }
-
-  override async start() {
-    this.startCalled = true;
-  }
-
-  override async waitForReady(_timeout: number) {
-    return this.waitForReadyResult;
-  }
-}
+const OLDER_VERSION = "0.0.1";
+const NEWER_VERSION = "9999.0.0";
+const ANCIENT_TIMESTAMP = 1;
 
 describe("DaemonMcpProxy", () => {
   describe("connection management", () => {
@@ -144,6 +70,191 @@ describe("DaemonMcpProxy", () => {
         isAvailableSpy.mockRestore();
         await proxy.close();
       }
+    });
+
+    describe("version-mismatch handling", () => {
+      function makeProxy(opts: {
+        runningVersion?: string;
+        startedAt?: number;
+        autoStartDaemon?: boolean;
+        waitForReadyResult?: boolean;
+        daemonOptions?: { debug?: boolean; port?: number };
+      } = {}) {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResult = {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          ...(opts.runningVersion !== undefined ? { version: opts.runningVersion } : {}),
+          ...(opts.startedAt !== undefined ? { startedAt: opts.startedAt } : {}),
+        };
+        if (opts.waitForReadyResult !== undefined) {
+          fakeManager.waitForReadyResult = opts.waitForReadyResult;
+        }
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          autoStartDaemon: opts.autoStartDaemon ?? true,
+          daemonOptions: opts.daemonOptions,
+        });
+        return { fakeClient, fakeManager, isAvailableSpy, proxy };
+      }
+
+      test("restarts daemon when MCP server version is newer", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart when daemon version is newer (older client connects anyway)", async () => {
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: NEWER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.isConnected()).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart when versions match", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: DAEMON_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart when daemon is older but within cooldown window", async () => {
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: Date.now() - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.isConnected()).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("restarts older daemon once cooldown has elapsed", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: Date.now() - DAEMON_VERSION_RESTART_COOLDOWN_MS - 1000,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart when autoStartDaemon is disabled, even when newer", async () => {
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          autoStartDaemon: false,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.isConnected()).toBe(true);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("throws when restarted daemon fails to become ready", async () => {
+        const { fakeClient, fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          waitForReadyResult: false,
+        });
+        try {
+          await expect(proxy.listTools()).rejects.toThrow(DaemonUnavailableError);
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeClient.isConnected()).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("forwards daemonOptions when restarting", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion: OLDER_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          daemonOptions: { debug: true, port: 4242 },
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ debug: true, port: 4242 });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart when running daemon does not expose a version", async () => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test.each([
+        ["prerelease tag", "0.0.21-beta.1"],
+        ["unknown fallback", "unknown"],
+        ["empty-after-prefix", "v"],
+      ])("does not restart when version comparison is non-numeric (%s)", async (_label, runningVersion) => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
     });
 
     test("throws error when auto-start is disabled and daemon not running", async () => {

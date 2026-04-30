@@ -98,6 +98,13 @@ export const DAEMON_STARTUP_TIMEOUT_MS =
 export const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000;
 
 /**
+ * Minimum age (ms since startedAt) before the proxy will restart a daemon on
+ * version mismatch. Prevents thrash when concurrent agents on different versions
+ * each try to "fix" the daemon to their own version.
+ */
+export const DAEMON_VERSION_RESTART_COOLDOWN_MS = 10000;
+
+/**
  * MCP streamable endpoint path
  */
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";

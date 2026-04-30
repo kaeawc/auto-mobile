@@ -1,8 +1,9 @@
 import { DaemonClient, DaemonUnavailableError, type DaemonClientLike, type DaemonClientFactory } from "./client";
-import { DaemonManager } from "./manager";
+import { DaemonManager, type DaemonManagerLike } from "./manager";
 import { logger } from "../utils/logger";
-import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS } from "./constants";
+import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
 import type { DaemonOptions } from "./types";
+import { compareVersions } from "../server/deviceMatcher";
 
 /**
  * Configuration for the DaemonMcpProxy
@@ -17,7 +18,7 @@ export interface DaemonMcpProxyConfig {
   /** Factory for creating daemon clients (for testing) */
   clientFactory?: DaemonClientFactory;
   /** Custom daemon manager (for testing) */
-  daemonManager?: DaemonManager;
+  daemonManager?: DaemonManagerLike;
   /** Options to pass when auto-starting the daemon */
   daemonOptions?: DaemonOptions;
 }
@@ -64,7 +65,7 @@ export interface ProxiedResourceTemplate {
 export class DaemonMcpProxy {
   private client: DaemonClientLike | null = null;
   private config: DaemonMcpProxyConfig;
-  private daemonManager: DaemonManager;
+  private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
@@ -116,14 +117,15 @@ export class DaemonMcpProxy {
     const isAvailable = await DaemonClient.isAvailable(socketPath);
 
     if (!isAvailable) {
-      if (this.config.autoStartDaemon) {
-        logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
-        await this.startDaemon();
-      } else {
+      if (!this.config.autoStartDaemon) {
         throw new DaemonUnavailableError(
           "Daemon is not running and auto-start is disabled"
         );
       }
+      logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
+      await this.startDaemon();
+    } else if (this.config.autoStartDaemon) {
+      await this.ensureVersionMatches();
     }
 
     // Create and connect client
@@ -131,6 +133,42 @@ export class DaemonMcpProxy {
     await this.client.connect();
     this.connected = true;
     logger.info("[DaemonMcpProxy] Connected to daemon");
+  }
+
+  /**
+   * Restart the daemon when this MCP server is strictly newer than the running daemon,
+   * so a newly-pinned or freshly-resolved-@latest client upgrades the shared daemon in place.
+   *
+   * "Newer wins, older connects anyway" — older clients attach to whatever's running,
+   * which prevents ping-pong restarts when concurrent agents are pinned to different versions.
+   *
+   * A cooldown (DAEMON_VERSION_RESTART_COOLDOWN_MS) on `startedAt` further suppresses
+   * thrash from racing restarts during a coordinated upgrade.
+   */
+  private async ensureVersionMatches(): Promise<void> {
+    const status = await this.daemonManager.status();
+    if (!status.running || !status.version) {
+      return;
+    }
+    if (compareVersions(DAEMON_VERSION, status.version) <= 0) {
+      return;
+    }
+    if (status.startedAt && Date.now() - status.startedAt < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+      logger.info(
+        `[DaemonMcpProxy] Daemon ${status.version} is older than ${DAEMON_VERSION} but was started ${Date.now() - status.startedAt}ms ago, skipping restart (cooldown)`
+      );
+      return;
+    }
+    logger.info(
+      `[DaemonMcpProxy] Daemon version ${status.version} is older than MCP server ${DAEMON_VERSION}, restarting daemon`
+    );
+    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+    if (!ready) {
+      throw new DaemonUnavailableError(
+        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+      );
+    }
   }
 
   /**

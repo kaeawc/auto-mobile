@@ -46,6 +46,17 @@ function stderrLog(message: string): void {
 }
 
 /**
+ * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
+ * Allows injecting fakes in tests without subclassing the concrete class.
+ */
+export interface DaemonManagerLike {
+  status(): Promise<DaemonStatus>;
+  start(options?: DaemonOptions): Promise<void>;
+  restart(options?: DaemonOptions): Promise<void>;
+  waitForReady(timeout: number): Promise<boolean>;
+}
+
+/**
  * Daemon Manager
  *
  * Handles daemon lifecycle:
@@ -54,22 +65,25 @@ function stderrLog(message: string): void {
  * - Check daemon status
  * - Restart daemon
  */
-export class DaemonManager {
+export class DaemonManager implements DaemonManagerLike {
   private readonly clientFactory: DaemonClientFactory;
   private readonly stateProvider: () => DaemonStateLike;
   private readonly timer: Timer;
   private readonly lockFilePath: string;
+  private readonly pidFilePath: string;
 
   constructor(
     clientFactory: DaemonClientFactory = () => new DaemonClient(),
     stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
     timer: Timer = defaultTimer,
-    lockFilePath: string = LOCK_FILE_PATH
+    lockFilePath: string = LOCK_FILE_PATH,
+    pidFilePath: string = PID_FILE_PATH
   ) {
     this.clientFactory = clientFactory;
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = lockFilePath;
+    this.pidFilePath = pidFilePath;
   }
 
   /**
@@ -266,10 +280,10 @@ export class DaemonManager {
         logger.warn(`Failed to remove stale socket file: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
-    if (existsSync(PID_FILE_PATH)) {
+    if (existsSync(this.pidFilePath)) {
       logger.debug("Removing stale PID file");
       try {
-        await unlink(PID_FILE_PATH);
+        await unlink(this.pidFilePath);
       } catch (error) {
         logger.warn(`Failed to remove stale PID file: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -437,8 +451,8 @@ export class DaemonManager {
       }
 
       // Clean up stale PID file if it exists
-      if (existsSync(PID_FILE_PATH)) {
-        await unlink(PID_FILE_PATH);
+      if (existsSync(this.pidFilePath)) {
+        await unlink(this.pidFilePath);
       }
 
       stderrLog("Daemon stopped");
@@ -449,8 +463,8 @@ export class DaemonManager {
         (error.message.includes("ESRCH") || error.message.includes("EPERM"))
       ) {
         // Clean up stale PID file
-        if (existsSync(PID_FILE_PATH)) {
-          await unlink(PID_FILE_PATH);
+        if (existsSync(this.pidFilePath)) {
+          await unlink(this.pidFilePath);
         }
         stderrLog("Daemon was not running (cleaned up stale PID file)");
       } else {
@@ -464,13 +478,13 @@ export class DaemonManager {
    */
   async status(): Promise<DaemonStatus> {
     // Check if PID file exists
-    if (!existsSync(PID_FILE_PATH)) {
+    if (!existsSync(this.pidFilePath)) {
       return { running: false };
     }
 
     try {
       // Read PID file
-      const pidFileContent = await readFile(PID_FILE_PATH, "utf-8");
+      const pidFileContent = await readFile(this.pidFilePath, "utf-8");
       const pidData: PidFileData = JSON.parse(pidFileContent);
 
       // Check if process is actually running
@@ -478,7 +492,7 @@ export class DaemonManager {
 
       if (!running) {
         // Clean up stale PID file
-        await unlink(PID_FILE_PATH);
+        await unlink(this.pidFilePath);
         return { running: false };
       }
 
@@ -564,13 +578,13 @@ export class DaemonManager {
    * Get daemon PID from lock file
    */
   getPid(): number | null {
-    if (!existsSync(PID_FILE_PATH)) {
+    if (!existsSync(this.pidFilePath)) {
       return null;
     }
 
     try {
       const pidFileContent = require("fs").readFileSync(
-        PID_FILE_PATH,
+        this.pidFilePath,
         "utf-8"
       );
       const pidData: PidFileData = JSON.parse(pidFileContent);

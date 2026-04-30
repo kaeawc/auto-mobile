@@ -237,6 +237,24 @@ describe("DaemonMcpProxy", () => {
           await proxy.close();
         }
       });
+
+      test.each([
+        ["prerelease tag", "0.0.21-beta.1"],
+        ["unknown fallback", "unknown"],
+        ["empty-after-prefix", "v"],
+      ])("does not restart when version comparison is non-numeric (%s)", async (_label, runningVersion) => {
+        const { fakeManager, isAvailableSpy, proxy } = makeProxy({
+          runningVersion,
+          startedAt: ANCIENT_TIMESTAMP,
+        });
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
     });
 
     test("throws error when auto-start is disabled and daemon not running", async () => {

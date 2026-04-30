@@ -150,7 +150,9 @@ export class DaemonMcpProxy {
     if (!status.running || !status.version) {
       return;
     }
-    if (compareVersions(DAEMON_VERSION, status.version) <= 0) {
+    const cmp = compareVersions(DAEMON_VERSION, status.version);
+    // NaN means non-numeric version (prerelease tag, "unknown", etc.) — be conservative and skip.
+    if (!Number.isFinite(cmp) || cmp <= 0) {
       return;
     }
     if (status.startedAt && Date.now() - status.startedAt < DAEMON_VERSION_RESTART_COOLDOWN_MS) {

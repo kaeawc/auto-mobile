@@ -392,10 +392,21 @@ export class DaemonManager implements DaemonManagerLike {
     // Open with restricted permissions (0o600 = owner read/write only)
     const logFd = openSync(logPath, "w", 0o600);
 
+    // Propagate any non-default file paths to the child so its constants module
+    // resolves to the same locations this manager polls.
+    const childEnv = { ...process.env };
+    if (this.pidFilePath !== PID_FILE_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
+    }
+    if (this.lockFilePath !== LOCK_FILE_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
+    }
+
     const daemonProcess = spawn(autoMobileCmd, args, {
       detached: true,
       stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
       shell: true, // Use shell to resolve command from PATH
+      env: childEnv,
     });
 
     // Close our reference to the log file (daemon process still has it open)

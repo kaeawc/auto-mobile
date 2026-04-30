@@ -803,8 +803,22 @@ public class ElementLocator: ElementLocating {
             // Get label - use for text (don't duplicate in content-desc)
             let label = snapshot.label.isEmpty ? nil : snapshot.label
 
+            // For text inputs, surface the entered value separately from the
+            // accessibility label (which is typically the placeholder for
+            // UISearchBar / UITextField). Mask password content to avoid
+            // leaking secrets through the hierarchy.
+            let isTextInput = snapshot.elementType == .textField
+                || snapshot.elementType == .textView
+                || snapshot.elementType == .secureTextField
+                || snapshot.elementType == .searchField
+            var enteredValue: String?
+            if isTextInput, let raw = snapshot.value as? String, !raw.isEmpty {
+                enteredValue = isPassword ? String(repeating: "•", count: raw.count) : raw
+            }
+
             return UIElementInfo(
                 text: label,
+                value: enteredValue,
                 textSize: nil,
                 contentDesc: nil, // Don't duplicate - label is in text
                 resourceId: resId,
@@ -905,6 +919,7 @@ public class ElementLocator: ElementLocating {
             if isRoot {
                 return [UIElementInfo(
                     text: element.text,
+                    value: element.value,
                     textSize: element.textSize,
                     contentDesc: element.contentDesc,
                     resourceId: element.resourceId,
@@ -944,6 +959,7 @@ public class ElementLocator: ElementLocating {
             // Keep this element with optimized children
             return [UIElementInfo(
                 text: element.text,
+                value: element.value,
                 textSize: element.textSize,
                 contentDesc: element.contentDesc,
                 resourceId: element.resourceId,

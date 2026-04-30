@@ -749,7 +749,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           }
 
       node.text?.toString()?.let {
-        text = it
+        // Mask password content to avoid leaking secrets through the hierarchy.
+        // Mirrors iOS UIElementInfo.value masking for .secureTextField.
+        text = if (node.isPassword) "•".repeat(it.length) else it
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
           textSize = node.extraRenderingInfo?.textSizeInPx
         }
@@ -1626,10 +1628,14 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         paneTitle = focusedNode.paneTitle?.toString()
       }
 
+      val rawFocusedText = focusedNode.text?.toString()
+      val focusedText =
+          if (rawFocusedText != null && focusedNode.isPassword) "•".repeat(rawFocusedText.length)
+          else rawFocusedText
       UIElementInfo(
           className = focusedNode.className?.toString(),
           resourceId = focusedNode.viewIdResourceName,
-          text = focusedNode.text?.toString(),
+          text = focusedText,
           contentDesc = focusedNode.contentDescription?.toString(),
           clickable = focusedNode.isClickable.toString(),
           longClickable = focusedNode.isLongClickable.toString(),
@@ -1844,10 +1850,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val isAccessibilityFocusedBool =
           accessibilityFocusedNode != null && isSameNode(node, accessibilityFocusedNode)
 
+      val rawText = node.text?.toString()
+      val maskedText =
+          if (rawText != null && node.isPassword) "•".repeat(rawText.length) else rawText
       UIElementInfo(
           className = node.className?.toString(),
           resourceId = node.viewIdResourceName,
-          text = node.text?.toString(),
+          text = maskedText,
           contentDesc = node.contentDescription?.toString(),
           clickable = node.isClickable.toString(),
           enabled = node.isEnabled.toString(),

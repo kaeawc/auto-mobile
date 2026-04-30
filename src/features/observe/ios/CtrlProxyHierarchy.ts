@@ -230,6 +230,7 @@ export class CtrlProxyHierarchy {
     const attrs: Record<string, string> = {};
 
     if (node.text) {attrs["text"] = node.text;}
+    if (node.value) {attrs["value"] = node.value;}
     const contentDesc = this.readNodeField<string>(node, "contentDesc", "content-desc");
     const resourceId = this.readNodeField<string>(node, "resourceId", "resource-id");
     const testTag = this.readNodeField<string>(node, "testTag", "test-tag");
@@ -294,6 +295,7 @@ export class CtrlProxyHierarchy {
   private hasContentProperties(attrs: Record<string, string>): boolean {
     return Boolean(
       (attrs["text"] && attrs["text"] !== "") ||
+      (attrs["value"] && attrs["value"] !== "") ||
       (attrs["resource-id"] && attrs["resource-id"] !== "") ||
       (attrs["content-desc"] && attrs["content-desc"] !== "") ||
       (attrs["test-tag"] && attrs["test-tag"] !== "") ||

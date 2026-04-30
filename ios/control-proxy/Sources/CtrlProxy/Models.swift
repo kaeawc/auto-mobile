@@ -364,6 +364,7 @@ public struct WindowInfo: Codable {
 /// UI Element information (matching Android's UIElementInfo)
 public struct UIElementInfo: Codable {
     public let text: String?
+    public let value: String?
     public let textSize: Float?
     public let contentDesc: String?
     public let resourceId: String?
@@ -391,7 +392,7 @@ public struct UIElementInfo: Codable {
     public let node: [UIElementInfo]?
 
     enum CodingKeys: String, CodingKey {
-        case text, textSize, className, bounds, clickable, enabled
+        case text, value, textSize, className, bounds, clickable, enabled
         case focusable, focused, scrollable, password, checkable, checked
         case selected, actions, node, role, testTag, extras
         case viewId = "view-id"
@@ -406,6 +407,7 @@ public struct UIElementInfo: Codable {
 
     public init(
         text: String? = nil,
+        value: String? = nil,
         textSize: Float? = nil,
         contentDesc: String? = nil,
         resourceId: String? = nil,
@@ -433,6 +435,7 @@ public struct UIElementInfo: Codable {
         node: [UIElementInfo]? = nil
     ) {
         self.text = text
+        self.value = value
         self.textSize = textSize
         self.contentDesc = contentDesc
         self.resourceId = resourceId

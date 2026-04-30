@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.21] - 2026-04-30
+### Other
+- No changes.
+
 ## [v0.0.20] - 2026-04-29
 ### Other
 - No changes.

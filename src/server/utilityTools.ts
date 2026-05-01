@@ -6,6 +6,7 @@ import { DeviceState } from "../features/utility/DeviceState";
 import { logger } from "../utils/logger";
 import { createJSONToolResponse } from "../utils/toolUtils";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
+import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { BootedDevice, Platform } from "../models";
 import { addDeviceTargetingToSchema, addSessionUuidToSchema, platformSchema } from "./toolSchemaHelpers";
 import { DaemonState } from "../daemon/daemonState";
@@ -97,7 +98,21 @@ export function registerUtilityTools() {
         logger.info(`[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`);
       } else {
         // Legacy single-agent path: sets global active device
-        await DeviceSessionManager.getInstance().ensureDeviceReady(args.platform, args.deviceId);
+        const sessionManager = DeviceSessionManager.getInstance();
+        const previousDevice = sessionManager.getCurrentDevice();
+        const previousPlatform = sessionManager.getCurrentPlatform();
+
+        await sessionManager.ensureDeviceReady(args.platform, args.deviceId);
+
+        // When switching platforms, clear observation caches to prevent stale
+        // data from the previous platform contaminating subsequent observe calls.
+        if (previousPlatform && previousPlatform !== args.platform && previousDevice) {
+          logger.info(
+            `[setActiveDevice] Platform switch detected (${previousPlatform} -> ${args.platform}), ` +
+            `clearing observation cache for previous device ${previousDevice.deviceId}`
+          );
+          RealObserveScreen.clearCache(previousDevice.deviceId);
+        }
       }
 
       return createJSONToolResponse({

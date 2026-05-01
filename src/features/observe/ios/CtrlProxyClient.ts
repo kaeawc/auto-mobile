@@ -27,6 +27,7 @@ import { PortManager } from "../../../utils/PortManager";
 import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostControlClient";
 import { isRunningInDocker } from "../../../utils/dockerEnv";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
+import { PlatformDeviceManagerFactory } from "../../../utils/factories/PlatformDeviceManagerFactory";
 import { NavigationGraphManager } from "../../navigation/NavigationGraphManager";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { NavigationScreenshotManager } from "../../navigation/NavigationScreenshotManager";
@@ -56,6 +57,16 @@ export type ServiceManagerFactory = (device: BootedDevice) => CtrlProxyIosManage
 
 /** Default production factory that delegates to the real singleton. */
 const defaultServiceManagerFactory: ServiceManagerFactory = d => IOSCtrlProxyManager.getInstance(d);
+
+/**
+ * Function type that returns currently booted devices.
+ * Injected for testability — avoids coupling to PlatformDeviceManagerFactory in tests.
+ */
+export type BootedDeviceLister = () => Promise<BootedDevice[]>;
+
+/** Default production lister that queries the real device manager. */
+const defaultBootedDeviceLister: BootedDeviceLister = () =>
+  PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
 
 /**
  * No-op factory used by createForTesting so that tests which don't supply
@@ -299,6 +310,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
+  private readonly bootedDeviceLister: BootedDeviceLister;
   private isAttemptingAutoSetup: boolean = false;
 
   private constructor(
@@ -306,12 +318,14 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     port: number = CtrlProxyClient.DEFAULT_PORT,
     wsFactory: WebSocketFactory = defaultWebSocketFactory,
     timer: Timer = defaultTimer,
-    serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory
+    serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
+    bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister
   ) {
     super(timer, wsFactory);
     this.device = device;
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
+    this.bootedDeviceLister = bootedDeviceLister;
   }
 
   /**
@@ -362,9 +376,13 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     port: number,
     wsFactory: WebSocketFactory,
     timer: Timer,
-    serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory
+    serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory,
+    bootedDeviceLister?: BootedDeviceLister
   ): CtrlProxyClient {
-    return new CtrlProxyClient(device, port, wsFactory, timer, serviceManagerFactory);
+    // Default test lister always reports the device as booted so existing tests
+    // are unaffected. Tests that verify boot-check behavior supply their own lister.
+    const lister = bootedDeviceLister ?? (async () => [device]);
+    return new CtrlProxyClient(device, port, wsFactory, timer, serviceManagerFactory, lister);
   }
 
   /**
@@ -410,6 +428,21 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         logger.info(`[CtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
         this.connectionAttempts = 0;
         return await super.ensureConnected(perf);
+      }
+
+      // Check if the target simulator is still booted before attempting auto-setup.
+      // Without this check, xcodebuild test-without-building will re-boot the simulator
+      // as a side effect, causing phantom simulators.
+      try {
+        const bootedDevices = await this.bootedDeviceLister();
+        const stillBooted = bootedDevices.some(d => d.deviceId === this.device.deviceId);
+        if (!stillBooted) {
+          logger.info(`[CtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`);
+          return false;
+        }
+      } catch (error) {
+        logger.warn(`[CtrlProxyClient] Failed to check simulator boot state: ${error}`);
+        // Proceed with auto-setup on failure to check — better to attempt than to silently skip
       }
 
       logger.info(`[CtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);

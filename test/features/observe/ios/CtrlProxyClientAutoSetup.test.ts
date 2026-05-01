@@ -7,7 +7,7 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
-import type { ServiceManagerFactory } from "../../../../src/features/observe/ios/CtrlProxyClient";
+import type { ServiceManagerFactory, BootedDeviceLister } from "../../../../src/features/observe/ios/CtrlProxyClient";
 
 describe("CtrlProxyClient auto-setup", function() {
   let testDevice: BootedDevice;
@@ -145,6 +145,98 @@ describe("CtrlProxyClient auto-setup", function() {
 
     // The re-entrant call should have returned false immediately
     expect(reentrantCallResult).toBe(false);
+
+    await client.close();
+  });
+
+  test("skips auto-setup when target simulator is no longer booted", async function() {
+    // Device lister returns empty — simulator has been shut down
+    const lister: BootedDeviceLister = async () => [];
+
+    const client = CtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      createInstantFailureWebSocketFactory(fakeTimer),
+      fakeTimer,
+      createManagerFactory(),
+      lister
+    );
+
+    const result = await client.ensureConnected();
+
+    expect(result).toBe(false);
+    // setup should NOT have been called since the simulator is not booted
+    expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
+
+    await client.close();
+  });
+
+  test("skips auto-setup when a different simulator is booted", async function() {
+    // A different simulator is booted, but not our target
+    const otherDevice: BootedDevice = {
+      deviceId: "FFFFFFFF-0000-1111-2222-333333333333",
+      platform: "ios",
+      name: "iPhone 15 Simulator",
+    };
+    const lister: BootedDeviceLister = async () => [otherDevice];
+
+    const client = CtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      createInstantFailureWebSocketFactory(fakeTimer),
+      fakeTimer,
+      createManagerFactory(),
+      lister
+    );
+
+    const result = await client.ensureConnected();
+
+    expect(result).toBe(false);
+    expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
+
+    await client.close();
+  });
+
+  test("proceeds with auto-setup when target simulator is still booted", async function() {
+    // Device lister returns our target simulator as booted
+    const lister: BootedDeviceLister = async () => [testDevice];
+
+    const client = CtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      createInstantFailureWebSocketFactory(fakeTimer),
+      fakeTimer,
+      createManagerFactory(),
+      lister
+    );
+
+    await client.ensureConnected();
+
+    // setup should have been called since the simulator is booted
+    expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(true);
+
+    await client.close();
+  });
+
+  test("proceeds with auto-setup when boot check fails", async function() {
+    // Device lister throws — should not prevent auto-setup
+    const lister: BootedDeviceLister = async () => {
+      throw new Error("simctl not available");
+    };
+
+    const client = CtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      createInstantFailureWebSocketFactory(fakeTimer),
+      fakeTimer,
+      createManagerFactory(),
+      lister
+    );
+
+    await client.ensureConnected();
+
+    // setup should still proceed when boot check fails
+    expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(true);
 
     await client.close();
   });

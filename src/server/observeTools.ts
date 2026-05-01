@@ -264,6 +264,36 @@ export function registerObserveTools() {
         ? waitOutcome.observation
         : await observeScreen.execute(undefined, createGlobalPerformanceTracker(), true, 0, signal);
 
+      // Validate that the returned hierarchy matches the expected platform.
+      // This guards against cross-platform data contamination where an iOS
+      // hierarchy could be returned for an Android device (or vice versa).
+      if (result.viewHierarchy?.hierarchy) {
+        const hierarchy = result.viewHierarchy.hierarchy;
+        const isIosHierarchy = hierarchy.type === "XCUIElementTypeApplication"
+          || hierarchy.elementType === "application"
+          || (typeof hierarchy.bundleId === "string" && !hierarchy.node);
+        const isAndroidHierarchy = hierarchy.node !== undefined
+          || (hierarchy.$ && hierarchy.$.class);
+
+        if (device.platform === "android" && isIosHierarchy && !isAndroidHierarchy) {
+          logger.error(
+            `[observe] Platform mismatch: device ${device.deviceId} is Android but received iOS hierarchy. ` +
+            `Discarding stale iOS data to prevent cross-platform contamination.`
+          );
+          result.viewHierarchy = undefined;
+          result.error = "Platform mismatch detected: received iOS hierarchy for Android device. " +
+            "This may indicate a stale connection. Try calling observe again.";
+        } else if (device.platform === "ios" && isAndroidHierarchy && !isIosHierarchy) {
+          logger.error(
+            `[observe] Platform mismatch: device ${device.deviceId} is iOS but received Android hierarchy. ` +
+            `Discarding stale Android data to prevent cross-platform contamination.`
+          );
+          result.viewHierarchy = undefined;
+          result.error = "Platform mismatch detected: received Android hierarchy for iOS device. " +
+            "This may indicate a stale connection. Try calling observe again.";
+        }
+      }
+
       if (args.raw) {
         await observeScreen.appendRawViewHierarchy(result, signal);
       }

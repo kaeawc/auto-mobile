@@ -196,8 +196,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return DeviceSessionManager.instance;
   }
 
-  public static createInstance(provider: DeviceClientProvider): DeviceSessionManager {
-    return new DeviceSessionManager(provider);
+  public static createInstance(provider: DeviceClientProvider, adbFactory?: AdbClientFactory): DeviceSessionManager {
+    return new DeviceSessionManager(provider, adbFactory);
   }
 
   /**
@@ -352,7 +352,9 @@ export class DeviceSessionManager implements DeviceSessionManager {
     if (!selectedDevice && this.currentDevice && (this.currentPlatform === platform || this.currentPlatform === resolvedPlatform)) {
       logger.info(`[DeviceSessionManager] Found current device: ${this.currentDevice.deviceId}, verifying readiness`);
       try {
-        await this.verifyDevice(this.currentDevice.deviceId, platform, options);
+        // Use resolvedPlatform (always "android" | "ios") instead of platform (which may be "either")
+        // to ensure verifyDevice dispatches to the correct platform-specific verification
+        await this.verifyDevice(this.currentDevice.deviceId, resolvedPlatform, options);
         selectedDevice = this.currentDevice;
         deviceVerified = true;
         deviceSource = "current";
@@ -373,6 +375,18 @@ export class DeviceSessionManager implements DeviceSessionManager {
 
     if (!deviceVerified) {
       await this.verifyDevice(selectedDevice.deviceId, resolvedPlatform, options);
+    }
+
+    // Safety check: ensure the selected device's platform matches the resolved platform.
+    // This guards against cross-platform contamination where an iOS device could be
+    // returned when Android was explicitly requested (or vice versa).
+    if (selectedDevice.platform !== resolvedPlatform) {
+      logger.warn(
+        `[DeviceSessionManager] Platform mismatch: selected device ${selectedDevice.deviceId} ` +
+        `has platform '${selectedDevice.platform}' but resolved platform is '${resolvedPlatform}'. ` +
+        `Discarding and finding correct platform device.`
+      );
+      selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
     }
 
     this.setCurrentDevice(selectedDevice, resolvedPlatform);

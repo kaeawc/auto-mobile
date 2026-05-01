@@ -13,6 +13,7 @@ import { CtrlProxyClient as IOSCtrlProxyClient } from "../../src/features/observ
 import { Window } from "../../src/features/observe/Window";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
+import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 
 describe("DeviceSessionManager", () => {
   const device: BootedDevice = {
@@ -376,6 +377,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeSimctl: FakeSimctl;
+  let fakeAdbFactory: AdbClientFactory;
   let originalGetActive: typeof Window.prototype.getActive;
   let originalAndroidCtrlProxyMgr: typeof AndroidCtrlProxyManager.getInstance;
   let originalAndroidCtrlProxyClient: typeof CtrlProxyClient.getInstance;
@@ -387,6 +389,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     fakeAdb = new FakeAdbExecutor();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeSimctl = new FakeSimctl();
+    fakeAdbFactory = { create: () => fakeAdb };
 
     fakeAdb.setDevices([androidDevice]);
     fakeSimctl.setBootedSimulators([iosDevice]);
@@ -444,7 +447,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("should throw when both platforms connected and no active device or deviceId", async () => {
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
     );
 
     await expect(
@@ -454,7 +458,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("should resolve to ios when setActiveDevice was called with ios", async () => {
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
     );
 
     manager.setCurrentDevice(iosDevice, "ios");
@@ -466,7 +471,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
     );
 
     manager.setCurrentDevice(iosDevice, "ios");
@@ -478,7 +484,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("should resolve ios device by providedDeviceId when no active device set", async () => {
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
     );
 
     const result = await manager.ensureDeviceReady("either", "ios-sim-1");
@@ -488,11 +495,72 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
   test("should resolve android device by providedDeviceId when no active device set", async () => {
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
     );
 
     const result = await manager.ensureDeviceReady("either", "emulator-5554");
     expect(result.platform).toBe("android");
     expect(result.deviceId).toBe("emulator-5554");
+  });
+
+  test("should verify current device using resolvedPlatform not raw platform when platform is 'either'", async () => {
+    // This test ensures that when platform="either" and currentDevice is Android,
+    // verifyDevice is called with "android" (resolvedPlatform) instead of "either" (raw platform).
+    // Bug fix: previously "either" was passed to verifyDevice which treated it as iOS.
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
+    );
+
+    // Set current device to Android (simulating a prior setActiveDevice call)
+    manager.setCurrentDevice(androidDevice, "android");
+
+    // Call ensureDeviceReady with "either" - should use the current Android device
+    const result = await manager.ensureDeviceReady("either");
+    expect(result.platform).toBe("android");
+    expect(result.deviceId).toBe("emulator-5554");
+    // The device should still be set (not cleared by a failed iOS verification)
+    expect(manager.getCurrentPlatform()).toBe("android");
+    expect(manager.getCurrentDevice()?.deviceId).toBe("emulator-5554");
+  });
+
+  test("should return android device when platform is explicitly 'android' even with iOS active", async () => {
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
+    );
+
+    // Set current device to iOS (simulating a prior setActiveDevice call to iOS)
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    // Call ensureDeviceReady with explicit "android" platform
+    const result = await manager.ensureDeviceReady("android", "emulator-5554");
+    expect(result.platform).toBe("android");
+    expect(result.deviceId).toBe("emulator-5554");
+    // Current device should now be updated to Android
+    expect(manager.getCurrentPlatform()).toBe("android");
+  });
+
+  test("should resolve correct platform when explicitly requesting android with both devices booted", async () => {
+    // When both platforms are booted and we explicitly request Android,
+    // the returned device must always be Android even if current device was iOS.
+    // Configure fakeDeviceUtils so findOrStartDevice can find Android devices
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+
+    const manager = DeviceSessionManager.createInstance(
+      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
+      fakeAdbFactory
+    );
+
+    // Set current device to iOS first
+    manager.setCurrentDevice(iosDevice, "ios");
+
+    // Explicitly request Android without deviceId — should still resolve to Android
+    const result = await manager.ensureDeviceReady("android");
+    expect(result.platform).toBe("android");
+    expect(result.deviceId).toBe("emulator-5554");
+    // Current device should now be updated to Android
+    expect(manager.getCurrentPlatform()).toBe("android");
   });
 });

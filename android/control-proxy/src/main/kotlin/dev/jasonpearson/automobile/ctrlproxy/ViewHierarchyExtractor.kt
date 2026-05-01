@@ -581,8 +581,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       // Filter nodes not actually visible to the user
       // Skip this filter when IME is present for the active app window — Android incorrectly
-      // marks app nodes as not visible when an IME window overlays them
-      if (!skipVisibilityFilter && !node.isVisibleToUser) {
+      // marks app nodes as not visible when an IME window overlays them.
+      // Also skip for interactive nodes — Android can mark long-clickable or clickable views
+      // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
+      // but they must still appear in the hierarchy since users can interact with them.
+      val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
+      if (!skipVisibilityFilter && !isInteractiveNode && !node.isVisibleToUser) {
         return null
       }
 

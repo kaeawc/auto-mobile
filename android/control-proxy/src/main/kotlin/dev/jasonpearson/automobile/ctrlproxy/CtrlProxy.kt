@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.accessibilityservice.AccessibilityService
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
 import android.app.ActivityManager
@@ -571,9 +572,15 @@ class CtrlProxy : AccessibilityService() {
     super.onServiceConnected()
     Log.d(TAG, "onServiceConnected")
 
-    // Ensure we receive ALL accessibility event types (XML config may be cached)
+    // Ensure we receive ALL accessibility event types and include not-important views
+    // (XML config may be cached). flagIncludeNotImportantViews exposes interactive nodes
+    // (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
     serviceInfo = serviceInfo?.apply {
       eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+      flags = flags or
+          AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+          AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
     }
 
     try {

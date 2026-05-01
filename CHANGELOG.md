@@ -1,5 +1,10 @@
 # Changelog
 
+## [v0.0.24] - 2026-05-01
+### Other
+- observe returns iOS hierarchy despite setActiveDevice to Android emulator ([#2053](https://github.com/kaeawc/auto-mobile/issues/2053))
+- ensureConnected should check if target simulator is still booted before relaunching CtrlProxy ([#2052](https://github.com/kaeawc/auto-mobile/issues/2052))
+
 ## [v0.0.23] - 2026-04-30
 ### Other
 - No changes.

@@ -196,8 +196,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     return DeviceSessionManager.instance;
   }
 
-  public static createInstance(provider: DeviceClientProvider): DeviceSessionManager {
-    return new DeviceSessionManager(provider);
+  public static createInstance(provider: DeviceClientProvider, adbFactory?: AdbClientFactory): DeviceSessionManager {
+    return new DeviceSessionManager(provider, adbFactory);
   }
 
   /**
@@ -387,8 +387,6 @@ export class DeviceSessionManager implements DeviceSessionManager {
         `Discarding and finding correct platform device.`
       );
       selectedDevice = await this.findOrStartDevice(resolvedPlatform, options);
-      deviceVerified = true;
-      deviceSource = "auto";
     }
 
     this.setCurrentDevice(selectedDevice, resolvedPlatform);

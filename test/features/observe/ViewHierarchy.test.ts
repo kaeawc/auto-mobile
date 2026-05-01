@@ -59,11 +59,13 @@ describe("ViewHierarchy", function() {
       const propsClickable = { clickable: "true" };
       const propsScrollable = { scrollable: "true" };
       const propsFocused = { focused: "true" };
+      const propsLongClickable = { "long-clickable": "true" };
       const propsNonBoolean = { text: "Button" };
 
       expect(viewHierarchy.meetsBooleanFilterCriteria(propsClickable)).toBe(true);
       expect(viewHierarchy.meetsBooleanFilterCriteria(propsScrollable)).toBe(true);
       expect(viewHierarchy.meetsBooleanFilterCriteria(propsFocused)).toBe(true);
+      expect(viewHierarchy.meetsBooleanFilterCriteria(propsLongClickable)).toBe(true);
       expect(viewHierarchy.meetsBooleanFilterCriteria(propsNonBoolean)).toBe(false);
     });
 
@@ -379,6 +381,25 @@ describe("ViewHierarchy", function() {
       expect(viewHierarchy.meetsStringFilterCriteria(mixedProps)).toBe(true);
       expect(viewHierarchy.meetsBooleanFilterCriteria(mixedProps)).toBe(true);
       expect(viewHierarchy.meetsFilterCriteria(mixedProps)).toBe(true);
+    });
+
+    test("should retain long-clickable-only nodes without text or content-desc", function() {
+      const longClickableImageView = {
+        "className": "android.widget.ImageView",
+        "resource-id": "com.app:id/splash_animation",
+        "long-clickable": "true",
+        "clickable": "false",
+        "bounds": "[192,1036][1088,2364]"
+      };
+
+      expect(viewHierarchy.meetsBooleanFilterCriteria(longClickableImageView)).toBe(true);
+      expect(viewHierarchy.meetsFilterCriteria(longClickableImageView)).toBe(true);
+
+      const filtered = viewHierarchy.filterSingleNode(longClickableImageView);
+      expect(filtered).toBeDefined();
+      expect(filtered).toHaveProperty("long-clickable", "true");
+      expect(filtered).toHaveProperty("resource-id", "com.app:id/splash_animation");
+      expect(filtered).toHaveProperty("bounds", "[192,1036][1088,2364]");
     });
 
     test("should clean node properties correctly with various edge cases", function() {

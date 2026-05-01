@@ -493,7 +493,8 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       (props.scrollable === "true") ||
       (props.focused === "true") ||
       (props.selected === "true") ||
-      (props.selected === true)
+      (props.selected === true) ||
+      (props["long-clickable"] === "true")
     );
   }
 
@@ -639,6 +640,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "contentDesc",
       "content-desc",
       "clickable",
+      "long-clickable",
       "scrollable",
       "enabled",
       "selected",

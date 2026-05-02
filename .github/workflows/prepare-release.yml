@@ -1,6 +1,7 @@
+---
 name: Prepare Release
 
-on:
+"on":
   workflow_dispatch:
     inputs:
       version:
@@ -46,7 +47,9 @@ jobs:
           fi
 
       - name: Bump versions
-        run: bash scripts/versioning/bump-versions.sh --new-version "${{ inputs.version }}"
+        run: >
+          bash scripts/versioning/bump-versions.sh
+          --new-version "${{ inputs.version }}"
 
       - name: Update changelog
         env:
@@ -79,8 +82,10 @@ jobs:
 
       - name: Update release constants
         env:
+          RELEASE_VERSION: ${{ inputs.version }}
           APK_SHA256_CHECKSUM: ${{ steps.checksum.outputs.apk_sha256 }}
-          IOS_CTRL_PROXY_SHA256_CHECKSUM: ${{ steps.checksum.outputs.ipa_sha256 }}
+          IOS_CTRL_PROXY_SHA256_CHECKSUM:
+            ${{ steps.checksum.outputs.ipa_sha256 }}
         run: bash scripts/generate-release-constants.sh
 
       - name: Create pull request
@@ -107,5 +112,6 @@ jobs:
         if: steps.create_pr.outputs.pull-request-number != ''
         uses: peter-evans/enable-pull-request-automerge@v3
         with:
-          pull-request-number: ${{ steps.create_pr.outputs.pull-request-number }}
+          pull-request-number:
+            ${{ steps.create_pr.outputs.pull-request-number }}
           merge-method: squash

@@ -64,6 +64,6 @@ describe("resolveChecksum", function() {
 
 describe("resolveLatestVersion", function() {
   test("returns first registry entry version", function() {
-    expect(resolveLatestVersion()).toBe("0.0.18");
+    expect(resolveLatestVersion()).toBe(RELEASE_CHECKSUM_REGISTRY[0].version);
   });
 });

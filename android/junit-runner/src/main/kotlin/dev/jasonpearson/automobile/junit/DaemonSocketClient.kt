@@ -314,10 +314,15 @@ internal object DaemonSocketPaths {
    * hides the soft keyboard after injection (Android emulator CI often leaves it open otherwise).
    *
    * Configured via JVM system property `automobile.daemon.dismiss.keyboard.after.input` (e.g.
-   * `./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true`).
+   * `./gradlew -Dautomobile.daemon.dismiss.keyboard.after.input=true`) or environment variable
+   * `AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT`.
    */
   private fun dismissKeyboardAfterInputRequested(): Boolean {
-    return SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)
+    if (SystemPropertyCache.getBoolean("automobile.daemon.dismiss.keyboard.after.input", false)) {
+      return true
+    }
+    val env = System.getenv("AUTOMOBILE_DAEMON_DISMISS_KEYBOARD_AFTER_INPUT")?.trim()?.lowercase().orEmpty()
+    return env == "1" || env == "true" || env == "yes"
   }
 
   private fun List<String>.withDismissKeyboardAfterInput(): List<String> {

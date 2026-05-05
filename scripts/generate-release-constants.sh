@@ -71,6 +71,31 @@ sed_inplace_extended() {
   fi
 }
 
+prepend_registry_entry() {
+  local file="$1"
+  local entry="$2"
+  local marker="export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry[] = ["
+  local next_file
+  local inserted=false
+  next_file="$(mktemp)"
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    printf '%s\n' "$line"
+    if [ "$line" = "$marker" ]; then
+      printf '%s\n' "$entry"
+      inserted=true
+    fi
+  done < "$file" > "$next_file"
+
+  if [ "$inserted" != true ]; then
+    rm -f "$next_file"
+    echo "ERROR: Failed to locate RELEASE_CHECKSUM_REGISTRY marker in ${file}"
+    exit 1
+  fi
+
+  mv "$next_file" "$file"
+}
+
 if [ -n "$release_version" ]; then
   # Mode: add new registry entry (requires all three)
   if [ -z "$apk_checksum" ] || [ -z "$ios_checksum" ]; then
@@ -90,9 +115,7 @@ if [ -n "$release_version" ]; then
   },"
 
   # Prepend new entry after the opening bracket of RELEASE_CHECKSUM_REGISTRY
-  sed_inplace "/^export const RELEASE_CHECKSUM_REGISTRY: ReleaseChecksumEntry\[\] = \[$/a\\
-${new_entry}
-" "$tmp_file"
+  prepend_registry_entry "$tmp_file" "$new_entry"
 
   # Cap registry at max_registry_entries
   entry_count=$(grep -c 'version: "' "$tmp_file" || true)

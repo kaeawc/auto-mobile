@@ -1,0 +1,35 @@
+#!/usr/bin/env bats
+#
+# Tests for scripts/generate-release-constants.sh
+
+SCRIPT="scripts/generate-release-constants.sh"
+APK_SHA="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+IPA_SHA="bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+setup() {
+  TEST_ROOT="$(mktemp -d)"
+  mkdir -p "${TEST_ROOT}/scripts" "${TEST_ROOT}/src/constants"
+  cp "$SCRIPT" "${TEST_ROOT}/scripts/generate-release-constants.sh"
+  cp "src/constants/release.ts" "${TEST_ROOT}/src/constants/release.ts"
+  chmod +x "${TEST_ROOT}/scripts/generate-release-constants.sh"
+}
+
+teardown() {
+  rm -rf "$TEST_ROOT"
+}
+
+@test "prepends release registry entry in release mode" {
+  run env \
+    RELEASE_VERSION="0.0.25" \
+    APK_SHA256_CHECKSUM="$APK_SHA" \
+    IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
+    bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
+
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"Added registry entry for version: 0.0.25"* ]]
+
+  first_version="$(grep -m1 '^[[:space:]]*version: "' "${TEST_ROOT}/src/constants/release.ts")"
+  [[ "$first_version" == *'version: "0.0.25"'* ]]
+  grep -q "apkSha256: \"${APK_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+  grep -q "ipaSha256: \"${IPA_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
+}

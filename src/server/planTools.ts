@@ -165,19 +165,14 @@ const executePlanTool = async (device: BootedDevice, params: {
   // stream can go idle and be silently dropped, causing the MCP client to
   // time out even though the tool completed successfully.
   let progressHeartbeatCount = 0;
-  let progressHeartbeatStopped = false;
   const progressHeartbeat = progress
-    ? defaultTimer.setInterval(() => {
-      if (progressHeartbeatStopped) { return; }
+    ? setInterval(() => {
       progressHeartbeatCount++;
-      progress(progressHeartbeatCount, undefined, "executing").catch(err => {
-        logger.debug(`[executePlan] Progress heartbeat delivery failed: ${err}`);
-      });
+      progress(progressHeartbeatCount, undefined, "executing").catch(() => {});
     }, 30_000)
     : undefined;
   const clearProgressHeartbeat = () => {
-    progressHeartbeatStopped = true;
-    if (progressHeartbeat) { defaultTimer.clearInterval(progressHeartbeat); }
+    if (progressHeartbeat) clearInterval(progressHeartbeat);
   };
 
   const recordTestExecution = async (

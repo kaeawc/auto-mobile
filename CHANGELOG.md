@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.25] - 2026-05-06
+### Other
+- Daemon mode ignores CLI flags (dismiss-keyboard, no-ui-perf, etc.) ([#2065](https://github.com/kaeawc/auto-mobile/issues/2065))
+
 ## [v0.0.24] - 2026-05-01
 ### Other
 - observe returns iOS hierarchy despite setActiveDevice to Android emulator ([#2053](https://github.com/kaeawc/auto-mobile/issues/2053))

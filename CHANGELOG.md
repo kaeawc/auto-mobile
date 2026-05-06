@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.26] - 2026-05-06
+### Other
+- WebSocket timeout cascade causes daemon blindness after slow hierarchy extraction ([#2079](https://github.com/kaeawc/auto-mobile/issues/2079))
+
 ## [v0.0.25] - 2026-05-06
 ### Other
 - Daemon mode ignores CLI flags (dismiss-keyboard, no-ui-perf, etc.) ([#2065](https://github.com/kaeawc/auto-mobile/issues/2065))

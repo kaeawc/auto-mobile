@@ -20,16 +20,16 @@ teardown() {
 
 @test "prepends release registry entry in release mode" {
   run env \
-    RELEASE_VERSION="0.0.25" \
+    RELEASE_VERSION="99.99.99" \
     APK_SHA256_CHECKSUM="$APK_SHA" \
     IOS_CTRL_PROXY_SHA256_CHECKSUM="$IPA_SHA" \
     bash "${TEST_ROOT}/scripts/generate-release-constants.sh"
 
   [ "$status" -eq 0 ]
-  [[ "$output" == *"Added registry entry for version: 0.0.25"* ]]
+  [[ "$output" == *"Added registry entry for version: 99.99.99"* ]]
 
   first_version="$(grep -m1 '^[[:space:]]*version: "' "${TEST_ROOT}/src/constants/release.ts")"
-  [[ "$first_version" == *'version: "0.0.25"'* ]]
+  [[ "$first_version" == *'version: "99.99.99"'* ]]
   grep -q "apkSha256: \"${APK_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
   grep -q "ipaSha256: \"${IPA_SHA}\"" "${TEST_ROOT}/src/constants/release.ts"
 }

@@ -518,18 +518,17 @@ export class TapOnElement extends BaseVisualChange {
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
 
-    if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
-      logger.warn(
-        `[TapOnElement] Element found but center is off-screen, will retry. ` +
-        `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}], ` +
-        `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
-      );
-      selection = { ...selection, element: null };
-      element = null;
-      offScreenRejections += 1;
-    }
-
-    if (!element) {
+    if (!element || this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+      if (element) {
+        logger.warn(
+          `[TapOnElement] Element found but center is off-screen, will retry. ` +
+          `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}], ` +
+          `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
+        );
+        selection = { ...selection, element: null };
+        element = null;
+        offScreenRejections += 1;
+      }
       const deadline = startTime + searchDurationMs;
       while (this.timer.now() < deadline) {
         throwIfAborted(signal);

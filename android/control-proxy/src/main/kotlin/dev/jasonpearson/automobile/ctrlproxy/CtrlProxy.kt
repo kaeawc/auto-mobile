@@ -724,7 +724,14 @@ class CtrlProxy : AccessibilityService() {
               },
           )
 
-      // Subscribe to hierarchy updates from the debouncer
+      // Subscribe to hierarchy updates from the debouncer.
+      // Throttle event-driven broadcasts to avoid saturating the ADB port-forwarding
+      // pipe. The extraction itself stays fast (request_hierarchy uses extractNowBlocking
+      // and bypasses this flow entirely), but unsolicited pushes are rate-limited so
+      // on-demand requests have a clear pipe to travel through.
+      var lastEventBroadcastMs = 0L
+      val eventBroadcastMinIntervalMs = 250L
+
       hierarchyFlowJob =
           hierarchyDebouncer.hierarchyFlow
               .onEach { result ->
@@ -735,15 +742,22 @@ class CtrlProxy : AccessibilityService() {
                         "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                     )
                     writeHierarchyToFile(result.hierarchy)
-                    broadcastHierarchyUpdate(result.hierarchy)
+                    throttledBroadcast(
+                        result.hierarchy,
+                        lastEventBroadcastMs,
+                        eventBroadcastMinIntervalMs,
+                    ) { lastEventBroadcastMs = it }
                   }
                   is HierarchyResult.Unchanged -> {
                     Log.d(
                         TAG,
                         "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
                     )
-                    // Still broadcast so clients get updated bounds
-                    broadcastHierarchyUpdate(result.hierarchy)
+                    throttledBroadcast(
+                        result.hierarchy,
+                        lastEventBroadcastMs,
+                        eventBroadcastMinIntervalMs,
+                    ) { lastEventBroadcastMs = it }
                   }
                   is HierarchyResult.Error -> {
                     Log.w(TAG, "Hierarchy extraction error: ${result.message}")
@@ -1617,12 +1631,20 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Extract hierarchy immediately and broadcast, bypassing the debouncer. Used for explicit
-   * WebSocket requests where we need fresh data immediately.
+   * Extract hierarchy immediately and broadcast synchronously, bypassing the debouncer and the
+   * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
+   * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
    */
   private fun extractHierarchyNow(disableAllFiltering: Boolean = false) {
     Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
-    hierarchyDebouncer.extractNow(disableAllFiltering)
+    val hierarchy = hierarchyDebouncer.extractNowBlocking(
+        skipFlowEmit = true,
+        disableAllFiltering = disableAllFiltering,
+    )
+    if (hierarchy != null) {
+      writeHierarchyToFile(hierarchy)
+      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(hierarchy, sync = true) }
+    }
   }
 
   /** Writes the hierarchy to a file for synchronous access */
@@ -1720,6 +1742,25 @@ class CtrlProxy : AccessibilityService() {
           error?.let { putExtra("error", it) }
         }
     sendBroadcast(resultIntent)
+  }
+
+  /**
+   * Rate-limit event-driven hierarchy broadcasts so unsolicited pushes don't saturate the
+   * ADB port-forwarding pipe.
+   */
+  private suspend fun throttledBroadcast(
+      hierarchy: ViewHierarchy,
+      lastBroadcastMs: Long,
+      minIntervalMs: Long,
+      updateTimestamp: (Long) -> Unit,
+  ) {
+    val now = System.currentTimeMillis()
+    if (now - lastBroadcastMs >= minIntervalMs) {
+      updateTimestamp(now)
+      broadcastHierarchyUpdate(hierarchy)
+    } else {
+      Log.d(TAG, "Throttled event-driven broadcast (${now - lastBroadcastMs}ms since last)")
+    }
   }
 
   /**

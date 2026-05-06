@@ -23,8 +23,10 @@ import type {
 } from "./types";
 import { generateSecureId } from "./types";
 
-/** Timeout cooldown period to skip WebSocket wait after a timeout */
-const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 5000;
+/** Cooldown after a WebSocket timeout before retrying fresh-data waits.
+ *  Keep short: a long cooldown (e.g. 5s) turns a single slow response into
+ *  a cascade where every hierarchy request returns stale data. */
+const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 500;
 
 /**
  * Delegate class for handling hierarchy retrieval and caching.
@@ -541,7 +543,7 @@ export class CtrlProxyHierarchy {
 
           if (freshness.isFresh) {
             this.context.timer.clearInterval(intervalId);
-            logger.debug(`[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}`);
+            logger.debug(`[CTRL_PROXY] Fresh data received: receivedAt=${cachedHierarchy.receivedAt}, updatedAt=${cachedHierarchy.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, elapsed=${elapsed}ms`);
             resolve(cachedHierarchy);
             return;
           }
@@ -577,7 +579,9 @@ export class CtrlProxyHierarchy {
           this.context.timer.clearInterval(intervalId);
           const cached = this.context.getCachedHierarchy();
           if (cached) {
-            logger.debug(`[CTRL_PROXY] Timeout: cached data receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}`);
+            logger.debug(`[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: cached receivedAt=${cached.receivedAt}, updatedAt=${cached.hierarchy.updatedAt}, minTimestamp=${minTimestamp}, useDeviceTimestamp=${useDeviceTimestamp}`);
+          } else {
+            logger.debug(`[CTRL_PROXY] waitForFreshData TIMEOUT after ${elapsed}ms: no cached data, minTimestamp=${minTimestamp}`);
           }
           resolve(null);
         }

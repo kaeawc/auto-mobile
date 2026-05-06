@@ -219,6 +219,9 @@ function createFakeAccessibilityClient() {
     async requestImeAction(action: string) {
       return { success: true, action, totalTimeMs: 1 };
     },
+    async requestTapCoordinates() {
+      return { success: true, totalTimeMs: 1 };
+    },
     async requestClearText() {
       return { success: true, totalTimeMs: 1 };
     },

@@ -2096,7 +2096,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
   private handleHierarchyUpdate(data: AccessibilityHierarchy, perfTiming?: AndroidPerfTiming[]): void {
     const now = this.timer.now();
-    logger.debug(`[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt})`);
+    logger.debug(`[CTRL_PROXY] Received hierarchy update (updatedAt: ${data.updatedAt}, receivedAt: ${now})`);
 
     // Mark previous cache as stale
     if (this.cachedHierarchy) {

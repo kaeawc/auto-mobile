@@ -147,6 +147,16 @@ const tapOnBaseSchema = z.object({
     "stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still " +
     "settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content."
   ),
+  retryIfNoChange: z.boolean().optional().describe(
+    "When true, compare the view hierarchy before and after the tap. If unchanged (ghost tap detected), " +
+    "retry the tap once after a short delay. Recommended for taps that should cause obvious UI changes " +
+    "like navigation or screen transitions."
+  ),
+  ensureTap: z.boolean().optional().describe(
+    "Convenience flag that enables both preTapStability and retryIfNoChange. " +
+    "Use on taps in dynamic UI where you want both stable bounds before tapping " +
+    "and ghost-tap detection after."
+  ),
   platform: platformSchema
 }).strict();
 
@@ -433,6 +443,8 @@ export function registerInteractionTools() {
       scrollableContainer: args.scrollableContainer,
       siblingOfText: args.siblingOfText,
       preTapStability: args.preTapStability,
+      retryIfNoChange: args.retryIfNoChange,
+      ensureTap: args.ensureTap,
     }, progress);
 
     const searchStats = result.searchUntil;

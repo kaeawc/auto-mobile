@@ -51,7 +51,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     restartOptions?: DaemonOptions;
     startCalled: boolean;
     waitForReadyResult: boolean;
-  } {
+    } {
     let restartCalled = false;
     let restartOptions: DaemonOptions | undefined;
     let startCalled = false;

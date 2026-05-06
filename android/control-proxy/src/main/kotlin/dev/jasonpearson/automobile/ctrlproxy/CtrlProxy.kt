@@ -4,7 +4,6 @@ import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
 import android.accessibilityservice.GestureDescription
 import android.annotation.SuppressLint
-import android.app.ActivityManager
 import android.app.admin.DevicePolicyManager
 import android.content.BroadcastReceiver
 import android.content.ClipData
@@ -39,22 +38,19 @@ import dev.jasonpearson.automobile.ctrlproxy.perf.PerfProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.SystemTimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.perf.TimeProvider
 import dev.jasonpearson.automobile.ctrlproxy.storage.StorageSubscriptionManager
-import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import dev.jasonpearson.automobile.protocol.AnrData
 import dev.jasonpearson.automobile.protocol.AnrEvent
+import dev.jasonpearson.automobile.protocol.BroadcastEventData
+import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
 import dev.jasonpearson.automobile.protocol.CrashData
 import dev.jasonpearson.automobile.protocol.CrashEvent
 import dev.jasonpearson.automobile.protocol.DeviceInfo
 import dev.jasonpearson.automobile.protocol.HandledExceptionData
 import dev.jasonpearson.automobile.protocol.HandledExceptionEvent
-import dev.jasonpearson.automobile.protocol.NavigationEventData
-import dev.jasonpearson.automobile.protocol.NavigationEventResponse
-import dev.jasonpearson.automobile.protocol.BroadcastEventData
-import dev.jasonpearson.automobile.protocol.BroadcastEventResponse
 import dev.jasonpearson.automobile.protocol.LifecycleEventData
 import dev.jasonpearson.automobile.protocol.LifecycleEventResponse
-import dev.jasonpearson.automobile.protocol.LogEventData
-import dev.jasonpearson.automobile.protocol.LogEventResponse
+import dev.jasonpearson.automobile.protocol.NavigationEventData
+import dev.jasonpearson.automobile.protocol.NavigationEventResponse
 import dev.jasonpearson.automobile.protocol.NetworkEventData
 import dev.jasonpearson.automobile.protocol.NetworkEventResponse
 import dev.jasonpearson.automobile.protocol.SdkAnrEvent
@@ -77,6 +73,7 @@ import dev.jasonpearson.automobile.sdk.AutoMobileSDK
 import dev.jasonpearson.automobile.sdk.anr.AutoMobileAnr
 import dev.jasonpearson.automobile.sdk.crashes.AutoMobileCrashes
 import dev.jasonpearson.automobile.sdk.failures.AutoMobileFailures
+import dev.jasonpearson.automobile.sdk.network.NetworkMockRuleStore
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.security.MessageDigest
@@ -116,8 +113,14 @@ class CtrlProxy : AccessibilityService() {
   private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
   private val recompositionStore = RecompositionStore()
   private val viewHierarchyExtractor = ViewHierarchyExtractor(recompositionStore)
-  private val json = Json { prettyPrint = true; encodeDefaults = true }
-  private val jsonCompact = Json { prettyPrint = false; encodeDefaults = true }
+  private val json = Json {
+    prettyPrint = true
+    encodeDefaults = true
+  }
+  private val jsonCompact = Json {
+    prettyPrint = false
+    encodeDefaults = true
+  }
   private val jsonLenient = Json { ignoreUnknownKeys = true }
   private val perfProvider = PerfProvider.instance
   private val timeProvider: TimeProvider = SystemTimeProvider()
@@ -138,8 +141,7 @@ class CtrlProxy : AccessibilityService() {
   }
   @Volatile private var lastWindowClassName: String? = null
 
-  @Volatile
-  private var isRecording: Boolean = false
+  @Volatile private var isRecording: Boolean = false
 
   // Debounce timestamps — @Volatile since interaction events may trigger coroutines
   @Volatile private var lastInputTextBroadcastMs: Long = 0
@@ -206,7 +208,10 @@ class CtrlProxy : AccessibilityService() {
             if (eventJson != null) {
               val event = SdkEventSerializer.navigationEventFromJson(eventJson)
               if (event != null) {
-                Log.d(TAG, "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})")
+                Log.d(
+                    TAG,
+                    "Received navigation event (protocol): ${event.destination} from ${event.source} (app: ${event.applicationId})",
+                )
                 navigationEventAccumulator.addEvent(
                     event.destination,
                     event.source.name,
@@ -242,7 +247,10 @@ class CtrlProxy : AccessibilityService() {
               }
             }
 
-            Log.d(TAG, "Received navigation event (legacy): $destination from $source (app: $applicationId)")
+            Log.d(
+                TAG,
+                "Received navigation event (legacy): $destination from $source (app: $applicationId)",
+            )
             navigationEventAccumulator.addEvent(
                 destination,
                 source,
@@ -337,7 +345,10 @@ class CtrlProxy : AccessibilityService() {
             if (eventJson != null) {
               val event = SdkEventSerializer.handledExceptionEventFromJson(eventJson)
               if (event != null) {
-                Log.d(TAG, "Received handled exception (protocol): ${event.exceptionClass} from ${event.applicationId}")
+                Log.d(
+                    TAG,
+                    "Received handled exception (protocol): ${event.exceptionClass} from ${event.applicationId}",
+                )
 
                 serviceScope.launch {
                   broadcastHandledExceptionEvent(
@@ -363,21 +374,17 @@ class CtrlProxy : AccessibilityService() {
             val timestamp = intent.getLongExtra(AutoMobileFailures.EXTRA_TIMESTAMP, 0L)
             val exceptionClass =
                 intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_CLASS) ?: return
-            val exceptionMessage =
-                intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_MESSAGE)
-            val stackTrace =
-                intent.getStringExtra(AutoMobileFailures.EXTRA_STACK_TRACE) ?: return
+            val exceptionMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_EXCEPTION_MESSAGE)
+            val stackTrace = intent.getStringExtra(AutoMobileFailures.EXTRA_STACK_TRACE) ?: return
             val customMessage = intent.getStringExtra(AutoMobileFailures.EXTRA_CUSTOM_MESSAGE)
             val currentScreen = intent.getStringExtra(AutoMobileFailures.EXTRA_CURRENT_SCREEN)
-            val packageName =
-                intent.getStringExtra(AutoMobileFailures.EXTRA_PACKAGE_NAME) ?: return
+            val packageName = intent.getStringExtra(AutoMobileFailures.EXTRA_PACKAGE_NAME) ?: return
             val appVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_APP_VERSION)
             val deviceModel =
                 intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MODEL) ?: "unknown"
             val deviceManufacturer =
                 intent.getStringExtra(AutoMobileFailures.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-            val osVersion =
-                intent.getStringExtra(AutoMobileFailures.EXTRA_OS_VERSION) ?: "unknown"
+            val osVersion = intent.getStringExtra(AutoMobileFailures.EXTRA_OS_VERSION) ?: "unknown"
             val sdkInt = intent.getIntExtra(AutoMobileFailures.EXTRA_SDK_INT, 0)
 
             Log.d(TAG, "Received handled exception (legacy): $exceptionClass from $packageName")
@@ -417,7 +424,10 @@ class CtrlProxy : AccessibilityService() {
             if (eventJson != null) {
               val event = SdkEventSerializer.crashEventFromJson(eventJson)
               if (event != null) {
-                Log.d(TAG, "Received crash (protocol): ${event.exceptionClass} from ${event.applicationId}")
+                Log.d(
+                    TAG,
+                    "Received crash (protocol): ${event.exceptionClass} from ${event.applicationId}",
+                )
 
                 serviceScope.launch {
                   broadcastCrashEvent(
@@ -443,22 +453,17 @@ class CtrlProxy : AccessibilityService() {
             val timestamp = intent.getLongExtra(AutoMobileCrashes.EXTRA_TIMESTAMP, 0L)
             val exceptionClass =
                 intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_CLASS) ?: return
-            val exceptionMessage =
-                intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_MESSAGE)
-            val stackTrace =
-                intent.getStringExtra(AutoMobileCrashes.EXTRA_STACK_TRACE) ?: return
-            val threadName =
-                intent.getStringExtra(AutoMobileCrashes.EXTRA_THREAD_NAME) ?: "unknown"
+            val exceptionMessage = intent.getStringExtra(AutoMobileCrashes.EXTRA_EXCEPTION_MESSAGE)
+            val stackTrace = intent.getStringExtra(AutoMobileCrashes.EXTRA_STACK_TRACE) ?: return
+            val threadName = intent.getStringExtra(AutoMobileCrashes.EXTRA_THREAD_NAME) ?: "unknown"
             val currentScreen = intent.getStringExtra(AutoMobileCrashes.EXTRA_CURRENT_SCREEN)
-            val packageName =
-                intent.getStringExtra(AutoMobileCrashes.EXTRA_PACKAGE_NAME) ?: return
+            val packageName = intent.getStringExtra(AutoMobileCrashes.EXTRA_PACKAGE_NAME) ?: return
             val appVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_APP_VERSION)
             val deviceModel =
                 intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MODEL) ?: "unknown"
             val deviceManufacturer =
                 intent.getStringExtra(AutoMobileCrashes.EXTRA_DEVICE_MANUFACTURER) ?: "unknown"
-            val osVersion =
-                intent.getStringExtra(AutoMobileCrashes.EXTRA_OS_VERSION) ?: "unknown"
+            val osVersion = intent.getStringExtra(AutoMobileCrashes.EXTRA_OS_VERSION) ?: "unknown"
             val sdkInt = intent.getIntExtra(AutoMobileCrashes.EXTRA_SDK_INT, 0)
 
             Log.d(TAG, "Received crash (legacy): $exceptionClass from $packageName")
@@ -551,8 +556,7 @@ class CtrlProxy : AccessibilityService() {
           }
 
           try {
-            val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON)
-                ?: return
+            val eventJson = intent.getStringExtra(SdkEventSerializer.EXTRA_SDK_EVENT_JSON) ?: return
             val batch = SdkEventSerializer.eventBatchFromJson(eventJson) ?: return
 
             Log.d(TAG, "Received event batch with ${batch.events.size} events")
@@ -575,13 +579,15 @@ class CtrlProxy : AccessibilityService() {
     // Ensure we receive ALL accessibility event types and include not-important views
     // (XML config may be cached). flagIncludeNotImportantViews exposes interactive nodes
     // (e.g. long-clickable ImageViews) that Android otherwise filters as decorative.
-    serviceInfo = serviceInfo?.apply {
-      eventTypes = AccessibilityEvent.TYPES_ALL_MASK
-      flags = flags or
-          AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
-          AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
-          AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
-    }
+    serviceInfo =
+        serviceInfo?.apply {
+          eventTypes = AccessibilityEvent.TYPES_ALL_MASK
+          flags =
+              flags or
+                  AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS or
+                  AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS or
+                  AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+        }
 
     try {
       overlayDrawer = OverlayDrawer(screenDimensionsProvider = { getScreenDimensions() })
@@ -653,8 +659,7 @@ class CtrlProxy : AccessibilityService() {
       Log.d(TAG, "Handled exception receiver registered")
 
       // Register broadcast receiver for crashes from SDK
-      val crashFilter =
-          IntentFilter().apply { addAction(AutoMobileCrashes.ACTION_CRASH) }
+      val crashFilter = IntentFilter().apply { addAction(AutoMobileCrashes.ACTION_CRASH) }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         registerReceiver(crashReceiver, crashFilter, RECEIVER_EXPORTED)
@@ -665,14 +670,12 @@ class CtrlProxy : AccessibilityService() {
       Log.d(TAG, "Crash receiver registered")
 
       // Register broadcast receiver for ANRs from SDK
-      val anrFilter =
-          IntentFilter().apply { addAction(AutoMobileAnr.ACTION_ANR) }
+      val anrFilter = IntentFilter().apply { addAction(AutoMobileAnr.ACTION_ANR) }
 
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         registerReceiver(anrReceiver, anrFilter, RECEIVER_EXPORTED)
       } else {
-        @SuppressLint("UnspecifiedRegisterReceiverFlag")
-        registerReceiver(anrReceiver, anrFilter)
+        @SuppressLint("UnspecifiedRegisterReceiverFlag") registerReceiver(anrReceiver, anrFilter)
       }
       Log.d(TAG, "ANR receiver registered")
 
@@ -724,7 +727,13 @@ class CtrlProxy : AccessibilityService() {
               },
           )
 
-      // Subscribe to hierarchy updates from the debouncer
+      // Subscribe to hierarchy updates from the debouncer.
+      // Throttle event-driven broadcasts to avoid saturating the ADB port-forwarding
+      // pipe. The extraction itself stays fast (request_hierarchy uses extractNowBlocking
+      // and bypasses this flow entirely), but unsolicited pushes are rate-limited so
+      // on-demand requests have a clear pipe to travel through.
+      val broadcastThrottler = BroadcastThrottler(timeProvider, minIntervalMs = 250L)
+
       hierarchyFlowJob =
           hierarchyDebouncer.hierarchyFlow
               .onEach { result ->
@@ -735,15 +744,28 @@ class CtrlProxy : AccessibilityService() {
                         "Hierarchy changed (hash=${result.hash}, extraction=${result.extractionTimeMs}ms)",
                     )
                     writeHierarchyToFile(result.hierarchy)
-                    broadcastHierarchyUpdate(result.hierarchy)
+                    if (broadcastThrottler.shouldBroadcast()) {
+                      broadcastHierarchyUpdate(result.hierarchy)
+                    } else {
+                      Log.d(
+                          TAG,
+                          "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                      )
+                    }
                   }
                   is HierarchyResult.Unchanged -> {
                     Log.d(
                         TAG,
                         "Hierarchy unchanged (animation mode, skipped=${result.skippedEventCount})",
                     )
-                    // Still broadcast so clients get updated bounds
-                    broadcastHierarchyUpdate(result.hierarchy)
+                    if (broadcastThrottler.shouldBroadcast()) {
+                      broadcastHierarchyUpdate(result.hierarchy)
+                    } else {
+                      Log.d(
+                          TAG,
+                          "Throttled event-driven broadcast (${broadcastThrottler.timeSinceLastBroadcastMs()}ms since last)",
+                      )
+                    }
                   }
                   is HierarchyResult.Error -> {
                     Log.w(TAG, "Hierarchy extraction error: ${result.message}")
@@ -760,7 +782,10 @@ class CtrlProxy : AccessibilityService() {
       storageChangeJob =
           storageSubscriptionManager.changeEvents
               .onEach { event ->
-                Log.d(TAG, "Storage change: ${event.packageName}:${event.fileName} key=${event.key}")
+                Log.d(
+                    TAG,
+                    "Storage change: ${event.packageName}:${event.fileName} key=${event.key}",
+                )
                 broadcastStorageChange(event)
               }
               .launchIn(serviceScope)
@@ -1047,7 +1072,7 @@ class CtrlProxy : AccessibilityService() {
       enabled: Boolean,
       errorType: String?,
       limit: Int?,
-      expiresAtEpochMs: Long?
+      expiresAtEpochMs: Long?,
   ) {
     try {
       val intent =
@@ -1073,7 +1098,10 @@ class CtrlProxy : AccessibilityService() {
     try {
       // Log accessibility events for debugging
       if (event.packageName?.toString()?.contains("playground") == true) {
-        Log.d(TAG, "A11Y event type=${event.eventType} class=${event.className} pkg=${event.packageName} text=${event.text} contentChange=${event.contentChangeTypes} action=${event.action}")
+        Log.d(
+            TAG,
+            "A11Y event type=${event.eventType} class=${event.className} pkg=${event.packageName} text=${event.text} contentChange=${event.contentChangeTypes} action=${event.action}",
+        )
       }
 
       if (event.eventType == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
@@ -1085,10 +1113,8 @@ class CtrlProxy : AccessibilityService() {
       // moves accessibility focus after a tap (more reliable than TYPE_VIEW_CLICKED
       // for Compose UIs). Debounce at 200ms to avoid duplicate events.
       when (event.eventType) {
-        AccessibilityEvent.TYPE_VIEW_CLICKED ->
-          recordInteractionEvent(event, "tap")
-        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED ->
-          recordInteractionEvent(event, "longPress")
+        AccessibilityEvent.TYPE_VIEW_CLICKED -> recordInteractionEvent(event, "tap")
+        AccessibilityEvent.TYPE_VIEW_LONG_CLICKED -> recordInteractionEvent(event, "longPress")
         // Compose doesn't fire TYPE_VIEW_CLICKED — detect taps via content changes
         // on clickable elements. CONTENT_CHANGE_TYPE_STATE_DESCRIPTION (64) fires
         // when Compose state changes (e.g., button click updates counter).
@@ -1102,10 +1128,8 @@ class CtrlProxy : AccessibilityService() {
             }
           }
         }
-        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED ->
-          recordInteractionEvent(event, "navigate")
-        AccessibilityEvent.TYPE_VIEW_SELECTED ->
-          recordInteractionEvent(event, "select")
+        AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED -> recordInteractionEvent(event, "navigate")
+        AccessibilityEvent.TYPE_VIEW_SELECTED -> recordInteractionEvent(event, "select")
         AccessibilityEvent.TYPE_VIEW_TEXT_CHANGED -> {
           val now = System.currentTimeMillis()
           if (now - lastInputTextBroadcastMs >= inputTextDebounceMs) {
@@ -1113,8 +1137,7 @@ class CtrlProxy : AccessibilityService() {
             recordInteractionEvent(event, "inputText")
           }
         }
-        AccessibilityEvent.TYPE_VIEW_SCROLLED ->
-          recordDebouncedScroll(event)
+        AccessibilityEvent.TYPE_VIEW_SCROLLED -> recordDebouncedScroll(event)
       }
 
       // Delegate to the smart debouncer for content/window changes
@@ -1142,40 +1165,52 @@ class CtrlProxy : AccessibilityService() {
       return
     }
 
-    val source = try { event.source } catch (_: Exception) { null }
+    val source =
+        try {
+          event.source
+        } catch (_: Exception) {
+          null
+        }
     val bounds =
         source?.let {
           try {
             val rect = Rect()
             it.getBoundsInScreen(rect)
             ElementBounds(rect)
-          } catch (_: Exception) { null }
+          } catch (_: Exception) {
+            null
+          }
         }
     // Build element from source node, falling back to event-level data
-    val element = if (source != null) {
-      InteractionElement(
-          text = source.text?.toString(),
-          contentDescription = source.contentDescription?.toString(),
-          resourceId = source.viewIdResourceName,
-          className = source.className?.toString(),
-          bounds = bounds,
-      )
-    } else {
-      // Fallback: extract what we can from the AccessibilityEvent itself
-      val eventText = event.text?.joinToString("") { it.toString() }?.takeIf { it.isNotEmpty() }
-      val eventDesc = event.contentDescription?.toString()
-      val eventClass = event.className?.toString()
-      if (eventText != null || eventDesc != null || eventClass != null) {
-        InteractionElement(
-            text = eventText,
-            contentDescription = eventDesc,
-            resourceId = null,
-            className = eventClass,
-            bounds = null,
-        )
-      } else null
+    val element =
+        if (source != null) {
+          InteractionElement(
+              text = source.text?.toString(),
+              contentDescription = source.contentDescription?.toString(),
+              resourceId = source.viewIdResourceName,
+              className = source.className?.toString(),
+              bounds = bounds,
+          )
+        } else {
+          // Fallback: extract what we can from the AccessibilityEvent itself
+          val eventText = event.text?.joinToString("") { it.toString() }?.takeIf { it.isNotEmpty() }
+          val eventDesc = event.contentDescription?.toString()
+          val eventClass = event.className?.toString()
+          if (eventText != null || eventDesc != null || eventClass != null) {
+            InteractionElement(
+                text = eventText,
+                contentDescription = eventDesc,
+                resourceId = null,
+                className = eventClass,
+                bounds = null,
+            )
+          } else null
+        }
+    try {
+      source?.recycle()
+    } catch (_: Exception) {
+      /* already recycled */
     }
-    try { source?.recycle() } catch (_: Exception) { /* already recycled */ }
 
     val textValue =
         if (type == "inputText") {
@@ -1221,8 +1256,8 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Debounce scroll events — accumulate deltas and emit once scrolling stops.
-   * TYPE_VIEW_SCROLLED fires many times per scroll gesture (every frame).
+   * Debounce scroll events — accumulate deltas and emit once scrolling stops. TYPE_VIEW_SCROLLED
+   * fires many times per scroll gesture (every frame).
    */
   private fun recordDebouncedScroll(event: AccessibilityEvent) {
     val now = System.currentTimeMillis()
@@ -1243,8 +1278,8 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Record an interaction event with debouncing to avoid duplicates.
-   * Used for TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires alongside TYPE_VIEW_CLICKED.
+   * Record an interaction event with debouncing to avoid duplicates. Used for
+   * TYPE_VIEW_ACCESSIBILITY_FOCUSED which fires alongside TYPE_VIEW_CLICKED.
    */
   private fun recordDebouncedInteraction(event: AccessibilityEvent, type: String) {
     val now = System.currentTimeMillis()
@@ -1366,7 +1401,8 @@ class CtrlProxy : AccessibilityService() {
     return try {
       if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
         // Use DisplayManager for AccessibilityService context (can't use context.display)
-        val displayManager = getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
+        val displayManager =
+            getSystemService(Context.DISPLAY_SERVICE) as? android.hardware.display.DisplayManager
         displayManager?.getDisplay(android.view.Display.DEFAULT_DISPLAY)?.rotation ?: 0
       } else {
         val windowManager = getSystemService(Context.WINDOW_SERVICE) as? WindowManager
@@ -1399,7 +1435,8 @@ class CtrlProxy : AccessibilityService() {
         // Fallback for older Android versions
         val statusBarId = resources.getIdentifier("status_bar_height", "dimen", "android")
         val navBarId = resources.getIdentifier("navigation_bar_height", "dimen", "android")
-        val statusBarHeight = if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
+        val statusBarHeight =
+            if (statusBarId > 0) resources.getDimensionPixelSize(statusBarId) else 0
         val navBarHeight = if (navBarId > 0) resources.getDimensionPixelSize(navBarId) else 0
         SystemInsetsInfo(top = statusBarHeight, bottom = navBarHeight, left = 0, right = 0)
       }
@@ -1429,22 +1466,26 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Get the foreground activity component name using accessibility service state.
-   * Uses rootInActiveWindow (reliable on all API levels) + lastWindowClassName
-   * from TYPE_WINDOW_STATE_CHANGED events, avoiding the restricted
-   * ActivityManager.getRunningTasks() API.
+   * Get the foreground activity component name using accessibility service state. Uses
+   * rootInActiveWindow (reliable on all API levels) + lastWindowClassName from
+   * TYPE_WINDOW_STATE_CHANGED events, avoiding the restricted ActivityManager.getRunningTasks()
+   * API.
    */
-  private fun getForegroundActivity(rootPackage: String? = null, windowClass: String? = null): String? {
+  private fun getForegroundActivity(
+      rootPackage: String? = null,
+      windowClass: String? = null,
+  ): String? {
     return try {
       val pkg = rootPackage
       val className = windowClass
       if (pkg != null && className != null) {
         // Use short class name format if it starts with the package
-        val shortName = if (className.startsWith(pkg)) {
-          className.removePrefix(pkg)
-        } else {
-          className
-        }
+        val shortName =
+            if (className.startsWith(pkg)) {
+              className.removePrefix(pkg)
+            } else {
+              className
+            }
         "$pkg/$shortName"
       } else {
         // Don't return package-only value — it produces an empty activityName
@@ -1483,29 +1524,30 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Execute a global action (back, home, recents, etc.) via the accessibility service.
-   * Returns true if the action was dispatched successfully.
+   * Execute a global action (back, home, recents, etc.) via the accessibility service. Returns true
+   * if the action was dispatched successfully.
    */
   private fun executeGlobalAction(action: String): Boolean {
-    val actionId = when (action.lowercase()) {
-      "back" -> GLOBAL_ACTION_BACK
-      "home" -> GLOBAL_ACTION_HOME
-      "recent", "recents" -> GLOBAL_ACTION_RECENTS
-      "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
-      "power_dialog" -> GLOBAL_ACTION_POWER_DIALOG
-      "lock_screen" -> if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-        GLOBAL_ACTION_LOCK_SCREEN
-      } else {
-        return false
-      }
-      else -> return false
-    }
+    val actionId =
+        when (action.lowercase()) {
+          "back" -> GLOBAL_ACTION_BACK
+          "home" -> GLOBAL_ACTION_HOME
+          "recent",
+          "recents" -> GLOBAL_ACTION_RECENTS
+          "notifications" -> GLOBAL_ACTION_NOTIFICATIONS
+          "power_dialog" -> GLOBAL_ACTION_POWER_DIALOG
+          "lock_screen" ->
+              if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                GLOBAL_ACTION_LOCK_SCREEN
+              } else {
+                return false
+              }
+          else -> return false
+        }
     return performGlobalAction(actionId)
   }
 
-  /**
-   * Handle a request_global_action WebSocket message.
-   */
+  /** Handle a request_global_action WebSocket message. */
   private fun performGlobalActionRequest(requestId: String?, action: String) {
     val startTime = System.currentTimeMillis()
     val success = executeGlobalAction(action)
@@ -1524,9 +1566,7 @@ class CtrlProxy : AccessibilityService() {
     }
   }
 
-  /**
-   * Handle a request_device_info WebSocket message.
-   */
+  /** Handle a request_device_info WebSocket message. */
   private fun performDeviceInfoRequest(requestId: String?) {
     val startTime = System.currentTimeMillis()
     val screenDimensions = getScreenDimensions()
@@ -1575,28 +1615,29 @@ class CtrlProxy : AccessibilityService() {
     }
 
     // Use multi-window extraction if windows are available, otherwise fall back to single window
-    val hierarchy = if (!allWindows.isNullOrEmpty()) {
-      Log.d(
-          TAG,
-          "Extracting from ${allWindows.size} windows (disableAllFiltering: $disableAllFiltering)",
-      )
-      viewHierarchyExtractor.extractFromAllWindows(
-          allWindows,
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-      )
-    } else {
-      viewHierarchyExtractor.extractFromActiveWindow(
-          rootNode,
-          null,
-          screenDimensions,
-          true,
-          disableAllFiltering,
-      )
-    }
+    val hierarchy =
+        if (!allWindows.isNullOrEmpty()) {
+          Log.d(
+              TAG,
+              "Extracting from ${allWindows.size} windows (disableAllFiltering: $disableAllFiltering)",
+          )
+          viewHierarchyExtractor.extractFromAllWindows(
+              allWindows,
+              rootNode,
+              null,
+              screenDimensions,
+              true,
+              disableAllFiltering,
+          )
+        } else {
+          viewHierarchyExtractor.extractFromActiveWindow(
+              rootNode,
+              null,
+              screenDimensions,
+              true,
+              disableAllFiltering,
+          )
+        }
 
     // Add device metadata to the hierarchy (eliminates need for dumpsys calls on client)
     val wakefulness = getWakefulness()
@@ -1617,12 +1658,21 @@ class CtrlProxy : AccessibilityService() {
   }
 
   /**
-   * Extract hierarchy immediately and broadcast, bypassing the debouncer. Used for explicit
-   * WebSocket requests where we need fresh data immediately.
+   * Extract hierarchy immediately and broadcast synchronously, bypassing the debouncer and the
+   * SharedFlow async path. Used for explicit WebSocket requests where the daemon is waiting for
+   * fresh data. Matches the sync=true pattern used by tap/setText/imeAction handlers.
    */
   private fun extractHierarchyNow(disableAllFiltering: Boolean = false) {
     Log.d(TAG, "extractHierarchyNow (disableAllFiltering: $disableAllFiltering)")
-    hierarchyDebouncer.extractNow(disableAllFiltering)
+    val hierarchy =
+        hierarchyDebouncer.extractNowBlocking(
+            skipFlowEmit = true,
+            disableAllFiltering = disableAllFiltering,
+        )
+    if (hierarchy != null) {
+      writeHierarchyToFile(hierarchy)
+      kotlinx.coroutines.runBlocking { broadcastHierarchyUpdate(hierarchy, sync = true) }
+    }
   }
 
   /** Writes the hierarchy to a file for synchronous access */
@@ -2518,7 +2568,12 @@ class CtrlProxy : AccessibilityService() {
    * Perform text input using AccessibilityService's ACTION_SET_TEXT. This is significantly faster
    * than ADB's input text command.
    */
-  private fun performSetText(requestId: String?, text: String, resourceId: String?, dismissKeyboard: Boolean = false) {
+  private fun performSetText(
+      requestId: String?,
+      text: String,
+      resourceId: String?,
+      dismissKeyboard: Boolean = false,
+  ) {
     val startTime = System.currentTimeMillis()
     Log.d(TAG, "performSetText: text='${text.take(20)}...' resourceId=$resourceId")
     perfProvider.serial("performSetText")
@@ -4150,17 +4205,19 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val response = NavigationEventResponse(
-        timestamp = System.currentTimeMillis(),
-        event = NavigationEventData(
-          destination = event.destination,
-          source = event.source,
-          arguments = event.arguments.takeIf { it.isNotEmpty() },
-          metadata = event.metadata.takeIf { it.isNotEmpty() },
-          applicationId = event.applicationId,
-          sequenceNumber = event.sequenceNumber,
-        ),
-      )
+      val response =
+          NavigationEventResponse(
+              timestamp = System.currentTimeMillis(),
+              event =
+                  NavigationEventData(
+                      destination = event.destination,
+                      source = event.source,
+                      arguments = event.arguments.takeIf { it.isNotEmpty() },
+                      metadata = event.metadata.takeIf { it.isNotEmpty() },
+                      applicationId = event.applicationId,
+                      sequenceNumber = event.sequenceNumber,
+                  ),
+          )
 
       webSocketServer.broadcast(response)
       Log.d(
@@ -4193,24 +4250,27 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val response = HandledExceptionEvent(
-        timestamp = System.currentTimeMillis(),
-        event = HandledExceptionData(
-          exceptionClass = exceptionClass,
-          message = exceptionMessage,
-          stackTrace = stackTrace,
-          customMessage = customMessage,
-          currentScreen = currentScreen,
-          packageName = packageName,
-          appVersion = appVersion,
-          deviceInfo = DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-        ),
-      )
+      val response =
+          HandledExceptionEvent(
+              timestamp = System.currentTimeMillis(),
+              event =
+                  HandledExceptionData(
+                      exceptionClass = exceptionClass,
+                      message = exceptionMessage,
+                      stackTrace = stackTrace,
+                      customMessage = customMessage,
+                      currentScreen = currentScreen,
+                      packageName = packageName,
+                      appVersion = appVersion,
+                      deviceInfo =
+                          DeviceInfo(
+                              model = deviceModel,
+                              manufacturer = deviceManufacturer,
+                              osVersion = osVersion,
+                              sdkInt = sdkInt,
+                          ),
+                  ),
+          )
 
       webSocketServer.broadcast(response)
       Log.d(
@@ -4243,24 +4303,27 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val response = CrashEvent(
-        timestamp = System.currentTimeMillis(),
-        event = CrashData(
-          exceptionClass = exceptionClass,
-          message = exceptionMessage,
-          stackTrace = stackTrace,
-          threadName = threadName,
-          currentScreen = currentScreen,
-          packageName = packageName,
-          appVersion = appVersion,
-          deviceInfo = DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-        ),
-      )
+      val response =
+          CrashEvent(
+              timestamp = System.currentTimeMillis(),
+              event =
+                  CrashData(
+                      exceptionClass = exceptionClass,
+                      message = exceptionMessage,
+                      stackTrace = stackTrace,
+                      threadName = threadName,
+                      currentScreen = currentScreen,
+                      packageName = packageName,
+                      appVersion = appVersion,
+                      deviceInfo =
+                          DeviceInfo(
+                              model = deviceModel,
+                              manufacturer = deviceManufacturer,
+                              osVersion = osVersion,
+                              sdkInt = sdkInt,
+                          ),
+                  ),
+          )
 
       webSocketServer.broadcast(response)
       Log.i(
@@ -4293,24 +4356,27 @@ class CtrlProxy : AccessibilityService() {
     }
 
     try {
-      val response = AnrEvent(
-        timestamp = timestamp,
-        event = AnrData(
-          pid = pid,
-          processName = processName,
-          importance = importance,
-          trace = trace,
-          reason = reason,
-          packageName = packageName,
-          appVersion = appVersion,
-          deviceInfo = DeviceInfo(
-            model = deviceModel,
-            manufacturer = deviceManufacturer,
-            osVersion = osVersion,
-            sdkInt = sdkInt,
-          ),
-        ),
-      )
+      val response =
+          AnrEvent(
+              timestamp = timestamp,
+              event =
+                  AnrData(
+                      pid = pid,
+                      processName = processName,
+                      importance = importance,
+                      trace = trace,
+                      reason = reason,
+                      packageName = packageName,
+                      appVersion = appVersion,
+                      deviceInfo =
+                          DeviceInfo(
+                              model = deviceModel,
+                              manufacturer = deviceManufacturer,
+                              osVersion = osVersion,
+                              sdkInt = sdkInt,
+                          ),
+                  ),
+          )
 
       webSocketServer.broadcast(response)
       Log.i(
@@ -4327,67 +4393,76 @@ class CtrlProxy : AccessibilityService() {
     if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
 
     try {
-      val response = when (event) {
-        is SdkNetworkRequestEvent -> NetworkEventResponse(
-          timestamp = event.timestamp,
-          event = NetworkEventData(
-            url = event.url,
-            method = event.method,
-            statusCode = event.statusCode,
-            durationMs = event.durationMs,
-            requestBodySize = event.requestBodySize,
-            responseBodySize = event.responseBodySize,
-            protocol = event.protocol,
-            host = event.host,
-            path = event.path,
-            error = event.error,
-            applicationId = event.applicationId,
-            requestHeaders = event.requestHeaders,
-            responseHeaders = event.responseHeaders,
-            requestBody = event.requestBody,
-            responseBody = event.responseBody,
-            contentType = event.contentType,
-          ),
-        )
-        is SdkWebSocketFrameEvent -> WebSocketFrameResponse(
-          timestamp = event.timestamp,
-          event = WebSocketFrameData(
-            connectionId = event.connectionId,
-            url = event.url,
-            direction = event.direction.name.lowercase(),
-            frameType = event.frameType.name.lowercase(),
-            payloadSize = event.payloadSize,
-            applicationId = event.applicationId,
-          ),
-        )
-        // SdkLogEvent no longer broadcast from SDK — logs captured via logcat reader
-        is SdkLogEvent -> null
-        is SdkBroadcastEvent -> BroadcastEventResponse(
-          timestamp = event.timestamp,
-          event = BroadcastEventData(
-            action = event.action,
-            categories = event.categories,
-            extraKeys = event.extraKeys,
-            applicationId = event.applicationId,
-          ),
-        )
-        is SdkLifecycleEvent -> LifecycleEventResponse(
-          timestamp = event.timestamp,
-          event = LifecycleEventData(
-            kind = event.kind,
-            details = event.details,
-            applicationId = event.applicationId,
-          ),
-        )
-        // Existing event types handled by their own receivers — skip here
-        is SdkNavigationEvent,
-        is SdkHandledExceptionEvent,
-        is SdkCrashEvent,
-        is SdkAnrEvent,
-        is SdkNotificationActionEvent,
-        is SdkRecompositionSnapshotEvent,
-        is SdkEventBatch -> null
-      }
+      val response =
+          when (event) {
+            is SdkNetworkRequestEvent ->
+                NetworkEventResponse(
+                    timestamp = event.timestamp,
+                    event =
+                        NetworkEventData(
+                            url = event.url,
+                            method = event.method,
+                            statusCode = event.statusCode,
+                            durationMs = event.durationMs,
+                            requestBodySize = event.requestBodySize,
+                            responseBodySize = event.responseBodySize,
+                            protocol = event.protocol,
+                            host = event.host,
+                            path = event.path,
+                            error = event.error,
+                            applicationId = event.applicationId,
+                            requestHeaders = event.requestHeaders,
+                            responseHeaders = event.responseHeaders,
+                            requestBody = event.requestBody,
+                            responseBody = event.responseBody,
+                            contentType = event.contentType,
+                        ),
+                )
+            is SdkWebSocketFrameEvent ->
+                WebSocketFrameResponse(
+                    timestamp = event.timestamp,
+                    event =
+                        WebSocketFrameData(
+                            connectionId = event.connectionId,
+                            url = event.url,
+                            direction = event.direction.name.lowercase(),
+                            frameType = event.frameType.name.lowercase(),
+                            payloadSize = event.payloadSize,
+                            applicationId = event.applicationId,
+                        ),
+                )
+            // SdkLogEvent no longer broadcast from SDK — logs captured via logcat reader
+            is SdkLogEvent -> null
+            is SdkBroadcastEvent ->
+                BroadcastEventResponse(
+                    timestamp = event.timestamp,
+                    event =
+                        BroadcastEventData(
+                            action = event.action,
+                            categories = event.categories,
+                            extraKeys = event.extraKeys,
+                            applicationId = event.applicationId,
+                        ),
+                )
+            is SdkLifecycleEvent ->
+                LifecycleEventResponse(
+                    timestamp = event.timestamp,
+                    event =
+                        LifecycleEventData(
+                            kind = event.kind,
+                            details = event.details,
+                            applicationId = event.applicationId,
+                        ),
+                )
+            // Existing event types handled by their own receivers — skip here
+            is SdkNavigationEvent,
+            is SdkHandledExceptionEvent,
+            is SdkCrashEvent,
+            is SdkAnrEvent,
+            is SdkNotificationActionEvent,
+            is SdkRecompositionSnapshotEvent,
+            is SdkEventBatch -> null
+          }
 
       response?.let { webSocketServer.broadcast(it) }
     } catch (e: Exception) {
@@ -4665,8 +4740,7 @@ class CtrlProxy : AccessibilityService() {
           append(""","totalTimeMs":$totalTimeMs""")
           val resultJson =
               jsonCompact.encodeToString(
-                  dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult
-                      .serializer(),
+                  dev.jasonpearson.automobile.ctrlproxy.models.TraversalOrderResult.serializer(),
                   traversalResult,
               )
           append(""","result":$resultJson""")
@@ -4780,78 +4854,74 @@ class CtrlProxy : AccessibilityService() {
   }
 
   private fun handleGetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
   ) {
     serviceScope.launch {
       val result = storageSubscriptionManager.getPreference(packageName, fileName, key)
       result.fold(
-        onSuccess = { entry ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, entry, null)
-        },
-        onFailure = { error ->
-          broadcastGetPreferenceResult(requestId, packageName, fileName, key, null, error.message)
-        },
+          onSuccess = { entry ->
+            broadcastGetPreferenceResult(requestId, packageName, fileName, key, entry, null)
+          },
+          onFailure = { error ->
+            broadcastGetPreferenceResult(requestId, packageName, fileName, key, null, error.message)
+          },
       )
     }
   }
 
   private fun handleSetPreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
-    value: String?,
-    type: String,
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
+      value: String?,
+      type: String,
   ) {
     serviceScope.launch {
       val result = storageSubscriptionManager.setPreference(packageName, fileName, key, value, type)
       result.fold(
-        onSuccess = {
-          broadcastSetPreferenceResult(requestId, packageName, fileName, key, null)
-        },
-        onFailure = { error ->
-          broadcastSetPreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
+          onSuccess = { broadcastSetPreferenceResult(requestId, packageName, fileName, key, null) },
+          onFailure = { error ->
+            broadcastSetPreferenceResult(requestId, packageName, fileName, key, error.message)
+          },
       )
     }
   }
 
   private fun handleRemovePreference(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
-    key: String,
+      requestId: String?,
+      packageName: String,
+      fileName: String,
+      key: String,
   ) {
     serviceScope.launch {
       val result = storageSubscriptionManager.removePreference(packageName, fileName, key)
       result.fold(
-        onSuccess = {
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, null)
-        },
-        onFailure = { error ->
-          broadcastRemovePreferenceResult(requestId, packageName, fileName, key, error.message)
-        },
+          onSuccess = {
+            broadcastRemovePreferenceResult(requestId, packageName, fileName, key, null)
+          },
+          onFailure = { error ->
+            broadcastRemovePreferenceResult(requestId, packageName, fileName, key, error.message)
+          },
       )
     }
   }
 
   private fun handleClearPreferences(
-    requestId: String?,
-    packageName: String,
-    fileName: String,
+      requestId: String?,
+      packageName: String,
+      fileName: String,
   ) {
     serviceScope.launch {
       val result = storageSubscriptionManager.clearPreferences(packageName, fileName)
       result.fold(
-        onSuccess = {
-          broadcastClearPreferencesResult(requestId, packageName, fileName, null)
-        },
-        onFailure = { error ->
-          broadcastClearPreferencesResult(requestId, packageName, fileName, error.message)
-        },
+          onSuccess = { broadcastClearPreferencesResult(requestId, packageName, fileName, null) },
+          onFailure = { error ->
+            broadcastClearPreferencesResult(requestId, packageName, fileName, error.message)
+          },
       )
     }
   }
@@ -4877,7 +4947,9 @@ class CtrlProxy : AccessibilityService() {
         if (files != null) {
           append(""","success":true,"files":${jsonCompact.encodeToString(files)}""")
         } else {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""")
+          append(
+              ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+          )
         }
         append("}")
       }
@@ -4911,7 +4983,9 @@ class CtrlProxy : AccessibilityService() {
         if (entries != null) {
           append(""","success":true,"entries":${jsonCompact.encodeToString(entries)}""")
         } else {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""")
+          append(
+              ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+          )
         }
         append("}")
       }
@@ -4943,14 +5017,21 @@ class CtrlProxy : AccessibilityService() {
         append(""","packageName":${jsonCompact.encodeToString(packageName)}""")
         append(""","fileName":${jsonCompact.encodeToString(fileName)}""")
         if (subscriptionId != null) {
-          append(""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}""")
+          append(
+              ""","success":true,"subscriptionId":${jsonCompact.encodeToString(subscriptionId)}"""
+          )
         } else {
-          append(""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}""")
+          append(
+              ""","success":false,"error":${jsonCompact.encodeToString(error ?: "Unknown error")}"""
+          )
         }
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted subscribe storage result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted subscribe storage result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting subscribe storage result", e)
     }
@@ -4979,7 +5060,10 @@ class CtrlProxy : AccessibilityService() {
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted unsubscribe storage result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted unsubscribe storage result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting unsubscribe storage result", e)
     }
@@ -5012,7 +5096,8 @@ class CtrlProxy : AccessibilityService() {
         } else if (entry != null) {
           append(""","success":true,"found":true""")
           if (entry.value != null) {
-            val jsonValue = if (entry.type == "STRING") jsonCompact.encodeToString(entry.value) else entry.value
+            val jsonValue =
+                if (entry.type == "STRING") jsonCompact.encodeToString(entry.value) else entry.value
             append(""","value":$jsonValue""")
           } else {
             append(""","value":null""")
@@ -5024,7 +5109,10 @@ class CtrlProxy : AccessibilityService() {
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted get preference result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted get preference result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting get preference result", e)
     }
@@ -5059,7 +5147,10 @@ class CtrlProxy : AccessibilityService() {
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted set preference result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted set preference result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting set preference result", e)
     }
@@ -5094,7 +5185,10 @@ class CtrlProxy : AccessibilityService() {
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted remove preference result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted remove preference result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting remove preference result", e)
     }
@@ -5127,7 +5221,10 @@ class CtrlProxy : AccessibilityService() {
         append("}")
       }
       webSocketServer.broadcast(message)
-      Log.d(TAG, "Broadcasted clear preferences result to ${webSocketServer.getConnectionCount()} clients")
+      Log.d(
+          TAG,
+          "Broadcasted clear preferences result to ${webSocketServer.getConnectionCount()} clients",
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting clear preferences result", e)
     }
@@ -5152,7 +5249,8 @@ class CtrlProxy : AccessibilityService() {
           append(""","key":null""")
         }
         if (event.value != null) {
-          // STRING values need JSON encoding (quotes + escaping), other types are already valid JSON
+          // STRING values need JSON encoding (quotes + escaping), other types are already valid
+          // JSON
           val jsonValue =
               if (event.type == "STRING") jsonCompact.encodeToString(event.value) else event.value
           append(""","value":$jsonValue""")

@@ -58,4 +58,23 @@ export interface TapOnElementOptions {
    * any flow where the target can disappear between observe and tap.
    */
   preTapStability?: boolean;
+
+  /**
+   * When true, compare the view hierarchy hash before and after the tap. If the hierarchy
+   * is unchanged (indicating the tap had no visible effect / "ghost tap"), retry the tap
+   * once after a short delay.
+   *
+   * Off by default. Recommended for taps that should cause obvious UI changes like
+   * navigation (search result selection, menu items) or screen transitions (save, submit).
+   * Avoid on taps where the UI change may be delayed (e.g., network-dependent transitions
+   * with no immediate visual feedback).
+   */
+  retryIfNoChange?: boolean;
+
+  /**
+   * Convenience flag that enables both preTapStability and retryIfNoChange.
+   * Equivalent to setting both flags individually. Use on taps in dynamic UI where
+   * you want both stable bounds before tapping and ghost-tap detection after.
+   */
+  ensureTap?: boolean;
 }

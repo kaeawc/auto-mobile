@@ -83,7 +83,7 @@ export class TapOnElement extends BaseVisualChange {
   private talkBackStrategy: TalkBackTapStrategy;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
-  private static readonly SEARCH_UNTIL_DEFAULT_MS = 500;
+  private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
 
@@ -196,6 +196,19 @@ export class TapOnElement extends BaseVisualChange {
       logger.debug(`[TapOnElement] Failed to hash view hierarchy: ${error}`);
       return null;
     }
+  }
+
+  private isElementCenterOffScreen(
+    element: Element,
+    screenSize?: ObserveResult["screenSize"]
+  ): boolean {
+    if (!screenSize?.width || !screenSize?.height || !element.bounds) {
+      return false;
+    }
+    const centerX = (element.bounds.left + element.bounds.right) / 2;
+    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
+    return centerX < 0 || centerX > screenSize.width ||
+           centerY < 0 || centerY > screenSize.height;
   }
 
   private findElementInHierarchy(
@@ -496,6 +509,7 @@ export class TapOnElement extends BaseVisualChange {
     const startTime = this.timer.now();
     let requestCount = 0;
     let changeCount = 0;
+    let offScreenRejections = 0;
     let lastHash = this.hashViewHierarchy(viewHierarchy);
 
     let latestViewHierarchy = viewHierarchy;
@@ -504,7 +518,17 @@ export class TapOnElement extends BaseVisualChange {
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
 
-    if (!element) {
+    if (!element || this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+      if (element) {
+        logger.warn(
+          `[TapOnElement] Element found but center is off-screen, will retry. ` +
+          `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}], ` +
+          `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
+        );
+        selection = { ...selection, element: null };
+        element = null;
+        offScreenRejections += 1;
+      }
       const deadline = startTime + searchDurationMs;
       while (this.timer.now() < deadline) {
         throwIfAborted(signal);
@@ -534,10 +558,27 @@ export class TapOnElement extends BaseVisualChange {
         selection = searchResult.selection;
         element = selection.element;
         containerFoundEver = containerFoundEver || searchResult.containerFound;
+        if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+          logger.warn(
+            `[TapOnElement] Element found but center is off-screen, retrying. ` +
+            `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}]`
+          );
+          selection = { ...selection, element: null };
+          element = null;
+          offScreenRejections += 1;
+          continue;
+        }
         if (element) {
           break;
         }
       }
+    }
+
+    if (offScreenRejections > 0 && !element) {
+      logger.error(
+        `[TapOnElement] Element was found ${offScreenRejections} time(s) but always with off-screen bounds. ` +
+        `The accessibility framework is reporting incorrect bounds for this element.`
+      );
     }
 
     const stats: SearchUntilStats = {
@@ -839,6 +880,10 @@ export class TapOnElement extends BaseVisualChange {
       return this.createErrorResult(options.action, "tap on action is required");
     }
 
+    if (options.ensureTap) {
+      options = { ...options, preTapStability: true, retryIfNoChange: true };
+    }
+
     const validationError = this.validateOptions(options);
     if (validationError) {
       return this.createErrorResult(options.action, validationError);
@@ -946,6 +991,13 @@ export class TapOnElement extends BaseVisualChange {
             logger.info("[TapOnElement] Using clickable parent for non-clickable element");
           }
           const tapPoint = this.geometry.getElementCenter(tapElement);
+          const tapBounds = tapElement.bounds;
+          logger.info(
+            `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
+            `text=${JSON.stringify(tapElement.text ?? options.text)}, ` +
+            `bounds=[${tapBounds?.left},${tapBounds?.top}][${tapBounds?.right},${tapBounds?.bottom}], ` +
+            `clickable=${tapElement.clickable}, usedParent=${usedParent}`
+          );
 
           selectionCapture = await this.selectionStateTracker.prepare({
             action,
@@ -953,6 +1005,10 @@ export class TapOnElement extends BaseVisualChange {
             element: tapElement,
             signal
           });
+
+          const preTapHash = options.retryIfNoChange
+            ? this.hashViewHierarchy(viewHierarchy)
+            : null;
 
           // Platform-specific tap execution
           await perf.track("executeTap", async () => {
@@ -976,6 +1032,20 @@ export class TapOnElement extends BaseVisualChange {
                 throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
             }
           });
+
+          if (preTapHash && this.device.platform === "android") {
+            await this.retryTapIfNoChange(
+              preTapHash,
+              tapPoint,
+              action,
+              longPressDuration,
+              tapElement,
+              options,
+              isTalkBackEnabled,
+              observeResult.screenSize,
+              signal,
+            );
+          }
 
           perf.end();
           return {
@@ -1098,7 +1168,8 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   /**
-   * Execute tap using coordinate-based input commands (standard mode)
+   * Execute tap using CtrlProxy's dispatchGesture API with ADB fallback.
+   * dispatchGesture bypasses the ADB input pipeline, reducing ghost-tap rate.
    */
   private async executeAndroidTapWithCoordinates(
     action: string,
@@ -1109,14 +1180,78 @@ export class TapOnElement extends BaseVisualChange {
     signal?: AbortSignal
   ): Promise<void> {
     if (action === "tap") {
-      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      const result = await this.accessibilityService.requestTapCoordinates(x, y, 10);
+      if (!result.success) {
+        logger.warn(
+          `[TapOnElement] dispatchGesture tap failed (${result.error}), falling back to ADB input`
+        );
+        await this.adb.executeCommand(`shell input touchscreen tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      }
     } else if (action === "longPress") {
       await this.executeAndroidLongPress(x, y, durationMs, element?.["resource-id"], signal);
     } else if (action === "doubleTap") {
-      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      const first = await this.accessibilityService.requestTapCoordinates(x, y, 10);
+      if (!first.success) {
+        logger.warn(`[TapOnElement] dispatchGesture first tap failed (${first.error}), falling back to ADB`);
+        await this.adb.executeCommand(`shell input touchscreen tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      }
       await this.timer.sleep(200);
-      await this.adb.executeCommand(`shell input tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      const second = await this.accessibilityService.requestTapCoordinates(x, y, 10);
+      if (!second.success) {
+        logger.warn(`[TapOnElement] dispatchGesture second tap failed (${second.error}), falling back to ADB`);
+        await this.adb.executeCommand(`shell input touchscreen tap ${x} ${y}`, undefined, undefined, undefined, signal);
+      }
     }
+  }
+
+  /**
+   * After a tap, check if the view hierarchy changed. If unchanged, retry the tap once.
+   * Only called when retryIfNoChange is true.
+   */
+  private async retryTapIfNoChange(
+    preTapHash: string,
+    tapPoint: { x: number; y: number },
+    action: string,
+    longPressDuration: number,
+    tapElement: Element,
+    options: TapOnElementOptions,
+    isTalkBackEnabled: boolean,
+    screenSize: ObserveResult["screenSize"],
+    signal?: AbortSignal,
+  ): Promise<void> {
+    await this.timer.sleep(150);
+
+    const postTapHierarchy = await this.refreshViewHierarchy(
+      500,
+      screenSize,
+      signal
+    );
+    const postTapHash = this.hashViewHierarchy(postTapHierarchy);
+
+    if (postTapHash && postTapHash !== preTapHash) {
+      logger.info(
+        `[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`
+      );
+      return;
+    }
+
+    logger.warn(
+      `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +
+      `(${tapPoint.x}, ${tapPoint.y}) — ghost tap detected, retrying`
+    );
+
+    await this.timer.sleep(100);
+
+    await this.executeAndroidTap(
+      action,
+      tapPoint.x,
+      tapPoint.y,
+      longPressDuration,
+      tapElement,
+      signal,
+      options,
+      isTalkBackEnabled
+    );
   }
 
   /**

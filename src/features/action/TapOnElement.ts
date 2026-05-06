@@ -518,7 +518,11 @@ export class TapOnElement extends BaseVisualChange {
     let element = selection.element;
     let containerFoundEver = initialSearch.containerFound;
 
-    if (!element || this.isElementCenterOffScreen(element, observeResult.screenSize)) {
+    const deadline = startTime + searchDurationMs;
+    while (
+      (!element || this.isElementCenterOffScreen(element, observeResult.screenSize)) &&
+      this.timer.now() < deadline
+    ) {
       if (element) {
         logger.warn(
           `[TapOnElement] Element found but center is off-screen, will retry. ` +
@@ -529,49 +533,34 @@ export class TapOnElement extends BaseVisualChange {
         element = null;
         offScreenRejections += 1;
       }
-      const deadline = startTime + searchDurationMs;
-      while (this.timer.now() < deadline) {
-        throwIfAborted(signal);
-        const remainingTimeMs = Math.max(0, deadline - this.timer.now());
-        const refreshedHierarchy = await this.refreshViewHierarchy(
-          remainingTimeMs,
-          observeResult.screenSize,
-          signal
-        );
-        requestCount += 1;
 
-        if (!refreshedHierarchy) {
-          continue;
-        }
+      throwIfAborted(signal);
+      const remainingTimeMs = Math.max(0, deadline - this.timer.now());
+      const refreshedHierarchy = await this.refreshViewHierarchy(
+        remainingTimeMs,
+        observeResult.screenSize,
+        signal
+      );
+      requestCount += 1;
 
-        latestViewHierarchy = refreshedHierarchy;
-        const hash = this.hashViewHierarchy(refreshedHierarchy);
-        if (hash && hash !== lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        } else if (hash && !lastHash) {
-          changeCount += 1;
-          lastHash = hash;
-        }
-
-        const searchResult = this.findElementInHierarchy(options, refreshedHierarchy);
-        selection = searchResult.selection;
-        element = selection.element;
-        containerFoundEver = containerFoundEver || searchResult.containerFound;
-        if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
-          logger.warn(
-            `[TapOnElement] Element found but center is off-screen, retrying. ` +
-            `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}]`
-          );
-          selection = { ...selection, element: null };
-          element = null;
-          offScreenRejections += 1;
-          continue;
-        }
-        if (element) {
-          break;
-        }
+      if (!refreshedHierarchy) {
+        continue;
       }
+
+      latestViewHierarchy = refreshedHierarchy;
+      const hash = this.hashViewHierarchy(refreshedHierarchy);
+      if (hash && hash !== lastHash) {
+        changeCount += 1;
+        lastHash = hash;
+      } else if (hash && !lastHash) {
+        changeCount += 1;
+        lastHash = hash;
+      }
+
+      const searchResult = this.findElementInHierarchy(options, refreshedHierarchy);
+      selection = searchResult.selection;
+      element = selection.element;
+      containerFoundEver = containerFoundEver || searchResult.containerFound;
     }
 
     if (offScreenRejections > 0 && !element) {

@@ -399,7 +399,12 @@ class ToolRegistryClass {
           ? String(unwrapped.error || "")
           : null;
         if (unwrapped && typeof unwrapped === "object" && "success" in unwrapped) {
-          logger.info(`[ToolRegistry] ${name} result: success=${unwrapped.success}${unwrapped.success === false ? `, error=${unwrapped.error || "unknown"}` : ""}`);
+          let sizeTag = "";
+          if (name === "executePlan") {
+            const responseSizeBytes = response ? JSON.stringify(response).length : 0;
+            sizeTag = `, responseSize=${responseSizeBytes}b`;
+          }
+          logger.info(`[ToolRegistry] ${name} result: success=${unwrapped.success}${unwrapped.success === false ? `, error=${unwrapped.error || "unknown"}` : ""}${sizeTag}`);
         }
 
         // Emit tool call telemetry
@@ -452,6 +457,9 @@ class ToolRegistryClass {
           }
         }
 
+        if (name === "executePlan") {
+          logger.info(`[ToolRegistry] ${name} handler returning response to MCP framework`);
+        }
         return response;
       } catch (error) {
         if (error instanceof ActionableError) {
@@ -460,6 +468,7 @@ class ToolRegistryClass {
         const deviceContext = device ? ` on device ${device.deviceId}` : "";
         throw new ActionableError(`Failed to execute tool ${name}${deviceContext}: ${error}`);
       } finally {
+        const finallyStartMs = name === "executePlan" ? this.timer.now() : 0;
         if (device && name === "executePlan" && args?.cleanupAppId) {
           await this.cleanupService.cleanup(device, {
             appId: args.cleanupAppId,
@@ -489,10 +498,11 @@ class ToolRegistryClass {
               logger.info(`Auto-released session ${session.sessionId} and freed device ${deviceId} after executePlan`);
             }
           } catch (releaseError) {
-            // Don't fail the tool if session release fails
-            // Session will be cleaned up by timeout mechanism
             logger.warn(`Failed to auto-release session ${sessionUuid}: ${releaseError}`);
           }
+        }
+        if (name === "executePlan") {
+          logger.info(`[ToolRegistry] ${name} finally block completed in ${this.timer.now() - finallyStartMs}ms`);
         }
       }
     };

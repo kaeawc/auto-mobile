@@ -296,6 +296,19 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               }
             }
         val packageName = rootNode.packageName?.toString()
+
+        if (packageName == "com.android.systemui") {
+          val rawNodeCount = element?.let { countNodes(it) } ?: 0
+          val processedNodeCount = processedElement?.let { countNodes(it) } ?: 0
+          Log.i(
+              TAG,
+              "[SYSUI-WINDOW] window=${window.id} type=$windowType layer=$windowLayer " +
+                  "active=${window.isActive} focused=${window.isFocused} " +
+                  "rawNodes=$rawNodeCount processedNodes=$processedNodeCount " +
+                  "processedNull=${processedElement == null}",
+          )
+        }
+
         if (!intentChooserDetected && processedElement != null) {
           intentChooserDetected = detectIntentChooserIndicators(processedElement)
         }
@@ -424,12 +437,21 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // 1. An active window has a null root (app restricts accessibility access)
     // 2. Only system UI windows were successfully extracted (no app windows accessible)
     val isSystemUiForeground = mainPackageName == "com.android.systemui"
-    val ctrlProxyIncomplete =
-        activeWindowHasNullRoot || (!hasApplicationWindow && !isSystemUiForeground)
+    val ctrlProxyIncomplete = activeWindowHasNullRoot || (!hasApplicationWindow && !isSystemUiForeground)
     if (ctrlProxyIncomplete) {
       Log.w(
           TAG,
           "[HIERARCHY-DEBUG] Accessibility service incomplete: activeWindowHasNullRoot=$activeWindowHasNullRoot, hasApplicationWindow=$hasApplicationWindow",
+      )
+    }
+    if (isSystemUiForeground) {
+      val windowTypes = windowEntries.map { "${it.windowId}:${it.windowType}" }
+      val nodeCount = windowEntries.sumOf { countNodes(it.hierarchy) }
+      Log.i(
+          TAG,
+          "[HIERARCHY-DEBUG] System UI foreground: windows=$windowTypes, " +
+              "totalNodes=$nodeCount, hasApplicationWindow=$hasApplicationWindow, " +
+              "incomplete=$ctrlProxyIncomplete",
       )
     }
 
@@ -589,11 +611,8 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Also skip for interactive nodes — Android can mark long-clickable or clickable views
       // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
       // but they must still appear in the hierarchy since users can interact with them.
-      // Also skip for system UI nodes — collapsed notification groups mark child text nodes
-      // as not visible even though they are present and interactable in the shade.
-      val isSystemUiNode = node.packageName?.toString() == "com.android.systemui"
       val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
-      if (!skipVisibilityFilter && !isSystemUiNode && !isInteractiveNode && !node.isVisibleToUser) {
+      if (!skipVisibilityFilter && !isInteractiveNode && !node.isVisibleToUser) {
         return null
       }
 
@@ -1187,6 +1206,26 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
       else -> nodeElement
     }
+  }
+
+  private fun countJsonNodes(element: kotlinx.serialization.json.JsonElement): Int {
+    return when (element) {
+      is kotlinx.serialization.json.JsonObject -> {
+        var count = 1
+        element["node"]?.let { count += countJsonNodes(it) }
+        count
+      }
+      is kotlinx.serialization.json.JsonArray -> {
+        element.sumOf { countJsonNodes(it) }
+      }
+      else -> 0
+    }
+  }
+
+  private fun countNodes(element: UIElementInfo): Int {
+    var count = 1
+    element.node?.let { count += countJsonNodes(it) }
+    return count
   }
 
   private data class WindowEntry(

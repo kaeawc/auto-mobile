@@ -22,6 +22,7 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
 import { boundsArea } from "../utils/bounds";
+import { logger } from "../utils/logger";
 
 // ============================================================================
 // Interfaces
@@ -216,6 +217,44 @@ type NormalizedSearchText = { text: string; normalized: string };
 // ============================================================================
 // Node Utility Functions
 // ============================================================================
+
+const countSystemTrayNodes = (hierarchy: any): number => {
+  if (!hierarchy || typeof hierarchy !== "object") {
+    return 0;
+  }
+  let count = 1;
+  const children = hierarchy.children ?? hierarchy.node;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      count += countSystemTrayNodes(child);
+    }
+  } else if (children && typeof children === "object") {
+    count += countSystemTrayNodes(children);
+  }
+  return count;
+};
+
+const collectVisibleTexts = (hierarchy: any, limit: number): string[] => {
+  const texts: string[] = [];
+  const visit = (node: any): void => {
+    if (!node || texts.length >= limit) return;
+    const props = node.$ ?? node;
+    const text = props?.text ?? props?.["content-desc"];
+    if (typeof text === "string" && text.length > 0) {
+      texts.push(text.length > 60 ? text.substring(0, 60) + "..." : text);
+    }
+    const children = node.children ?? node.node;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        visit(child);
+      }
+    } else if (children && typeof children === "object") {
+      visit(children);
+    }
+  };
+  visit(hierarchy);
+  return texts;
+};
 
 const getNodeProperties = (node: any): Record<string, any> | null => {
   if (!node || typeof node !== "object") {
@@ -1071,8 +1110,19 @@ export const ensureSystemTrayOpen = async (
     awaitTimeoutMs
   );
 
+  const finalObs = awaitedObservation ?? observation;
+  const finalTrayOpen = finalObs?.viewHierarchy
+    ? isSystemTrayOpen(finalObs.viewHierarchy)
+    : false;
+  const finalIncomplete = (finalObs?.viewHierarchy as any)?.ctrlProxyIncomplete === true;
+  const finalPkg = (finalObs?.viewHierarchy as any)?.packageName;
+  logger.info(
+    `[systemTray] ensureOpen result: trayOpen=${finalTrayOpen} pkg=${finalPkg} ` +
+    `incomplete=${finalIncomplete}`
+  );
+
   return {
-    observation: awaitedObservation ?? observation,
+    observation: finalObs,
     opened: true,
     skipped: false,
     minTimestamp
@@ -1160,19 +1210,39 @@ export const waitForNotificationMatch = async (
     observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
   }
 
+  let pollCount = 0;
   while (true) {
     if (timer.now() >= deadlineMs) {
+      logger.info(
+        `[systemTray] Notification match timed out after ${pollCount} polls. ` +
+        `criteria: title=${criteria.title}, body=${criteria.body}`
+      );
       return { observation, match: null };
     }
 
     const viewHierarchy = observation.viewHierarchy;
-    if (viewHierarchy && isSystemTrayOpen(viewHierarchy, device.platform)) {
+    const trayOpen = viewHierarchy ? isSystemTrayOpen(viewHierarchy, device.platform) : false;
+    const isIncomplete = (viewHierarchy as any)?.ctrlProxyIncomplete === true;
+    const pkg = (viewHierarchy as any)?.packageName;
+
+    if (pollCount === 0 || pollCount % 4 === 0) {
+      const nodeCount = viewHierarchy?.hierarchy ? countSystemTrayNodes(viewHierarchy.hierarchy) : 0;
+      const texts = viewHierarchy?.hierarchy ? collectVisibleTexts(viewHierarchy.hierarchy, 10) : [];
+      logger.info(
+        `[systemTray] poll=${pollCount} trayOpen=${trayOpen} pkg=${pkg} ` +
+        `incomplete=${isIncomplete} nodes=${nodeCount} texts=${JSON.stringify(texts)}`
+      );
+    }
+
+    if (trayOpen && viewHierarchy) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
+        logger.info(`[systemTray] Notification matched on poll ${pollCount}`);
         return { observation, match };
       }
     }
 
+    pollCount++;
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
     observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
   }

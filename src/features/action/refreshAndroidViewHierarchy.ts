@@ -5,6 +5,17 @@ import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
 import { logger } from "../../utils/logger";
 
+function countHierarchyNodes(node: Record<string, unknown>): number {
+  let count = 1;
+  const children = node.children as Record<string, unknown>[] | undefined;
+  if (children) {
+    for (const child of children) {
+      count += countHierarchyNodes(child);
+    }
+  }
+  return count;
+}
+
 /**
  * Shared Android view hierarchy refresh: sync from accessibility service,
  * check for incomplete hierarchy, and merge with uiautomator fallback.
@@ -34,11 +45,21 @@ export async function refreshAndroidViewHierarchy(
   }
 
   if (rawHierarchy.ctrlProxyIncomplete) {
-    logger.debug("[refreshAndroidViewHierarchy] Accessibility service returned incomplete hierarchy, fetching uiautomator fallback");
+    const nodeCount = rawHierarchy.hierarchy ? countHierarchyNodes(rawHierarchy.hierarchy) : 0;
+    logger.info(
+      `[refreshAndroidViewHierarchy] Incomplete hierarchy: pkg=${rawHierarchy.packageName}, ` +
+      `nodes=${nodeCount}, fetching uiautomator fallback`
+    );
     try {
       const uiautomatorHierarchy = await viewHierarchy.getUiAutomatorHierarchy(
         signal,
         !serverConfig.isRawElementSearchEnabled()
+      );
+      const fallbackNodeCount = uiautomatorHierarchy?.hierarchy
+        ? countHierarchyNodes(uiautomatorHierarchy.hierarchy)
+        : 0;
+      logger.info(
+        `[refreshAndroidViewHierarchy] UIAutomator fallback: pkg=${uiautomatorHierarchy?.packageName}, nodes=${fallbackNodeCount}`
       );
       rawHierarchy = viewHierarchy.mergeHierarchies(rawHierarchy, uiautomatorHierarchy);
     } catch (fallbackErr) {

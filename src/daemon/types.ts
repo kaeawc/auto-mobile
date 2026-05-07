@@ -118,8 +118,6 @@ export interface DaemonOptions {
   mcpRecording?: boolean;
   /** Disable navigation screenshots */
   noNavigationScreenshots?: boolean;
-  /** Skip screenshots and back stack during waitFor polling to reduce ADB overhead */
-  noWaitForPollingOverhead?: boolean;
   /** Disable FLAG_INCLUDE_NOT_IMPORTANT_VIEWS on the accessibility service */
   noA11yIncludeNotImportantViews?: boolean;
   /** Disable FLAG_REPORT_VIEW_IDS on the accessibility service */

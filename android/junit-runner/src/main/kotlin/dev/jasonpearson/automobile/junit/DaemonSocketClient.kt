@@ -290,7 +290,6 @@ internal object DaemonSocketPaths {
         .withDismissKeyboardAfterInput()
         .withNoUiPerfMode()
         .withNoNavigationScreenshots()
-        .withNoWaitForPollingOverhead()
         .withNoIncludeNotImportantViews()
         .withNoReportViewIds()
         .withNoRetrieveInteractiveWindows()
@@ -443,32 +442,6 @@ internal object DaemonSocketPaths {
   private fun List<String>.withNoRetrieveInteractiveWindows(): List<String> {
     if (!noRetrieveInteractiveWindowsRequested()) return this
     return this + "--no-retrieve-interactive-windows"
-  }
-
-  /**
-   * When true, the spawned daemon passes `--no-waitfor-polling-overhead` to skip screenshots
-   * and back stack collection during observe waitFor polling loops. Reduces ADB contention
-   * that can cause ctrl-proxy WebSocket instability on resource-constrained CI emulators.
-   *
-   * Configured via JVM system property `automobile.daemon.no.waitfor.polling.overhead`
-   * or environment variable `AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD`.
-   */
-  private fun noWaitForPollingOverheadRequested(): Boolean {
-    if (SystemPropertyCache.getBoolean(
-        "automobile.daemon.no.waitfor.polling.overhead",
-        false
-      )
-    ) {
-      return true
-    }
-    val env = System.getenv("AUTOMOBILE_DAEMON_NO_WAITFOR_POLLING_OVERHEAD")
-        ?.trim()?.lowercase().orEmpty()
-    return env == "1" || env == "true" || env == "yes"
-  }
-
-  private fun List<String>.withNoWaitForPollingOverhead(): List<String> {
-    if (!noWaitForPollingOverheadRequested()) return this
-    return this + "--no-waitfor-polling-overhead"
   }
 
   private fun resolveLocalProjectPath(): String? {

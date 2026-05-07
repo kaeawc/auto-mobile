@@ -15,6 +15,7 @@ import {
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
+import { CtrlProxyClient as AndroidCtrlProxyClient } from "../features/observe/android/CtrlProxyClient";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
@@ -1324,9 +1325,16 @@ export const tapElement = async (device: BootedDevice, element: Element): Promis
     return;
   }
 
-  const { adbFactory } = getSystemTrayDependencies();
-  const adb = adbFactory(device);
-  await adb.executeCommand(`shell input touchscreen tap ${center.x} ${center.y}`);
+  const client = AndroidCtrlProxyClient.getInstance(device);
+  const result = await client.requestTapCoordinates(center.x, center.y, 10);
+  if (!result.success) {
+    logger.warn(
+      `[systemTray] dispatchGesture tap failed (${result.error}), falling back to ADB input`
+    );
+    const { adbFactory } = getSystemTrayDependencies();
+    const adb = adbFactory(device);
+    await adb.executeCommand(`shell input touchscreen tap ${center.x} ${center.y}`);
+  }
 };
 
 export const swipeElement = async (device: BootedDevice, element: Element): Promise<void> => {

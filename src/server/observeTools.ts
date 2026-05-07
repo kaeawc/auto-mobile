@@ -17,7 +17,6 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
-import { serverConfig } from "../utils/ServerConfig";
 import {
   accessibilityStateSchema,
   activeWindowSchema,
@@ -192,23 +191,15 @@ const waitForObservation = async (
     elementId: "elementId" in waitFor ? waitFor.elementId : undefined
   };
 
-  // When overhead is disabled, skip screenshots and back stack during ALL waitFor
-  // observations (including the initial one) to reduce ADB contention. This prevents
-  // slow back stack fetches (dumpsys activity) and screenshots (screencap) from
-  // consuming the timeout budget. Trade-off: LATEST_SCREENSHOT will not reflect the
-  // exact screen state when waitFor resolved.
-  const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
-
   throwIfAborted(signal);
-  let observation = await observeScreen.execute({
+  let observation = await observeScreen.execute(
     queryOptions,
-    perf: createGlobalPerformanceTracker(),
-    skipWaitForFresh: false,
-    minTimestamp: startTime,
+    createGlobalPerformanceTracker(),
+    false,
+    startTime,
     signal,
-    skipBackStack: skipPollingOverhead || skipBackStack,
-    skipScreenshot: skipPollingOverhead,
-  });
+    skipBackStack
+  );
   let awaitedElement = observation.viewHierarchy
     ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
     : null;
@@ -234,15 +225,14 @@ const waitForObservation = async (
     await defaultTimer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
-    observation = await observeScreen.execute({
+    observation = await observeScreen.execute(
       queryOptions,
-      perf: createGlobalPerformanceTracker(),
-      skipWaitForFresh: false,
-      minTimestamp: startTime,
+      createGlobalPerformanceTracker(),
+      false,
+      startTime,
       signal,
-      skipBackStack: skipPollingOverhead || skipBackStack,
-      skipScreenshot: skipPollingOverhead,
-    });
+      skipBackStack
+    );
     awaitedElement = observation.viewHierarchy
       ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
       : null;
@@ -276,7 +266,7 @@ export function registerObserveTools() {
         : null;
       const result = waitOutcome
         ? waitOutcome.observation
-        : await observeScreen.execute({ perf: createGlobalPerformanceTracker(), skipWaitForFresh: true, signal });
+        : await observeScreen.execute(undefined, createGlobalPerformanceTracker(), true, 0, signal);
 
       // Validate that the returned hierarchy matches the expected platform.
       // This guards against cross-platform data contamination where an iOS

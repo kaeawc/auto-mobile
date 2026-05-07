@@ -198,16 +198,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var activeWindowHasNullRoot = false
     var hasApplicationWindow = false
 
-    // Detect if an IME (keyboard) window with an extractable root is present.
-    // When IME is visible, Android may mark app window nodes as isVisibleToUser=false
-    // even though they are physically visible above the keyboard.
-    // Only bypass visibility filtering when the IME window has a root node, because that
-    // root contributes occlusion nodes that will properly hide elements behind the keyboard.
-    // If the IME window has a null root, it cannot participate in occlusion and we must keep
-    // the isVisibleToUser filter to avoid exposing non-interactable elements under the keyboard.
-    val hasImeWindow =
-        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.root != null }
-
     // Extract from each window
     for (window in windows) {
       try {
@@ -260,13 +250,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             )
         )
 
-        // When IME is present and this is the active app window, skip isVisibleToUser
-        // filtering. Android marks app nodes as not visible when an IME window overlays them,
-        // but they are still physically on screen above the keyboard.
-        val skipVisibilityFilter =
-            hasImeWindow &&
-                window.isActive &&
-                window.type == AccessibilityWindowInfo.TYPE_APPLICATION
         val element =
             extractNodeInfo(
                 rootNode,
@@ -275,7 +258,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 screenDimensions,
                 dedupeTextContentDesc,
                 accessibilityFocusedNode,
-                skipVisibilityFilter,
                 parentPath = "w${window.id}",
             )
         // Skip optimization if disableAllFiltering is true
@@ -350,7 +332,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               screenDimensions,
               dedupeTextContentDesc,
               accessibilityFocusedNode,
-              skipVisibilityFilter = hasImeWindow,
           )
       // Skip optimization if disableAllFiltering is true
       mainHierarchy =
@@ -580,7 +561,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       screenDimensions: ScreenDimensions? = null,
       dedupeTextContentDesc: Boolean = true,
       accessibilityFocusedNode: AccessibilityNodeInfo? = null,
-      skipVisibilityFilter: Boolean = false,
       parentPath: String = "",
       childIndex: Int = 0,
   ): UIElementInfo? {
@@ -605,16 +585,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         }
       }
 
-      // Filter nodes not actually visible to the user
-      // Skip this filter when IME is present for the active app window — Android incorrectly
-      // marks app nodes as not visible when an IME window overlays them.
-      // Also skip for interactive nodes — Android can mark long-clickable or clickable views
-      // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
-      // but they must still appear in the hierarchy since users can interact with them.
-      val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
-      if (!skipVisibilityFilter && !isInteractiveNode && !node.isVisibleToUser) {
-        return null
-      }
+      // Skip isVisibleToUser filtering entirely. Android's accessibility framework
+      // frequently misreports visibility for Compose bottom sheets, loading states,
+      // and animated views — causing text that is clearly rendered on screen to be
+      // excluded from the hierarchy. Since we already filter zero-area and offscreen
+      // nodes above, those guards are sufficient.
 
       // Build deterministic path for viewId generation
       val segment = if (node.viewIdResourceName != null) {
@@ -638,7 +613,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                   screenDimensions,
                   dedupeTextContentDesc,
                   accessibilityFocusedNode,
-                  skipVisibilityFilter,
                   parentPath = currentPath,
                   childIndex = i,
               )

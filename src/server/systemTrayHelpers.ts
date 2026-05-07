@@ -1212,14 +1212,6 @@ export const waitForNotificationMatch = async (
 
   let pollCount = 0;
   while (true) {
-    if (timer.now() >= deadlineMs) {
-      logger.info(
-        `[systemTray] Notification match timed out after ${pollCount} polls. ` +
-        `criteria: title=${criteria.title}, body=${criteria.body}`
-      );
-      return { observation, match: null };
-    }
-
     const viewHierarchy = observation.viewHierarchy;
     const trayOpen = viewHierarchy ? isSystemTrayOpen(viewHierarchy, device.platform) : false;
     const isIncomplete = (viewHierarchy as any)?.ctrlProxyIncomplete === true;
@@ -1240,6 +1232,14 @@ export const waitForNotificationMatch = async (
         logger.info(`[systemTray] Notification matched on poll ${pollCount}`);
         return { observation, match };
       }
+    }
+
+    if (timer.now() >= deadlineMs) {
+      logger.info(
+        `[systemTray] Notification match timed out after ${pollCount} polls. ` +
+        `criteria: title=${criteria.title}, body=${criteria.body}`
+      );
+      return { observation, match: null };
     }
 
     pollCount++;
@@ -1326,7 +1326,7 @@ export const tapElement = async (device: BootedDevice, element: Element): Promis
 
   const { adbFactory } = getSystemTrayDependencies();
   const adb = adbFactory(device);
-  await adb.executeCommand(`shell input tap ${center.x} ${center.y}`);
+  await adb.executeCommand(`shell input touchscreen tap ${center.x} ${center.y}`);
 };
 
 export const swipeElement = async (device: BootedDevice, element: Element): Promise<void> => {

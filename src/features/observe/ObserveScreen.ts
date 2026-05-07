@@ -576,7 +576,8 @@ export class RealObserveScreen implements ObserveScreen {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack: boolean = false
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -1364,7 +1365,7 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Collect all data components with parallelization
       // Note: collectAllData tracks its phases internally, so we just call it directly
-      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
 
       // Capture screenshot for latest observation resource
       if (serverConfig.getAccessibilityAuditConfig()) {
@@ -1430,8 +1431,8 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
-      logger.error("Critical error in observe command:", err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorMessage = err instanceof Error ? (err.stack || err.message) : String(err);
+      logger.error(`Critical error in observe command: ${errorMessage}`);
       ScreenshotJobTracker.cancelJob(this.device.deviceId);
       RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, `Observation failed: ${errorMessage}`);
       return {

@@ -585,11 +585,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         }
       }
 
-      // Skip isVisibleToUser filtering entirely. Android's accessibility framework
-      // frequently misreports visibility for Compose bottom sheets, loading states,
-      // and animated views — causing text that is clearly rendered on screen to be
-      // excluded from the hierarchy. Since we already filter zero-area and offscreen
-      // nodes above, those guards are sufficient.
+      // Filter nodes not visible to the user, but keep interactive nodes regardless
+      val isInteractiveNode =
+          node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
+      if (!isInteractiveNode && !node.isVisibleToUser) {
+        return null
+      }
 
       // Build deterministic path for viewId generation
       val segment = if (node.viewIdResourceName != null) {

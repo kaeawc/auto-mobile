@@ -1143,12 +1143,48 @@ export const ensureSystemTrayClosed = async (
   };
 };
 
-const NOTIFICATION_GROUP_CLASS_HINTS = [
-  "ExpandableNotificationRow",
-  "NotificationGroup",
+const NOTIFICATION_GROUP_RESOURCE_ID_HINTS = [
+  "notification_children_container",
+  "expandablenotificationrow",
 ];
 
-const findCollapsedNotificationGroup = (
+const findExpandButtonInSubtree = (
+  node: any,
+  parser: DefaultElementParser
+): Element | null => {
+  if (!node) {
+    return null;
+  }
+
+  const props = getNodeProperties(node);
+  if (props) {
+    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+    const contentDesc = String(props["content-desc"] ?? "").toLowerCase();
+
+    if (
+      resourceId.includes("expand_button") ||
+      (contentDesc === "expand" && resourceId.includes("expand"))
+    ) {
+      return parser.parseNodeBounds(node) ?? null;
+    }
+  }
+
+  const children = node.node;
+  if (Array.isArray(children)) {
+    for (const child of children) {
+      const result = findExpandButtonInSubtree(child, parser);
+      if (result) {
+        return result;
+      }
+    }
+  } else if (children && typeof children === "object") {
+    return findExpandButtonInSubtree(children, parser);
+  }
+
+  return null;
+};
+
+const findNotificationGroupExpandButton = (
   viewHierarchy: ViewHierarchyResult,
   appMatchTexts: string[]
 ): Element | null => {
@@ -1167,24 +1203,23 @@ const findCollapsedNotificationGroup = (
     const props = getNodeProperties(node);
     if (props) {
       const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-      const className = String(props.className ?? props.class ?? "").toLowerCase();
-      const packageName = String(props.packageName ?? props.package ?? "").toLowerCase();
-      const isSystemUi =
-          packageName === SYSTEM_TRAY_PACKAGE || resourceId.includes(SYSTEM_TRAY_PACKAGE);
 
-      if (isSystemUi) {
-        const isGroupRow = NOTIFICATION_GROUP_CLASS_HINTS.some(
-          hint => className.includes(hint.toLowerCase())
+      const isGroupContainer = NOTIFICATION_GROUP_RESOURCE_ID_HINTS.some(
+        hint => resourceId.includes(hint)
+      );
+
+      if (isGroupContainer) {
+        const textsInSubtree = collectAllTexts(node);
+        const hasAppMatch = textsInSubtree.some(
+          t => normalizedAppTexts.some(app => t.includes(app))
         );
 
-        if (isGroupRow) {
-          const textsInSubtree = collectAllTexts(node);
-          const hasAppMatch = textsInSubtree.some(
-            t => normalizedAppTexts.some(app => t.includes(app))
-          );
-          if (hasAppMatch) {
-            return parser.parseNodeBounds(node) ?? null;
+        if (hasAppMatch) {
+          const expandButton = findExpandButtonInSubtree(node, parser);
+          if (expandButton) {
+            return expandButton;
           }
+          return parser.parseNodeBounds(node) ?? null;
         }
       }
     }
@@ -1267,13 +1302,13 @@ export const waitForNotificationMatch = async (
       }
 
       if (expandGroup && !groupExpanded && device.platform === "android") {
-        const groupElement = findCollapsedNotificationGroup(viewHierarchy, appMatchTexts);
-        if (groupElement) {
+        const expandTarget = findNotificationGroupExpandButton(viewHierarchy, appMatchTexts);
+        if (expandTarget) {
           logger.info(
-            `[systemTray] Expanding collapsed notification group for app ` +
-            `(bounds=${JSON.stringify(groupElement.bounds)})`
+            `[systemTray] Expanding notification group ` +
+            `(bounds=${JSON.stringify(expandTarget.bounds)})`
           );
-          await tapElement(device, groupElement);
+          await tapElement(device, expandTarget);
           groupExpanded = true;
           await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
           observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);

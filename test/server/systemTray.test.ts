@@ -346,17 +346,66 @@ const createTrayWithCollapsedGroup = (appLabel: string): ViewHierarchyResult => 
     node: {
       $: {
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
-        "class": "NotificationShade",
         "packageName": SYSTEM_TRAY_PACKAGE,
         "bounds": "[0,0][1080,1920]"
       },
       node: [{
         $: {
-          "resource-id": "com.android.systemui:id/notification_group",
-          "class": "ExpandableNotificationRow",
-          "packageName": SYSTEM_TRAY_PACKAGE,
-          "text": appLabel,
-          "bounds": "[0,100][1080,200]"
+          "resource-id": "com.android.systemui:id/expandableNotificationRow",
+          "bounds": "[48,663][1296,993]"
+        },
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_children_container",
+            "className": "android.view.ViewGroup",
+            "bounds": "[48,663][1296,993]"
+          },
+          node: [
+            {
+              $: {
+                "resource-id": "android:id/notification_header",
+                "className": "android.widget.RelativeLayout",
+                "bounds": "[48,663][1296,831]"
+              },
+              node: [
+                {
+                  $: {
+                    "resource-id": "android:id/notification_top_line",
+                    "bounds": "[48,663][1084,831]"
+                  },
+                  node: {
+                    $: {
+                      "text": appLabel,
+                      "resource-id": "android:id/app_name_text",
+                      "bounds": "[204,722][391,771]"
+                    }
+                  }
+                },
+                {
+                  $: {
+                    "content-desc": "Expand",
+                    "resource-id": "android:id/expand_button",
+                    "className": "android.widget.Button",
+                    "clickable": "true",
+                    "bounds": "[1084,663][1296,831]"
+                  },
+                  node: {
+                    $: {
+                      "resource-id": "android:id/expand_button_pill",
+                      "bounds": "[1132,711][1248,783]"
+                    },
+                    node: {
+                      $: {
+                        "text": "2",
+                        "resource-id": "android:id/expand_button_number",
+                        "bounds": "[1132,711][1176,783]"
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          ]
         }
       }]
     }
@@ -372,7 +421,6 @@ const createTrayWithExpandedNotification = (
     node: {
       $: {
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
-        "class": "NotificationShade",
         "packageName": SYSTEM_TRAY_PACKAGE,
         "bounds": "[0,0][1080,1920]"
       },
@@ -441,7 +489,8 @@ describe("systemTray expandGroup", () => {
 
     expect(result.match).not.toBeNull();
     expect(result.match!.match.matches.title?.text).toBe("New Lead: John Doe");
-    expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(true);
+    // Taps the expand_button center: (1084+1296)/2=1190, (663+831)/2=747
+    expect(fakeAdb.wasCommandExecuted("shell input tap 1190 747")).toBe(true);
   });
 
   test("does not expand group when expandGroup is false", async () => {

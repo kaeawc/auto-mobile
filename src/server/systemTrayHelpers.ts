@@ -1219,7 +1219,11 @@ const findNotificationGroupExpandButton = (
           if (expandButton) {
             return expandButton;
           }
-          return parser.parseNodeBounds(node) ?? null;
+          logger.info(
+            `[systemTray] Found notification group for app but no expand_button ` +
+            `(resourceId=${resourceId}, subtreeTexts=${textsInSubtree.slice(0, 5).join(", ")})`
+          );
+          return null;
         }
       }
     }

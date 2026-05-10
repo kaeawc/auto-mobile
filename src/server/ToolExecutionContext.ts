@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { CtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
+import { type Timer, defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Storage for accessibility service setup timing.
@@ -123,7 +124,12 @@ function isTransientA11yError(error: string): boolean {
   return A11Y_TRANSIENT_ERROR_PATTERNS.some(p => error.includes(p));
 }
 
-async function ensureAccessibilityServiceReady(deviceId: string, sessionId: string, platform: Platform): Promise<void> {
+async function ensureAccessibilityServiceReady(
+  deviceId: string,
+  sessionId: string,
+  platform: Platform,
+  timer: Timer = defaultTimer
+): Promise<void> {
   const device: BootedDevice = {
     name: deviceId,
     platform,
@@ -154,7 +160,7 @@ async function ensureAccessibilityServiceReady(deviceId: string, sessionId: stri
         logger.warn(
           `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`
         );
-        await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+        await timer.sleep(RETRY_DELAY_MS);
         continue;
       }
 

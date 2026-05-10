@@ -957,9 +957,9 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
   private syncAccessibilityFlagsToDevice(): void {
     try {
-      const { serverConfig } = require("../../../utils/ServerConfig");
       const flags = serverConfig.getAccessibilityFlagsConfig();
-      const allEnabled = flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows;
+      const allEnabled =
+          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows;
       if (allEnabled) {
         return;
       }

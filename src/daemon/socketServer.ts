@@ -258,9 +258,7 @@ export class UnixSocketServer {
           const queueWaitMs = this.timer.now() - queueEnterMs;
           const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
           const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
-          const isExecutePlan = request.method === "tools/call" && request.params?.name === "executePlan";
-          const logFn = isExecutePlan ? logger.info.bind(logger) : logger.debug.bind(logger);
-          logFn(
+          logger.debug(
             `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`
           );
 
@@ -275,18 +273,9 @@ export class UnixSocketServer {
             const mcpClient = await this.getMcpClient();
 
             try {
-              const mcpResult = await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs);
-              const forwardMs = this.timer.now() - forwardStartMs;
-              logFn(
-                `[McpForward] callTool resolved socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${forwardMs}`
-              );
-              return mcpResult;
+              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs);
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
-              const forwardMs = this.timer.now() - forwardStartMs;
-              logFn(
-                `[McpForward] callTool rejected socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${forwardMs} error=${ideErrorMessage}`
-              );
               if (ideErrorMessage.includes("Session not found")) {
                 logger.warn("MCP client session expired, reconnecting and retrying...");
                 this.mcpClient = null;
@@ -303,7 +292,7 @@ export class UnixSocketServer {
               throw ideError;
             }
           } finally {
-            logFn(
+            logger.debug(
               `[McpForward] end socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
             );
           }

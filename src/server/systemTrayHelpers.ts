@@ -1148,43 +1148,10 @@ const NOTIFICATION_GROUP_RESOURCE_ID_HINTS = [
   "expandablenotificationrow",
 ];
 
-const findExpandButtonInSubtree = (
-  node: any,
-  parser: DefaultElementParser
-): Element | null => {
-  if (!node) {
-    return null;
-  }
+const EXPAND_GROUP_SWIPE_DISTANCE_PX = 300;
+const EXPAND_GROUP_SWIPE_DURATION_MS = 200;
 
-  const props = getNodeProperties(node);
-  if (props) {
-    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-    const contentDesc = String(props["content-desc"] ?? "").toLowerCase();
-
-    if (
-      resourceId.includes("expand_button") ||
-      (contentDesc === "expand" && resourceId.includes("expand"))
-    ) {
-      return parser.parseNodeBounds(node) ?? null;
-    }
-  }
-
-  const children = node.node;
-  if (Array.isArray(children)) {
-    for (const child of children) {
-      const result = findExpandButtonInSubtree(child, parser);
-      if (result) {
-        return result;
-      }
-    }
-  } else if (children && typeof children === "object") {
-    return findExpandButtonInSubtree(children, parser);
-  }
-
-  return null;
-};
-
-const findNotificationGroupExpandButton = (
+const findNotificationGroupContainer = (
   viewHierarchy: ViewHierarchyResult,
   appMatchTexts: string[]
 ): Element | null => {
@@ -1215,15 +1182,7 @@ const findNotificationGroupExpandButton = (
         );
 
         if (hasAppMatch) {
-          const expandButton = findExpandButtonInSubtree(node, parser);
-          if (expandButton) {
-            return expandButton;
-          }
-          logger.info(
-            `[systemTray] Found notification group for app but no expand_button ` +
-            `(resourceId=${resourceId}, subtreeTexts=${textsInSubtree.slice(0, 5).join(", ")})`
-          );
-          return null;
+          return parser.parseNodeBounds(node) ?? null;
         }
       }
     }
@@ -1306,13 +1265,21 @@ export const waitForNotificationMatch = async (
       }
 
       if (expandGroup && !groupExpanded && device.platform === "android") {
-        const expandTarget = findNotificationGroupExpandButton(viewHierarchy, appMatchTexts);
-        if (expandTarget) {
+        const groupContainer = findNotificationGroupContainer(viewHierarchy, appMatchTexts);
+        if (groupContainer) {
+          const geometry = new DefaultElementGeometry();
+          const center = geometry.getElementCenter(groupContainer);
+          const endY = center.y + EXPAND_GROUP_SWIPE_DISTANCE_PX;
           logger.info(
-            `[systemTray] Expanding notification group ` +
-            `(bounds=${JSON.stringify(expandTarget.bounds)})`
+            `[systemTray] Expanding notification group via swipe ` +
+            `(${center.x},${center.y} -> ${center.x},${endY})`
           );
-          await tapElement(device, expandTarget);
+          const { adbFactory } = getSystemTrayDependencies();
+          const adb = adbFactory(device);
+          await adb.executeCommand(
+            `shell input swipe ${center.x} ${center.y} ${center.x} ${endY} ` +
+            `${EXPAND_GROUP_SWIPE_DURATION_MS}`
+          );
           groupExpanded = true;
           await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
           observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);

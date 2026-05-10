@@ -489,8 +489,8 @@ describe("systemTray expandGroup", () => {
 
     expect(result.match).not.toBeNull();
     expect(result.match!.match.matches.title?.text).toBe("New Lead: John Doe");
-    // Taps the expand_button center: (1084+1296)/2=1190, (663+831)/2=747
-    expect(fakeAdb.wasCommandExecuted("shell input tap 1190 747")).toBe(true);
+    // Swipes down from group center to expand: center of [48,663][1296,993] = (672, 828)
+    expect(fakeAdb.wasCommandExecuted("shell input swipe 672 828 672 1128 200")).toBe(true);
   });
 
   test("does not expand group when expandGroup is false", async () => {
@@ -556,11 +556,11 @@ describe("systemTray expandGroup", () => {
   test("only attempts group expansion once", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
-    const tapCommands: string[] = [];
+    const swipeCommands: string[] = [];
     const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
     fakeAdb.executeCommand = async (command: string) => {
-      if (command.startsWith("shell input tap")) {
-        tapCommands.push(command);
+      if (command.startsWith("shell input swipe")) {
+        swipeCommands.push(command);
       }
       return originalExecuteCommand(command);
     };
@@ -592,8 +592,7 @@ describe("systemTray expandGroup", () => {
     const result = await resultPromise;
 
     expect(result.match).toBeNull();
-    const tapCount = tapCommands.filter(c => c.startsWith("shell input tap")).length;
-    expect(tapCount).toBe(1);
+    expect(swipeCommands.length).toBe(1);
   });
 });
 

@@ -336,6 +336,218 @@ const createIosNotificationCenterHierarchy = (title: string, body?: string): Vie
   }
 });
 
+// ============================================================================
+// Notification group expansion tests
+// ============================================================================
+
+const createTrayWithCollapsedGroup = (appLabel: string): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "class": "NotificationShade",
+        "packageName": SYSTEM_TRAY_PACKAGE,
+        "bounds": "[0,0][1080,1920]"
+      },
+      node: [{
+        $: {
+          "resource-id": "com.android.systemui:id/notification_group",
+          "class": "ExpandableNotificationRow",
+          "packageName": SYSTEM_TRAY_PACKAGE,
+          "text": appLabel,
+          "bounds": "[0,100][1080,200]"
+        }
+      }]
+    }
+  }
+});
+
+const createTrayWithExpandedNotification = (
+  appLabel: string,
+  title: string
+): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "class": "NotificationShade",
+        "packageName": SYSTEM_TRAY_PACKAGE,
+        "bounds": "[0,0][1080,1920]"
+      },
+      node: [
+        {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_row_1",
+            "class": "ExpandableNotificationRow",
+            "packageName": SYSTEM_TRAY_PACKAGE,
+            "text": title,
+            "bounds": "[0,100][1080,200]"
+          }
+        },
+        {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_row_2",
+            "class": "ExpandableNotificationRow",
+            "packageName": SYSTEM_TRAY_PACKAGE,
+            "text": appLabel,
+            "bounds": "[0,200][1080,300]"
+          }
+        }
+      ]
+    }
+  }
+});
+
+describe("systemTray expandGroup", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("taps collapsed group then finds expanded notification", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithExpandedNotification("FUBStaging", "New Lead: John Doe"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "New Lead: John Doe" },
+      ["FUBStaging"],
+      5000,
+      undefined,
+      true
+    );
+
+    // First sleep: after group expansion tap
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    // Second sleep: regular poll loop (obs[1] still collapsed, no re-expand)
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("New Lead: John Doe");
+    expect(fakeAdb.wasCommandExecuted("shell input tap")).toBe(true);
+  });
+
+  test("does not expand group when expandGroup is false", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "New Lead: John Doe" },
+      ["FUBStaging"],
+      500,
+      undefined,
+      false
+    );
+
+    await advancePendingSleeps(fakeTimer, 3);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+  });
+
+  test("does not expand group when expandGroup is undefined", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "New Lead: John Doe" },
+      ["FUBStaging"],
+      500
+    );
+
+    await advancePendingSleeps(fakeTimer, 3);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+  });
+
+  test("only attempts group expansion once", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const tapCommands: string[] = [];
+    const originalExecuteCommand = fakeAdb.executeCommand.bind(fakeAdb);
+    fakeAdb.executeCommand = async (command: string) => {
+      if (command.startsWith("shell input tap")) {
+        tapCommands.push(command);
+      }
+      return originalExecuteCommand(command);
+    };
+
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging")),
+      createObservation(createTrayWithCollapsedGroup("FUBStaging"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "New Lead: John Doe" },
+      ["FUBStaging"],
+      1000,
+      undefined,
+      true
+    );
+
+    await advancePendingSleeps(fakeTimer, 5);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+    const tapCount = tapCommands.filter(c => c.startsWith("shell input tap")).length;
+    expect(tapCount).toBe(1);
+  });
+});
+
 describe("iOS systemTray open", () => {
   afterEach(() => {
     resetSystemTrayDependencies();

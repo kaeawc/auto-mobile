@@ -339,6 +339,7 @@ const systemTraySchemaBase = z.object({
   ),
   notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
   awaitTimeout: z.number().optional().describe("Timeout in ms to wait for notification (default: 5000)"),
+  expandGroup: z.boolean().optional().describe("When true, if the target notification is not found, attempt to expand a collapsed notification group from the same app before retrying (default: false)"),
   platform: platformSchema
 });
 
@@ -588,7 +589,8 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
+          args.expandGroup
         );
 
         if (!match) {
@@ -609,7 +611,8 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
+          args.expandGroup
         );
 
         if (!match) {
@@ -647,7 +650,8 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress
+          progress,
+          args.expandGroup
         );
 
         if (!match) {

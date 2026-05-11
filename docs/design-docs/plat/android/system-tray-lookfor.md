@@ -77,12 +77,29 @@ group header. The `tap` action handles this automatically:
   inside collapsed groups, the tap target was not clickable until the group
   was visually expanded.
 
+#### `find` and `dismiss` do not auto-expand
+
+Only `tap` auto-expands collapsed groups. `find` can match text inside a
+collapsed group (thanks to the visibility bypass below), but it does not
+expand the group — it is read-only. `dismiss` similarly matches without
+expanding. This keeps side effects limited to the action that needs them.
+
 #### CtrlProxy `isVisibleToUser` bypass
 
 Collapsed notification groups mark child text nodes as
 `isVisibleToUser=false` in the accessibility tree, even though they are
 present in the shade. `ViewHierarchyExtractor.kt` bypasses this filter for
-`com.android.systemui` nodes so the text is available for matching.
+all `com.android.systemui` nodes (not scoped to the notification shade
+specifically). The broader scope is safe because notification candidate
+collection already filters nodes through resource ID hints and excludes —
+extra system UI nodes (status bar, quick settings) are not collected as
+notification candidates.
+
+Additionally, the occlusion filter is skipped for single-window scenarios
+(`windowEntries.size > 1` guard). Within a single system UI window, peer
+subtrees (e.g. `notification_panel` and `keyguard_message_area_container`)
+were incorrectly stripping each other's content. Multi-window occlusion
+filtering is unaffected.
 
 ### Key resource IDs
 

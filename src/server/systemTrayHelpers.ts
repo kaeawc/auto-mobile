@@ -505,9 +505,13 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
 const nodeIsNotificationGroup = (node: any): boolean => {
   const children = node.node;
   const checkChild = (child: any): boolean => {
-    if (!child) {return false;}
+    if (!child) {
+      return false;
+    }
     const props = getNodeProperties(child);
-    if (!props) {return false;}
+    if (!props) {
+      return false;
+    }
     const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
     return resourceId.includes("notification_children_container");
   };
@@ -1371,11 +1375,6 @@ export const tapElement = async (device: BootedDevice, element: Element): Promis
     return;
   }
 
-  // NOTE: Previously used CtrlProxy dispatchGesture here (commit 725a49dc).
-  // Reverted to ADB input to reduce change surface. To restore:
-  //   const client = AndroidCtrlProxyClient.getInstance(device);
-  //   const result = await client.requestTapCoordinates(center.x, center.y, 10);
-  //   if (!result.success) { /* fallback to ADB */ }
   const { adbFactory } = getSystemTrayDependencies();
   const adb = adbFactory(device);
   await adb.executeCommand(`shell input tap ${center.x} ${center.y}`);

@@ -32,7 +32,7 @@ androidx-startup = "1.2.0"
 # Media library versions
 coil = "3.4.0"
 core-splashscreen = "1.2.0"
-kotlinx-coroutines-test = "1.10.2"
+kotlinx-coroutines-test = "1.11.0"
 media3 = "1.10.0"
 
 # Library versions

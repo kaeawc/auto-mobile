@@ -507,17 +507,17 @@ export class Daemon {
         // writes the result to a dead pipe and the client eventually times out.
         // SSE comment lines (`:`) are ignored by EventSourceParserStream.
         const keepaliveTimer = req.method === "POST"
-          ? setInterval(() => {
+          ? defaultTimer.setInterval(() => {
             if (res.headersSent && !res.writableEnded && !res.destroyed) {
               res.write(":keepalive\n\n");
             } else if (res.writableEnded || res.destroyed) {
-              clearInterval(keepaliveTimer!);
+              defaultTimer.clearInterval(keepaliveTimer!);
             }
           }, 30_000)
           : undefined;
 
         const clearKeepalive = () => {
-          if (keepaliveTimer) clearInterval(keepaliveTimer);
+          if (keepaliveTimer) {defaultTimer.clearInterval(keepaliveTimer);}
         };
         res.on("close", clearKeepalive);
         res.on("finish", clearKeepalive);

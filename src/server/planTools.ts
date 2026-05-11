@@ -166,13 +166,13 @@ const executePlanTool = async (device: BootedDevice, params: {
   // time out even though the tool completed successfully.
   let progressHeartbeatCount = 0;
   const progressHeartbeat = progress
-    ? setInterval(() => {
+    ? defaultTimer.setInterval(() => {
       progressHeartbeatCount++;
       progress(progressHeartbeatCount, undefined, "executing").catch(() => {});
     }, 30_000)
     : undefined;
   const clearProgressHeartbeat = () => {
-    if (progressHeartbeat) clearInterval(progressHeartbeat);
+    if (progressHeartbeat) {defaultTimer.clearInterval(progressHeartbeat);}
   };
 
   const recordTestExecution = async (

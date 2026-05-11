@@ -5828,10 +5828,6 @@
           "description": "Timeout in ms to wait for notification (default: 5000)",
           "type": "number"
         },
-        "expandGroup": {
-          "description": "When true, if the target notification is not found, attempt to expand a collapsed notification group from the same app before retrying (default: false)",
-          "type": "boolean"
-        },
         "platform": {
           "type": "string",
           "enum": [

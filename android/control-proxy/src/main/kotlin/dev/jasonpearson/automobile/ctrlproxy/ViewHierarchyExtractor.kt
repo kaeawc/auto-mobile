@@ -589,8 +589,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Also skip for interactive nodes — Android can mark long-clickable or clickable views
       // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
       // but they must still appear in the hierarchy since users can interact with them.
+      // Also skip for system UI nodes — collapsed notification groups mark child text nodes
+      // as not visible even though they are present and interactable in the shade.
+      val isSystemUiNode = node.packageName?.toString() == "com.android.systemui"
       val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
-      if (!skipVisibilityFilter && !isInteractiveNode && !node.isVisibleToUser) {
+      if (!skipVisibilityFilter && !isSystemUiNode && !isInteractiveNode && !node.isVisibleToUser) {
         return null
       }
 

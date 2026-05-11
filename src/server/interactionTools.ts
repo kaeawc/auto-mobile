@@ -77,8 +77,11 @@ import {
   tapElement,
   swipeElement,
   resolveAppLabel,
+  isMatchInCollapsedGroup,
+  expandNotificationGroup,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+  EXPAND_GROUP_SETTLE_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -339,7 +342,6 @@ const systemTraySchemaBase = z.object({
   ),
   notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
   awaitTimeout: z.number().optional().describe("Timeout in ms to wait for notification (default: 5000)"),
-  expandGroup: z.boolean().optional().describe("When true, if the target notification is not found, attempt to expand a collapsed notification group from the same app before retrying (default: false)"),
   platform: platformSchema
 });
 
@@ -589,8 +591,7 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress,
-          args.expandGroup
+          progress
         );
 
         if (!match) {
@@ -606,17 +607,40 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "tap") {
-        const { match } = await waitForNotificationMatch(
+        let { match } = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress,
-          args.expandGroup
+          progress
         );
 
         if (!match) {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        if (isMatchInCollapsedGroup(match)) {
+          const expanded = await expandNotificationGroup(device, match);
+          if (expanded) {
+            const { timer } = getSystemTrayDependencies();
+            await timer.sleep(EXPAND_GROUP_SETTLE_MS);
+            const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
+            const reMatch = await waitForNotificationMatch(
+              device,
+              notification,
+              appMatchTexts,
+              remainingMs,
+              progress
+            );
+            if (reMatch.match) {
+              match = reMatch.match;
+            } else {
+              throw new ActionableError(
+                "Expanded collapsed notification group but could not re-match the notification. " +
+                "The group may have changed after expansion."
+              );
+            }
+          }
         }
 
         const tapMatch = resolveNotificationTapElement(match, notification);
@@ -650,8 +674,7 @@ export function registerInteractionTools() {
           notification,
           appMatchTexts,
           awaitTimeoutMs,
-          progress,
-          args.expandGroup
+          progress
         );
 
         if (!match) {

@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `systemTray` MCP tool is fully implemented with open/close/find/tap/dismiss/clearAll actions. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `systemTray` MCP tool is fully implemented with open/close/find/tap/dismiss/clearAll actions. Collapsed notification groups are automatically expanded before tapping. See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Goal
 
@@ -42,6 +42,66 @@ Finding notifications:
   `com.android.systemui`.
 - Return bounding box + hierarchy path for use in follow-up taps.
 
+### Collapsed notification group handling
+
+When an app posts 2+ notifications, Android collapses them into a single
+group header. The `tap` action handles this automatically:
+
+1. **Match** — `collectNotificationCandidates` traverses the hierarchy. When
+   it encounters a notification group (a node whose children include a
+   `notification_children_container`), it descends into the group's children
+   and tags each child candidate with a `groupNode` reference.
+2. **Detect** — After matching, `isMatchInCollapsedGroup` checks whether
+   the best match has a `groupNode`. If so, the notification is inside a
+   collapsed group.
+3. **Expand** — `expandNotificationGroup` finds the "Expand" button inside
+   the group header (matched by `content-desc: "Expand"` or `resource-id`
+   containing `expand_button`) and taps it via ADB.
+4. **Re-match** — After a 500 ms settle, the tool re-observes the hierarchy
+   and re-matches the now-expanded notification.
+5. **Tap** — The specific notification row is tapped, triggering its
+   deep-link intent (e.g. launching a specific flow rather than opening the
+   app generically).
+
+#### What didn't work (lessons learned)
+
+- **Tapping text nodes inside collapsed groups** — Android routes the tap to
+  the group header, which opens the app generically instead of triggering
+  the notification's specific deep-link intent.
+- **Swiping/gesturing on the group** to expand — `adb shell input swipe`
+  did not reliably expand collapsed groups.
+- **Tapping the expand button directly** without first identifying the
+  correct group node — the tap was intercepted by the parent notification
+  row.
+- **Matching only** without expansion — even with correct text matching
+  inside collapsed groups, the tap target was not clickable until the group
+  was visually expanded.
+
+#### CtrlProxy `isVisibleToUser` bypass
+
+Collapsed notification groups mark child text nodes as
+`isVisibleToUser=false` in the accessibility tree, even though they are
+present in the shade. `ViewHierarchyExtractor.kt` bypasses this filter for
+`com.android.systemui` nodes so the text is available for matching.
+
+### Key resource IDs
+
+Matching:
+
+- `NOTIFICATION_ROW_RESOURCE_ID_HINTS`: `notification_row`,
+  `expandablenotificationrow`, `status_bar_notification`,
+  `notification_container`, `notification_content`,
+  `notification_main_column`, `notification_template`
+
+Exclusions (container nodes that must not be collected as individual
+notification candidates):
+
+- `notification_children_container` — the container holding grouped child
+  notifications
+- `notification_container_parent` — broad parent wrapping all notifications
+- `shared_notification_container` — another broad wrapper with full-screen
+  bounds
+
 ## ADB validation (API 35)
 
 Status:
@@ -66,13 +126,10 @@ Notes:
 - `adb shell cmd statusbar expand-settings` is also available to expand quick
   settings when needed.
 
-## Plan
-
-1. Add `systemTray` with open/close/find/tap/dismiss/clearAll actions.
-2. Use accessibility node search to match notification text.
-3. Return structured match details for action chaining.
-
 ## Risks
 
 - OEM System UI layouts vary; emulator support may be the reliable baseline.
 - Requires AccessibilityService access to System UI nodes.
+- Collapsed group expansion depends on the "Expand" button being present in
+  the accessibility tree with predictable `content-desc` and `resource-id`
+  values. Non-standard OEM notification UIs may use different patterns.

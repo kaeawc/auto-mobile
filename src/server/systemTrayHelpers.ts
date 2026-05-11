@@ -149,6 +149,7 @@ const SYSTEM_TRAY_CLASS_HINTS = [
 ];
 const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
   "notification_row",
+  "expandablenotificationrow",
   "status_bar_notification",
   "notification_container",
   "notification_content",
@@ -164,12 +165,16 @@ const NOTIFICATION_ROW_CLASS_HINTS = [
 const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
   ...SYSTEM_TRAY_RESOURCE_ID_HINTS,
   "notification_shelf",
-  "notification_stack_scroll"
+  "notification_stack_scroll",
+  "notification_children_container",
+  "notification_container_parent",
+  "shared_notification_container"
 ];
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
+export const EXPAND_GROUP_SETTLE_MS = 500;
 
 // ============================================================================
 // Internal Types
@@ -198,6 +203,7 @@ interface SystemTrayNotificationCandidate {
   node: any;
   depth: number;
   element?: Element;
+  groupNode?: any;
 }
 
 interface SystemTrayNotificationMatch {
@@ -492,29 +498,127 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
-  const candidates: SystemTrayNotificationCandidate[] = [];
+// Only checks direct children for notification_children_container.
+// Android's standard SystemUI places this container as an immediate child
+// of the group row node. If a future OEM wraps it deeper, this will need
+// to become a recursive search.
+const nodeIsNotificationGroup = (node: any): boolean => {
+  const children = node.node;
+  const checkChild = (child: any): boolean => {
+    if (!child) {return false;}
+    const props = getNodeProperties(child);
+    if (!props) {return false;}
+    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+    return resourceId.includes("notification_children_container");
+  };
+
+  if (Array.isArray(children)) {
+    return children.some(checkChild);
+  }
+  return checkChild(children);
+};
+
+export const isMatchInCollapsedGroup = (match: SystemTrayNotificationMatch): boolean => {
+  return !!match.candidate.groupNode;
+};
+
+const findExpandButtonInGroup = (groupNode: any): Element | null => {
   const parser = new DefaultElementParser();
 
-  const visit = (node: any, depth: number): void => {
+  const search = (node: any): Element | null => {
     if (!node) {
-      return;
+      return null;
     }
 
-    if (nodeHasNotificationRowHint(node)) {
-      const element = parser.parseNodeBounds(node) ?? undefined;
-      candidates.push({ node, depth, element });
-      return;
+    const props = getNodeProperties(node);
+    if (props) {
+      const contentDesc = String(props["content-desc"] ?? props.contentDesc ?? "").toLowerCase();
+      const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+      const matchesDesc = contentDesc === "expand";
+      const matchesId = resourceId.includes("expand_button");
+      if (matchesDesc || matchesId) {
+        if (matchesDesc !== matchesId) {
+          logger.warn(
+            `[systemTray] Expand button partial match: ` +
+            `content-desc="${contentDesc}", resource-id="${resourceId}"`
+          );
+        }
+        return parser.parseNodeBounds(node) ?? null;
+      }
     }
 
     const children = node.node;
     if (Array.isArray(children)) {
       for (const child of children) {
-        visit(child, depth + 1);
+        const result = search(child);
+        if (result) {
+          return result;
+        }
       }
     } else if (children && typeof children === "object") {
-      visit(children, depth + 1);
+      return search(children);
     }
+
+    return null;
+  };
+
+  return search(groupNode);
+};
+
+export const expandNotificationGroup = async (
+  device: BootedDevice,
+  match: SystemTrayNotificationMatch
+): Promise<boolean> => {
+  const groupNode = match.candidate.groupNode;
+  if (!groupNode) {
+    return false;
+  }
+
+  const expandButton = findExpandButtonInGroup(groupNode);
+  if (!expandButton) {
+    logger.warn("[systemTray] Collapsed group detected but no expand button found in group node");
+    return false;
+  }
+
+  logger.info(
+    `[systemTray] Expanding collapsed notification group ` +
+    `(tap ${expandButton.bounds?.left},${expandButton.bounds?.top})`
+  );
+  await tapElement(device, expandButton);
+  return true;
+};
+
+const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
+  const candidates: SystemTrayNotificationCandidate[] = [];
+  const parser = new DefaultElementParser();
+
+  const visitChildren = (node: any, depth: number, groupNode?: any): void => {
+    const children = node.node;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        visit(child, depth + 1, groupNode);
+      }
+    } else if (children && typeof children === "object") {
+      visit(children, depth + 1, groupNode);
+    }
+  };
+
+  const visit = (node: any, depth: number, groupNode?: any): void => {
+    if (!node) {
+      return;
+    }
+
+    if (nodeHasNotificationRowHint(node)) {
+      if (nodeIsNotificationGroup(node)) {
+        visitChildren(node, depth, node);
+        return;
+      }
+      const element = parser.parseNodeBounds(node) ?? undefined;
+      candidates.push({ node, depth, element, groupNode });
+      return;
+    }
+
+    visitChildren(node, depth, groupNode);
   };
 
   const rootNodes = getHierarchyRoots(viewHierarchy);
@@ -895,6 +999,12 @@ const getCandidateArea = (candidate: SystemTrayNotificationCandidate): number =>
   return boundsArea(bounds);
 };
 
+const CANDIDATE_NO_BOUNDS_TOP_Y = Infinity;
+
+const getCandidateTopY = (candidate: SystemTrayNotificationCandidate): number => {
+  return candidate.element?.bounds?.top ?? CANDIDATE_NO_BOUNDS_TOP_Y;
+};
+
 const selectBestNotificationMatch = (
   matches: SystemTrayNotificationMatch[]
 ): SystemTrayNotificationMatch | null => {
@@ -912,6 +1022,12 @@ const selectBestNotificationMatch = (
       }
       if (leftCounts.partial !== rightCounts.partial) {
         return rightCounts.partial - leftCounts.partial;
+      }
+      // Prefer topmost notification (most recent in Android shade)
+      const leftTop = getCandidateTopY(left.candidate);
+      const rightTop = getCandidateTopY(right.candidate);
+      if (leftTop !== rightTop) {
+        return leftTop - rightTop;
       }
       const leftArea = getCandidateArea(left.candidate);
       const rightArea = getCandidateArea(right.candidate);
@@ -1143,105 +1259,12 @@ export const ensureSystemTrayClosed = async (
   };
 };
 
-const NOTIFICATION_GROUP_RESOURCE_ID_HINTS = [
-  "notification_children_container",
-  "expandablenotificationrow",
-];
-
-const EXPAND_GROUP_SWIPE_DISTANCE_PX = 300;
-const EXPAND_GROUP_SWIPE_DURATION_MS = 200;
-
-const findNotificationGroupContainer = (
-  viewHierarchy: ViewHierarchyResult,
-  appMatchTexts: string[]
-): Element | null => {
-  if (appMatchTexts.length === 0) {
-    return null;
-  }
-
-  const parser = new DefaultElementParser();
-  const normalizedAppTexts = appMatchTexts.map(t => t.toLowerCase());
-
-  const visit = (node: any): Element | null => {
-    if (!node) {
-      return null;
-    }
-
-    const props = getNodeProperties(node);
-    if (props) {
-      const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
-
-      const isGroupContainer = NOTIFICATION_GROUP_RESOURCE_ID_HINTS.some(
-        hint => resourceId.includes(hint)
-      );
-
-      if (isGroupContainer) {
-        const textsInSubtree = collectAllTexts(node);
-        const hasAppMatch = textsInSubtree.some(
-          t => normalizedAppTexts.some(app => t.includes(app))
-        );
-
-        if (hasAppMatch) {
-          return parser.parseNodeBounds(node) ?? null;
-        }
-      }
-    }
-
-    const children = node.node;
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        const result = visit(child);
-        if (result) {
-          return result;
-        }
-      }
-    } else if (children && typeof children === "object") {
-      return visit(children);
-    }
-
-    return null;
-  };
-
-  const rootNodes = getHierarchyRoots(viewHierarchy);
-  for (const root of rootNodes) {
-    const result = visit(root);
-    if (result) {
-      return result;
-    }
-  }
-
-  return null;
-};
-
-const collectAllTexts = (node: any): string[] => {
-  const texts: string[] = [];
-  const visit = (n: any): void => {
-    if (!n) return;
-    const props = n.$ ?? n;
-    const text = props?.text ?? props?.["content-desc"];
-    if (typeof text === "string" && text.length > 0) {
-      texts.push(text.toLowerCase());
-    }
-    const children = n.children ?? n.node;
-    if (Array.isArray(children)) {
-      for (const child of children) {
-        visit(child);
-      }
-    } else if (children && typeof children === "object") {
-      visit(children);
-    }
-  };
-  visit(node);
-  return texts;
-};
-
 export const waitForNotificationMatch = async (
   device: BootedDevice,
   criteria: SystemTrayNotificationArgs,
   appMatchTexts: string[],
   awaitTimeoutMs: number,
-  progress?: ProgressCallback,
-  expandGroup?: boolean
+  progress?: ProgressCallback
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
   const observeScreen = observeScreenFactory(device);
@@ -1254,37 +1277,12 @@ export const waitForNotificationMatch = async (
     observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
   }
 
-  let groupExpanded = false;
-
   while (true) {
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy && isSystemTrayOpen(viewHierarchy, device.platform)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };
-      }
-
-      if (expandGroup && !groupExpanded && device.platform === "android") {
-        const groupContainer = findNotificationGroupContainer(viewHierarchy, appMatchTexts);
-        if (groupContainer) {
-          const geometry = new DefaultElementGeometry();
-          const center = geometry.getElementCenter(groupContainer);
-          const endY = center.y + EXPAND_GROUP_SWIPE_DISTANCE_PX;
-          logger.info(
-            `[systemTray] Expanding notification group via swipe ` +
-            `(${center.x},${center.y} -> ${center.x},${endY})`
-          );
-          const { adbFactory } = getSystemTrayDependencies();
-          const adb = adbFactory(device);
-          await adb.executeCommand(
-            `shell input swipe ${center.x} ${center.y} ${center.x} ${endY} ` +
-            `${EXPAND_GROUP_SWIPE_DURATION_MS}`
-          );
-          groupExpanded = true;
-          await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-          observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
-          continue;
-        }
       }
     }
 

@@ -24,6 +24,9 @@ import { ListInstalledApps } from "../features/observe/ListInstalledApps";
 import { createJSONToolResponse, createStructuredToolResponse } from "../utils/toolUtils";
 import { resolveSwipeDirection } from "../utils/swipeOnUtils";
 import { RecompositionTracker } from "../features/performance/RecompositionTracker";
+import { DefaultElementFinder } from "../features/utility/ElementFinder";
+import { defaultTimer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
 import { serverConfig } from "../utils/ServerConfig";
 import {
@@ -111,6 +114,9 @@ export type {
   SystemTrayAdb,
   SystemTrayDependencies,
 };
+
+const RETRY_WHILE_VISIBLE_DELAY_MS = 1500;
+const RETRY_WHILE_VISIBLE_DEFAULT_TIMEOUT_MS = 10000;
 
 export {
   setSystemTrayDependencies,
@@ -323,9 +329,19 @@ export const selectAllTextSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }));
 
+const retryWhileVisibleSchema = z.object({
+  text: z.string().optional().describe("Retry pressing the button while this text is still visible on screen"),
+  elementId: z.string().optional().describe("Retry pressing the button while this element ID is still visible on screen"),
+  timeout: z.number().optional().describe("Maximum time in ms to keep retrying (default: 10000)")
+});
+
 export const pressButtonSchema = addDeviceTargetingToSchema(z.object({
   button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"])
     .describe("Button to press"),
+  retryWhileVisible: retryWhileVisibleSchema.optional().describe(
+    "After pressing the button, check if the specified element is still visible. " +
+    "If so, wait and press again. Useful when heads-up notifications intercept back presses."
+  ),
   platform: platformSchema
 }));
 
@@ -529,12 +545,73 @@ export function registerInteractionTools() {
     RecompositionTracker.getInstance().recordInteraction();
     try {
       const pressButton = new PressButton(device);
-      const result = await pressButton.execute(args.button, progress); // observe = true
+      const result = await pressButton.execute(args.button, progress);
+
+      if (!args.retryWhileVisible || !result.success) {
+        return createJSONToolResponse({
+          message: `Pressed button ${args.button}`,
+          observation: result.observation,
+          ...result
+        });
+      }
+
+      const finder = new DefaultElementFinder();
+      const retryOpts = args.retryWhileVisible;
+      const timeoutMs = retryOpts.timeout ?? RETRY_WHILE_VISIBLE_DEFAULT_TIMEOUT_MS;
+      const startTime = defaultTimer.now();
+      let latestResult = result;
+      let retryCount = 0;
+      let timedOut = false;
+
+      while (defaultTimer.now() - startTime < timeoutMs) {
+        const hierarchy = latestResult.observation?.viewHierarchy;
+        if (!hierarchy) {
+          break;
+        }
+
+        const found = retryOpts.text
+          ? finder.findElementByText(hierarchy, retryOpts.text, null, true, false)
+          : retryOpts.elementId
+            ? finder.findElementByResourceId(hierarchy, retryOpts.elementId, null)
+            : null;
+
+        if (!found) {
+          logger.info(
+            `[PRESS_BUTTON] retryWhileVisible: element gone after ${retryCount} retry(s), navigation succeeded`
+          );
+          break;
+        }
+
+        retryCount++;
+        logger.info(
+          `[PRESS_BUTTON] retryWhileVisible: element still visible (retry ${retryCount}), ` +
+          `waiting ${RETRY_WHILE_VISIBLE_DELAY_MS}ms before pressing ${args.button} again`
+        );
+
+        await defaultTimer.sleep(RETRY_WHILE_VISIBLE_DELAY_MS);
+
+        if (defaultTimer.now() - startTime >= timeoutMs) {
+          timedOut = true;
+          logger.warn(`[PRESS_BUTTON] retryWhileVisible: timed out after ${retryCount} retries, element still visible`);
+          break;
+        }
+
+        latestResult = await pressButton.execute(args.button, progress);
+        if (!latestResult.success) {
+          break;
+        }
+      }
 
       return createJSONToolResponse({
-        message: `Pressed button ${args.button}`,
-        observation: result.observation,
-        ...result
+        message: timedOut
+          ? `Pressed button ${args.button} ${retryCount + 1} time(s) but element still visible (retryWhileVisible timed out)`
+          : retryCount > 0
+            ? `Pressed button ${args.button} (${retryCount + 1} attempt(s), retryWhileVisible)`
+            : `Pressed button ${args.button}`,
+        observation: latestResult.observation,
+        retryCount,
+        timedOut,
+        ...latestResult
       });
     } catch (error) {
       throw new ActionableError(`Failed to press button: ${error}`);

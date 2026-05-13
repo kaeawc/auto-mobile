@@ -16,15 +16,8 @@ export interface SelectAllTextArgs {
   platform: Platform;
 }
 
-export interface PressButtonRetryWhileVisible {
-  text?: string;
-  elementId?: string;
-  timeout?: number;
-}
-
 export interface PressButtonArgs {
   button: "home" | "back" | "menu" | "power" | "volume_up" | "volume_down" | "recent";
-  retryWhileVisible?: PressButtonRetryWhileVisible;
   platform: Platform;
 }
 

@@ -296,6 +296,16 @@ const migrateStepFields = (
     }
   }
 
+  if (normalizedTool === "systemTray") {
+    const notification = isRecord(mergedParams.notification) ? mergedParams.notification : undefined;
+    if (notification && typeof notification.timeout === "number" && mergedParams.awaitTimeout === undefined) {
+      mergedParams.awaitTimeout = notification.timeout;
+      delete notification.timeout;
+      recordWarning(warnings, "Moved notification.timeout to awaitTimeout.", stepIndex);
+      changed = true;
+    }
+  }
+
   if (normalizedTool === "observe") {
     if (mergedParams.withViewHierarchy !== undefined) {
       delete mergedParams.withViewHierarchy;

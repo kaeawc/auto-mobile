@@ -343,6 +343,40 @@ describe("PlanMigrator", () => {
         expect(report.warnings.some(w => w.message.includes("Removed deprecated scrollMode"))).toBe(true);
       });
 
+      test("moves systemTray notification.timeout to awaitTimeout", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "systemTray",
+            action: "tap",
+            notification: { title: "Test notification", timeout: 15000 },
+          }],
+        });
+
+        expect(plan.steps[0].params.awaitTimeout).toBe(15000);
+        expect(plan.steps[0].params.notification.timeout).toBeUndefined();
+        expect(plan.steps[0].params.notification.title).toBe("Test notification");
+        expect(report.warnings.some(w => w.message.includes("notification.timeout to awaitTimeout"))).toBe(true);
+      });
+
+      test("does not overwrite explicit awaitTimeout with notification.timeout", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "systemTray",
+            action: "tap",
+            notification: { title: "Test", timeout: 15000 },
+            awaitTimeout: 10000,
+          }],
+        });
+
+        expect(plan.steps[0].params.awaitTimeout).toBe(10000);
+      });
+
       test("removes deprecated observe.withViewHierarchy", () => {
         const { plan, report } = migratePlan({
           name: "Plan",

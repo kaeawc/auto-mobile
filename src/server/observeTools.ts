@@ -192,6 +192,13 @@ const waitForObservation = async (
     elementId: "elementId" in waitFor ? waitFor.elementId : undefined
   };
 
+  // When overhead is disabled, skip screenshots and back stack during ALL waitFor
+  // observations (including the initial one) to reduce ADB contention. This prevents
+  // slow back stack fetches (dumpsys activity) and screenshots (screencap) from
+  // consuming the timeout budget. Trade-off: LATEST_SCREENSHOT will not reflect the
+  // exact screen state when waitFor resolved.
+  const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
+
   throwIfAborted(signal);
   let observation = await observeScreen.execute(
     queryOptions,
@@ -199,7 +206,8 @@ const waitForObservation = async (
     false,
     startTime,
     signal,
-    skipBackStack
+    skipPollingOverhead || skipBackStack,
+    skipPollingOverhead
   );
   let awaitedElement = observation.viewHierarchy
     ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
@@ -221,12 +229,6 @@ const waitForObservation = async (
       awaitTimeout: true
     };
   }
-
-  // When overhead is disabled, skip screenshots and back stack during intermediate polls
-  // to reduce ADB contention. Trade-off: if the element is found mid-poll, LATEST_SCREENSHOT
-  // will reflect the initial observation (before the element appeared), not the exact moment
-  // waitFor resolved.
-  const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
   while (defaultTimer.now() - startTime < timeoutMs) {
     await defaultTimer.sleep(WAIT_FOR_POLL_INTERVAL_MS);

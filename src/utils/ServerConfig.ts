@@ -33,6 +33,7 @@ class ServerConfig {
   private _a11yIncludeNotImportantViews: boolean = true;
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
+  private _planExecutionActive: boolean = false;
 
   private constructor() {}
 
@@ -189,6 +190,14 @@ class ServerConfig {
 
   isA11yRetrieveInteractiveWindows(): boolean {
     return this._a11yRetrieveInteractiveWindows;
+  }
+
+  setPlanExecutionActive(active: boolean): void {
+    this._planExecutionActive = active;
+  }
+
+  isPlanExecutionActive(): boolean {
+    return this._planExecutionActive;
   }
 
   getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean } {

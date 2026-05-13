@@ -651,7 +651,16 @@ export function registerInteractionTools() {
         await tapElement(device, tapMatch.element);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const skipPostActionOverhead = serverConfig.isPlanExecutionActive();
+        const nextObservation = await observeScreen.execute(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          skipPostActionOverhead,
+          skipPostActionOverhead
+        );
 
         return createJSONToolResponse({
           message: notification.tapActionLabel
@@ -689,7 +698,16 @@ export function registerInteractionTools() {
         await swipeElement(device, swipeTarget);
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const skipPostActionOverhead = serverConfig.isPlanExecutionActive();
+        const nextObservation = await observeScreen.execute(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          skipPostActionOverhead,
+          skipPostActionOverhead
+        );
 
         return createJSONToolResponse({
           message: "Dismissed notification",
@@ -728,7 +746,16 @@ export function registerInteractionTools() {
 
         const { observeScreenFactory } = getSystemTrayDependencies();
         const observeScreen = observeScreenFactory(device);
-        const nextObservation = await observeScreen.execute();
+        const skipPostActionOverhead = serverConfig.isPlanExecutionActive();
+        const nextObservation = await observeScreen.execute(
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          skipPostActionOverhead,
+          skipPostActionOverhead
+        );
 
         return createJSONToolResponse({
           message: dismissed > 0

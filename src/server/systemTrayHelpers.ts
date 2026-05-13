@@ -34,7 +34,9 @@ export interface SystemTrayObserver {
     perf?: unknown,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack?: boolean,
+    skipScreenshot?: boolean
   ): Promise<ObserveResult>;
 }
 

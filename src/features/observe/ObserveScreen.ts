@@ -1347,10 +1347,11 @@ export class RealObserveScreen implements ObserveScreen {
   async execute(
     queryOptions?: ViewHierarchyQueryOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = true, // Default to true for direct observe tool requests
+    skipWaitForFresh: boolean = true,
     minTimestamp: number = 0,
     signal?: AbortSignal,
-    skipBackStack: boolean = false
+    skipBackStack: boolean = false,
+    skipScreenshot: boolean = false
   ): Promise<ObserveResult> {
     try {
       logger.debug(`Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
@@ -1367,11 +1368,12 @@ export class RealObserveScreen implements ObserveScreen {
       // Note: collectAllData tracks its phases internally, so we just call it directly
       await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
 
-      // Capture screenshot for latest observation resource
-      if (serverConfig.getAccessibilityAuditConfig()) {
-        await this.captureObservationScreenshot(perf, signal);
-      } else {
-        this.startObservationScreenshot(perf, signal);
+      if (!skipScreenshot) {
+        if (serverConfig.getAccessibilityAuditConfig()) {
+          await this.captureObservationScreenshot(perf, signal);
+        } else {
+          this.startObservationScreenshot(perf, signal);
+        }
       }
 
       // Attach recomposition metrics if enabled

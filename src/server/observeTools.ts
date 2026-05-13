@@ -17,6 +17,7 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
+import { serverConfig } from "../utils/ServerConfig";
 import {
   accessibilityStateSchema,
   activeWindowSchema,
@@ -221,6 +222,12 @@ const waitForObservation = async (
     };
   }
 
+  // When overhead is disabled, skip screenshots and back stack during intermediate polls
+  // to reduce ADB contention. Trade-off: if the element is found mid-poll, LATEST_SCREENSHOT
+  // will reflect the initial observation (before the element appeared), not the exact moment
+  // waitFor resolved.
+  const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
+
   while (defaultTimer.now() - startTime < timeoutMs) {
     await defaultTimer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
@@ -231,7 +238,8 @@ const waitForObservation = async (
       false,
       startTime,
       signal,
-      skipBackStack
+      skipPollingOverhead || skipBackStack,
+      skipPollingOverhead
     );
     awaitedElement = observation.viewHierarchy
       ? findWaitForElement(finder, waitFor, observation.viewHierarchy)

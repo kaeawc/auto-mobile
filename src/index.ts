@@ -55,6 +55,7 @@ function parseArgs(): {
   dismissKeyboardAfterInput: boolean;
   mcpRecording: boolean;
   navigationScreenshots: boolean;
+  noWaitForPollingOverhead: boolean;
   noProxy: boolean;
   noDaemon: boolean;
   noA11yIncludeNotImportantViews: boolean;
@@ -115,6 +116,7 @@ function parseArgs(): {
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
   const mcpRecording = args.includes("--mcp-recording");
   const navigationScreenshots = !args.includes("--no-navigation-screenshots");
+  const noWaitForPollingOverhead = args.includes("--no-waitfor-polling-overhead");
   const noA11yIncludeNotImportantViews = args.includes("--no-include-not-important-views");
   const noA11yReportViewIds = args.includes("--no-report-view-ids");
   const noA11yRetrieveInteractiveWindows = args.includes("--no-retrieve-interactive-windows");
@@ -312,6 +314,7 @@ function parseArgs(): {
     dismissKeyboardAfterInput,
     mcpRecording,
     navigationScreenshots,
+    noWaitForPollingOverhead,
     noProxy,
     noDaemon,
     noA11yIncludeNotImportantViews,
@@ -386,6 +389,7 @@ async function main() {
       dismissKeyboardAfterInput,
       mcpRecording,
       navigationScreenshots,
+      noWaitForPollingOverhead,
       noProxy,
       noDaemon,
       noA11yIncludeNotImportantViews,
@@ -449,6 +453,11 @@ async function main() {
       logger.info("Navigation screenshots disabled (--no-navigation-screenshots)");
     }
 
+    if (noWaitForPollingOverhead) {
+      serverConfig.setWaitForPollingOverheadEnabled(false);
+      logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
+    }
+
     if (daemonMode) {
       await startDaemon({
         port: daemonPort,
@@ -476,6 +485,7 @@ async function main() {
         skipCtrlProxyDownload,
         mcpRecording,
         noNavigationScreenshots: !navigationScreenshots,
+        noWaitForPollingOverhead,
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,
@@ -532,6 +542,7 @@ async function main() {
         rawElementSearch,
         skipCtrlProxyDownload,
         noNavigationScreenshots: !navigationScreenshots,
+        noWaitForPollingOverhead,
         noA11yIncludeNotImportantViews,
         noA11yReportViewIds,
         noA11yRetrieveInteractiveWindows,

@@ -29,6 +29,7 @@ class ServerConfig {
   private _mcpRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
   private _navigationScreenshotsEnabled: boolean = true;
+  private _waitForPollingOverheadEnabled: boolean = true;
   private _a11yIncludeNotImportantViews: boolean = true;
   private _a11yReportViewIds: boolean = true;
   private _a11yRetrieveInteractiveWindows: boolean = true;
@@ -156,6 +157,14 @@ class ServerConfig {
 
   isNavigationScreenshotsEnabled(): boolean {
     return this._navigationScreenshotsEnabled;
+  }
+
+  setWaitForPollingOverheadEnabled(enabled: boolean): void {
+    this._waitForPollingOverheadEnabled = enabled;
+  }
+
+  isWaitForPollingOverheadEnabled(): boolean {
+    return this._waitForPollingOverheadEnabled;
   }
 
   setA11yIncludeNotImportantViews(enabled: boolean): void {

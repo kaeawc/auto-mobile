@@ -22,6 +22,7 @@ import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
 import { boundsArea } from "../utils/bounds";
+import { logger } from "../utils/logger";
 
 // ============================================================================
 // Interfaces
@@ -33,7 +34,9 @@ export interface SystemTrayObserver {
     perf?: unknown,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack?: boolean,
+    skipScreenshot?: boolean
   ): Promise<ObserveResult>;
 }
 
@@ -148,6 +151,7 @@ const SYSTEM_TRAY_CLASS_HINTS = [
 ];
 const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
   "notification_row",
+  "expandablenotificationrow",
   "status_bar_notification",
   "notification_container",
   "notification_content",
@@ -163,12 +167,16 @@ const NOTIFICATION_ROW_CLASS_HINTS = [
 const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
   ...SYSTEM_TRAY_RESOURCE_ID_HINTS,
   "notification_shelf",
-  "notification_stack_scroll"
+  "notification_stack_scroll",
+  "notification_children_container",
+  "notification_container_parent",
+  "shared_notification_container"
 ];
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
 export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
+export const EXPAND_GROUP_SETTLE_MS = 500;
 
 // ============================================================================
 // Internal Types
@@ -197,6 +205,7 @@ interface SystemTrayNotificationCandidate {
   node: any;
   depth: number;
   element?: Element;
+  groupNode?: any;
 }
 
 interface SystemTrayNotificationMatch {
@@ -491,29 +500,131 @@ const nodeHasNotificationRowHint = (node: any): boolean => {
   return matchesResourceId || matchesClassName;
 };
 
-const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
-  const candidates: SystemTrayNotificationCandidate[] = [];
+// Only checks direct children for notification_children_container.
+// Android's standard SystemUI places this container as an immediate child
+// of the group row node. If a future OEM wraps it deeper, this will need
+// to become a recursive search.
+const nodeIsNotificationGroup = (node: any): boolean => {
+  const children = node.node;
+  const checkChild = (child: any): boolean => {
+    if (!child) {
+      return false;
+    }
+    const props = getNodeProperties(child);
+    if (!props) {
+      return false;
+    }
+    const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+    return resourceId.includes("notification_children_container");
+  };
+
+  if (Array.isArray(children)) {
+    return children.some(checkChild);
+  }
+  return checkChild(children);
+};
+
+export const isMatchInCollapsedGroup = (match: SystemTrayNotificationMatch): boolean => {
+  return !!match.candidate.groupNode;
+};
+
+const findExpandButtonInGroup = (groupNode: any): Element | null => {
   const parser = new DefaultElementParser();
 
-  const visit = (node: any, depth: number): void => {
+  const search = (node: any): Element | null => {
     if (!node) {
-      return;
+      return null;
     }
 
-    if (nodeHasNotificationRowHint(node)) {
-      const element = parser.parseNodeBounds(node) ?? undefined;
-      candidates.push({ node, depth, element });
-      return;
+    const props = getNodeProperties(node);
+    if (props) {
+      const contentDesc = String(props["content-desc"] ?? props.contentDesc ?? "").toLowerCase();
+      const resourceId = String(props["resource-id"] ?? props.resourceId ?? "").toLowerCase();
+      const matchesDesc = contentDesc === "expand";
+      const matchesId = resourceId.includes("expand_button");
+      if (matchesDesc || matchesId) {
+        if (matchesDesc !== matchesId) {
+          logger.warn(
+            `[systemTray] Expand button partial match: ` +
+            `content-desc="${contentDesc}", resource-id="${resourceId}"`
+          );
+        }
+        return parser.parseNodeBounds(node) ?? null;
+      }
     }
 
     const children = node.node;
     if (Array.isArray(children)) {
       for (const child of children) {
-        visit(child, depth + 1);
+        const result = search(child);
+        if (result) {
+          return result;
+        }
       }
     } else if (children && typeof children === "object") {
-      visit(children, depth + 1);
+      return search(children);
     }
+
+    return null;
+  };
+
+  return search(groupNode);
+};
+
+export const expandNotificationGroup = async (
+  device: BootedDevice,
+  match: SystemTrayNotificationMatch
+): Promise<boolean> => {
+  const groupNode = match.candidate.groupNode;
+  if (!groupNode) {
+    return false;
+  }
+
+  const expandButton = findExpandButtonInGroup(groupNode);
+  if (!expandButton) {
+    logger.warn("[systemTray] Collapsed group detected but no expand button found in group node");
+    return false;
+  }
+
+  logger.info(
+    `[systemTray] Expanding collapsed notification group ` +
+    `(tap ${expandButton.bounds?.left},${expandButton.bounds?.top})`
+  );
+  await tapElement(device, expandButton);
+  return true;
+};
+
+const collectNotificationCandidates = (viewHierarchy: ViewHierarchyResult): SystemTrayNotificationCandidate[] => {
+  const candidates: SystemTrayNotificationCandidate[] = [];
+  const parser = new DefaultElementParser();
+
+  const visitChildren = (node: any, depth: number, groupNode?: any): void => {
+    const children = node.node;
+    if (Array.isArray(children)) {
+      for (const child of children) {
+        visit(child, depth + 1, groupNode);
+      }
+    } else if (children && typeof children === "object") {
+      visit(children, depth + 1, groupNode);
+    }
+  };
+
+  const visit = (node: any, depth: number, groupNode?: any): void => {
+    if (!node) {
+      return;
+    }
+
+    if (nodeHasNotificationRowHint(node)) {
+      if (nodeIsNotificationGroup(node)) {
+        visitChildren(node, depth, node);
+        return;
+      }
+      const element = parser.parseNodeBounds(node) ?? undefined;
+      candidates.push({ node, depth, element, groupNode });
+      return;
+    }
+
+    visitChildren(node, depth, groupNode);
   };
 
   const rootNodes = getHierarchyRoots(viewHierarchy);
@@ -894,6 +1005,12 @@ const getCandidateArea = (candidate: SystemTrayNotificationCandidate): number =>
   return boundsArea(bounds);
 };
 
+const CANDIDATE_NO_BOUNDS_TOP_Y = Infinity;
+
+const getCandidateTopY = (candidate: SystemTrayNotificationCandidate): number => {
+  return candidate.element?.bounds?.top ?? CANDIDATE_NO_BOUNDS_TOP_Y;
+};
+
 const selectBestNotificationMatch = (
   matches: SystemTrayNotificationMatch[]
 ): SystemTrayNotificationMatch | null => {
@@ -911,6 +1028,12 @@ const selectBestNotificationMatch = (
       }
       if (leftCounts.partial !== rightCounts.partial) {
         return rightCounts.partial - leftCounts.partial;
+      }
+      // Prefer topmost notification (most recent in Android shade)
+      const leftTop = getCandidateTopY(left.candidate);
+      const rightTop = getCandidateTopY(right.candidate);
+      if (leftTop !== rightTop) {
+        return leftTop - rightTop;
       }
       const leftArea = getCandidateArea(left.candidate);
       const rightArea = getCandidateArea(right.candidate);
@@ -1161,16 +1284,16 @@ export const waitForNotificationMatch = async (
   }
 
   while (true) {
-    if (timer.now() >= deadlineMs) {
-      return { observation, match: null };
-    }
-
     const viewHierarchy = observation.viewHierarchy;
     if (viewHierarchy && isSystemTrayOpen(viewHierarchy, device.platform)) {
       const match = findBestNotificationMatch(viewHierarchy, criteria, appMatchTexts);
       if (match) {
         return { observation, match };
       }
+    }
+
+    if (timer.now() >= deadlineMs) {
+      return { observation, match: null };
     }
 
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);

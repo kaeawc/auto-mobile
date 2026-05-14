@@ -9,6 +9,8 @@ import {
   ensureSystemTrayOpen,
   tapElement,
   swipeElement,
+  isMatchInCollapsedGroup,
+  expandNotificationGroup,
 } from "../../src/server/systemTrayHelpers";
 import type { SystemTrayIosClient } from "../../src/server/systemTrayHelpers";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -334,6 +336,609 @@ const createIosNotificationCenterHierarchy = (title: string, body?: string): Vie
       }]
     }
   }
+});
+
+// ============================================================================
+// Notification group matching tests
+// ============================================================================
+
+const createTrayWithGroupedNotifications = (
+  appLabel: string,
+  titles: string[]
+): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "packageName": SYSTEM_TRAY_PACKAGE,
+        "bounds": "[0,0][1080,1920]"
+      },
+      node: [{
+        $: {
+          "resource-id": "com.android.systemui:id/expandableNotificationRow",
+          "bounds": "[48,663][1296,993]"
+        },
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_children_container",
+            "className": "android.view.ViewGroup",
+            "bounds": "[48,663][1296,993]"
+          },
+          node: [
+            {
+              $: {
+                "resource-id": "android:id/notification_header",
+                "className": "android.widget.RelativeLayout",
+                "bounds": "[48,663][1296,731]"
+              },
+              node: [
+                {
+                  $: {
+                    "text": appLabel,
+                    "resource-id": "android:id/app_name_text",
+                    "bounds": "[204,672][391,721]"
+                  }
+                },
+                {
+                  $: {
+                    "content-desc": "Expand",
+                    "resource-id": "android:id/expand_button",
+                    "className": "android.widget.Button",
+                    "clickable": "true",
+                    "bounds": "[1084,663][1296,731]"
+                  }
+                }
+              ]
+            },
+            ...titles.map((title, i) => ({
+              $: {
+                "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                "className": "android.widget.FrameLayout",
+                "bounds": `[48,${731 + i * 80}][1296,${811 + i * 80}]`
+              },
+              node: {
+                $: {
+                  "resource-id": "android:id/notification_content",
+                  "bounds": `[48,${731 + i * 80}][1296,${811 + i * 80}]`
+                },
+                node: {
+                  $: {
+                    "text": title,
+                    "resource-id": "android:id/title",
+                    "bounds": `[96,${741 + i * 80}][900,${801 + i * 80}]`
+                  }
+                }
+              }
+            }))
+          ]
+        }
+      }]
+    }
+  }
+} as unknown as ViewHierarchyResult);
+
+const createTrayWithGroupedNotificationsNoExpandButton = (
+  appLabel: string,
+  titles: string[]
+): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "packageName": SYSTEM_TRAY_PACKAGE,
+        "bounds": "[0,0][1080,1920]"
+      },
+      node: [{
+        $: {
+          "resource-id": "com.android.systemui:id/expandableNotificationRow",
+          "bounds": "[48,663][1296,993]"
+        },
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_children_container",
+            "className": "android.view.ViewGroup",
+            "bounds": "[48,663][1296,993]"
+          },
+          node: [
+            {
+              $: {
+                "resource-id": "android:id/notification_header",
+                "className": "android.widget.RelativeLayout",
+                "bounds": "[48,663][1296,731]"
+              },
+              node: {
+                $: {
+                  "text": appLabel,
+                  "resource-id": "android:id/app_name_text",
+                  "bounds": "[204,672][391,721]"
+                }
+              }
+            },
+            ...titles.map((title, i) => ({
+              $: {
+                "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                "className": "android.widget.FrameLayout",
+                "bounds": `[48,${731 + i * 80}][1296,${811 + i * 80}]`
+              },
+              node: {
+                $: {
+                  "resource-id": "android:id/notification_content",
+                  "bounds": `[48,${731 + i * 80}][1296,${811 + i * 80}]`
+                },
+                node: {
+                  $: {
+                    "text": title,
+                    "resource-id": "android:id/title",
+                    "bounds": `[96,${741 + i * 80}][900,${801 + i * 80}]`
+                  }
+                }
+              }
+            }))
+          ]
+        }
+      }]
+    }
+  }
+} as unknown as ViewHierarchyResult);
+
+const createTrayWithExpandedNotifications = (
+  titles: string[]
+): ViewHierarchyResult => ({
+  packageName: SYSTEM_TRAY_PACKAGE,
+  hierarchy: {
+    node: {
+      $: {
+        "resource-id": "com.android.systemui:id/notification_stack_scroller",
+        "packageName": SYSTEM_TRAY_PACKAGE,
+        "bounds": "[0,0][1080,1920]"
+      },
+      node: titles.map((title, i) => ({
+        $: {
+          "resource-id": "com.android.systemui:id/expandableNotificationRow",
+          "className": "android.widget.FrameLayout",
+          "clickable": "true",
+          "bounds": `[48,${400 + i * 200}][1296,${600 + i * 200}]`
+        },
+        node: {
+          $: {
+            "resource-id": "android:id/notification_content",
+            "bounds": `[48,${400 + i * 200}][1296,${600 + i * 200}]`
+          },
+          node: {
+            $: {
+              "text": title,
+              "resource-id": "android:id/title",
+              "bounds": `[96,${410 + i * 200}][900,${590 + i * 200}]`
+            }
+          }
+        }
+      }))
+    }
+  }
+} as unknown as ViewHierarchyResult);
+
+describe("systemTray grouped notifications", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("matches individual notification inside a collapsed group", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["Zillow Real-Time Tour request", "New Lead: Jane Smith"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Zillow Real-Time Tour request");
+  });
+
+  test("prefers topmost notification when multiple match", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["Zillow Real-Time Tour request", "Zillow Real-Time Tour request"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Zillow Real-Time Tour request");
+    // First notification row starts at y=731, second at y=811
+    expect(result.match!.candidate.element?.bounds?.top).toBe(731);
+  });
+
+  test("does not match notification_container_parent or shared_notification_container", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+
+    const hierarchy: any = {
+      packageName: SYSTEM_TRAY_PACKAGE,
+      hierarchy: {
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_panel",
+            "packageName": SYSTEM_TRAY_PACKAGE,
+            "bounds": "[0,0][1344,2992]"
+          },
+          node: {
+            $: {
+              "resource-id": "com.android.systemui:id/shared_notification_container",
+              "bounds": "[0,0][1344,2992]"
+            },
+            node: {
+              $: {
+                "resource-id": "com.android.systemui:id/notification_container_parent",
+                "bounds": "[0,0][1344,2992]"
+              },
+              node: {
+                $: {
+                  "resource-id": "com.android.systemui:id/notification_stack_scroller",
+                  "bounds": "[0,0][1344,2896]"
+                },
+                node: {
+                  $: {
+                    "resource-id": "com.android.systemui:id/expandableNotificationRow",
+                    "clickable": "true",
+                    "bounds": "[48,663][1296,1073]"
+                  },
+                  node: {
+                    $: {
+                      "text": "Zillow Real-Time Tour request",
+                      "resource-id": "android:id/title",
+                      "bounds": "[204,813][1248,878]"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(hierarchy)
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.candidate.element?.bounds?.top).toBe(663);
+    expect(result.match!.candidate.element?.bounds?.bottom).toBe(1073);
+    expect(result.match!.candidate.node?.$?.["resource-id"]).toBe(
+      "com.android.systemui:id/expandableNotificationRow"
+    );
+  });
+
+  test("does not match unrelated titles in grouped notifications", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["New Lead: Jane Smith", "New Lead: Bob Wilson"]
+      )),
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["New Lead: Jane Smith", "New Lead: Bob Wilson"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    await advancePendingSleeps(fakeTimer, 3);
+
+    const result = await resultPromise;
+
+    expect(result.match).toBeNull();
+  });
+});
+
+describe("systemTray group expansion", () => {
+  afterEach(() => {
+    resetSystemTrayDependencies();
+  });
+
+  test("detects match in collapsed group via groupNode", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["Zillow Real-Time Tour request"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+  });
+
+  test("standalone notification is not in collapsed group", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const hierarchy: any = {
+      packageName: SYSTEM_TRAY_PACKAGE,
+      hierarchy: {
+        node: {
+          $: {
+            "resource-id": "com.android.systemui:id/notification_stack_scroller",
+            "packageName": SYSTEM_TRAY_PACKAGE,
+            "bounds": "[0,0][1080,1920]"
+          },
+          node: {
+            $: {
+              "resource-id": "com.android.systemui:id/expandableNotificationRow",
+              "clickable": "true",
+              "bounds": "[48,663][1296,1073]"
+            },
+            node: {
+              $: {
+                "text": "Zillow Real-Time Tour request",
+                "resource-id": "android:id/title",
+                "bounds": "[204,813][1248,878]"
+              }
+            }
+          }
+        }
+      }
+    };
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(hierarchy)
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(result.match!)).toBe(false);
+  });
+
+  test("expandNotificationGroup taps expand button in group", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotifications(
+        "FUBStaging",
+        ["Zillow Real-Time Tour request"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+
+    const expanded = await expandNotificationGroup(device, result.match!);
+    expect(expanded).toBe(true);
+
+    const tapCommands = fakeAdb.getExecutedCommands()
+      .filter(cmd => cmd.includes("input tap"));
+    expect(tapCommands.length).toBe(1);
+
+    const tapCmd = tapCommands[0];
+    expect(tapCmd).toContain("input tap");
+    expect(tapCmd).toMatch(/input tap \d+ \d+/);
+  });
+
+  test("expandNotificationGroup returns false when no expand button exists", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayWithGroupedNotificationsNoExpandButton(
+        "FUBStaging",
+        ["Zillow Real-Time Tour request"]
+      ))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+
+    const expanded = await expandNotificationGroup(device, result.match!);
+    expect(expanded).toBe(false);
+
+    const tapCommands = fakeAdb.getExecutedCommands()
+      .filter(cmd => cmd.includes("input tap"));
+    expect(tapCommands.length).toBe(0);
+  });
+
+  test("tap action expands collapsed group then re-matches", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+
+    const collapsedHierarchy = createTrayWithGroupedNotifications(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request", "Test message"]
+    );
+    const expandedHierarchy = createTrayWithExpandedNotifications(
+      ["Zillow Real-Time Tour request", "Test message"]
+    );
+
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(expandedHierarchy),
+      createObservation(expandedHierarchy),
+      createObservation(expandedHierarchy),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      5000
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
+
+    const reResult = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      5000
+    );
+
+    expect(reResult.match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(reResult.match!)).toBe(false);
+  });
+
+  test("re-match returns null when notification disappears after expand", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 1000]);
+
+    const collapsedHierarchy = createTrayWithGroupedNotifications(
+      "FUBStaging",
+      ["Zillow Real-Time Tour request"]
+    );
+    const postExpandHierarchy = createTrayWithExpandedNotifications(
+      ["Completely different notification"]
+    );
+
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(collapsedHierarchy),
+      createObservation(postExpandHierarchy),
+      createObservation(postExpandHierarchy),
+      createObservation(postExpandHierarchy),
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    const { match } = await waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      5000
+    );
+
+    expect(match).not.toBeNull();
+    expect(isMatchInCollapsedGroup(match!)).toBe(true);
+
+    const expanded = await expandNotificationGroup(device, match!);
+    expect(expanded).toBe(true);
+
+    const reMatchPromise = waitForNotificationMatch(
+      device,
+      { title: "Zillow Real-Time Tour request" },
+      [],
+      500
+    );
+
+    await advancePendingSleeps(fakeTimer, 5);
+
+    const reResult = await reMatchPromise;
+    expect(reResult.match).toBeNull();
+  });
 });
 
 describe("iOS systemTray open", () => {

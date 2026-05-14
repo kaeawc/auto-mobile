@@ -67,6 +67,37 @@ This is a high-level summary of core MCP tools exposed by the server.
 ## Device Management
 - `listDevices`, `startDevice`, `killDevice`, `setActiveDevice`
 
+# Android Notification Group Handling (Hard-Won Knowledge)
+
+When Android collapses 2+ notifications from the same app into a group,
+you **must expand the group before tapping** a specific notification.
+Tapping a notification inside a collapsed group opens the app generically
+instead of triggering the notification's deep-link intent.
+
+The `systemTray` tool handles this automatically. See
+`docs/design-docs/plat/android/system-tray-lookfor.md` for full details.
+
+## What does NOT work (do not retry these approaches)
+
+- Tapping text nodes inside collapsed groups (opens app generically)
+- Swiping on the group (`adb shell input swipe` does not expand groups)
+- Tapping the expand button without identifying the correct group node
+- Matching without expansion (tap target is not clickable until expanded)
+
+## What works
+
+1. Match notification text inside the collapsed group hierarchy.
+2. Detect the match is inside a group (via `groupNode` reference).
+3. Find and tap the "Expand" button (`content-desc: "Expand"` or
+   `resource-id` containing `expand_button`).
+4. Wait 500 ms, re-observe, re-match, then tap.
+
+## CtrlProxy visibility bypass
+
+`ViewHierarchyExtractor.kt` bypasses `isVisibleToUser` for
+`com.android.systemui` nodes. Collapsed groups mark child text as
+not visible even though they are present in the shade.
+
 # Codex specific
 
 - GitHub interactions use the GitHub CLI (`gh`).

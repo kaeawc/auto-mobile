@@ -72,8 +72,27 @@ systemTray "open" → systemTray "clearAll" → systemTray "close"
 (trigger notification) → systemTray "open" → systemTray "find"
 ```
 
+## Collapsed Notification Groups
+
+When an app posts 2+ notifications, Android collapses them into a single
+group. The `tap` action handles this **automatically** — no special
+parameters needed:
+
+1. Matches the notification text inside the collapsed group
+2. Detects that the match is inside a collapsed group
+3. Taps the "Expand" button on the group header (matched by
+   `content-desc: "Expand"` or `resource-id` containing `expand_button`)
+4. Re-observes the hierarchy after expansion
+5. Taps the specific individual notification (triggering its deep-link)
+
+This is critical because tapping a notification inside a collapsed group
+without expanding first will open the app generically instead of triggering
+the notification's specific intent/deep-link.
+
 ## Tips
 
 - Always `open` the system tray before other actions
 - Use `pressButton "back"` or `homeScreen` to close the shade
 - Notifications may take a moment to appear after triggering
+- Collapsed notification groups are expanded automatically when tapping —
+  no extra parameters or steps required

@@ -11,6 +11,8 @@ import type { AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader } from "./AvdConfigReader";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
+const modelNameCache = new Map<string, string>();
+
 /**
  * Interface for Android Emulator (AVD) management
  * Provides emulator lifecycle and control capabilities
@@ -684,25 +686,31 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
         let deviceName = device.deviceId; // Default fallback
 
-        try {
-          // Try to get the actual device model name
-          const adbWithDevice = this.adbFactory.create(device);
-          const result = await adbWithDevice.executeCommand(
-            "shell getprop ro.product.model",
-            infoTimeoutMs,
-            undefined,
-            true
-          );
-          const modelName = result.stdout.trim();
+        const cachedModel = modelNameCache.get(device.deviceId);
+        if (cachedModel) {
+          deviceName = cachedModel;
+          logger.info(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
+        } else {
+          try {
+            const adbWithDevice = this.adbFactory.create(device);
+            const result = await adbWithDevice.executeCommand(
+              "shell getprop ro.product.model",
+              infoTimeoutMs,
+              undefined,
+              true
+            );
+            const modelName = result.stdout.trim();
 
-          if (modelName && modelName !== "unknown" && modelName.length > 0) {
-            deviceName = modelName;
-            logger.info(`Got model name for ${device.deviceId}: "${modelName}"`);
-          } else {
-            logger.info(`No model name found for ${device.deviceId}, using device ID`);
+            if (modelName && modelName !== "unknown" && modelName.length > 0) {
+              deviceName = modelName;
+              modelNameCache.set(device.deviceId, modelName);
+              logger.info(`Got model name for ${device.deviceId}: "${modelName}"`);
+            } else {
+              logger.info(`No model name found for ${device.deviceId}, using device ID`);
+            }
+          } catch (error) {
+            logger.info(`Failed to get model name for ${device.deviceId}: ${error}`);
           }
-        } catch (error) {
-          logger.info(`Failed to get model name for ${device.deviceId}: ${error}`);
         }
 
         runningDevices.push({
@@ -716,7 +724,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       return runningDevices;
     } catch (error) {
-      logger.error("Failed to get running emulators:", error);
+      logger.error(`[DeviceListTimeout] Failed to get running emulators (ADB likely timed out):`, error);
       return [];
     }
   }

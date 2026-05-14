@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ToolRegistry } from "./toolRegistry";
+import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { ActionableError, BootedDevice, ExecutePlanResult } from "../models";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { logger } from "../utils/logger";
@@ -157,8 +157,26 @@ const executePlanTool = async (device: BootedDevice, params: {
   cleanupAppId?: string;
   cleanupClearAppData?: boolean;
   captureObserveSteps?: "summary" | "full";
-}, _progress?: unknown, signal?: AbortSignal): Promise<any> => {
+}, progress?: ProgressCallback, signal?: AbortSignal): Promise<any> => {
   const startTime = defaultTimer.now();
+
+  // Send periodic progress heartbeats to keep the SSE stream alive during
+  // long-running plan execution. Without these, the Streamable HTTP response
+  // stream can go idle and be silently dropped, causing the MCP client to
+  // time out even though the tool completed successfully.
+  let progressHeartbeatCount = 0;
+  const progressHeartbeat = progress
+    ? defaultTimer.setInterval(() => {
+      progressHeartbeatCount++;
+      progress(progressHeartbeatCount, undefined, "executing").catch(err => {
+        logger.debug(`[executePlan] Progress heartbeat delivery failed: ${err}`);
+      });
+    }, 30_000)
+    : undefined;
+  const clearProgressHeartbeat = () => {
+    if (progressHeartbeat) {defaultTimer.clearInterval(progressHeartbeat);}
+  };
+
   const recordTestExecution = async (
     status: TestExecutionStatus,
     durationMs: number,
@@ -501,6 +519,8 @@ const executePlanTool = async (device: BootedDevice, params: {
 
     logger.info(`[PERF] Returning error from executePlanTool (deviceId=${device.deviceId})`);
     return createStructuredToolResponse(response);
+  } finally {
+    clearProgressHeartbeat();
   }
 };
 
@@ -686,7 +706,7 @@ export const registerPlanTools = () => {
     "Execute a series of tool calls from a YAML plan content. Stops execution if any step fails (success: false). Optionally can resume execution from a specific step index.",
     executePlanSchema,
     executePlanTool,
-    false,
+    true,
     false,
     { outputSchema: executePlanResultSchema }
   );

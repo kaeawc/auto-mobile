@@ -168,7 +168,9 @@ const executePlanTool = async (device: BootedDevice, params: {
   const progressHeartbeat = progress
     ? defaultTimer.setInterval(() => {
       progressHeartbeatCount++;
-      progress(progressHeartbeatCount, undefined, "executing").catch(() => {});
+      progress(progressHeartbeatCount, undefined, "executing").catch(err => {
+        logger.debug(`[executePlan] Progress heartbeat delivery failed: ${err}`);
+      });
     }, 30_000)
     : undefined;
   const clearProgressHeartbeat = () => {

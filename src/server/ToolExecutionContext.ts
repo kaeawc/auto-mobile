@@ -8,6 +8,7 @@ import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
 import { CtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
+import { type Timer, defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Storage for accessibility service setup timing.
@@ -113,7 +114,22 @@ export async function createToolExecutionContext(
   };
 }
 
-async function ensureAccessibilityServiceReady(deviceId: string, sessionId: string, platform: Platform): Promise<void> {
+const A11Y_TRANSIENT_ERROR_PATTERNS = [
+  "Operation aborted",
+  "Operation cancelled",
+  "Command timed out",
+];
+
+function isTransientA11yError(error: string): boolean {
+  return A11Y_TRANSIENT_ERROR_PATTERNS.some(p => error.includes(p));
+}
+
+async function ensureAccessibilityServiceReady(
+  deviceId: string,
+  sessionId: string,
+  platform: Platform,
+  timer: Timer = defaultTimer
+): Promise<void> {
   const device: BootedDevice = {
     name: deviceId,
     platform,
@@ -121,38 +137,54 @@ async function ensureAccessibilityServiceReady(deviceId: string, sessionId: stri
   };
   logger.info(`[ToolExecutionContext] Ensuring accessibility service is ready for session ${sessionId}`);
 
-  // Always track setup timing (it's one-time per session and valuable for debugging)
-  const perf = createPerformanceTracker(true);
-  perf.serial("ensureAccessibilityServiceReady");
+  const MAX_ATTEMPTS = 2;
+  const RETRY_DELAY_MS = 3000;
 
-  const serviceManager = AndroidCtrlProxyManager.getInstance(device);
-  // New session gets a clean setup attempt — the singleton's attemptedAutomatedSetup
-  // flag may be stale from a prior session on the same device.
-  serviceManager.resetSetupState();
-  const setupResult = await serviceManager.setup(false, perf);
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const perf = createPerformanceTracker(true);
+    perf.serial("ensureAccessibilityServiceReady");
 
-  if (!setupResult.success) {
+    const serviceManager = AndroidCtrlProxyManager.getInstance(device);
+    serviceManager.resetSetupState();
+    const setupResult = await serviceManager.setup(false, perf);
+
+    if (!setupResult.success) {
+      perf.end();
+      const timings = perf.getTimings();
+      if (timings) {
+        logger.info(`[ToolExecutionContext] Accessibility service setup failed`, { perfTiming: JSON.stringify(timings, null, 2) });
+      }
+
+      const errorMsg = setupResult.error || setupResult.message || "";
+      if (attempt < MAX_ATTEMPTS && isTransientA11yError(errorMsg)) {
+        logger.warn(
+          `[A11yRetry] Transient failure on attempt ${attempt}/${MAX_ATTEMPTS}, retrying in ${RETRY_DELAY_MS}ms: ${errorMsg}`
+        );
+        await timer.sleep(RETRY_DELAY_MS);
+        continue;
+      }
+
+      throw new ActionableError(
+        `Failed to setup accessibility service for device ${deviceId} (session ${sessionId}): ${errorMsg}`
+      );
+    }
+
+    if (attempt > 1) {
+      logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
+    }
+
+    const accessibilityClient = CtrlProxyClient.getInstance(deviceId);
+    const connected = await perf.track("waitForConnection", () => accessibilityClient.waitForConnection());
+
     perf.end();
     const timings = perf.getTimings();
     if (timings) {
-      logger.info(`[ToolExecutionContext] Accessibility service setup failed`, { perfTiming: JSON.stringify(timings, null, 2) });
+      storeSetupTiming(deviceId, timings);
+      logger.info(`[ToolExecutionContext] Accessibility service ready for session ${sessionId}`, { connected });
+    } else {
+      logger.warn(`[ToolExecutionContext] No timing data captured for setup (deviceId=${deviceId})`);
     }
-    throw new ActionableError(
-      `Failed to setup accessibility service for device ${deviceId} (session ${sessionId}): ${setupResult.error || setupResult.message}`
-    );
-  }
-
-  // Wait for WebSocket connection to be ready after setup
-  const accessibilityClient = CtrlProxyClient.getInstance(deviceId);
-  const connected = await perf.track("waitForConnection", () => accessibilityClient.waitForConnection());
-
-  perf.end();
-  const timings = perf.getTimings();
-  if (timings) {
-    storeSetupTiming(deviceId, timings);
-    logger.info(`[ToolExecutionContext] Accessibility service ready for session ${sessionId}`, { connected });
-  } else {
-    logger.warn(`[ToolExecutionContext] No timing data captured for setup (deviceId=${deviceId})`);
+    return;
   }
 }
 

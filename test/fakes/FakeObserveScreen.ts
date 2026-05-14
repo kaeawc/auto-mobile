@@ -142,7 +142,9 @@ export class FakeObserveScreen implements ObserveScreen {
     _perf?: any,
     _skipWaitForFresh?: boolean,
     _minTimestamp?: number,
-    _signal?: AbortSignal
+    _signal?: AbortSignal,
+    _skipBackStack?: boolean,
+    _skipScreenshot?: boolean
   ): Promise<ObserveResult> {
     this.executedOperations.push("execute");
     this.executeCallCount++;

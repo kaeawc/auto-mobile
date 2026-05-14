@@ -96,6 +96,19 @@ export class TapOnElement extends BaseVisualChange {
    */
   private static readonly ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS_WHEN_LOADING = 32;
 
+  /**
+   * Separate budget for consecutive "ctrl-proxy returned no hierarchy" results.
+   * When the accessibility service WebSocket is temporarily unresponsive, these
+   * shouldn't consume the normal refind attempts (the element is likely still there).
+   */
+  private static readonly ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE = 12;
+
+  /**
+   * Longer backoff when ctrl-proxy returns no hierarchy — gives the WebSocket
+   * time to recover rather than hammering it every 150ms.
+   */
+  private static readonly ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS = 500;
+
   private static readonly ANDROID_PRE_TAP_REFIND_DELAY_MS = 150;
 
   private static readonly ANDROID_PRE_TAP_REFRESH_TIMEOUT_MS = 800;
@@ -406,11 +419,16 @@ export class TapOnElement extends BaseVisualChange {
     } | null = null;
 
     let maxAttempts = TapOnElement.ANDROID_PRE_TAP_REFIND_MAX_ATTEMPTS;
+    let consecutiveNoHierarchy = 0;
+    let refindAttempt = 0;
 
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    while (refindAttempt < maxAttempts) {
       throwIfAborted(signal);
-      if (attempt > 0) {
-        await this.timer.sleep(TapOnElement.ANDROID_PRE_TAP_REFIND_DELAY_MS);
+      if (refindAttempt > 0 || consecutiveNoHierarchy > 0) {
+        const delayMs = consecutiveNoHierarchy > 0
+          ? TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_DELAY_MS
+          : TapOnElement.ANDROID_PRE_TAP_REFIND_DELAY_MS;
+        await this.timer.sleep(delayMs);
       }
 
       const freshHierarchy = await this.refreshViewHierarchy(
@@ -419,13 +437,27 @@ export class TapOnElement extends BaseVisualChange {
         signal
       );
       if (!freshHierarchy) {
+        consecutiveNoHierarchy++;
         logger.warn(
-          `[TapOnElement] Android pre-tap refresh attempt ${attempt + 1}/${maxAttempts} returned no hierarchy`
+          `[TapOnElement] Android pre-tap refresh returned no hierarchy ` +
+          `(consecutive: ${consecutiveNoHierarchy}/${TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE}, ` +
+          `refind attempt: ${refindAttempt}/${maxAttempts})`
         );
+        if (consecutiveNoHierarchy >= TapOnElement.ANDROID_PRE_TAP_NO_HIERARCHY_MAX_CONSECUTIVE) {
+          return {
+            ok: false,
+            error:
+              `Android tap aborted: accessibility service was unreachable for ${consecutiveNoHierarchy} consecutive attempts ` +
+              `(ctrl-proxy WebSocket unresponsive). The device may be under heavy load or the accessibility service may need reconnection.`
+          };
+        }
         consecutiveStable = 0;
         prevBounds = null;
         continue;
       }
+
+      consecutiveNoHierarchy = 0;
+      refindAttempt++;
 
       if (
         androidViewHierarchyIndicatesLikelyBlockingLoading(freshHierarchy, this.elementParser) &&
@@ -440,7 +472,7 @@ export class TapOnElement extends BaseVisualChange {
       const refind = this.findElementInHierarchy(options, freshHierarchy);
       if (!refind.selection.element) {
         logger.warn(
-          `[TapOnElement] Android pre-tap refresh attempt ${attempt + 1}/${maxAttempts} did not re-find tap target`
+          `[TapOnElement] Android pre-tap refresh attempt ${refindAttempt}/${maxAttempts} did not re-find tap target`
         );
         consecutiveStable = 0;
         prevBounds = null;
@@ -477,7 +509,7 @@ export class TapOnElement extends BaseVisualChange {
 
       if (consecutiveStable >= stableMatchesRequired) {
         logger.info(
-          `[TapOnElement] Android tap target stable after ${attempt + 1} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`
+          `[TapOnElement] Android tap target stable after ${refindAttempt} refresh(es) (bounds matched on last ${stableMatchesRequired} consecutive re-find(s), ε=${TapOnElement.ANDROID_PRE_TAP_BOUNDS_EPSILON_PX}px)`
         );
         return { ok: true, ...best };
       }

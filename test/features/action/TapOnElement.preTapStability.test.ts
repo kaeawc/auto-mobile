@@ -171,6 +171,99 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     expect(result.tapElement).toBe(el);
   });
 
+  test("null hierarchies do not consume refind attempts — recovers after many nulls", async () => {
+    const { tap } = createTapOnElement();
+    const vh = makeHierarchy();
+    const el = makeElement(STABLE_BOUNDS);
+
+    const sequence: StubSequenceEntry[] = [
+      ...Array.from({ length: 10 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      { hierarchy: vh, element: el },
+    ];
+
+    stubStabilityDeps(tap, sequence);
+
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.tapElement).toBe(el);
+  });
+
+  test("aborts with specific error after too many consecutive null hierarchies", async () => {
+    const { tap } = createTapOnElement();
+
+    stubStabilityDeps(tap, [{ hierarchy: null, element: null }]);
+
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false
+    );
+
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("accessibility service was unreachable");
+  });
+
+  test("consecutive null counter resets when hierarchy returns", async () => {
+    const { tap } = createTapOnElement();
+    const vh = makeHierarchy();
+    const el = makeElement(STABLE_BOUNDS);
+
+    const sequence: StubSequenceEntry[] = [
+      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      { hierarchy: vh, element: el },
+      ...Array.from({ length: 5 }, () => ({ hierarchy: null, element: null } as StubSequenceEntry)),
+      { hierarchy: vh, element: el },
+    ];
+
+    stubStabilityDeps(tap, sequence);
+
+    const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", tapClickableParent: true, action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.tapElement).toBe(el);
+  });
+
+  test("uses longer delay after null hierarchy vs normal refind delay", async () => {
+    const { tap, timer } = createTapOnElement();
+    const vh = makeHierarchy();
+    const el = makeElement(STABLE_BOUNDS);
+
+    const sleepDurations: number[] = [];
+    const origSleep = timer.sleep.bind(timer);
+    timer.sleep = async (ms: number) => {
+      sleepDurations.push(ms);
+      return origSleep(ms);
+    };
+
+    stubStabilityDeps(tap, [
+      { hierarchy: null, element: null },
+      { hierarchy: null, element: null },
+      { hierarchy: vh, element: el },
+    ]);
+
+    await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
+      { text: "Contact Name", action: "tap" },
+      { screenSize: { width: 1080, height: 1920 } },
+      "tap",
+      false
+    );
+
+    expect(sleepDurations[0]).toBe(500);
+    expect(sleepDurations[1]).toBe(500);
+  });
+
   test("churn-prone selectors require 2 consecutive stable matches", async () => {
     const { tap } = createTapOnElement();
     const vh = makeHierarchy();

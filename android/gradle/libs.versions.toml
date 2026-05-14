@@ -13,7 +13,7 @@ build-android-agp = "9.2.1"
 # Kotlin versions
 build-kotlin = "2.3.21"
 build-kotlin-language = "2.3"              # Used in all Kotlin modules
-build-kotlin-coroutines = "1.11.0"
+build-kotlin-coroutines = "1.10.2"
 
 # Java versions
 build-java-target = "21"                   # Used in root build.gradle.kts and playground
@@ -32,7 +32,7 @@ androidx-startup = "1.2.0"
 # Media library versions
 coil = "3.4.0"
 core-splashscreen = "1.2.0"
-kotlinx-coroutines-test = "1.11.0"
+kotlinx-coroutines-test = "1.10.2"
 media3 = "1.10.0"
 
 # Library versions

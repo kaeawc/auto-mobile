@@ -29,6 +29,11 @@ class ServerConfig {
   private _mcpRecordingEnabled: boolean = false;
   private _dismissKeyboardAfterInputEnabled: boolean = false;
   private _navigationScreenshotsEnabled: boolean = true;
+  private _waitForPollingOverheadEnabled: boolean = true;
+  private _a11yIncludeNotImportantViews: boolean = true;
+  private _a11yReportViewIds: boolean = true;
+  private _a11yRetrieveInteractiveWindows: boolean = true;
+  private _planExecutionActive: boolean = false;
 
   private constructor() {}
 
@@ -153,6 +158,54 @@ class ServerConfig {
 
   isNavigationScreenshotsEnabled(): boolean {
     return this._navigationScreenshotsEnabled;
+  }
+
+  setWaitForPollingOverheadEnabled(enabled: boolean): void {
+    this._waitForPollingOverheadEnabled = enabled;
+  }
+
+  isWaitForPollingOverheadEnabled(): boolean {
+    return this._waitForPollingOverheadEnabled;
+  }
+
+  setA11yIncludeNotImportantViews(enabled: boolean): void {
+    this._a11yIncludeNotImportantViews = enabled;
+  }
+
+  isA11yIncludeNotImportantViews(): boolean {
+    return this._a11yIncludeNotImportantViews;
+  }
+
+  setA11yReportViewIds(enabled: boolean): void {
+    this._a11yReportViewIds = enabled;
+  }
+
+  isA11yReportViewIds(): boolean {
+    return this._a11yReportViewIds;
+  }
+
+  setA11yRetrieveInteractiveWindows(enabled: boolean): void {
+    this._a11yRetrieveInteractiveWindows = enabled;
+  }
+
+  isA11yRetrieveInteractiveWindows(): boolean {
+    return this._a11yRetrieveInteractiveWindows;
+  }
+
+  setPlanExecutionActive(active: boolean): void {
+    this._planExecutionActive = active;
+  }
+
+  isPlanExecutionActive(): boolean {
+    return this._planExecutionActive;
+  }
+
+  getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean } {
+    return {
+      includeNotImportantViews: this._a11yIncludeNotImportantViews,
+      reportViewIds: this._a11yReportViewIds,
+      retrieveInteractiveWindows: this._a11yRetrieveInteractiveWindows,
+    };
   }
 
 }

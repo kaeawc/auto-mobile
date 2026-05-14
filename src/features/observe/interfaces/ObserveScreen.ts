@@ -21,7 +21,9 @@ export interface ObserveScreen {
     perf?: PerformanceTracker,
     skipWaitForFresh?: boolean,
     minTimestamp?: number,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack?: boolean,
+    skipScreenshot?: boolean
   ): Promise<ObserveResult>;
 
   /**

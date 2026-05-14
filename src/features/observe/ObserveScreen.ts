@@ -576,7 +576,8 @@ export class RealObserveScreen implements ObserveScreen {
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack: boolean = false
   ): Promise<void> {
     switch (this.device.platform) {
       case "android":
@@ -617,16 +618,20 @@ export class RealObserveScreen implements ObserveScreen {
               layoutSeqSum: 0
             };
           }
-          // Always use ADB for back stack (accessibility service cannot determine stack depth)
-          await perf.track("backStack", () => this.collectBackStack(result, perf, signal));
+          if (!skipBackStack) {
+            await perf.track("backStack", () => this.collectBackStack(result, perf, signal));
+          }
           logger.debug("[OBSERVE] Using device metadata from accessibility service");
         } else {
           logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
           // Fall back to ADB for all metadata
-          await Promise.all([
+          const tasks: Promise<void>[] = [
             perf.track("wakefulness", () => this.collectWakefulness(result, signal)),
-            perf.track("backStack", () => this.collectBackStack(result, perf, signal)),
-          ]);
+          ];
+          if (!skipBackStack) {
+            tasks.push(perf.track("backStack", () => this.collectBackStack(result, perf, signal)));
+          }
+          await Promise.all(tasks);
         }
 
         // Note: Offscreen filtering is now done in the Android accessibility service (Kotlin)
@@ -1342,9 +1347,11 @@ export class RealObserveScreen implements ObserveScreen {
   async execute(
     queryOptions?: ViewHierarchyQueryOptions,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = true, // Default to true for direct observe tool requests
+    skipWaitForFresh: boolean = true,
     minTimestamp: number = 0,
-    signal?: AbortSignal
+    signal?: AbortSignal,
+    skipBackStack: boolean = false,
+    skipScreenshot: boolean = false
   ): Promise<ObserveResult> {
     try {
       logger.debug(`Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
@@ -1359,13 +1366,15 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Collect all data components with parallelization
       // Note: collectAllData tracks its phases internally, so we just call it directly
-      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+      const planActive = serverConfig.isPlanExecutionActive();
+      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack || planActive);
 
-      // Capture screenshot for latest observation resource
-      if (serverConfig.getAccessibilityAuditConfig()) {
-        await this.captureObservationScreenshot(perf, signal);
-      } else {
-        this.startObservationScreenshot(perf, signal);
+      if (!skipScreenshot && !planActive) {
+        if (serverConfig.getAccessibilityAuditConfig()) {
+          await this.captureObservationScreenshot(perf, signal);
+        } else {
+          this.startObservationScreenshot(perf, signal);
+        }
       }
 
       // Attach recomposition metrics if enabled
@@ -1425,8 +1434,8 @@ export class RealObserveScreen implements ObserveScreen {
       logger.debug(`Total observe command execution took ${this.timer.now() - startTime}ms`);
       return result;
     } catch (err) {
-      logger.error("Critical error in observe command:", err);
-      const errorMessage = err instanceof Error ? err.message : String(err);
+      const errorMessage = err instanceof Error ? (err.stack || err.message) : String(err);
+      logger.error(`Critical error in observe command: ${errorMessage}`);
       ScreenshotJobTracker.cancelJob(this.device.deviceId);
       RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, `Observation failed: ${errorMessage}`);
       return {

@@ -115,6 +115,9 @@ export class Daemon {
     if (options.noNavigationScreenshots) {
       serverConfig.setNavigationScreenshotsEnabled(false);
     }
+    if (options.noWaitForPollingOverhead) {
+      serverConfig.setWaitForPollingOverheadEnabled(false);
+    }
     if (options.memPerfAudit) {
       serverConfig.setMemPerfAuditMode(true);
     }
@@ -126,6 +129,15 @@ export class Daemon {
     }
     if (options.skipCtrlProxyDownload) {
       serverConfig.setSkipCtrlProxyDownload(true);
+    }
+    if (options.noA11yIncludeNotImportantViews) {
+      serverConfig.setA11yIncludeNotImportantViews(false);
+    }
+    if (options.noA11yReportViewIds) {
+      serverConfig.setA11yReportViewIds(false);
+    }
+    if (options.noA11yRetrieveInteractiveWindows) {
+      serverConfig.setA11yRetrieveInteractiveWindows(false);
     }
   }
 
@@ -755,6 +767,11 @@ export class Daemon {
 
     this.deviceDisconnectTimer = defaultTimer.setInterval(async () => {
       try {
+        if (serverConfig.isPlanExecutionActive()) {
+          logger.debug("[DisconnectMonitor] Skipping — plan execution active");
+          return;
+        }
+
         const bootedDevices = await deviceManager.getBootedDevices("either");
         const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
         const activeRecordings = await listActiveVideoRecordings();

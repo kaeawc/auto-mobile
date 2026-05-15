@@ -37,7 +37,7 @@ import { DefaultElementParser } from "../utility/ElementParser";
 import { CtrlProxyClient as AndroidCtrlProxyClient } from "./android";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "./ios";
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
-import type { ObserveScreen } from "./interfaces/ObserveScreen";
+import type { ObserveScreen, ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
 import type { ScreenSize } from "./interfaces/ScreenSize";
 import type { SystemInsets } from "./interfaces/SystemInsets";
@@ -1344,15 +1344,14 @@ export class RealObserveScreen implements ObserveScreen {
    * @param minTimestamp - If provided, cached data must have updatedAt >= this value (used after actions to ensure fresh data)
    * @returns The observation result
    */
-  async execute(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = true,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    skipBackStack: boolean = false,
-    skipScreenshot: boolean = false
-  ): Promise<ObserveResult> {
+  async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
+    const queryOptions = options?.queryOptions;
+    const perf = options?.perf ?? new NoOpPerformanceTracker();
+    const skipWaitForFresh = options?.skipWaitForFresh ?? true;
+    const minTimestamp = options?.minTimestamp ?? 0;
+    const signal = options?.signal;
+    const skipBackStack = options?.skipBackStack ?? false;
+    const skipScreenshot = options?.skipScreenshot ?? false;
     try {
       logger.debug(`Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
       const startTime = this.timer.now();

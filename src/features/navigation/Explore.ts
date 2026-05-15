@@ -171,7 +171,7 @@ export class Explore extends BaseVisualChange {
           break;
         }
         // Get current screen state
-        const observation = await this.observeScreen.execute(undefined, perf, true, 0, signal);
+        const observation = await this.observeScreen.execute({ perf, skipWaitForFresh: true, signal });
 
         const viewHierarchy = observation.viewHierarchy;
         if (viewHierarchy && !viewHierarchy.hierarchy.error) {
@@ -371,7 +371,7 @@ export class Explore extends BaseVisualChange {
 
     const warnings: string[] = [];
 
-    const observation = await this.observeScreen.execute(undefined, perf, true, 0, signal);
+    const observation = await this.observeScreen.execute({ perf, skipWaitForFresh: true, signal });
     const viewHierarchy = observation.viewHierarchy;
     if (!viewHierarchy || viewHierarchy.hierarchy.error) {
       warnings.push("Unable to inspect view hierarchy for dry run planning.");

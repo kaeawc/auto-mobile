@@ -200,15 +200,15 @@ const waitForObservation = async (
   const skipPollingOverhead = !serverConfig.isWaitForPollingOverheadEnabled();
 
   throwIfAborted(signal);
-  let observation = await observeScreen.execute(
+  let observation = await observeScreen.execute({
     queryOptions,
-    createGlobalPerformanceTracker(),
-    false,
-    startTime,
+    perf: createGlobalPerformanceTracker(),
+    skipWaitForFresh: false,
+    minTimestamp: startTime,
     signal,
-    skipPollingOverhead || skipBackStack,
-    skipPollingOverhead
-  );
+    skipBackStack: skipPollingOverhead || skipBackStack,
+    skipScreenshot: skipPollingOverhead,
+  });
   let awaitedElement = observation.viewHierarchy
     ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
     : null;
@@ -234,15 +234,15 @@ const waitForObservation = async (
     await defaultTimer.sleep(WAIT_FOR_POLL_INTERVAL_MS);
     throwIfAborted(signal);
 
-    observation = await observeScreen.execute(
+    observation = await observeScreen.execute({
       queryOptions,
-      createGlobalPerformanceTracker(),
-      false,
-      startTime,
+      perf: createGlobalPerformanceTracker(),
+      skipWaitForFresh: false,
+      minTimestamp: startTime,
       signal,
-      skipPollingOverhead || skipBackStack,
-      skipPollingOverhead
-    );
+      skipBackStack: skipPollingOverhead || skipBackStack,
+      skipScreenshot: skipPollingOverhead,
+    });
     awaitedElement = observation.viewHierarchy
       ? findWaitForElement(finder, waitFor, observation.viewHierarchy)
       : null;
@@ -276,7 +276,7 @@ export function registerObserveTools() {
         : null;
       const result = waitOutcome
         ? waitOutcome.observation
-        : await observeScreen.execute(undefined, createGlobalPerformanceTracker(), true, 0, signal);
+        : await observeScreen.execute({ perf: createGlobalPerformanceTracker(), skipWaitForFresh: true, signal });
 
       // Validate that the returned hierarchy matches the expected platform.
       // This guards against cross-platform data contamination where an iOS

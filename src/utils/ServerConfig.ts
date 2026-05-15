@@ -172,32 +172,12 @@ class ServerConfig {
     this._a11yIncludeNotImportantViews = enabled;
   }
 
-  isA11yIncludeNotImportantViews(): boolean {
-    return this._a11yIncludeNotImportantViews;
-  }
-
   setA11yReportViewIds(enabled: boolean): void {
     this._a11yReportViewIds = enabled;
   }
 
-  isA11yReportViewIds(): boolean {
-    return this._a11yReportViewIds;
-  }
-
   setA11yRetrieveInteractiveWindows(enabled: boolean): void {
     this._a11yRetrieveInteractiveWindows = enabled;
-  }
-
-  isA11yRetrieveInteractiveWindows(): boolean {
-    return this._a11yRetrieveInteractiveWindows;
-  }
-
-  setPlanExecutionActive(active: boolean): void {
-    this._planExecutionActive = active;
-  }
-
-  isPlanExecutionActive(): boolean {
-    return this._planExecutionActive;
   }
 
   getAccessibilityFlagsConfig(): { includeNotImportantViews: boolean; reportViewIds: boolean; retrieveInteractiveWindows: boolean } {
@@ -206,6 +186,14 @@ class ServerConfig {
       reportViewIds: this._a11yReportViewIds,
       retrieveInteractiveWindows: this._a11yRetrieveInteractiveWindows,
     };
+  }
+
+  setPlanExecutionActive(active: boolean): void {
+    this._planExecutionActive = active;
+  }
+
+  isPlanExecutionActive(): boolean {
+    return this._planExecutionActive;
   }
 
 }

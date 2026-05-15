@@ -52,15 +52,9 @@ class SequencedObserveScreen extends FakeObserveScreen {
     this.setObserveResult(() => this.nextResult());
   }
 
-  async execute(
-    queryOptions?: unknown,
-    perf?: unknown,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal
-  ): Promise<ObserveResult> {
-    this.minTimestamps.push(minTimestamp);
-    return super.execute(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+  async execute(options?: any): Promise<ObserveResult> {
+    this.minTimestamps.push(options?.minTimestamp);
+    return super.execute(options);
   }
 
   getMinTimestamps(): Array<number | undefined> {

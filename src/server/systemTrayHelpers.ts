@@ -1105,14 +1105,14 @@ const waitForSystemTrayOpen = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (isSystemTrayOpen(observation.viewHierarchy, platform)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   return observation;
@@ -1126,14 +1126,14 @@ const waitForSystemTrayClosed = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (!isSystemTrayOpen(observation.viewHierarchy, platform)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   return observation;
@@ -1156,7 +1156,7 @@ export const ensureSystemTrayOpen = async (
 
   if (device.platform === "ios") {
     minTimestamp = timer.now();
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (isSystemTrayOpen(observation.viewHierarchy, "ios")) {
       return { observation, opened: false, skipped: true, minTimestamp };
     }
@@ -1177,7 +1177,7 @@ export const ensureSystemTrayOpen = async (
 
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (isSystemTrayOpen(observation.viewHierarchy)) {
       return { observation, opened: false, skipped: true, minTimestamp };
     }
@@ -1219,7 +1219,7 @@ export const ensureSystemTrayClosed = async (
 
   if (device.platform === "ios") {
     minTimestamp = timer.now();
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (!isSystemTrayOpen(observation.viewHierarchy, "ios")) {
       return { observation, closed: false, skipped: true, minTimestamp };
     }
@@ -1240,7 +1240,7 @@ export const ensureSystemTrayClosed = async (
 
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (!isSystemTrayOpen(observation.viewHierarchy)) {
       return { observation, closed: false, skipped: true, minTimestamp };
     }
@@ -1280,7 +1280,7 @@ export const waitForNotificationMatch = async (
   let observation = result.observation;
   const minTimestamp = result.minTimestamp;
   if (!observation) {
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   while (true) {
@@ -1297,7 +1297,7 @@ export const waitForNotificationMatch = async (
     }
 
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 };
 

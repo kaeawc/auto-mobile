@@ -143,41 +143,43 @@ describe("retryTapIfNoChange", () => {
 });
 
 describe("ensureTap flag expansion", () => {
-  test("ensureTap enables both preTapStability and retryIfNoChange", () => {
+  test("ensureTap enables both preTapStability and retryIfNoChange", async () => {
     const { tap } = createTapOnElement();
 
-    const original = {
-      text: "Submit",
-      action: "tap" as const,
-      ensureTap: true,
+    let capturedOptions: Record<string, unknown> | undefined;
+    (tap as any).validateOptions = (opts: Record<string, unknown>) => {
+      capturedOptions = opts;
+      return "abort-for-test";
     };
 
-    const result = { ...original };
-    if (result.ensureTap) {
-      Object.assign(result, { preTapStability: true, retryIfNoChange: true });
-    }
+    await tap.execute({
+      text: "Submit",
+      action: "tap",
+      ensureTap: true,
+    } as any);
 
-    expect(result.preTapStability).toBe(true);
-    expect(result.retryIfNoChange).toBe(true);
-
-    expect(tap).toBeDefined();
+    expect(capturedOptions!.preTapStability).toBe(true);
+    expect(capturedOptions!.retryIfNoChange).toBe(true);
   });
 
-  test("ensureTap does not override explicitly set flags", () => {
-    const original = {
-      text: "Submit",
-      action: "tap" as const,
-      ensureTap: true,
-      preTapStability: true,
-      retryIfNoChange: true,
+  test("ensureTap sets flags even when not originally provided", async () => {
+    const { tap } = createTapOnElement();
+
+    let capturedOptions: Record<string, unknown> | undefined;
+    (tap as any).validateOptions = (opts: Record<string, unknown>) => {
+      capturedOptions = opts;
+      return "abort-for-test";
     };
 
-    const result = { ...original };
-    if (result.ensureTap) {
-      Object.assign(result, { preTapStability: true, retryIfNoChange: true });
-    }
+    await tap.execute({
+      text: "Submit",
+      action: "tap",
+      ensureTap: true,
+      preTapStability: undefined,
+      retryIfNoChange: undefined,
+    } as any);
 
-    expect(result.preTapStability).toBe(true);
-    expect(result.retryIfNoChange).toBe(true);
+    expect(capturedOptions!.preTapStability).toBe(true);
+    expect(capturedOptions!.retryIfNoChange).toBe(true);
   });
 });

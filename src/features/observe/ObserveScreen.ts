@@ -1366,10 +1366,9 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Collect all data components with parallelization
       // Note: collectAllData tracks its phases internally, so we just call it directly
-      const planActive = serverConfig.isPlanExecutionActive();
-      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack || planActive);
+      await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
 
-      if (!skipScreenshot && !planActive) {
+      if (!skipScreenshot) {
         if (serverConfig.getAccessibilityAuditConfig()) {
           await this.captureObservationScreenshot(perf, signal);
         } else {

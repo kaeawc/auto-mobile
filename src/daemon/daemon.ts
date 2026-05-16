@@ -510,8 +510,6 @@ export class Daemon {
           ? defaultTimer.setInterval(() => {
             if (res.headersSent && !res.writableEnded && !res.destroyed) {
               res.write(":keepalive\n\n");
-            } else if (res.writableEnded || res.destroyed) {
-              defaultTimer.clearInterval(keepaliveTimer!);
             }
           }, 30_000)
           : undefined;
@@ -826,7 +824,7 @@ export class Daemon {
           }
           const misses = (this.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
           this.deviceDisconnectMisses.set(deviceId, misses);
-          logger.warn(
+          logger.info(
             `[DisconnectMonitor] Device ${deviceId} not in booted list (miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`
           );
           if (misses < DEVICE_DISCONNECT_MISS_THRESHOLD) {

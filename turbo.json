@@ -15,7 +15,12 @@
         "package.json"
       ],
       "outputLogs": "new-only",
-      "env": ["AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS"],
+      "env": [
+        "AUTOMOBILE_SOURCEMAP_INCLUDE_DEPS",
+        "RELEASE_VERSION",
+        "APK_SHA256_CHECKSUM",
+        "IOS_CTRL_PROXY_SHA256_CHECKSUM"
+      ],
       "passThroughEnv": ["CI", "GITHUB_ACTIONS"]
     },
     "lint": {

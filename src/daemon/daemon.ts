@@ -49,7 +49,8 @@ import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService"
 import { serverConfig } from "../utils/ServerConfig";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
-const DEVICE_DISCONNECT_MISS_THRESHOLD = 2;
+const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
+const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 
 /**
  * Main daemon process
@@ -501,12 +502,33 @@ export class Daemon {
           return;
         }
 
+        // SSE keepalive: prevent the fetch() response stream from going idle
+        // during long-running tool calls (e.g. executePlan at ~6-10 min).
+        // Without traffic the client-side stream silently dies; the server
+        // writes the result to a dead pipe and the client eventually times out.
+        // SSE comment lines (`:`) are ignored by EventSourceParserStream.
+        const keepaliveTimer = req.method === "POST"
+          ? defaultTimer.setInterval(() => {
+            if (res.headersSent && !res.writableEnded && !res.destroyed) {
+              res.write(":keepalive\n\n");
+            }
+          }, SSE_KEEPALIVE_INTERVAL_MS)
+          : undefined;
+
+        const clearKeepalive = () => {
+          if (keepaliveTimer) {defaultTimer.clearInterval(keepaliveTimer);}
+        };
+        res.on("close", clearKeepalive);
+        res.on("finish", clearKeepalive);
+
         // Let the transport handle the request
         try {
           await streamableTransport.handleRequest(req, res, parsedBody);
         } catch (error) {
           logger.error("Streamable HTTP request handling failed:", error);
           sendJsonRpcError("Server error", error);
+        } finally {
+          clearKeepalive();
         }
       } else {
         // 404 for unknown paths
@@ -785,6 +807,17 @@ export class Daemon {
           candidateDeviceIds.add(deviceId);
         }
 
+        // When getBootedDevices returns empty but we have tracked devices, ADB
+        // itself likely failed (timeout, connection error). Counting misses in
+        // this state causes false disconnect detections on remote emulators
+        // where ADB can be intermittently slow.
+        if (bootedDeviceIds.size === 0 && candidateDeviceIds.size > 0) {
+          logger.warn(
+            `[DisconnectMonitor] ADB returned 0 devices but ${candidateDeviceIds.size} tracked — skipping miss count (ADB likely unreachable)`
+          );
+          return;
+        }
+
         for (const deviceId of candidateDeviceIds) {
           if (bootedDeviceIds.has(deviceId)) {
             this.deviceDisconnectMisses.delete(deviceId);
@@ -792,6 +825,9 @@ export class Daemon {
           }
           const misses = (this.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
           this.deviceDisconnectMisses.set(deviceId, misses);
+          logger.info(
+            `[DisconnectMonitor] Device ${deviceId} not in booted list (miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`
+          );
           if (misses < DEVICE_DISCONNECT_MISS_THRESHOLD) {
             continue;
           }
@@ -832,7 +868,7 @@ export class Daemon {
           const sessionId = this.sessionManager.getSessionForDevice(deviceId);
           if (sessionId) {
             logger.warn(
-              `[Daemon] Device ${deviceId} disconnected — cancelling session ${sessionId}`
+              `[DisconnectMonitor] Device ${deviceId} confirmed disconnected after ${DEVICE_DISCONNECT_MISS_THRESHOLD} consecutive misses — cancelling session ${sessionId}`
             );
             await this.cancelAndReleaseSession(sessionId);
           }

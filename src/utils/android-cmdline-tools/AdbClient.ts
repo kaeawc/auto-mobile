@@ -77,7 +77,7 @@ export class AdbClient implements AdbExecutor {
   private readonly retryExecutor: RetryExecutor;
   private readonly timer: Timer;
 
-  private static readonly DEVICE_LIST_TIMEOUT_MS = 5000;
+  private static readonly DEVICE_LIST_TIMEOUT_MS = 10000;
   private static readonly MAX_ADB_RETRIES = 3;
 
   /**

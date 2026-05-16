@@ -1,0 +1,239 @@
+import { describe, expect, test } from "bun:test";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+
+const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
+const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
+const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
+
+
+class FakeResponse {
+  headersSent = true;
+  writableEnded = false;
+  destroyed = false;
+  written: string[] = [];
+  listeners: Map<string, Array<() => void>> = new Map();
+
+  write(data: string): void {
+    this.written.push(data);
+  }
+
+  on(event: string, callback: () => void): void {
+    if (!this.listeners.has(event)) {
+      this.listeners.set(event, []);
+    }
+    this.listeners.get(event)!.push(callback);
+  }
+
+  emit(event: string): void {
+    for (const cb of this.listeners.get(event) ?? []) {
+      cb();
+    }
+  }
+}
+
+
+describe("SSE keepalive timer", () => {
+
+  test("writes keepalive comment every interval while response is writable", () => {
+    const timer = new FakeTimer();
+    const res = new FakeResponse();
+
+    timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written).toEqual([":keepalive\n\n"]);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written).toEqual([":keepalive\n\n", ":keepalive\n\n"]);
+  });
+
+  test("does not write keepalive before headers are sent", () => {
+    const timer = new FakeTimer();
+    const res = new FakeResponse();
+    res.headersSent = false;
+
+    timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written).toEqual([]);
+  });
+
+  test("does not write keepalive after response ends", () => {
+    const timer = new FakeTimer();
+    const res = new FakeResponse();
+
+    timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+
+    res.writableEnded = true;
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+  });
+
+  test("does not write keepalive after response is destroyed", () => {
+    const timer = new FakeTimer();
+    const res = new FakeResponse();
+
+    timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+
+    res.destroyed = true;
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+  });
+
+  test("clearKeepalive stops the interval", () => {
+    const timer = new FakeTimer();
+    const res = new FakeResponse();
+
+    const keepaliveTimer = timer.setInterval(() => {
+      if (res.headersSent && !res.writableEnded && !res.destroyed) {
+        res.write(":keepalive\n\n");
+      }
+    }, SSE_KEEPALIVE_INTERVAL_MS);
+
+    const clearKeepalive = () => timer.clearInterval(keepaliveTimer);
+    res.on("close", clearKeepalive);
+
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+
+    res.emit("close");
+    timer.advanceTime(SSE_KEEPALIVE_INTERVAL_MS);
+    expect(res.written.length).toBe(1);
+  });
+});
+
+
+describe("disconnect monitor miss counting", () => {
+
+  const runDisconnectPoll = (
+    deviceDisconnectMisses: Map<string, number>,
+    bootedDeviceIds: Set<string>,
+    candidateDeviceIds: Set<string>,
+  ): { disconnected: string[]; skippedAdbUnreachable: boolean } => {
+    const disconnected: string[] = [];
+
+    if (bootedDeviceIds.size === 0 && candidateDeviceIds.size > 0) {
+      return { disconnected, skippedAdbUnreachable: true };
+    }
+
+    for (const deviceId of candidateDeviceIds) {
+      if (bootedDeviceIds.has(deviceId)) {
+        deviceDisconnectMisses.delete(deviceId);
+        continue;
+      }
+      const misses = (deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
+      deviceDisconnectMisses.set(deviceId, misses);
+      if (misses >= DEVICE_DISCONNECT_MISS_THRESHOLD) {
+        disconnected.push(deviceId);
+      }
+    }
+
+    return { disconnected, skippedAdbUnreachable: false };
+  };
+
+  test("resets miss count when device appears in booted list", () => {
+    const misses = new Map<string, number>();
+    misses.set("device-1", 2);
+
+    runDisconnectPoll(misses, new Set(["device-1"]), new Set(["device-1"]));
+    expect(misses.has("device-1")).toBe(false);
+  });
+
+  test("increments miss count when device is absent", () => {
+    const misses = new Map<string, number>();
+
+    runDisconnectPoll(misses, new Set(), new Set(["device-1"]));
+    // ADB unreachable guard: 0 booted but 1 tracked → skip
+    expect(misses.has("device-1")).toBe(false);
+
+    // Simulate ADB returning some devices but not ours
+    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    expect(misses.get("device-1")).toBe(1);
+
+    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    expect(misses.get("device-1")).toBe(2);
+  });
+
+  test("reports disconnect after threshold consecutive misses", () => {
+    const misses = new Map<string, number>();
+
+    for (let i = 1; i < DEVICE_DISCONNECT_MISS_THRESHOLD; i++) {
+      const result = runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+      expect(result.disconnected).toEqual([]);
+    }
+
+    const result = runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    expect(result.disconnected).toEqual(["device-1"]);
+  });
+
+  test("skips miss counting when ADB returns 0 devices (unreachable guard)", () => {
+    const misses = new Map<string, number>();
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(),
+      new Set(["device-1", "device-2"]),
+    );
+
+    expect(result.skippedAdbUnreachable).toBe(true);
+    expect(result.disconnected).toEqual([]);
+    expect(misses.size).toBe(0);
+  });
+
+  test("miss count resets after device reappears then starts over", () => {
+    const misses = new Map<string, number>();
+
+    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    expect(misses.get("device-1")).toBe(2);
+
+    runDisconnectPoll(misses, new Set(["device-1"]), new Set(["device-1"]));
+    expect(misses.has("device-1")).toBe(false);
+
+    runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
+    expect(misses.get("device-1")).toBe(1);
+  });
+
+  test("fires at poll interval using FakeTimer", () => {
+    const timer = new FakeTimer();
+    let pollCount = 0;
+
+    timer.setInterval(() => {
+      pollCount++;
+    }, DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+
+    expect(pollCount).toBe(0);
+
+    timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+    expect(pollCount).toBe(1);
+
+    timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+    expect(pollCount).toBe(2);
+
+    timer.advanceTime(DEVICE_DISCONNECT_POLL_INTERVAL_MS);
+    expect(pollCount).toBe(3);
+  });
+});

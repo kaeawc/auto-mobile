@@ -914,6 +914,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
 
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
+    this.syncAccessibilityFlagsToDevice();
   }
 
   private syncNetworkStateToDevice(): void {
@@ -951,6 +952,32 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }));
     } catch (e) {
       logger.debug(`[CtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
+    }
+  }
+
+  private syncAccessibilityFlagsToDevice(): void {
+    try {
+      const flags = serverConfig.getAccessibilityFlagsConfig();
+      const allEnabled =
+          flags.includeNotImportantViews && flags.reportViewIds && flags.retrieveInteractiveWindows;
+      if (allEnabled) {
+        return;
+      }
+
+      logger.info(
+        `[CtrlProxyClient] Sending accessibility flags config: ` +
+        `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
+        `reportViewIds=${flags.reportViewIds}, ` +
+        `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}`
+      );
+      this.sendMessage(JSON.stringify({
+        type: "set_accessibility_flags",
+        includeNotImportantViews: flags.includeNotImportantViews,
+        reportViewIds: flags.reportViewIds,
+        retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
+      }));
+    } catch (e) {
+      logger.debug(`[CtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);
     }
   }
 

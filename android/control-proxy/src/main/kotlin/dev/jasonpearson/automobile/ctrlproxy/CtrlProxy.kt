@@ -879,6 +879,13 @@ class CtrlProxy : AccessibilityService() {
               },
               onRequestDeviceInfo = { requestId -> performDeviceInfoRequest(requestId) },
               onSetRecompositionTracking = { enabled -> setRecompositionTrackingEnabled(enabled) },
+              onSetAccessibilityFlags = { includeNotImportant, reportViewIds, retrieveInteractive ->
+                applyAccessibilityFlags(
+                  includeNotImportantViews = includeNotImportant,
+                  reportViewIds = reportViewIds,
+                  retrieveInteractiveWindows = retrieveInteractive
+                )
+              },
               onSetNetworkMockRules = { rulesJson -> broadcastNetworkMockRules(rulesJson) },
               onSetNetworkErrorSimulation = { enabled, errorType, limit, expiresAt ->
                 broadcastNetworkErrorSimulation(enabled, errorType, limit, expiresAt)
@@ -1041,6 +1048,48 @@ class CtrlProxy : AccessibilityService() {
     recompositionStore.setEnabled(enabled)
     broadcastRecompositionControl(enabled)
     Log.d(TAG, "Recomposition tracking ${if (enabled) "enabled" else "disabled"}")
+  }
+
+  private fun applyAccessibilityFlags(
+    includeNotImportantViews: Boolean,
+    reportViewIds: Boolean,
+    retrieveInteractiveWindows: Boolean
+  ) {
+    val info = serviceInfo ?: run {
+      Log.w(TAG, "Cannot apply accessibility flags — serviceInfo is null")
+      return
+    }
+
+    var flags = info.flags
+
+    flags = if (includeNotImportantViews) {
+      flags or AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS
+    } else {
+      flags and AccessibilityServiceInfo.FLAG_INCLUDE_NOT_IMPORTANT_VIEWS.inv()
+    }
+
+    flags = if (reportViewIds) {
+      flags or AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS
+    } else {
+      flags and AccessibilityServiceInfo.FLAG_REPORT_VIEW_IDS.inv()
+    }
+
+    flags = if (retrieveInteractiveWindows) {
+      flags or AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+    } else {
+      flags and AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS.inv()
+    }
+
+    info.flags = flags
+    serviceInfo = info
+
+    Log.i(
+      TAG,
+      "Applied accessibility flags: " +
+          "includeNotImportantViews=$includeNotImportantViews, " +
+          "reportViewIds=$reportViewIds, " +
+          "retrieveInteractiveWindows=$retrieveInteractiveWindows"
+    )
   }
 
   private fun broadcastRecompositionControl(enabled: Boolean) {

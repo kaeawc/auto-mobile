@@ -23,7 +23,9 @@ import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.boolean
 import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.modules.SerializersModule
 import kotlinx.serialization.modules.polymorphic
 import kotlinx.serialization.modules.subclass
@@ -172,6 +174,9 @@ class WebSocketServer(
         ((requestId: String?, permission: String?, requestPermission: Boolean?) -> Unit)? =
         null,
     private val onSetRecompositionTracking: ((enabled: Boolean) -> Unit)? = null,
+    private val onSetAccessibilityFlags:
+        ((includeNotImportantViews: Boolean, reportViewIds: Boolean, retrieveInteractiveWindows: Boolean) -> Unit)? =
+        null,
     private val onSetNetworkMockRules: ((rulesJson: String) -> Unit)? = null,
     private val onSetNetworkErrorSimulation:
         ((enabled: Boolean, errorType: String?, limit: Int?, expiresAtEpochMs: Long?) -> Unit)? =
@@ -703,6 +708,31 @@ class WebSocketServer(
             onSetRecompositionTracking?.invoke(enabled)
           } else {
             Log.w(TAG, "set_recomposition_tracking missing enabled flag")
+          }
+        }
+        "set_accessibility_flags" -> {
+          try {
+            val jsonObj = protocolJson.parseToJsonElement(message).jsonObject
+            val includeNotImportant = jsonObj["includeNotImportantViews"]
+                ?.jsonPrimitive?.boolean ?: true
+            val reportViewIds = jsonObj["reportViewIds"]
+                ?.jsonPrimitive?.boolean ?: true
+            val retrieveInteractive = jsonObj["retrieveInteractiveWindows"]
+                ?.jsonPrimitive?.boolean ?: true
+            Log.i(
+              TAG,
+              "Received accessibility flags config: " +
+                  "includeNotImportantViews=$includeNotImportant, " +
+                  "reportViewIds=$reportViewIds, " +
+                  "retrieveInteractiveWindows=$retrieveInteractive"
+            )
+            onSetAccessibilityFlags?.invoke(
+              includeNotImportant,
+              reportViewIds,
+              retrieveInteractive
+            )
+          } catch (e: Exception) {
+            Log.e(TAG, "Failed to parse set_accessibility_flags", e)
           }
         }
         "set_network_mock_rules" -> {

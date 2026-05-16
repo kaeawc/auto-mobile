@@ -417,6 +417,7 @@ const executePlanTool = async (device: BootedDevice, params: {
     let videoRecordingIds: string[] = [];
     try {
       logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Starting plan execution on device ${device.deviceId} (${device.platform})`);
+      serverConfig.setPlanExecutionActive(true);
       result = await executePlan(
         plan,
         startStep,
@@ -430,6 +431,7 @@ const executePlanTool = async (device: BootedDevice, params: {
       const execDuration = defaultTimer.now() - perfStart;
       logger.info(`[PERF +${execDuration}ms] Plan execution completed: ${result.success ? "SUCCESS" : "FAILED"} (${result.executedSteps}/${result.totalSteps} steps)`);
     } finally {
+      serverConfig.setPlanExecutionActive(false);
       if (androidVideoSession) {
         try {
           logger.info(`[PERF +${defaultTimer.now() - perfStart}ms] Finalizing segmented video recording`);

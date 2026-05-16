@@ -355,6 +355,9 @@ export class DaemonManager implements DaemonManagerLike {
     if (options.noNavigationScreenshots) {
       args.push("--no-navigation-screenshots");
     }
+    if (options.noWaitForPollingOverhead) {
+      args.push("--no-waitfor-polling-overhead");
+    }
     if (options.memPerfAudit) {
       args.push("--mem-perf-audit");
     }
@@ -654,6 +657,8 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       options.noUiPerfMode = true;
     } else if (args[i] === "--no-navigation-screenshots") {
       options.noNavigationScreenshots = true;
+    } else if (args[i] === "--no-waitfor-polling-overhead") {
+      options.noWaitForPollingOverhead = true;
     } else if (args[i] === "--mem-perf-audit") {
       options.memPerfAudit = true;
     } else if (args[i] === "--accessibility-audit") {

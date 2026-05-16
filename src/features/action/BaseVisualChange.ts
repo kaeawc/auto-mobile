@@ -112,13 +112,13 @@ export class BaseVisualChange {
         previousObserveResult = await perf.track("getPreviousObserve", async () => {
           const cached = await this.observeScreen.getMostRecentCachedObserveResult();
           if (!cached?.viewHierarchy || cached.viewHierarchy.hierarchy.error) {
-            return this.observeScreen.execute(options.queryOptions, perf, true, 0, options.signal);
+            return this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: true, signal: options.signal });
           }
           return cached;
         });
       } catch {
         previousObserveResult = await perf.track("getPreviousObserveFallback", async () => {
-          return this.observeScreen.execute(options.queryOptions, perf, true, 0, options.signal);
+          return this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: true, signal: options.signal });
         });
       }
 
@@ -240,7 +240,7 @@ export class BaseVisualChange {
     perf.serial("finalObserve");
     // Wait for fresh data from accessibility service (skipWaitForFresh=false)
     // This ensures we get observation data that reflects the action that just completed
-    let latestObservation = await this.observeScreen.execute(options.queryOptions, perf, false, minTimestamp, options.signal);
+    let latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal });
     perf.end();
 
     const shouldRetry = (observation: ObserveResult): boolean => {
@@ -266,7 +266,7 @@ export class BaseVisualChange {
       logger.info(`[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${retryDelaysMs.length})`);
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
-      latestObservation = await this.observeScreen.execute(options.queryOptions, perf, false, minTimestamp, options.signal);
+      latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal });
       perf.end();
     }
 

@@ -12,6 +12,7 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.dismiss.keyboard.after.input",
       "automobile.daemon.no.ui.perf.mode",
       "automobile.daemon.no.navigation.screenshots",
+      "automobile.daemon.no.waitfor.polling.overhead",
   )
 
   @Before
@@ -41,6 +42,10 @@ class DaemonSocketPathsFlagWiringTest {
     assertFalse(
         "should not contain --no-navigation-screenshots",
         command.contains("--no-navigation-screenshots"),
+    )
+    assertFalse(
+        "should not contain --no-waitfor-polling-overhead",
+        command.contains("--no-waitfor-polling-overhead"),
     )
   }
 
@@ -84,10 +89,24 @@ class DaemonSocketPathsFlagWiringTest {
   }
 
   @Test
+  fun `buildDaemonStartCommand appends no-waitfor-polling-overhead flag when property true`() {
+    System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "true")
+    SystemPropertyCache.clear()
+
+    val command = DaemonSocketPaths.buildDaemonStartCommand()
+
+    assertTrue(
+        "should contain --no-waitfor-polling-overhead",
+        command.contains("--no-waitfor-polling-overhead"),
+    )
+  }
+
+  @Test
   fun `buildDaemonStartCommand appends all flags when all properties set`() {
     System.setProperty("automobile.daemon.dismiss.keyboard.after.input", "true")
     System.setProperty("automobile.daemon.no.ui.perf.mode", "true")
     System.setProperty("automobile.daemon.no.navigation.screenshots", "true")
+    System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "true")
     SystemPropertyCache.clear()
 
     val command = DaemonSocketPaths.buildDaemonStartCommand()
@@ -95,6 +114,7 @@ class DaemonSocketPathsFlagWiringTest {
     assertTrue(command.contains("--dismiss-keyboard-after-input"))
     assertTrue(command.contains("--no-ui-perf-mode"))
     assertTrue(command.contains("--no-navigation-screenshots"))
+    assertTrue(command.contains("--no-waitfor-polling-overhead"))
   }
 
   @Test
@@ -102,6 +122,7 @@ class DaemonSocketPathsFlagWiringTest {
     System.setProperty("automobile.daemon.dismiss.keyboard.after.input", "false")
     System.setProperty("automobile.daemon.no.ui.perf.mode", "false")
     System.setProperty("automobile.daemon.no.navigation.screenshots", "false")
+    System.setProperty("automobile.daemon.no.waitfor.polling.overhead", "false")
     SystemPropertyCache.clear()
 
     val command = DaemonSocketPaths.buildDaemonStartCommand()
@@ -109,6 +130,7 @@ class DaemonSocketPathsFlagWiringTest {
     assertFalse(command.contains("--dismiss-keyboard-after-input"))
     assertFalse(command.contains("--no-ui-perf-mode"))
     assertFalse(command.contains("--no-navigation-screenshots"))
+    assertFalse(command.contains("--no-waitfor-polling-overhead"))
   }
 
   @Test

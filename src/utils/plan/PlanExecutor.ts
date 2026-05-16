@@ -18,6 +18,7 @@ import { PlanPartitioner, TrackedStep } from "./PlanPartitioner";
 import { DaemonState } from "../../daemon/daemonState";
 import { Timer, defaultTimer } from "../SystemTimer";
 import type { FailureObservationSummary } from "../../models/FailureObservation";
+import { ScreenshotJobTracker } from "../ScreenshotJobTracker";
 import {
   summarizeObserveResultForFailure,
   trimObservationForStepCapture,
@@ -423,6 +424,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
           // Parse and validate the parameters
           const parsedParams = tool.schema.parse(enhancedParams);
+
+          if (deviceId) {
+            ScreenshotJobTracker.cancelJob(deviceId);
+          }
 
           // Execute the tool
           logger.info(`[PLAN_STEP_${i + 1}] Calling ${step.tool} with params: ${JSON.stringify(parsedParams).substring(0, 200)}`);
@@ -920,6 +925,10 @@ export class DefaultPlanExecutor implements PlanExecutor {
 
           // Parse and validate parameters
           const parsedParams = tool.schema.parse(enhancedParams);
+
+          if (deviceId) {
+            ScreenshotJobTracker.cancelJob(deviceId);
+          }
 
           // Execute the tool
           logger.debug(

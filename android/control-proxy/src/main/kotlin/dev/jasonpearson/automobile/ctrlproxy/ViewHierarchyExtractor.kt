@@ -370,8 +370,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       }
     }
 
-    // Skip occlusion filtering if disableAllFiltering is true
-    if (!disableAllFiltering && OCCLUSION_FILTER_ENABLED && windowEntries.isNotEmpty()) {
+    // Skip occlusion filtering when disabled, or when there's only one window
+    // (within-window "occlusion" between peer subtrees like notification_panel and
+    // keyguard_message_area_container incorrectly strips content in system UI)
+    if (!disableAllFiltering && OCCLUSION_FILTER_ENABLED && windowEntries.size > 1) {
       val occlusionInfo = buildOcclusionInfo(windowEntries)
       val filteredEntries =
           windowEntries.mapNotNull { windowEntry ->
@@ -421,7 +423,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     // This happens when:
     // 1. An active window has a null root (app restricts accessibility access)
     // 2. Only system UI windows were successfully extracted (no app windows accessible)
-    val ctrlProxyIncomplete = activeWindowHasNullRoot || !hasApplicationWindow
+    val isSystemUiForeground = mainPackageName == "com.android.systemui"
+    val ctrlProxyIncomplete =
+        activeWindowHasNullRoot || (!hasApplicationWindow && !isSystemUiForeground)
     if (ctrlProxyIncomplete) {
       Log.w(
           TAG,
@@ -585,8 +589,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       // Also skip for interactive nodes — Android can mark long-clickable or clickable views
       // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
       // but they must still appear in the hierarchy since users can interact with them.
+      // Also skip for system UI nodes — collapsed notification groups mark child text nodes
+      // as not visible even though they are present and interactable in the shade.
+      val isSystemUiNode = node.packageName?.toString() == "com.android.systemui"
       val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
-      if (!skipVisibilityFilter && !isInteractiveNode && !node.isVisibleToUser) {
+      if (!skipVisibilityFilter && !isSystemUiNode && !isInteractiveNode && !node.isVisibleToUser) {
         return null
       }
 

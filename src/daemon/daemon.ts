@@ -50,6 +50,7 @@ import { serverConfig } from "../utils/ServerConfig";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
+const SSE_KEEPALIVE_INTERVAL_MS = 30_000;
 
 /**
  * Main daemon process
@@ -511,7 +512,7 @@ export class Daemon {
             if (res.headersSent && !res.writableEnded && !res.destroyed) {
               res.write(":keepalive\n\n");
             }
-          }, 30_000)
+          }, SSE_KEEPALIVE_INTERVAL_MS)
           : undefined;
 
         const clearKeepalive = () => {

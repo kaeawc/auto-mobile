@@ -1,4 +1,5 @@
-import { Kysely, Migrator, FileMigrationProvider, DEFAULT_MIGRATION_TABLE } from "kysely";
+import { Kysely } from "kysely";
+import { Migrator, FileMigrationProvider, DEFAULT_MIGRATION_TABLE } from "kysely/migration";
 import { existsSync, promises as fs } from "fs";
 import * as path from "path";
 import { fileURLToPath } from "url";

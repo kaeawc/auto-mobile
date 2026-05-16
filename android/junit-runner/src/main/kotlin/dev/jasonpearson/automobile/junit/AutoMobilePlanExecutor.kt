@@ -81,56 +81,63 @@ internal object AutoMobilePlanExecutor {
         )
 
     // Add optional metadata if available
-    val appVersion = firstNonBlank(
-        System.getProperty("automobile.app.version", ""),
-        System.getenv("AUTOMOBILE_APP_VERSION"),
-        System.getenv("APP_VERSION"),
-    )
+    val appVersion =
+        firstNonBlank(
+            System.getProperty("automobile.app.version", ""),
+            System.getenv("AUTOMOBILE_APP_VERSION"),
+            System.getenv("APP_VERSION"),
+        )
     if (appVersion != null) {
       metadata["appVersion"] = JsonPrimitive(appVersion)
     }
 
-    val gitCommit = firstNonBlank(
-        System.getProperty("automobile.git.commit", ""),
-        System.getenv("AUTOMOBILE_GIT_COMMIT"),
-        System.getenv("GITHUB_SHA"),
-        System.getenv("GIT_COMMIT"),
-        System.getenv("CI_COMMIT_SHA"),
-    )
+    val gitCommit =
+        firstNonBlank(
+            System.getProperty("automobile.git.commit", ""),
+            System.getenv("AUTOMOBILE_GIT_COMMIT"),
+            System.getenv("GITHUB_SHA"),
+            System.getenv("GIT_COMMIT"),
+            System.getenv("CI_COMMIT_SHA"),
+        )
     if (gitCommit != null) {
       metadata["gitCommit"] = JsonPrimitive(gitCommit)
     }
 
-    val targetSdk = firstNonBlank(
-        System.getProperty("automobile.android.targetSdk", ""),
-        System.getProperty("automobile.targetSdk", ""),
-        System.getenv("AUTOMOBILE_TARGET_SDK"),
-        System.getenv("ANDROID_TARGET_SDK"),
-    )?.toIntOrNull()
+    val targetSdk =
+        firstNonBlank(
+                System.getProperty("automobile.android.targetSdk", ""),
+                System.getProperty("automobile.targetSdk", ""),
+                System.getenv("AUTOMOBILE_TARGET_SDK"),
+                System.getenv("ANDROID_TARGET_SDK"),
+            )
+            ?.toIntOrNull()
     if (targetSdk != null) {
       metadata["targetSdk"] = JsonPrimitive(targetSdk)
     }
 
-    val jdkVersion = firstNonBlank(
-        System.getProperty("java.version"),
-        System.getProperty("java.runtime.version"),
-    )
+    val jdkVersion =
+        firstNonBlank(
+            System.getProperty("java.version"),
+            System.getProperty("java.runtime.version"),
+        )
     if (jdkVersion != null) {
       metadata["jdkVersion"] = JsonPrimitive(jdkVersion)
     }
 
-    val jvmTarget = firstNonBlank(
-        System.getProperty("kotlin.jvm.target"),
-        System.getProperty("java.specification.version"),
-    )
+    val jvmTarget =
+        firstNonBlank(
+            System.getProperty("kotlin.jvm.target"),
+            System.getProperty("java.specification.version"),
+        )
     if (jvmTarget != null) {
       metadata["jvmTarget"] = JsonPrimitive(jvmTarget)
     }
 
-    val gradleVersion = firstNonBlank(
-        System.getProperty("org.gradle.version"),
-        System.getProperty("gradle.version"),
-    )
+    val gradleVersion =
+        firstNonBlank(
+            System.getProperty("org.gradle.version"),
+            System.getProperty("gradle.version"),
+        )
     if (gradleVersion != null) {
       metadata["gradleVersion"] = JsonPrimitive(gradleVersion)
     }
@@ -274,7 +281,12 @@ internal object AutoMobilePlanExecutor {
       planContent: String,
       options: AutoMobilePlanExecutionOptions,
   ): InternalExecutionResult {
-    return executePlanFromStep(planContent, options, startStep = 0, recoveryAlreadyAttempted = false)
+    return executePlanFromStep(
+        planContent,
+        options,
+        startStep = 0,
+        recoveryAlreadyAttempted = false,
+    )
   }
 
   /**
@@ -336,7 +348,9 @@ internal object AutoMobilePlanExecutor {
       appendCaptureObserveStepsArgs(args)
 
       if (options.debugMode) {
-        println("Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)")
+        println(
+            "Executing plan via daemon socket: executePlan (startStep=$startStep, attempt=$attempt)"
+        )
       }
 
       DaemonHeartbeat.registerSession(sessionUuid)
@@ -412,7 +426,13 @@ internal object AutoMobilePlanExecutor {
 
     val ciMode = resolveCiMode()
     val recoveryFlagEnabled = agent.recoveryConfigProvider.isRecoveryEnabled()
-    if (!options.aiAssistance || !recoveryFlagEnabled || ciMode || recoveryAlreadyAttempted || failedStepContext == null) {
+    if (
+        !options.aiAssistance ||
+            !recoveryFlagEnabled ||
+            ciMode ||
+            recoveryAlreadyAttempted ||
+            failedStepContext == null
+    ) {
       if (recoveryAlreadyAttempted) {
         println("Recovery already attempted for this test — failing without retry")
       }
@@ -429,7 +449,9 @@ internal object AutoMobilePlanExecutor {
     }
 
     // Attempt Koog-powered recovery
-    println("Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})")
+    println(
+        "Attempting AI-assisted recovery for failed step ${failedStepContext.failedStepIndex + 1} (${failedStepContext.failedTool})"
+    )
 
     val recoveryOutcome = agent.attemptAiRecovery(failedStepContext)
 
@@ -451,13 +473,14 @@ internal object AutoMobilePlanExecutor {
     val resumeStep = failedStepContext.failedStepIndex + 1
     println("AI recovery succeeded, resuming plan from step ${resumeStep + 1}")
 
-    val resumeResult = executePlanFromStep(
-        planContent = planContent,
-        options = options,
-        startStep = resumeStep,
-        recoveryAlreadyAttempted = true, // prevent recursive recovery
-        deviceIdOverride = failedStepContext.deviceId,
-    )
+    val resumeResult =
+        executePlanFromStep(
+            planContent = planContent,
+            options = options,
+            startStep = resumeStep,
+            recoveryAlreadyAttempted = true, // prevent recursive recovery
+            deviceIdOverride = failedStepContext.deviceId,
+        )
 
     return InternalExecutionResult(
         success = resumeResult.success,
@@ -549,22 +572,25 @@ internal object AutoMobilePlanExecutor {
           val success = parsed["success"]?.jsonPrimitive?.content?.toBooleanStrictOrNull()
           if (success == false) {
             val failedStepObj = parsed["failedStep"]?.jsonObject
-            val errorMessage = if (failedStepObj != null) {
-              val stepIndex = failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
-              val tool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
-              val stepError = failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown step error"
-              val executedSteps = parsed["executedSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-              val totalSteps = parsed["totalSteps"]?.jsonPrimitive?.content?.toIntOrNull()
-              buildString {
-                append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
-                append("\n  Error: $stepError")
-                if (executedSteps != null && totalSteps != null) {
-                  append("\n  Executed: $executedSteps/$totalSteps steps")
+            val errorMessage =
+                if (failedStepObj != null) {
+                  val stepIndex =
+                      failedStepObj["stepIndex"]?.jsonPrimitive?.content?.toIntOrNull() ?: 0
+                  val tool = failedStepObj["tool"]?.jsonPrimitive?.content ?: "unknown"
+                  val stepError =
+                      failedStepObj["error"]?.jsonPrimitive?.content ?: "Unknown step error"
+                  val executedSteps = parsed["executedSteps"]?.jsonPrimitive?.content?.toIntOrNull()
+                  val totalSteps = parsed["totalSteps"]?.jsonPrimitive?.content?.toIntOrNull()
+                  buildString {
+                    append("Test plan execution failed at step ${stepIndex + 1} ($tool):")
+                    append("\n  Error: $stepError")
+                    if (executedSteps != null && totalSteps != null) {
+                      append("\n  Executed: $executedSteps/$totalSteps steps")
+                    }
+                  }
+                } else {
+                  parsed["error"]?.jsonPrimitive?.content ?: "AutoMobile plan failed"
                 }
-              }
-            } else {
-              parsed["error"]?.jsonPrimitive?.content ?: "AutoMobile plan failed"
-            }
             return ParsedToolResult(false, errorMessage)
           }
           return ParsedToolResult(true, "")
@@ -770,26 +796,41 @@ internal object AutoMobilePlanExecutor {
       return t.equals("true", ignoreCase = true) || t == "1"
     }
     val env =
-        System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")?.trim()?.lowercase().orEmpty()
+        System.getenv("AUTOMOBILE_EXECUTE_PLAN_CLEANUP_CLEAR_APP_DATA")
+            ?.trim()
+            ?.lowercase()
+            .orEmpty()
     return env == "true" || env == "1" || env == "yes"
   }
+
+  internal const val CAPTURE_OBSERVE_STEPS_PROPERTY =
+      "automobile.junit.executePlan.captureObserveSteps"
+  internal const val CAPTURE_OBSERVE_STEPS_ENV = "AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS"
 
   /**
    * When set, the daemon attaches each successful `observe` step to `executePlan` `debug` (see
    * AutoMobile `captureObserveSteps`). Single-device plans only.
    *
-   * **System property:** `automobile.junit.executePlan.captureObserveSteps` — `summary` or `full`
+   * **System property:** [CAPTURE_OBSERVE_STEPS_PROPERTY] — `summary` or `full`
    *
-   * **Environment:** `AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS` (same values)
+   * **Environment:** [CAPTURE_OBSERVE_STEPS_ENV] (same values)
    */
   private fun appendCaptureObserveStepsArgs(args: MutableMap<String, JsonElement>) {
+    val v = resolveCaptureObserveSteps() ?: return
+    args["captureObserveSteps"] = JsonPrimitive(v)
+  }
+
+  /**
+   * Resolves the `captureObserveSteps` mode from system property (preferred) or environment
+   * variable. Returns `null` if unset or set to an unrecognized value.
+   */
+  @JvmStatic
+  internal fun resolveCaptureObserveSteps(): String? {
     val v =
-        System.getProperty("automobile.junit.executePlan.captureObserveSteps")?.trim()?.lowercase()
-            ?: System.getenv("AUTOMOBILE_EXECUTE_PLAN_CAPTURE_OBSERVE_STEPS")?.trim()?.lowercase()
-            ?: return
-    if (v == "summary" || v == "full") {
-      args["captureObserveSteps"] = JsonPrimitive(v)
-    }
+        System.getProperty(CAPTURE_OBSERVE_STEPS_PROPERTY)?.trim()?.lowercase()
+            ?: System.getenv(CAPTURE_OBSERVE_STEPS_ENV)?.trim()?.lowercase()
+            ?: return null
+    return v.takeIf { it == "summary" || it == "full" }
   }
 
   // ── Retry helpers ────────────────────────────────────────────────────────

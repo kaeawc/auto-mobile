@@ -178,6 +178,39 @@ class AutoMobilePlanExecutorTest {
     assertTrue(errorResult?.errorMessage?.contains("Missing tool name") == true)
   }
 
+  @Test
+  fun `resolveCaptureObserveSteps reads system property and normalizes`() {
+    val cases =
+        listOf(
+            "summary" to "summary",
+            "full" to "full",
+            "  SUMMARY  " to "summary",
+            "FULL" to "full",
+            "bogus" to null,
+            "" to null,
+        )
+    for ((input, expected) in cases) {
+      System.setProperty(AutoMobilePlanExecutor.CAPTURE_OBSERVE_STEPS_PROPERTY, input)
+      try {
+        assertEquals(
+            "input=\"$input\"",
+            expected,
+            AutoMobilePlanExecutor.resolveCaptureObserveSteps(),
+        )
+      } finally {
+        System.clearProperty(AutoMobilePlanExecutor.CAPTURE_OBSERVE_STEPS_PROPERTY)
+      }
+    }
+  }
+
+  @Test
+  fun `resolveCaptureObserveSteps returns null when property is unset`() {
+    System.clearProperty(AutoMobilePlanExecutor.CAPTURE_OBSERVE_STEPS_PROPERTY)
+    // Cannot set env vars from tests; this falls through to the env-var branch which is also unset
+    // in the test JVM, so a null result here also covers the "neither set" case.
+    assertNull(AutoMobilePlanExecutor.resolveCaptureObserveSteps())
+  }
+
   private fun executePlan(): AutoMobilePlanExecutionResult {
     return AutoMobilePlanExecutor.execute(
         "test-plans/launch-clock-app.yaml",

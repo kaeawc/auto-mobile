@@ -8,6 +8,9 @@ import type {
   VideoCaptureConfig,
 } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 describe("PlatformVideoCaptureBackend - Unit Tests", () => {
   let backend: PlatformVideoCaptureBackend;
@@ -99,6 +102,123 @@ describe("PlatformVideoCaptureBackend - Unit Tests", () => {
       };
 
       await expect(backend.stop(invalidHandle)).rejects.toThrow();
+    });
+  });
+
+  describe("Android stop sequence (issue #1960)", () => {
+    function buildAndroidStopHandle(
+      outputPath: string,
+      fakeProcess: FakeChildProcess
+    ): RecordingHandle {
+      const androidHandle = {
+        kind: "android" as const,
+        process: fakeProcess,
+        outputStream: { end: () => undefined },
+        exitState: {
+          exitCode: fakeProcess.exitCode,
+          signal: fakeProcess.signalCode,
+          endedAt: new Date().toISOString(),
+        },
+        exitPromise: Promise.resolve(),
+        stderr: [] as string[],
+        device: {
+          platform: "android",
+          deviceId: "test-emulator",
+          name: "Test Android Emulator",
+        } satisfies BootedDevice,
+        deviceTempPath: "/sdcard/auto-mobile-test.mp4",
+      };
+
+      return {
+        recordingId: "test-stop-sequence",
+        outputPath,
+        startedAt: new Date().toISOString(),
+        backendHandle: androidHandle as any,
+      };
+    }
+
+    function spyOnKill(fakeProcess: FakeChildProcess): Array<NodeJS.Signals | number | undefined> {
+      const signals: Array<NodeJS.Signals | number | undefined> = [];
+      const originalKill = fakeProcess.kill.bind(fakeProcess);
+      fakeProcess.kill = (signal?: NodeJS.Signals | number) => {
+        signals.push(signal);
+        return originalKill(signal);
+      };
+      return signals;
+    }
+
+    test("sends device-side `pkill -2 screenrecord` as the first ADB command on stop", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+
+      // stop() will throw at the adb pull step (FakeAdbClient has no
+      // getBaseCommandParts) — but pkill must run first regardless.
+      await expect(backend.stop(handle)).rejects.toThrow();
+
+      const commands = fakeClient.getAllCommands();
+      expect(commands[0]).toBe("shell pkill -2 screenrecord");
+    });
+
+    test("does NOT signal host adb when the device-side pkill caused it to exit on its own", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      fakeProcess.exitCode = 0;
+      const killSignals = spyOnKill(fakeProcess);
+
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+
+      await expect(backend.stop(handle)).rejects.toThrow();
+
+      expect(killSignals).toEqual([]);
+    });
+
+    test("falls back to host SIGINT when device-side pkill fails and host adb is still running", async () => {
+      const fakeFactory = new FakeAdbClientFactory();
+      const fakeClient = fakeFactory.getFakeClient();
+      fakeClient.setCommandError(
+        "shell pkill -2 screenrecord",
+        new Error("device offline")
+      );
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+
+      const backend = new PlatformVideoCaptureBackend(fakeFactory, fakeTimer);
+      const fakeProcess = new FakeChildProcess();
+      // exitCode stays null → host adb still running when stop() begins
+      const killSignals: Array<NodeJS.Signals | number | undefined> = [];
+
+      let resolveExit!: () => void;
+      const exitPromise = new Promise<void>(resolve => { resolveExit = resolve; });
+
+      fakeProcess.kill = (signal?: NodeJS.Signals | number) => {
+        killSignals.push(signal);
+        if (signal === "SIGINT") {
+          fakeProcess.exitCode = 0;
+          fakeProcess.killed = true;
+          resolveExit();
+        }
+        return true;
+      };
+
+      const handle = buildAndroidStopHandle(path.join(tempDir, "out.mp4"), fakeProcess);
+      (handle.backendHandle as any).exitPromise = exitPromise;
+      (handle.backendHandle as any).exitState.exitCode = null;
+
+      await expect(backend.stop(handle)).rejects.toThrow();
+
+      expect(killSignals).toContain("SIGINT");
+      expect(fakeClient.wasCommandExecuted("shell pkill -2 screenrecord")).toBe(true);
     });
   });
 

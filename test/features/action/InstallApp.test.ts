@@ -450,6 +450,26 @@ describe("InstallApp", () => {
     await expect(installApp.execute(ipaPath, undefined, controller.signal)).rejects.toThrow("Operation cancelled");
   });
 
+  test("treats grep -c failure as not installed instead of throwing", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+    // Simulate grep -c exiting with code 1 when package is not found
+    fakeAdb.setCommandError("grep -c com.example.app", new Error("Command failed with exit code 1"));
+    fakeAdb.setCommandResponse(`install --user 0 -r "${apkPath}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(true);
+    expect(result.upgrade).toBe(false);
+    expect(result.packageName).toBe("com.example.app");
+  });
+
   test("detects Android upgrade when package already installed", async () => {
     const apkPath = "/tmp/app-debug.apk";
     const perf = createPerformanceTracker(true, fakeTimer);

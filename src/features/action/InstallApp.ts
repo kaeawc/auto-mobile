@@ -118,9 +118,13 @@ export class InstallApp {
     if (packageName) {
       // Check if app is already installed for this user
       isInstalled = await perf.track("checkInstalled", async () => {
-        const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
-        const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
-        return parseInt(isInstalledOutput.trim(), 10) > 0;
+        try {
+          const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
+          const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);
+          return parseInt(isInstalledOutput.trim(), 10) > 0;
+        } catch {
+          return false;
+        }
       });
     }
 

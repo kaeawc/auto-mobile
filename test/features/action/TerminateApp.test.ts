@@ -134,4 +134,24 @@ describe("TerminateApp (Android)", () => {
     expect(result.userId).toBe(0);
     expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
   });
+
+  test("treats grep -c failure as not installed instead of throwing", async () => {
+    fakeAdb.setForegroundApp(null);
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", running: true }]);
+    // Simulate grep -c exiting with code 1 when package is not found
+    fakeAdb.setCommandError(
+      "grep -c com.example.app",
+      new Error("Command failed with exit code 1")
+    );
+
+    const terminateApp = new TerminateApp(androidDevice, fakeAdb as any, null, fakeTimer);
+    const result = await terminateApp.execute("com.example.app", { skipObservation: true });
+
+    expect(result.success).toBe(true);
+    expect(result.wasInstalled).toBe(false);
+    expect(result.wasRunning).toBe(false);
+    expect(result.wasForeground).toBe(false);
+    expect(result.userId).toBe(0);
+    expect(fakeAdb.wasCommandExecuted("force-stop")).toBe(false);
+  });
 });

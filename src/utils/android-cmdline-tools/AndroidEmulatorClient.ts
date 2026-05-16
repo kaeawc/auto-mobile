@@ -11,8 +11,6 @@ import type { AvdConfigReader } from "./AvdConfigReader";
 import { FileAvdConfigReader } from "./AvdConfigReader";
 import type { FormFactor } from "../../models/DeviceMatchCriteria";
 
-const modelNameCache = new Map<string, string>();
-
 /**
  * Interface for Android Emulator (AVD) management
  * Provides emulator lifecycle and control capabilities
@@ -121,6 +119,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
   private emulatorPath: string;
   private timer: Timer;
   private adbFactory: AdbClientFactory;
+  private modelNameCache = new Map<string, string>();
   private avdConfigReader: AvdConfigReader;
 
   /**
@@ -686,7 +685,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
         let deviceName = device.deviceId; // Default fallback
 
-        const cachedModel = modelNameCache.get(device.deviceId);
+        const cachedModel = this.modelNameCache.get(device.deviceId);
         if (cachedModel) {
           deviceName = cachedModel;
           logger.info(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
@@ -703,7 +702,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
             if (modelName && modelName !== "unknown" && modelName.length > 0) {
               deviceName = modelName;
-              modelNameCache.set(device.deviceId, modelName);
+              this.modelNameCache.set(device.deviceId, modelName);
               logger.info(`Got model name for ${device.deviceId}: "${modelName}"`);
             } else {
               logger.info(`No model name found for ${device.deviceId}, using device ID`);

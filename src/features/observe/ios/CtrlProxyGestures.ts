@@ -8,6 +8,7 @@
 import { SharedGestureDelegate } from "../shared/SharedGestureDelegate";
 import type { DelegateContext, GestureTimingResult } from "./types";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyGestures extends SharedGestureDelegate {
   constructor(context: DelegateContext) {
@@ -37,38 +38,15 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<GestureTimingResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, totalTimeMs: 0, error: "Not connected to CtrlProxy" };
-    }
-
-    const requestId = this.context.requestManager.generateId("multi_finger_swipe");
-    const promise = this.context.requestManager.register<GestureTimingResult>(
-      requestId,
-      "multi_finger_swipe",
+    return sendCommand<GestureTimingResult>(this.context, {
+      idPrefix: "multi_finger_swipe",
+      responseType: "multi_finger_swipe",
+      messageType: "request_multi_finger_swipe",
+      params: { x1, y1, x2, y2, fingerCount, duration },
       timeoutMs,
-      () => ({
-        success: false,
-        totalTimeMs: timeoutMs,
-        error: `Multi-finger swipe timed out after ${timeoutMs}ms`
-      })
-    );
-
-    const message = {
-      type: "request_multi_finger_swipe",
-      requestId,
-      x1,
-      y1,
-      x2,
-      y2,
-      fingerCount,
-      duration,
-    };
-
-    const ws = this.context.getWebSocket();
-    ws?.send(JSON.stringify(message));
-
-    return promise;
+      perf,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Multi-finger swipe",
+    });
   }
 }

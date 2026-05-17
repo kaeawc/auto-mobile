@@ -9,7 +9,7 @@
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { DelegateContext, GestureTimingResult, BaseResult } from "./types";
-import { createMessage } from "../DeviceServiceUtils";
+import { sendCommand } from "../DeviceServiceUtils";
 
 interface SharedGestureConfig {
   logTag: string;
@@ -36,31 +36,15 @@ export class SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<BaseResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("tap");
-    const promise = this.context.requestManager.register<BaseResult>(
-      requestId,
-      "tap_coordinates",
+    return sendCommand<BaseResult>(this.context, {
+      idPrefix: "tap",
+      responseType: "tap_coordinates",
+      messageType: "request_tap_coordinates",
+      params: { x: this.coord(x), y: this.coord(y), duration },
       timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: timeout,
-        error: `Tap timed out after ${timeout}ms`
-      })
-    );
-
-    const msg = createMessage("request_tap_coordinates", requestId, {
-      x: this.coord(x),
-      y: this.coord(y),
-      duration
+      perf,
+      errorLabel: "Tap",
     });
-    this.context.getWebSocket()?.send(msg);
-    return promise;
   }
 
   async requestSwipe(
@@ -72,33 +56,21 @@ export class SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<GestureTimingResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("swipe");
-    const promise = this.context.requestManager.register<GestureTimingResult>(
-      requestId,
-      "swipe",
+    return sendCommand<GestureTimingResult>(this.context, {
+      idPrefix: "swipe",
+      responseType: "swipe",
+      messageType: "request_swipe",
+      params: {
+        x1: this.coord(x1),
+        y1: this.coord(y1),
+        x2: this.coord(x2),
+        y2: this.coord(y2),
+        duration,
+      },
       timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: timeout,
-        error: `Swipe timed out after ${timeout}ms`
-      })
-    );
-
-    const msg = createMessage("request_swipe", requestId, {
-      x1: this.coord(x1),
-      y1: this.coord(y1),
-      x2: this.coord(x2),
-      y2: this.coord(y2),
-      duration
+      perf,
+      errorLabel: "Swipe",
     });
-    this.context.getWebSocket()?.send(msg);
-    return promise;
   }
 
   async requestDrag(
@@ -111,35 +83,22 @@ export class SharedGestureDelegate {
     holdDurationMs: number,
     timeoutMs: number
   ): Promise<GestureTimingResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected()) {
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("drag");
-    const promise = this.context.requestManager.register<GestureTimingResult>(
-      requestId,
-      "drag",
+    return sendCommand<GestureTimingResult>(this.context, {
+      idPrefix: "drag",
+      responseType: "drag",
+      messageType: "request_drag",
+      params: {
+        x1: this.coord(x1),
+        y1: this.coord(y1),
+        x2: this.coord(x2),
+        y2: this.coord(y2),
+        pressDurationMs,
+        dragDurationMs,
+        holdDurationMs,
+      },
       timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: timeout,
-        error: `Drag timed out after ${timeout}ms`
-      })
-    );
-
-    const msg = createMessage("request_drag", requestId, {
-      x1: this.coord(x1),
-      y1: this.coord(y1),
-      x2: this.coord(x2),
-      y2: this.coord(y2),
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs
+      errorLabel: "Drag",
     });
-    this.context.getWebSocket()?.send(msg);
-    return promise;
   }
 
   async requestPinch(
@@ -152,33 +111,21 @@ export class SharedGestureDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<GestureTimingResult> {
-    this.context.cancelScreenshotBackoff();
-
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("pinch");
-    const promise = this.context.requestManager.register<GestureTimingResult>(
-      requestId,
-      "pinch",
+    return sendCommand<GestureTimingResult>(this.context, {
+      idPrefix: "pinch",
+      responseType: "pinch",
+      messageType: "request_pinch",
+      params: {
+        centerX: this.coord(centerX),
+        centerY: this.coord(centerY),
+        distanceStart: this.coord(distanceStart),
+        distanceEnd: this.coord(distanceEnd),
+        rotationDegrees,
+        duration,
+      },
       timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: timeout,
-        error: `Pinch timed out after ${timeout}ms`
-      })
-    );
-
-    const msg = createMessage("request_pinch", requestId, {
-      centerX: this.coord(centerX),
-      centerY: this.coord(centerY),
-      distanceStart: this.coord(distanceStart),
-      distanceEnd: this.coord(distanceEnd),
-      rotationDegrees,
-      duration
+      perf,
+      errorLabel: "Pinch",
     });
-    this.context.getWebSocket()?.send(msg);
-    return promise;
   }
 }

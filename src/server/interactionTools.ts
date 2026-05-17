@@ -620,26 +620,24 @@ export function registerInteractionTools() {
         }
 
         if (isMatchInCollapsedGroup(match)) {
-          const expanded = await expandNotificationGroup(device, match);
-          if (expanded) {
-            const { timer } = getSystemTrayDependencies();
-            await timer.sleep(EXPAND_GROUP_SETTLE_MS);
-            const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
-            const reMatch = await waitForNotificationMatch(
-              device,
-              notification,
-              appMatchTexts,
-              remainingMs,
-              progress
+          await expandNotificationGroup(device, match);
+          const { timer } = getSystemTrayDependencies();
+          await timer.sleep(EXPAND_GROUP_SETTLE_MS);
+          const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
+          const reMatch = await waitForNotificationMatch(
+            device,
+            notification,
+            appMatchTexts,
+            remainingMs,
+            progress
+          );
+          if (reMatch.match) {
+            match = reMatch.match;
+          } else {
+            throw new ActionableError(
+              "Expanded collapsed notification group but could not re-match the notification. " +
+              "The group may have changed after expansion."
             );
-            if (reMatch.match) {
-              match = reMatch.match;
-            } else {
-              throw new ActionableError(
-                "Expanded collapsed notification group but could not re-match the notification. " +
-                "The group may have changed after expansion."
-              );
-            }
           }
         }
 

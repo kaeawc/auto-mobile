@@ -53,14 +53,10 @@ class SequencedObserveScreen extends FakeObserveScreen {
   }
 
   async execute(
-    queryOptions?: unknown,
-    perf?: unknown,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal
+    options?: { skipWaitForFresh?: boolean; minTimestamp?: number; signal?: AbortSignal }
   ): Promise<ObserveResult> {
-    this.minTimestamps.push(minTimestamp);
-    return super.execute(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+    this.minTimestamps.push(options?.minTimestamp);
+    return super.execute(options);
   }
 
   getMinTimestamps(): Array<number | undefined> {
@@ -809,7 +805,7 @@ describe("systemTray group expansion", () => {
     expect(tapCmd).toMatch(/input tap \d+ \d+/);
   });
 
-  test("expandNotificationGroup returns false when no expand button exists", async () => {
+  test("expandNotificationGroup throws when no expand button exists", async () => {
     const fakeTimer = new FakeTimer();
     const fakeAdb = new SequencedFakeAdbExecutor([1000]);
     const fakeObserveScreen = new SequencedObserveScreen([
@@ -835,8 +831,9 @@ describe("systemTray group expansion", () => {
     expect(result.match).not.toBeNull();
     expect(isMatchInCollapsedGroup(result.match!)).toBe(true);
 
-    const expanded = await expandNotificationGroup(device, result.match!);
-    expect(expanded).toBe(false);
+    await expect(expandNotificationGroup(device, result.match!)).rejects.toThrow(
+      "Collapsed notification group detected but no expand button found"
+    );
 
     const tapCommands = fakeAdb.getExecutedCommands()
       .filter(cmd => cmd.includes("input tap"));

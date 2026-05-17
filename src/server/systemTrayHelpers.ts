@@ -12,6 +12,7 @@ import {
   Platform,
   ViewHierarchyResult
 } from "../models";
+import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
@@ -29,15 +30,7 @@ import { logger } from "../utils/logger";
 // ============================================================================
 
 export interface SystemTrayObserver {
-  execute(
-    queryOptions?: unknown,
-    perf?: unknown,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
-    skipBackStack?: boolean,
-    skipScreenshot?: boolean
-  ): Promise<ObserveResult>;
+  execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
 }
 
 export interface SystemTrayAdb {
@@ -582,8 +575,10 @@ export const expandNotificationGroup = async (
 
   const expandButton = findExpandButtonInGroup(groupNode);
   if (!expandButton) {
-    logger.warn("[systemTray] Collapsed group detected but no expand button found in group node");
-    return false;
+    throw new ActionableError(
+      "Collapsed notification group detected but no expand button found. " +
+      "Cannot tap individual notifications inside a collapsed group."
+    );
   }
 
   logger.info(
@@ -1105,14 +1100,14 @@ const waitForSystemTrayOpen = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (isSystemTrayOpen(observation.viewHierarchy, platform)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   return observation;
@@ -1126,14 +1121,14 @@ const waitForSystemTrayClosed = async (
 ): Promise<ObserveResult> => {
   const { timer } = getSystemTrayDependencies();
   const startTime = timer.now();
-  let observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+  let observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
 
   while (timer.now() - startTime < awaitTimeoutMs) {
     if (!isSystemTrayOpen(observation.viewHierarchy, platform)) {
       return observation;
     }
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   return observation;
@@ -1156,7 +1151,7 @@ export const ensureSystemTrayOpen = async (
 
   if (device.platform === "ios") {
     minTimestamp = timer.now();
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (isSystemTrayOpen(observation.viewHierarchy, "ios")) {
       return { observation, opened: false, skipped: true, minTimestamp };
     }
@@ -1177,7 +1172,7 @@ export const ensureSystemTrayOpen = async (
 
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (isSystemTrayOpen(observation.viewHierarchy)) {
       return { observation, opened: false, skipped: true, minTimestamp };
     }
@@ -1219,7 +1214,7 @@ export const ensureSystemTrayClosed = async (
 
   if (device.platform === "ios") {
     minTimestamp = timer.now();
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (!isSystemTrayOpen(observation.viewHierarchy, "ios")) {
       return { observation, closed: false, skipped: true, minTimestamp };
     }
@@ -1240,7 +1235,7 @@ export const ensureSystemTrayClosed = async (
 
   if (device.platform === "android") {
     minTimestamp = await resolveSystemTrayObservationTimestamp(device);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
     if (!isSystemTrayOpen(observation.viewHierarchy)) {
       return { observation, closed: false, skipped: true, minTimestamp };
     }
@@ -1280,7 +1275,7 @@ export const waitForNotificationMatch = async (
   let observation = result.observation;
   const minTimestamp = result.minTimestamp;
   if (!observation) {
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 
   while (true) {
@@ -1297,7 +1292,7 @@ export const waitForNotificationMatch = async (
     }
 
     await sleep(SYSTEM_TRAY_POLL_INTERVAL_MS);
-    observation = await observeScreen.execute(undefined, undefined, false, minTimestamp);
+    observation = await observeScreen.execute({ skipWaitForFresh: false, minTimestamp });
   }
 };
 

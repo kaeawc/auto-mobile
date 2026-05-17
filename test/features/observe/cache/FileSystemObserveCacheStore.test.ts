@@ -143,8 +143,12 @@ describe("FileSystemObserveCacheStore", function() {
     store.clear("device-1");
     await store.put("device-1", makeResult("fresh"));
 
-    // Drain microtasks/IO so any in-flight unlinks settle.
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // Drain the microtask queue so any in-flight unlinks resolve. The snapshot
+    // taken inside clear() should NOT include the post-clear write, so the
+    // file count must settle at exactly one.
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
 
     const files = readdirSync(cacheDir).filter(f => f.endsWith(".json"));
     expect(files.length).toBe(1);

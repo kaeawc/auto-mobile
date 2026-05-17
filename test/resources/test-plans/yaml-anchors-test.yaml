@@ -30,17 +30,20 @@ steps:
       device: A
     label: Observe device A with common settings
 
-  # Critical section without device parameter (device-agnostic tool)
+  # Critical section must target a specific device, just like any other step.
+  # deviceCount matches the number of per-device criticalSection steps that
+  # share this lock (just one here — device A acts alone).
   - tool: criticalSection
     params:
+      device: A
       lock: sync-point
-      deviceCount: 2
+      deviceCount: 1
       steps:
         - tool: tapOn
           params:
             device: A
             text: Sync
-    label: Critical section for synchronization
+    label: Critical section for device A
 
   # Reuse observe anchor with merge and override
   - tool: observe

@@ -255,12 +255,12 @@
                 "description": "Tool name to execute"
               },
               "params": {
-                "description": "Tool-specific parameters",
                 "type": "object",
                 "propertyNames": {
                   "type": "string"
                 },
-                "additionalProperties": {}
+                "additionalProperties": {},
+                "description": "Tool-specific parameters. Must include a non-empty 'device'."
               },
               "label": {
                 "description": "Optional human-readable label",
@@ -268,7 +268,8 @@
               }
             },
             "required": [
-              "tool"
+              "tool",
+              "params"
             ],
             "additionalProperties": {}
           },

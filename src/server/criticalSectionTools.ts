@@ -6,17 +6,30 @@ import { createJSONToolResponse, throwIfAborted } from "../utils/toolUtils";
 import { CriticalSectionCoordinator } from "./CriticalSectionCoordinator";
 import { PlanNormalizer } from "../utils/plan/PlanNormalizer";
 
-// Schema for steps inside critical section
+// Schema for steps inside critical section.
+// Every sub-step MUST declare a target `device` — there is no routing
+// fallback inside a critical section, so an undefined device would silently
+// run on whichever device acquired the lock first.
 const criticalSectionStepSchema = z
   .object({
     tool: z.string().describe("Tool name to execute"),
     params: z
       .record(z.string(), z.any())
-      .optional()
-      .describe("Tool-specific parameters"),
+      .describe("Tool-specific parameters. Must include a non-empty 'device'."),
     label: z.string().optional().describe("Optional human-readable label"),
   })
-  .passthrough();
+  .passthrough()
+  .superRefine((step, ctx) => {
+    const device = step.params?.device;
+    if (device === undefined || device === null || device === "") {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["params", "device"],
+        message:
+          "Every step inside a criticalSection must declare a non-empty 'device' parameter",
+      });
+    }
+  });
 
 type CriticalSectionStepInput = z.infer<typeof criticalSectionStepSchema>;
 

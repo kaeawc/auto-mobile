@@ -253,7 +253,7 @@ class TwoDeviceCriticalSectionPlanTest {
 
   @Test
   fun `plan content includes critical section step with lock name and device count`() {
-    capturingClient.setResponse("executePlan", successResponse(executedSteps = 5, totalSteps = 5))
+    capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
     AutoMobilePlanExecutor.execute(
         "test-plans/dual-device-critical-section.yaml",
@@ -272,7 +272,7 @@ class TwoDeviceCriticalSectionPlanTest {
 
   @Test
   fun `critical section contains device-specific sub-steps for device A and device B`() {
-    capturingClient.setResponse("executePlan", successResponse(executedSteps = 5, totalSteps = 5))
+    capturingClient.setResponse("executePlan", successResponse(executedSteps = 6, totalSteps = 6))
 
     AutoMobilePlanExecutor.execute(
         "test-plans/dual-device-critical-section.yaml",
@@ -284,42 +284,56 @@ class TwoDeviceCriticalSectionPlanTest {
       decodePlanContent(
         capturingClient.capturedArguments!!["planContent"]!!.jsonPrimitive.content
       )
-    // Scope device assertions strictly to the criticalSection step's own params block.
-    // Search for "tool: criticalSection" (not just "criticalSection") to skip any occurrence
-    // in the plan name or description. Then trim at "\n\n  - tool:" which is the blank-line
-    // separator before the next top-level step, ensuring trailing terminateApp "device:" labels
-    // cannot satisfy the assertion if criticalSection sub-steps lose their device assignments.
-    val afterCriticalSection =
-      decoded.substringAfter("tool: criticalSection", missingDelimiterValue = "")
-    assertTrue("criticalSection tool step should be present", afterCriticalSection.isNotEmpty())
-    val criticalSectionBlock = afterCriticalSection.substringBefore("\n\n  - tool:")
+
+    // Each device now owns its own criticalSection step that shares a lock
+    // name. Split on "tool: criticalSection" and verify both occurrences,
+    // each scoped to its own block (delimited by the blank-line "\n\n  - tool:"
+    // separator before the next top-level step).
+    val criticalSectionBlocks =
+      decoded.split("tool: criticalSection").drop(1).map { afterMarker ->
+        afterMarker.substringBefore("\n\n  - tool:")
+      }
+    assertEquals(
+      "Plan should contain a per-device criticalSection step for each device",
+      2,
+      criticalSectionBlocks.size,
+    )
+
+    val joinedBlocks = criticalSectionBlocks.joinToString(separator = "\n")
     assertTrue(
-      "CriticalSection sub-steps should target device A",
-      criticalSectionBlock.contains("device: A"),
+      "One criticalSection block should target device A",
+      criticalSectionBlocks.any { it.contains("device: A") },
     )
     assertTrue(
-      "CriticalSection sub-steps should target device B",
-      criticalSectionBlock.contains("device: B"),
+      "One criticalSection block should target device B",
+      criticalSectionBlocks.any { it.contains("device: B") },
+    )
+    assertTrue(
+      "Per-device criticalSection steps must share the same lock name",
+      joinedBlocks.contains("lock: chat-sync"),
     )
   }
 
   @Test
   fun `runner succeeds when daemon completes all steps including critical section`() {
-    // Five steps: launchApp A, launchApp B, criticalSection (coord), terminateApp A, terminateApp B
+    // Six steps: launchApp A, launchApp B, criticalSection A, criticalSection B,
+    // terminateApp A, terminateApp B. The two per-device criticalSection steps
+    // share a lock and synchronize through the coordinator.
     capturingClient.setResponse(
       "executePlan",
       buildDaemonResponse(
         JsonObject(
           mapOf(
             "success" to JsonPrimitive(true),
-            "executedSteps" to JsonPrimitive(5),
-            "totalSteps" to JsonPrimitive(5),
+            "executedSteps" to JsonPrimitive(6),
+            "totalSteps" to JsonPrimitive(6),
             "toolResults" to
               JsonArray(
                 listOf(
                   perDeviceStepResult("launchApp", "A"),
                   perDeviceStepResult("launchApp", "B"),
-                  coordinationStepResult("criticalSection"),
+                  perDeviceStepResult("criticalSection", "A"),
+                  perDeviceStepResult("criticalSection", "B"),
                   perDeviceStepResult("terminateApp", "A"),
                   perDeviceStepResult("terminateApp", "B"),
                 )
@@ -347,7 +361,7 @@ class TwoDeviceCriticalSectionPlanTest {
           mapOf(
             "success" to JsonPrimitive(false),
             "executedSteps" to JsonPrimitive(2),
-            "totalSteps" to JsonPrimitive(5),
+            "totalSteps" to JsonPrimitive(6),
             "failedStep" to
               JsonObject(
                 mapOf(
@@ -392,14 +406,6 @@ class TwoDeviceCriticalSectionPlanTest {
         "toolName" to JsonPrimitive(toolName),
         "success" to JsonPrimitive(true),
         "device" to JsonPrimitive(device),
-      )
-    )
-
-  private fun coordinationStepResult(toolName: String): JsonObject =
-    JsonObject(
-      mapOf(
-        "toolName" to JsonPrimitive(toolName),
-        "success" to JsonPrimitive(true),
       )
     )
 

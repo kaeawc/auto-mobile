@@ -126,7 +126,7 @@ describe("PlanValidator", () => {
       expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
     });
 
-    test("criticalSection steps do not require device label", () => {
+    test("criticalSection steps require a device label like any other step", () => {
       const plan: Plan = {
         name: "Test",
         devices: ["phone", "tablet"],
@@ -136,7 +136,10 @@ describe("PlanValidator", () => {
           { tool: "tapOn", params: { text: "Login", device: "tablet" } },
         ],
       };
-      expect(() => PlanValidator.validate(plan)).not.toThrow();
+      expect(() => PlanValidator.validate(plan)).toThrow(ActionableError);
+      expect(() => PlanValidator.validate(plan)).toThrow(
+        "missing 'device' parameter"
+      );
     });
 
     test("throws when steps use device labels without declaring devices", () => {

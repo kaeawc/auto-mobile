@@ -1,6 +1,7 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { McpTestFixture } from "../../fixtures/mcpTestFixture";
 import { RealObserveScreen } from "../../../src/features/observe/ObserveScreen";
+import { getScreenshotStateStore } from "../../../src/features/observe/screenshot/ScreenshotStateRegistry";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { z } from "zod";
@@ -186,16 +187,12 @@ describe("MCP Resources Read", () => {
     await observeScreen.cacheObserveResult(observeScreen.createBaseResult());
 
     // Clear any pre-existing screenshot state
-    (RealObserveScreen as any).screenshotStateByDevice.delete(mockDevice.deviceId);
+    getScreenshotStateStore().clear(mockDevice.deviceId);
 
     ScreenshotJobTracker.startJob(mockDevice.deviceId, async signal => {
       return new Promise(resolve => {
         const timeoutId = fakeTimer.setTimeout(() => {
-          (RealObserveScreen as any).screenshotStateByDevice.set(mockDevice.deviceId, {
-            path: screenshotPath,
-            error: null,
-            timestamp: Date.now(),
-          });
+          getScreenshotStateStore().update(mockDevice.deviceId, screenshotPath);
           resolve({ success: true, path: screenshotPath });
         }, 25);
 

@@ -1,0 +1,204 @@
+import { logger } from "../../../utils/logger";
+import { NoOpPerformanceTracker, PerformanceTracker } from "../../../utils/PerformanceTracker";
+import { AndroidCtrlProxyManager } from "../../../utils/CtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../android";
+import { IOSCtrlProxyClient } from "../ios";
+import { appendObserveError } from "../ObserveError";
+import type { BootedDevice, ObserveResult } from "../../../models";
+import type { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
+import type { ViewHierarchy } from "../interfaces/ViewHierarchy";
+import type { Timer } from "../../../utils/SystemTimer";
+import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+
+export interface HierarchyCollectorOptions {
+  device: BootedDevice;
+  viewHierarchy: ViewHierarchy;
+  adb: AdbExecutor;
+  adbFactory: AdbClientFactory;
+  timer: Timer;
+}
+
+/**
+ * Collects view hierarchy + raw view hierarchy data into an ObserveResult.
+ * Encapsulates Android/iOS branching and structured error reporting.
+ */
+export class HierarchyCollector {
+  constructor(private opts: HierarchyCollectorOptions) {}
+
+  /**
+   * Collect view hierarchy and handle errors with accessibility service caching.
+   */
+  async collect(
+    result: ObserveResult,
+    queryOptions?: ViewHierarchyQueryOptions,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    skipWaitForFresh: boolean = false,
+    minTimestamp: number = 0,
+    signal?: AbortSignal
+  ): Promise<void> {
+    const { device, viewHierarchy, adb, timer } = this.opts;
+    try {
+      if (device.platform === "android") {
+        await viewHierarchy.configureRecompositionTracking(true, perf);
+      }
+
+      const viewHierarchyStart = timer.now();
+      const hierarchy = await viewHierarchy.getViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+      logger.debug("Accessibility service availability cached as: true");
+
+      if (hierarchy) {
+        result.viewHierarchy = hierarchy;
+
+        // Use the updatedAt from the view hierarchy if available (from accessibility service)
+        if (hierarchy.updatedAt) {
+          result.updatedAt = hierarchy.updatedAt;
+          logger.debug(`Using updatedAt from view hierarchy: ${hierarchy.updatedAt}`);
+        }
+
+        const focusedElement = viewHierarchy.findFocusedElement(hierarchy);
+        if (focusedElement) {
+          result.focusedElement = focusedElement;
+          logger.debug(`Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`);
+        }
+
+        const accessibilityFocusedElement = viewHierarchy.findAccessibilityFocusedElement(hierarchy);
+        if (accessibilityFocusedElement) {
+          result.accessibilityFocusedElement = accessibilityFocusedElement;
+          logger.debug(`Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`);
+        }
+
+        // Intent chooser detection (inlined; logs but does not append a structured error on failure)
+        try {
+          const intentChooserDetected = hierarchy.intentChooserDetected;
+          result.intentChooserDetected = intentChooserDetected;
+          if (intentChooserDetected) {
+            logger.debug("[ObserveScreen] Intent chooser dialog detected in view hierarchy");
+          }
+        } catch (intentError) {
+          logger.warn(`[ObserveScreen] Failed to detect intent chooser: ${intentError}`);
+          // Don't fail the observation if intent chooser detection fails
+        }
+
+        if (hierarchy.notificationPermissionDetected !== undefined) {
+          result.notificationPermissionDetected = hierarchy.notificationPermissionDetected;
+          if (hierarchy.notificationPermissionDetected) {
+            logger.debug("[ObserveScreen] Notification permission dialog detected in view hierarchy");
+          }
+        }
+      }
+
+      logger.debug(`View hierarchy retrieval took ${timer.now() - viewHierarchyStart}ms`);
+    } catch (error) {
+      logger.warn("Failed to get view hierarchy:", error);
+
+      // Clear cache on failure
+      try {
+        AndroidCtrlProxyManager.getInstance(device, adb).clearAvailabilityCache();
+      } catch (clearError) {
+        logger.debug(`[HierarchyCollector] Failed to clear availability cache: ${clearError}`);
+      }
+
+      const errorStr = String(error);
+      if (
+        errorStr.includes("null root node returned by UiTestAutomationBridge") ||
+        (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
+        (errorStr.includes("screen appears to be off"))
+      ) {
+        appendObserveError(result, {
+          phase: "viewHierarchy",
+          message: "Screen appears to be off or device is locked",
+          cause: errorStr
+        });
+      } else {
+        appendObserveError(result, {
+          phase: "viewHierarchy",
+          message: "Failed to retrieve view hierarchy",
+          cause: errorStr
+        });
+      }
+    }
+  }
+
+  /**
+   * Fetch raw (unfiltered) view hierarchy and attach it to the result.
+   * Invalidates the shared cache after fetching so that the unfiltered snapshot
+   * does not bleed into subsequent normal observe calls.
+   */
+  async collectRaw(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+    const { device, adbFactory, timer } = this.opts;
+    try {
+      if (device.platform === "android") {
+        const client = AndroidCtrlProxyClient.getInstance(device, adbFactory);
+        const syncResult = await client.requestHierarchySync(
+          new NoOpPerformanceTracker(),
+          true, // disableAllFiltering
+          signal
+        );
+        client.invalidateCache();
+        if (syncResult?.hierarchy) {
+          result.rawViewHierarchy = {
+            json: JSON.stringify(syncResult.hierarchy, null, 2),
+            source: "accessibility-service",
+            timestamp: timer.now(),
+            device: { deviceId: device.deviceId, platform: device.platform }
+          };
+        }
+      } else {
+        const xcTestClient = IOSCtrlProxyClient.getInstance(device);
+        const hierarchyResult = await xcTestClient.requestHierarchySync(
+          new NoOpPerformanceTracker(),
+          true, // disableAllFiltering
+          signal
+        );
+        xcTestClient.invalidateCache();
+        if (hierarchyResult?.hierarchy) {
+          result.rawViewHierarchy = {
+            xcuitest: JSON.stringify(hierarchyResult.hierarchy, null, 2),
+            source: "xcuitest",
+            timestamp: timer.now(),
+            device: { deviceId: device.deviceId, platform: device.platform }
+          };
+        }
+      }
+    } catch (error) {
+      logger.warn("[ObserveScreen] Failed to collect raw view hierarchy:", error);
+    }
+  }
+
+  /**
+   * Extract screen size from view hierarchy root node bounds.
+   * Supports both Android format ("[left,top][right,bottom]") and iOS format
+   * ({left, top, right, bottom}).
+   */
+  extractScreenSize(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
+    // Android format: hierarchy.node.$.bounds = "[0,0][402,874]"
+    const rootNode = viewHierarchy?.hierarchy?.node;
+    if (rootNode?.$?.bounds) {
+      const boundsStr = rootNode.$.bounds;
+      const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
+      if (match) {
+        const width = parseInt(match[3], 10) - parseInt(match[1], 10);
+        const height = parseInt(match[4], 10) - parseInt(match[2], 10);
+        if (width > 0 && height > 0) {
+          return { width, height };
+        }
+      }
+    }
+
+    // iOS format: hierarchy is the root XCTestNode with bounds as {left, top, right, bottom}
+    const iosHierarchy = viewHierarchy?.hierarchy;
+    if (iosHierarchy?.bounds && typeof iosHierarchy.bounds === "object" && !Array.isArray(iosHierarchy.bounds)) {
+      const { left, top, right, bottom } = iosHierarchy.bounds;
+      if (typeof right === "number" && typeof bottom === "number") {
+        const width = right - (left ?? 0);
+        const height = bottom - (top ?? 0);
+        if (width > 0 && height > 0) {
+          return { width, height };
+        }
+      }
+    }
+
+    return null;
+  }
+}

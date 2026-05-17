@@ -299,7 +299,7 @@ export class ContrastChecker {
             });
           }
         } catch (error) {
-          console.error(`Error checking contrast for element:`, error);
+          logger.error(`Error checking contrast for element:`, error);
           results.set(element, null);
         }
       }
@@ -309,7 +309,7 @@ export class ContrastChecker {
         this.cleanupCache(this.elementCache, this.config.maxCacheSize.elements);
       }
     } catch (error) {
-      console.error("Batch contrast checking error:", error);
+      logger.error("Batch contrast checking error:", error);
       // Return null for all elements on screenshot load failure
       for (const element of elements) {
         results.set(element, null);

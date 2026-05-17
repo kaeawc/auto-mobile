@@ -7,6 +7,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { logger } from "../../utils/logger";
 
 export class GetDumpsysWindow implements DumpsysWindow {
   private adb: AdbExecutor;
@@ -91,7 +92,7 @@ export class GetDumpsysWindow implements DumpsysWindow {
       await perf.track("saveDiskCache", () => this.saveToDiskCache(cacheEntry));
     } catch (error) {
       // Disk cache write failed, but we still return the result
-      console.warn(`Failed to write disk cache for device ${this.device.deviceId}:`, error);
+      logger.warn(`Failed to write disk cache for device ${this.device.deviceId}:`, error);
     }
 
     return result;

@@ -12,6 +12,7 @@ import type {
 import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 
 export class VisionFallback {
   private config: VisionFallbackConfig;
@@ -43,7 +44,7 @@ export class VisionFallback {
     if (this.config.cacheResults) {
       const cached = this.getCachedResult(screenshotPath, searchCriteria);
       if (cached) {
-        console.log("✓ Vision fallback: Using cached result");
+        logger.debug("Vision fallback: using cached result");
         return cached;
       }
     }
@@ -54,7 +55,7 @@ export class VisionFallback {
         throw new Error("Claude client not initialized");
       }
 
-      console.log("🔍 Vision fallback: Analyzing with Claude...");
+      logger.debug("Vision fallback: analyzing with Claude");
       const result = await this.claudeClient.analyzeUIElement(
         screenshotPath,
         searchCriteria,
@@ -63,10 +64,10 @@ export class VisionFallback {
 
       // Check if cost exceeds max
       if (result.costUsd > this.config.maxCostUsd) {
-        console.warn(`⚠️  Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`);
+        logger.warn(`Vision fallback cost ($${result.costUsd.toFixed(4)}) exceeds max ($${this.config.maxCostUsd})`);
       }
 
-      console.log(`✓ Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`);
+      logger.debug(`Vision fallback complete: confidence=${result.confidence}, cost=$${result.costUsd.toFixed(4)}, time=${result.durationMs}ms`);
 
       // Cache result
       if (this.config.cacheResults) {

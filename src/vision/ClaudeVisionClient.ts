@@ -14,6 +14,7 @@ import type {
 import type { ViewHierarchyNode } from "../models/ViewHierarchyResult";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { logger } from "../utils/logger";
 
 export class ClaudeVisionClient {
   private client: Anthropic;
@@ -86,7 +87,7 @@ export class ClaudeVisionClient {
         screenshotPath
       );
     } catch (error) {
-      console.error("Claude Vision API error:", error);
+      logger.error("Claude Vision API error:", error);
       throw error;
     }
   }

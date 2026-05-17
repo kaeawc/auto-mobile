@@ -46,6 +46,14 @@ import {
   computeChecksum,
 } from "../ScreenshotBackoffScheduler";
 import { getFailureRecorder } from "../../failures/FailureRecorder";
+import {
+  normalizeAnr,
+  normalizeCrash,
+  type SdkAnrPayload,
+  type SdkCrashPayload,
+} from "../crash/sdkCrashIngestion";
+import { FailureEventRepository } from "../../../db/failureEventRepository";
+import type { CrashEventSink } from "../../../utils/interfaces/CrashMonitor";
 import { serverConfig } from "../../../utils/ServerConfig";
 import { TelemetryRecorder } from "../../telemetry/TelemetryRecorder";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
@@ -146,46 +154,6 @@ interface HandledExceptionEvent {
   customMessage?: string;
   currentScreen?: string;
   packageName: string;
-  appVersion?: string;
-  deviceInfo: {
-    model: string;
-    manufacturer: string;
-    osVersion: string;
-    sdkInt: number;
-  };
-}
-
-/**
- * Interface for crash event from SDK
- */
-interface CrashEvent {
-  timestamp: number;
-  exceptionClass: string;
-  message?: string;
-  stackTrace: string;
-  threadName: string;
-  currentScreen?: string;
-  packageName: string;
-  appVersion?: string;
-  deviceInfo: {
-    model: string;
-    manufacturer: string;
-    osVersion: string;
-    sdkInt: number;
-  };
-}
-
-/**
- * Interface for ANR event from SDK
- */
-interface AnrEvent {
-  timestamp: number;
-  pid: number;
-  processName: string;
-  importance: string;
-  trace?: string;
-  reason: string;
-  packageName?: string;
   appVersion?: string;
   deviceInfo: {
     model: string;
@@ -495,12 +463,12 @@ interface WsHandledExceptionEventMessage extends WsMessageBase {
 
 interface WsCrashEventMessage extends WsMessageBase {
   type: "crash_event";
-  event?: CrashEvent;
+  event?: SdkCrashPayload;
 }
 
 interface WsAnrEventMessage extends WsMessageBase {
   type: "anr_event";
-  event?: AnrEvent;
+  event?: SdkAnrPayload;
 }
 
 interface WsNetworkEventMessage extends WsMessageBase {
@@ -817,6 +785,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private lastForegroundPackage: string | null = null;
   private lastLayoutTelemetryTimestamp = 0;
 
+  private readonly crashEventSink: CrashEventSink;
+
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
 
@@ -829,12 +799,14 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     webSocketFactory?: WebSocketFactory,
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
-    retryExecutor?: RetryExecutor
+    retryExecutor?: RetryExecutor,
+    crashEventSink?: CrashEventSink
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
     this.device = device;
     this.adb = adb;
     this.installedAppsRepository = installedAppsRepository ?? null;
+    this.crashEventSink = crashEventSink ?? new FailureEventRepository();
     this.localPort = PortManager.allocate(device.deviceId);
     AndroidCtrlProxyManager.getInstance(device);
   }
@@ -899,9 +871,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     webSocketFactory: (url: string) => WebSocket,
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
-    retryExecutor?: RetryExecutor
+    retryExecutor?: RetryExecutor,
+    crashEventSink?: CrashEventSink
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor);
+    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor, crashEventSink);
   }
 
   // ===========================================================================
@@ -2770,9 +2743,15 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async handleCrashEvent(event: CrashEvent): Promise<void> {
-    logger.info(`[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
+  private async persistCrash(event: SdkCrashPayload): Promise<void> {
+    try {
+      await this.crashEventSink.saveCrash(normalizeCrash(event, this.device.deviceId));
+    } catch (error) {
+      logger.error(`[CTRL_PROXY] Failed to persist crash: ${error}`);
+    }
+  }
 
+  private async recordCrashAnalytics(event: SdkCrashPayload): Promise<void> {
     try {
       const failureRecorder = getFailureRecorder();
       const stackTraceElements = this.parseStackTrace(event.stackTrace, event.packageName);
@@ -2807,12 +2786,22 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  private async handleAnrEvent(event: AnrEvent): Promise<void> {
-    logger.info(`[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
+  private async handleCrashEvent(event: SdkCrashPayload): Promise<void> {
+    logger.info(`[CTRL_PROXY] Received crash: ${event.exceptionClass} on thread ${event.threadName} from ${event.packageName}`);
+    await Promise.all([this.persistCrash(event), this.recordCrashAnalytics(event)]);
+  }
 
+  private async persistAnr(event: SdkAnrPayload): Promise<void> {
+    try {
+      await this.crashEventSink.saveAnr(normalizeAnr(event, this.device.deviceId));
+    } catch (error) {
+      logger.error(`[CTRL_PROXY] Failed to persist ANR: ${error}`);
+    }
+  }
+
+  private async recordAnrAnalytics(event: SdkAnrPayload, packageName: string): Promise<void> {
     try {
       const failureRecorder = getFailureRecorder();
-      const packageName = event.packageName ?? event.processName;
 
       // Parse stack trace if available
       const stackTraceElements = event.trace
@@ -2843,6 +2832,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     } catch (error) {
       logger.error(`[CTRL_PROXY] Failed to record ANR: ${error}`);
     }
+  }
+
+  private async handleAnrEvent(event: SdkAnrPayload): Promise<void> {
+    logger.info(`[CTRL_PROXY] Received ANR: pid=${event.pid}, process=${event.processName}, importance=${event.importance}`);
+    const packageName = event.packageName ?? event.processName;
+    await Promise.all([this.persistAnr(event), this.recordAnrAnalytics(event, packageName)]);
   }
 
   private parseStackTrace(stackTrace: string, packageName: string): StackTraceElement[] {

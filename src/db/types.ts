@@ -247,7 +247,7 @@ interface CrashesTable {
   signal: string | null; // For native crashes
   fault_address: string | null; // For native crashes
   tombstone_path: string | null;
-  detection_source: "logcat" | "tombstone" | "dropbox" | "accessibility" | "process_monitor";
+  detection_source: "sdk_websocket" | "logcat" | "tombstone" | "dropbox" | "accessibility" | "process_monitor";
   raw_log: string | null;
   navigation_node_id: number | null;
   test_execution_id: number | null;
@@ -269,7 +269,7 @@ interface AnrsTable {
   cpu_usage: string | null;
   main_thread_state: string | null;
   stacktrace: string | null;
-  detection_source: "logcat" | "dropbox" | "accessibility";
+  detection_source: "sdk_websocket" | "logcat" | "dropbox" | "accessibility";
   raw_log: string | null;
   navigation_node_id: number | null;
   test_execution_id: number | null;

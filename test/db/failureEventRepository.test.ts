@@ -12,7 +12,7 @@ function makeCrashEvent(overrides: Partial<CrashEvent> = {}): CrashEvent {
     packageName: "com.example.app",
     crashType: "java",
     timestamp: 1000000,
-    detectionSource: "logcat",
+    detectionSource: "sdk_websocket",
     exceptionClass: "java.lang.NullPointerException",
     exceptionMessage: "Attempt to invoke virtual method on null",
     stacktrace: "at com.example.app.Main.run(Main.java:42)",
@@ -25,7 +25,7 @@ function makeAnrEvent(overrides: Partial<AnrEvent> = {}): AnrEvent {
     deviceId: "emulator-5554",
     packageName: "com.example.app",
     timestamp: 2000000,
-    detectionSource: "logcat",
+    detectionSource: "sdk_websocket",
     reason: "Input dispatching timed out",
     activity: "com.example.app.MainActivity",
     waitDurationMs: 5000,
@@ -64,7 +64,7 @@ describe("FailureEventRepository", () => {
       expect(crashes[0].exception_class).toBe("java.lang.NullPointerException");
       expect(crashes[0].exception_message).toBe("Attempt to invoke virtual method on null");
       expect(crashes[0].stacktrace).toBe("at com.example.app.Main.run(Main.java:42)");
-      expect(crashes[0].detection_source).toBe("logcat");
+      expect(crashes[0].detection_source).toBe("sdk_websocket");
     });
 
     test("saves multiple crashes and returns them ordered by timestamp desc", async () => {
@@ -83,9 +83,9 @@ describe("FailureEventRepository", () => {
       const id = await repo.saveCrash({
         deviceId: "device-1",
         packageName: "com.test",
-        crashType: "native",
+        crashType: "java",
         timestamp: 5000,
-        detectionSource: "tombstone",
+        detectionSource: "sdk_websocket",
       });
       expect(id).toBeGreaterThan(0);
 
@@ -113,7 +113,7 @@ describe("FailureEventRepository", () => {
       expect(anrs[0].reason).toBe("Input dispatching timed out");
       expect(anrs[0].activity).toBe("com.example.app.MainActivity");
       expect(anrs[0].wait_duration_ms).toBe(5000);
-      expect(anrs[0].detection_source).toBe("logcat");
+      expect(anrs[0].detection_source).toBe("sdk_websocket");
     });
 
     test("saves multiple ANRs and returns them ordered by timestamp desc", async () => {
@@ -133,7 +133,7 @@ describe("FailureEventRepository", () => {
         deviceId: "device-1",
         packageName: "com.test",
         timestamp: 5000,
-        detectionSource: "logcat",
+        detectionSource: "sdk_websocket",
       });
       expect(id).toBeGreaterThan(0);
 
@@ -390,17 +390,15 @@ describe("FailureEventRepository", () => {
     test("crash records contain crash-specific fields", async () => {
       await repo.saveCrash(
         makeCrashEvent({
-          crashType: "native",
-          exceptionClass: "SIGSEGV",
-          signal: "11",
+          crashType: "java",
+          exceptionClass: "java.lang.OutOfMemoryError",
         })
       );
 
       const all = await repo.getAllFailures();
       const crash = all.find(f => f.type === "crash")!;
-      expect(crash.crashType).toBe("native");
-      expect(crash.exceptionClass).toBe("SIGSEGV");
-      expect(crash.signal).toBe("11");
+      expect(crash.crashType).toBe("java");
+      expect(crash.exceptionClass).toBe("java.lang.OutOfMemoryError");
     });
 
     test("ANR records contain ANR-specific fields", async () => {

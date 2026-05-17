@@ -12,6 +12,7 @@ import {
   Platform,
   ViewHierarchyResult
 } from "../models";
+import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
@@ -29,15 +30,7 @@ import { logger } from "../utils/logger";
 // ============================================================================
 
 export interface SystemTrayObserver {
-  execute(
-    queryOptions?: unknown,
-    perf?: unknown,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    signal?: AbortSignal,
-    skipBackStack?: boolean,
-    skipScreenshot?: boolean
-  ): Promise<ObserveResult>;
+  execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult>;
 }
 
 export interface SystemTrayAdb {
@@ -582,8 +575,10 @@ export const expandNotificationGroup = async (
 
   const expandButton = findExpandButtonInGroup(groupNode);
   if (!expandButton) {
-    logger.warn("[systemTray] Collapsed group detected but no expand button found in group node");
-    return false;
+    throw new ActionableError(
+      "Collapsed notification group detected but no expand button found. " +
+      "Cannot tap individual notifications inside a collapsed group."
+    );
   }
 
   logger.info(

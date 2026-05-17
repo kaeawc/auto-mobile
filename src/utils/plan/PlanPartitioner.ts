@@ -11,27 +11,16 @@ export interface TrackedStep {
 }
 
 /**
- * Represents a critical section barrier in the execution timeline.
+ * Represents a single step in the execution timeline, tagged with the device
+ * that will execute it. Critical sections are not special — they appear as
+ * device-targeted steps just like any other tool. Coordination across devices
+ * happens inside the criticalSection handler via shared lock + deviceCount.
  */
-interface CriticalSectionBarrier {
-  type: "barrier";
-  step: PlanStep;
-  planIndex: number;
-}
-
-/**
- * Represents a regular device step in the execution timeline.
- */
-interface DeviceStepEntry {
+interface TimelineEntry {
   type: "step";
   device: string;
   trackedStep: TrackedStep;
 }
-
-/**
- * Union type for timeline entries.
- */
-type TimelineEntry = CriticalSectionBarrier | DeviceStepEntry;
 
 /**
  * Result of partitioning a plan into device tracks.
@@ -39,7 +28,7 @@ type TimelineEntry = CriticalSectionBarrier | DeviceStepEntry;
 interface PartitionedPlan {
   devices: string[];
   deviceTracks: Map<string, TrackedStep[]>; // device -> ordered steps for that device
-  timeline: TimelineEntry[]; // Ordered list of all steps and barriers
+  timeline: TimelineEntry[]; // Ordered list of every step, in plan order
 }
 
 /**
@@ -76,34 +65,11 @@ export class PlanPartitioner {
       trackPositions.set(device, 0);
     }
 
-    // Partition steps into device tracks
+    // Partition steps into device tracks. Every step — including
+    // criticalSection — must declare params.device; validation enforces this
+    // upstream so we treat a missing device as a programmer error here.
     for (let planIndex = 0; planIndex < plan.steps.length; planIndex++) {
       const step = plan.steps[planIndex];
-
-      // Critical sections are barriers that all devices must reach
-      if (step.tool === "criticalSection") {
-        timeline.push({
-          type: "barrier",
-          step,
-          planIndex,
-        });
-
-        // Add critical section to ALL device tracks at this position
-        // so each device will independently call it and coordinate via the coordinator
-        for (const device of devices) {
-          const track = deviceTracks.get(device)!;
-          const trackIndex = trackPositions.get(device)!;
-          const trackedStep: TrackedStep = {
-            step,
-            planIndex,
-            trackIndex,
-          };
-          track.push(trackedStep);
-          trackPositions.set(device, trackIndex + 1);
-        }
-
-        continue;
-      }
 
       // Regular step - assign to device track
       const device = step.params?.device;
@@ -147,8 +113,8 @@ export class PlanPartitioner {
   }
 
   /**
-   * Gets the device label for a step at a given plan index.
-   * Returns undefined for critical sections.
+   * Gets the device label for a step at a given plan index. Returns undefined
+   * only for out-of-bounds indices or plans with no device-tagged steps.
    */
   static getStepDevice(plan: Plan, planIndex: number): string | undefined {
     if (planIndex < 0 || planIndex >= plan.steps.length) {
@@ -156,10 +122,6 @@ export class PlanPartitioner {
     }
 
     const step = plan.steps[planIndex];
-    if (step.tool === "criticalSection") {
-      return undefined;
-    }
-
     return step.params?.device;
   }
 

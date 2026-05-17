@@ -17,7 +17,11 @@ steps:
       appId: com.example.chat
     label: Launch chat app on device B
 
+  # Per-device criticalSection steps that share a lock name. The coordinator
+  # synchronizes both devices at the barrier (deviceCount: 2) before either
+  # executes its sub-steps.
   - tool: criticalSection
+    device: A
     params:
       lock: chat-sync
       deviceCount: 2
@@ -26,10 +30,18 @@ steps:
           params:
             device: A
             text: Hello from Device A
+    label: Device A sends message
+
+  - tool: criticalSection
+    device: B
+    params:
+      lock: chat-sync
+      deviceCount: 2
+      steps:
         - tool: observe
           params:
             device: B
-    label: Device A sends message, Device B observes
+    label: Device B observes incoming message
 
   - tool: terminateApp
     device: A

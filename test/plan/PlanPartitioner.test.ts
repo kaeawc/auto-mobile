@@ -72,7 +72,7 @@ describe("PlanPartitioner", () => {
       expect(result!.devices).toEqual(["A", "B"]);
     });
 
-    test("should add critical sections to all device tracks", () => {
+    test("should route a per-device critical section to its targeted track", () => {
       const plan: Plan = {
         name: "Plan with Critical Section",
         devices: ["A", "B"],
@@ -81,6 +81,7 @@ describe("PlanPartitioner", () => {
           {
             tool: "criticalSection",
             params: {
+              device: "A",
               lock: "sync1",
               deviceCount: 2,
               steps: [
@@ -95,30 +96,23 @@ describe("PlanPartitioner", () => {
       const result = PlanPartitioner.partition(plan);
       expect(result).not.toBeNull();
 
-      // Check device A track
+      // Device A picks up the criticalSection because it targets device A
       const trackA = result!.deviceTracks.get("A")!;
       expect(trackA).toHaveLength(2); // observe + criticalSection
       expect(trackA[0].step.tool).toBe("observe");
-      expect(trackA[0].planIndex).toBe(0);
       expect(trackA[1].step.tool).toBe("criticalSection");
-      expect(trackA[1].planIndex).toBe(1);
 
-      // Check device B track
+      // Device B only sees its own observe step
       const trackB = result!.deviceTracks.get("B")!;
-      expect(trackB).toHaveLength(2); // criticalSection + observe
-      expect(trackB[0].step.tool).toBe("criticalSection");
-      expect(trackB[0].planIndex).toBe(1);
-      expect(trackB[1].step.tool).toBe("observe");
-      expect(trackB[1].planIndex).toBe(2);
+      expect(trackB).toHaveLength(1);
+      expect(trackB[0].step.tool).toBe("observe");
 
-      // Check timeline
-      expect(result!.timeline).toHaveLength(3); // A observe (step), critical section (barrier), B observe (step)
-      const barriers = result!.timeline.filter(e => e.type === "barrier");
-      expect(barriers).toHaveLength(1);
-      expect(barriers[0].planIndex).toBe(1);
+      // Timeline has three entries, all device-tagged steps
+      expect(result!.timeline).toHaveLength(3);
+      expect(result!.timeline.every(e => e.type === "step")).toBe(true);
     });
 
-    test("should handle multiple critical sections", () => {
+    test("should handle multiple critical sections that share a lock across devices", () => {
       const plan: Plan = {
         name: "Plan with Multiple Critical Sections",
         devices: ["A", "B"],
@@ -126,12 +120,20 @@ describe("PlanPartitioner", () => {
           { tool: "observe", params: { device: "A" } },
           {
             tool: "criticalSection",
-            params: { lock: "sync1", deviceCount: 2, steps: [] },
+            params: { device: "A", lock: "sync1", deviceCount: 2, steps: [] },
+          },
+          {
+            tool: "criticalSection",
+            params: { device: "B", lock: "sync1", deviceCount: 2, steps: [] },
           },
           { tool: "tapOn", params: { device: "B" } },
           {
             tool: "criticalSection",
-            params: { lock: "sync2", deviceCount: 2, steps: [] },
+            params: { device: "A", lock: "sync2", deviceCount: 2, steps: [] },
+          },
+          {
+            tool: "criticalSection",
+            params: { device: "B", lock: "sync2", deviceCount: 2, steps: [] },
           },
           { tool: "observe", params: { device: "A" } },
         ],
@@ -140,27 +142,94 @@ describe("PlanPartitioner", () => {
       const result = PlanPartitioner.partition(plan);
       expect(result).not.toBeNull();
 
-      // Check device A track
+      // Device A: observe, cs(sync1), cs(sync2), observe
       const trackA = result!.deviceTracks.get("A")!;
-      expect(trackA).toHaveLength(4); // observe, cs1, cs2, observe
-      expect(trackA[0].step.tool).toBe("observe");
-      expect(trackA[1].step.tool).toBe("criticalSection");
-      expect(trackA[2].step.tool).toBe("criticalSection");
-      expect(trackA[3].step.tool).toBe("observe");
+      expect(trackA).toHaveLength(4);
+      expect(trackA.map(t => t.step.tool)).toEqual([
+        "observe",
+        "criticalSection",
+        "criticalSection",
+        "observe",
+      ]);
 
-      // Check device B track
+      // Device B: cs(sync1), tapOn, cs(sync2)
       const trackB = result!.deviceTracks.get("B")!;
-      expect(trackB).toHaveLength(3); // cs1, tapOn, cs2
-      expect(trackB[0].step.tool).toBe("criticalSection");
-      expect(trackB[1].step.tool).toBe("tapOn");
-      expect(trackB[2].step.tool).toBe("criticalSection");
-
-      // Check timeline has 2 barriers
-      const barriers = result!.timeline.filter(e => e.type === "barrier");
-      expect(barriers).toHaveLength(2);
+      expect(trackB).toHaveLength(3);
+      expect(trackB.map(t => t.step.tool)).toEqual([
+        "criticalSection",
+        "tapOn",
+        "criticalSection",
+      ]);
     });
 
-    test("should handle device with no steps before critical section", () => {
+    test("should route criticalSection with params.device only to that device's track", () => {
+      const plan: Plan = {
+        name: "Per-Device Critical Sections",
+        devices: ["A", "B"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "A",
+              lock: "shared",
+              deviceCount: 2,
+              steps: [{ tool: "inputText", params: { device: "A", text: "hi" } }],
+            },
+          },
+          {
+            tool: "criticalSection",
+            params: {
+              device: "B",
+              lock: "shared",
+              deviceCount: 2,
+              steps: [{ tool: "observe", params: { device: "B" } }],
+            },
+          },
+        ],
+      };
+
+      const result = PlanPartitioner.partition(plan)!;
+
+      const trackA = result.deviceTracks.get("A")!;
+      const trackB = result.deviceTracks.get("B")!;
+
+      // Each device gets ONLY its own criticalSection step, not the other's
+      expect(trackA).toHaveLength(1);
+      expect(trackA[0].step.params!.device).toBe("A");
+      expect(trackA[0].planIndex).toBe(0);
+
+      expect(trackB).toHaveLength(1);
+      expect(trackB[0].step.params!.device).toBe("B");
+      expect(trackB[0].planIndex).toBe(1);
+
+      // Per-device critical sections appear as device "step" entries in the timeline,
+      // not as global barriers.
+      expect(result.timeline).toHaveLength(2);
+      expect(result.timeline[0].type).toBe("step");
+      expect(result.timeline[1].type).toBe("step");
+    });
+
+    test("should throw when criticalSection params.device references unknown device", () => {
+      const plan: Plan = {
+        name: "Invalid Per-Device Critical Section",
+        devices: ["A", "B"],
+        steps: [
+          {
+            tool: "criticalSection",
+            params: {
+              device: "C",
+              lock: "shared",
+              deviceCount: 2,
+              steps: [],
+            },
+          },
+        ],
+      };
+
+      expect(() => PlanPartitioner.partition(plan)).toThrow("unknown device");
+    });
+
+    test("should handle device with no steps before its first critical section", () => {
       const plan: Plan = {
         name: "Plan with Empty Device Track",
         devices: ["A", "B"],
@@ -169,7 +238,7 @@ describe("PlanPartitioner", () => {
           { tool: "tapOn", params: { device: "A" } },
           {
             tool: "criticalSection",
-            params: { lock: "sync1", deviceCount: 2, steps: [] },
+            params: { device: "B", lock: "sync1", deviceCount: 1, steps: [] },
           },
           { tool: "observe", params: { device: "B" } },
         ],
@@ -178,11 +247,12 @@ describe("PlanPartitioner", () => {
       const result = PlanPartitioner.partition(plan);
       expect(result).not.toBeNull();
 
-      // Device A has 3 steps
+      // Device A has 2 steps (observe + tapOn)
       const trackA = result!.deviceTracks.get("A")!;
-      expect(trackA).toHaveLength(3);
+      expect(trackA).toHaveLength(2);
 
-      // Device B has 2 steps (critical section + observe)
+      // Device B has 2 steps (criticalSection + observe), even though its
+      // first activity is a criticalSection.
       const trackB = result!.deviceTracks.get("B")!;
       expect(trackB).toHaveLength(2);
       expect(trackB[0].step.tool).toBe("criticalSection");

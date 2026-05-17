@@ -74,6 +74,39 @@ describe("criticalSection tool", () => {
     expect(() => tool!.schema.parse(invalidParams)).toThrow();
   });
 
+  test("rejects schema when a sub-step is missing the device parameter", () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const invalidParams = {
+      lock: "test-lock",
+      deviceCount: 2,
+      steps: [
+        { tool: "observe", params: { device: "A" } },
+        { tool: "inputText", params: { text: "hi" } }, // no device
+      ],
+    };
+
+    expect(() => tool!.schema.parse(invalidParams)).toThrow(
+      /Every step inside a criticalSection must declare a non-empty 'device' parameter/
+    );
+  });
+
+  test("rejects schema when a sub-step's device is an empty string", () => {
+    const tool = ToolRegistry.getTool("criticalSection");
+    expect(tool).toBeDefined();
+
+    const invalidParams = {
+      lock: "test-lock",
+      deviceCount: 1,
+      steps: [{ tool: "observe", params: { device: "" } }],
+    };
+
+    expect(() => tool!.schema.parse(invalidParams)).toThrow(
+      /Every step inside a criticalSection must declare a non-empty 'device' parameter/
+    );
+  });
+
   test("rejects invalid schema - non-positive device count", () => {
     const tool = ToolRegistry.getTool("criticalSection");
     expect(tool).toBeDefined();

@@ -74,29 +74,16 @@ describe("PlanPartitioner", () => {
       expect(phoneTracks[1].trackIndex).toBe(1);
     });
 
-    test("criticalSection creates barrier in timeline", () => {
+    test("criticalSection step lands only in its targeted device track", () => {
       const plan: Plan = {
         name: "Test",
         devices: ["phone", "tablet"],
         steps: [
           { tool: "tapOn", params: { text: "A", device: "phone" } },
-          { tool: "criticalSection", params: { name: "sync" } },
-          { tool: "tapOn", params: { text: "B", device: "tablet" } },
-        ],
-      };
-
-      const result = PlanPartitioner.partition(plan)!;
-      expect(result.timeline).toHaveLength(3);
-      expect(result.timeline[1].type).toBe("barrier");
-    });
-
-    test("criticalSection added to all device tracks", () => {
-      const plan: Plan = {
-        name: "Test",
-        devices: ["phone", "tablet"],
-        steps: [
-          { tool: "tapOn", params: { text: "A", device: "phone" } },
-          { tool: "criticalSection", params: { name: "sync" } },
+          {
+            tool: "criticalSection",
+            params: { device: "phone", lock: "sync", deviceCount: 2, steps: [] },
+          },
           { tool: "tapOn", params: { text: "B", device: "tablet" } },
         ],
       };
@@ -106,9 +93,12 @@ describe("PlanPartitioner", () => {
       const tabletTrack = result.deviceTracks.get("tablet")!;
 
       expect(phoneTrack).toHaveLength(2); // tapOn + criticalSection
-      expect(tabletTrack).toHaveLength(2); // criticalSection + tapOn
+      expect(tabletTrack).toHaveLength(1); // tapOn only
       expect(phoneTrack[1].step.tool).toBe("criticalSection");
-      expect(tabletTrack[0].step.tool).toBe("criticalSection");
+
+      // Every timeline entry is a device-tagged step (no broadcast barriers).
+      expect(result.timeline).toHaveLength(3);
+      expect(result.timeline.every(e => e.type === "step")).toBe(true);
     });
 
     test("throws on missing device parameter", () => {
@@ -138,17 +128,17 @@ describe("PlanPartitioner", () => {
         steps: [
           { tool: "tapOn", params: { text: "A", device: "phone" } },
           { tool: "tapOn", params: { text: "B", device: "tablet" } },
-          { tool: "criticalSection", params: { name: "sync" } },
+          {
+            tool: "criticalSection",
+            params: { device: "phone", lock: "sync", deviceCount: 2, steps: [] },
+          },
           { tool: "tapOn", params: { text: "C", device: "phone" } },
         ],
       };
 
       const result = PlanPartitioner.partition(plan)!;
       expect(result.timeline).toHaveLength(4);
-      expect(result.timeline[0].type).toBe("step");
-      expect(result.timeline[1].type).toBe("step");
-      expect(result.timeline[2].type).toBe("barrier");
-      expect(result.timeline[3].type).toBe("step");
+      expect(result.timeline.every(e => e.type === "step")).toBe(true);
     });
 
     test("supports device definitions", () => {

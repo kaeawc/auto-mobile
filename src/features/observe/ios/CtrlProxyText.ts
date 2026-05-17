@@ -10,8 +10,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { BaseResult } from "../shared/types";
 import { SharedTextDelegate } from "../shared/SharedTextDelegate";
 import type { DelegateContext } from "./types";
-import { createMessage } from "../DeviceServiceUtils";
-import { logger } from "../../../utils/logger";
+import { sendCommand } from "../DeviceServiceUtils";
 
 export class CtrlProxyText extends SharedTextDelegate {
   constructor(context: DelegateContext) {
@@ -31,42 +30,19 @@ export class CtrlProxyText extends SharedTextDelegate {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<BaseResult> {
-    const startMs = Date.now();
-    this.context.cancelScreenshotBackoff();
-
-    const connected = await (perf
-      ? perf.track("ensureConnected", () => this.context.ensureConnected(perf))
-      : this.context.ensureConnected(perf));
-    if (!connected) {
-      logger.warn(`[CtrlProxyText] requestClearText aborted: not connected (resourceId=${resourceId ?? "nil"})`);
-      return { success: false, totalTimeMs: 0, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("clearText");
-    logger.debug(`[CtrlProxyText] requestClearText send requestId=${requestId} resourceId=${resourceId ?? "nil"} timeoutMs=${timeoutMs}`);
-
-    const promise = this.context.requestManager.register<BaseResult>(
-      requestId,
-      "clear_text",
-      timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        totalTimeMs: timeout,
-        error: `Clear text timed out after ${timeout}ms`
-      })
-    );
-
     const params: Record<string, unknown> = {};
     if (resourceId) {
       params.resourceId = resourceId;
     }
 
-    const msg = createMessage("request_clear_text", requestId, params);
-    this.context.getWebSocket()?.send(msg);
-    const result = await (perf
-      ? perf.track("clearText.awaitResponse", () => promise)
-      : promise);
-    logger.debug(`[CtrlProxyText] requestClearText done requestId=${requestId} success=${result.success} totalMs=${Date.now() - startMs}${result.error ? ` error=${result.error}` : ""}`);
-    return result;
+    return sendCommand<BaseResult>(this.context, {
+      idPrefix: "clearText",
+      responseType: "clear_text",
+      messageType: "request_clear_text",
+      params,
+      timeoutMs,
+      perf,
+      errorLabel: "Clear text",
+    });
   }
 }

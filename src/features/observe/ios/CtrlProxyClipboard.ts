@@ -10,6 +10,7 @@ import type {
   DelegateContext,
   CtrlProxyClipboardResult,
 } from "./types";
+import { sendCommand } from "../DeviceServiceUtils";
 
 /**
  * Delegate class for handling clipboard operations.
@@ -30,34 +31,26 @@ export class CtrlProxyClipboard {
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<CtrlProxyClipboardResult> {
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, action, totalTimeMs: 0, error: "Not connected" };
+    const params: Record<string, unknown> = { action };
+    if (text !== undefined) {
+      params.text = text;
     }
 
-    const requestId = this.context.requestManager.generateId("clipboard");
-    const promise = this.context.requestManager.register<CtrlProxyClipboardResult>(
-      requestId,
-      "clipboard",
+    return sendCommand<CtrlProxyClipboardResult>(this.context, {
+      idPrefix: "clipboard",
+      responseType: "clipboard",
+      messageType: "request_clipboard",
+      params,
       timeoutMs,
-      (_id, _type, timeout) => ({
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),
+      timeoutError: timeout => ({
         success: false,
         action,
         totalTimeMs: timeout,
-        error: `Clipboard operation timed out after ${timeout}ms`
-      })
-    );
-
-    const message: Record<string, unknown> = {
-      type: "request_clipboard",
-      requestId,
-      action
-    };
-    if (text !== undefined) {
-      message.text = text;
-    }
-
-    const ws = this.context.getWebSocket();
-    ws?.send(JSON.stringify(message));
-    return promise;
+        error: `Clipboard operation timed out after ${timeout}ms`,
+      }),
+    });
   }
 }

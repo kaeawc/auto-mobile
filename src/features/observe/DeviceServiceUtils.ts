@@ -6,8 +6,9 @@
  */
 
 import type { Timer } from "../../utils/SystemTimer";
+import type { PerformanceTracker } from "../../utils/PerformanceTracker";
 import type { GestureResult, TextResult, ScreenshotResult } from "./DeviceService";
-import type { BaseResult, GestureTimingResult, ActionTimingResult } from "./shared/types";
+import type { BaseResult, GestureTimingResult, ActionTimingResult, DelegateContext } from "./shared/types";
 
 // =============================================================================
 // Connection Utilities
@@ -191,6 +192,82 @@ export function createMessage(
     requestId,
     ...params,
   });
+}
+
+// =============================================================================
+// Generic Delegate Request Helper
+// =============================================================================
+
+/**
+ * Options for `sendCommand` — the shared
+ *   cancelScreenshotBackoff → ensureConnected → register → send → await
+ * flow used by WebSocket delegate methods.
+ */
+export interface SendCommandOptions<T> {
+  idPrefix: string;
+  responseType: string;
+  messageType: string;
+  params?: Record<string, unknown>;
+  timeoutMs: number;
+  perf?: PerformanceTracker;
+  /** Defaults to true. Set false for endpoints that should not interrupt screenshot backoff. */
+  cancelScreenshotBackoff?: boolean;
+  /** Custom timeout-error builder. Defaults to `{success:false, totalTimeMs, error: "<errorLabel> timed out after <ms>ms"}`. */
+  timeoutError?: (timeoutMs: number) => T;
+  /** Custom not-connected-error builder for non-BaseResult shapes (e.g. carries `action` or `enabled`). */
+  notConnectedError?: () => T;
+  /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
+  notConnectedMessage?: string;
+  /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
+  errorLabel?: string;
+}
+
+export async function sendCommand<T>(
+  context: DelegateContext,
+  options: SendCommandOptions<T>
+): Promise<T> {
+  if (options.cancelScreenshotBackoff !== false) {
+    context.cancelScreenshotBackoff();
+  }
+
+  const connected = options.perf
+    ? await options.perf.track("ensureConnected", () => context.ensureConnected(options.perf))
+    : await context.ensureConnected();
+
+  if (!connected) {
+    if (options.notConnectedError) {
+      return options.notConnectedError();
+    }
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error: options.notConnectedMessage ?? "Not connected",
+    } as T;
+  }
+
+  const requestId = context.requestManager.generateId(options.idPrefix);
+  const label = options.errorLabel ?? options.responseType;
+  const timeoutFactory = options.timeoutError
+    ? (_id: string, _type: string, timeout: number) => options.timeoutError!(timeout)
+    : (_id: string, _type: string, timeout: number) => ({
+      success: false,
+      totalTimeMs: timeout,
+      error: `${label} timed out after ${timeout}ms`,
+    } as T);
+
+  const promise = context.requestManager.register<T>(
+    requestId,
+    options.responseType,
+    options.timeoutMs,
+    timeoutFactory,
+  );
+
+  const msg = createMessage(options.messageType, requestId, options.params);
+  context.getWebSocket()?.send(msg);
+
+  return options.perf
+    ? options.perf.track(`${options.idPrefix}.awaitResponse`, () => promise)
+    : promise;
 }
 
 // =============================================================================

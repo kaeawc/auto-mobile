@@ -7,8 +7,9 @@
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
-  XCTestScreenshotResult,
+  CtrlProxyScreenshotResult,
 } from "./types";
+import { sendCommand } from "../DeviceServiceUtils";
 
 /**
  * Delegate class for handling screenshot operations.
@@ -26,29 +27,16 @@ export class CtrlProxyScreenshot {
   async requestScreenshot(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
-  ): Promise<XCTestScreenshotResult> {
-    if (!await this.context.ensureConnected(perf)) {
-      return { success: false, error: "Not connected" };
-    }
-
-    const requestId = this.context.requestManager.generateId("screenshot");
-    const promise = this.context.requestManager.register<XCTestScreenshotResult>(
-      requestId,
-      "screenshot",
+  ): Promise<CtrlProxyScreenshotResult> {
+    return sendCommand<CtrlProxyScreenshotResult>(this.context, {
+      idPrefix: "screenshot",
+      responseType: "screenshot",
+      messageType: "request_screenshot",
       timeoutMs,
-      (_id, _type, timeout) => ({
-        success: false,
-        error: `Screenshot timed out after ${timeout}ms`
-      })
-    );
-
-    const message = {
-      type: "request_screenshot",
-      requestId
-    };
-
-    const ws = this.context.getWebSocket();
-    ws?.send(JSON.stringify(message));
-    return promise;
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedError: () => ({ success: false, error: "Not connected" }),
+      timeoutError: timeout => ({ success: false, error: `Screenshot timed out after ${timeout}ms` }),
+    });
   }
 }

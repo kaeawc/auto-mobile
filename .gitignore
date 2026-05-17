@@ -1,5 +1,6 @@
 .auto-mobile-config.json
 .claude/worktrees/
+.claude/scheduled_tasks.lock
 .idea
 node_modules
 .turbo

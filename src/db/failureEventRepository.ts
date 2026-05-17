@@ -100,9 +100,9 @@ export class FailureEventRepository {
       exception_class: event.exceptionClass ?? null,
       exception_message: event.exceptionMessage ?? null,
       stacktrace: event.stacktrace ?? null,
-      signal: event.signal ?? null,
-      fault_address: event.faultAddress ?? null,
-      tombstone_path: event.tombstonePath ?? null,
+      signal: null,
+      fault_address: null,
+      tombstone_path: null,
       detection_source: event.detectionSource,
       raw_log: event.rawLog ?? null,
       navigation_node_id: event.navigationNodeId ?? null,
@@ -117,7 +117,7 @@ export class FailureEventRepository {
       .executeTakeFirstOrThrow();
 
     logger.info(
-      `[FAILURE_REPO] Saved crash for ${event.packageName}: ${event.exceptionClass ?? event.signal ?? "unknown"}`
+      `[FAILURE_REPO] Saved crash for ${event.packageName}: ${event.exceptionClass ?? "unknown"}`
     );
 
     return result.id;

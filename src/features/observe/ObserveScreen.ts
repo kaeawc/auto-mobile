@@ -1,8 +1,6 @@
 import { logger } from "../../utils/logger";
 import { throwIfAborted } from "../../utils/toolUtils";
-import { BootedDevice, ExecResult, ObserveResult } from "../../models";
-import { ViewHierarchyQueryOptions } from "../../models/ViewHierarchyQueryOptions";
-import { ScreenshotResult } from "../../models/ScreenshotResult";
+import { BootedDevice, ObserveResult } from "../../models";
 import { GetScreenSize } from "./GetScreenSize";
 import { GetSystemInsets } from "./GetSystemInsets";
 import { ViewHierarchy } from "./ViewHierarchy";
@@ -12,174 +10,98 @@ import { GetDumpsysWindow } from "./GetDumpsysWindow";
 import { GetBackStack } from "./GetBackStack";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { existsSync, mkdirSync } from "node:fs";
-import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
-import path from "path";
-import { readdirAsync, readFileAsync, statAsync, writeFileAsync } from "../../utils/io";
-import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
-import { PerformanceTracker, NoOpPerformanceTracker, processTimingData } from "../../utils/PerformanceTracker";
-import { PerformanceAudit } from "../performance/PerformanceAudit";
-import { ThresholdManager } from "../performance/ThresholdManager";
-import { DeviceCapabilitiesDetector } from "../../utils/DeviceCapabilities";
+import { NoOpPerformanceTracker, PerformanceTracker, processTimingData } from "../../utils/PerformanceTracker";
 import { serverConfig } from "../../utils/ServerConfig";
-import { WcagAudit } from "../accessibility/WcagAudit";
-import { Element } from "../../models/Element";
 import { RecompositionTracker } from "../performance/RecompositionTracker";
 import { PredictiveUIState } from "./PredictiveUIState";
-import { accessibilityDetector } from "../../utils/AccessibilityDetector";
-import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
-import { FeatureFlagService } from "../featureFlags/FeatureFlagService";
-import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { ScreenshotJobTracker } from "../../utils/ScreenshotJobTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
-import { DefaultElementParser } from "../utility/ElementParser";
-import { AndroidCtrlProxyClient } from "./android";
-import { IOSCtrlProxyClient } from "./ios";
-import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ObserveScreen, ObserveScreenExecuteOptions } from "./interfaces/ObserveScreen";
 import type { ObserveScreenDependencies } from "./ObserveScreenDependencies";
-import type { ScreenSize } from "./interfaces/ScreenSize";
-import type { SystemInsets } from "./interfaces/SystemInsets";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
-import type { Window as WindowInterface } from "./interfaces/Window";
 import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
-import type { BackStack } from "./interfaces/BackStack";
 import type { PredictiveUIState as PredictiveUIStateInterface } from "./interfaces/PredictiveUIState";
-import type { ScreenshotService } from "./interfaces/ScreenshotService";
+
+import { getObserveCacheStore, setObserveCacheStore } from "./cache/ObserveCacheRegistry";
+import { getScreenshotStateStore, setScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import {
+  DefaultObserveScreenshotRecorder,
+  ObserveScreenshotRecorder,
+  TrackedScreenshotService
+} from "./screenshot/ObserveScreenshotRecorder";
+import { HierarchyCollector } from "./collectors/HierarchyCollector";
+import { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import { PerformanceAuditor } from "./audits/PerformanceAuditor";
+import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
+import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
+import { appendObserveError } from "./ObserveError";
 
 /**
- * Interface for cached observe result
- */
-interface ObserveResultCache {
-  timestamp: number;
-  deviceId: string;
-  observeResult: ObserveResult;
-}
-
-/**
- * Per-device screenshot state
- */
-interface ScreenshotState {
-  path: string | null;
-  error: string | null;
-  timestamp: number;
-}
-
-/**
- * Observe command class that combines screen details, view hierarchy and screenshot
+ * Observe command class that combines screen details, view hierarchy and screenshot.
+ *
+ * State (observe-result cache, per-device screenshot state) lives on injected
+ * stores. The static methods below preserve the existing API for server
+ * resource handlers and the daemon by delegating to those stores.
  */
 export class RealObserveScreen implements ObserveScreen {
   private device: BootedDevice;
-  private screenSize: ScreenSize;
-  private systemInsets: SystemInsets;
-  private viewHierarchy: ViewHierarchyInterface;
-  private window: WindowInterface;
-  private screenshotUtil: ScreenshotService;
-  private dumpsysWindow: DumpsysWindow;
-  private backStack: BackStack;
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
-  private predictiveUIState: PredictiveUIStateInterface;
   private timer: Timer;
 
-  // Static cache for observe results (keyed by "deviceId:timestamp")
-  private static observeResultCache: Map<string, ObserveResultCache> = new Map();
-  private static observeResultCacheDir: string = getTempDir(TEMP_SUBDIRS.OBSERVE_RESULTS);
-  private static readonly OBSERVE_RESULT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-  // Per-device screenshot state
-  private static screenshotStateByDevice: Map<string, ScreenshotState> = new Map();
+  private viewHierarchy: ViewHierarchyInterface;
+  private dumpsysWindow: DumpsysWindow;
+  private predictiveUIState: PredictiveUIStateInterface;
 
-  /**
-   * Get the most recent cached observe result from memory (static accessor).
-   * Returns the most recently cached result across ALL devices if available and not expired.
-   */
+  private screenshotRecorder: ObserveScreenshotRecorder;
+  private hierarchyCollector: HierarchyCollector;
+  private deviceStateCollector: DeviceStateCollector;
+  private performanceAuditor: PerformanceAuditor;
+  private accessibilityAuditor: AccessibilityAuditor;
+  private accessibilityStateDetector: AccessibilityStateDetector;
+
+  // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
+
   static getRecentCachedResult(): ObserveResult | undefined {
-    return RealObserveScreen.findMostRecentCachedResult();
+    return getObserveCacheStore().getRecentInMemory();
   }
 
-  /**
-   * Get the most recent cached observe result for a specific device.
-   * Returns undefined if no valid cached result exists for that device.
-   */
   static getRecentCachedResultForDevice(deviceId: string): ObserveResult | undefined {
-    return RealObserveScreen.findMostRecentCachedResult(deviceId);
+    return getObserveCacheStore().getRecentInMemoryForDevice(deviceId);
   }
 
-  private static findMostRecentCachedResult(deviceId?: string): ObserveResult | undefined {
-    if (RealObserveScreen.observeResultCache.size === 0) {
-      return undefined;
-    }
-
-    const now = defaultTimer.now();
-    let mostRecentEntry: ObserveResultCache | undefined;
-    let mostRecentTimestamp = 0;
-
-    for (const entry of RealObserveScreen.observeResultCache.values()) {
-      if (deviceId && entry.deviceId !== deviceId) {
-        continue;
-      }
-      const age = now - entry.timestamp;
-      if (age <= RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS && entry.timestamp > mostRecentTimestamp) {
-        mostRecentEntry = entry;
-        mostRecentTimestamp = entry.timestamp;
-      }
-    }
-
-    return mostRecentEntry?.observeResult;
-  }
-
-  /**
-   * Get the most recent cached screenshot path (if any) across all devices.
-   */
   static getRecentCachedScreenshotPath(): string | undefined {
-    const state = RealObserveScreen.findLatestScreenshotState();
-    return state?.path ?? undefined;
+    return getScreenshotStateStore().getPath();
   }
 
-  /**
-   * Get the most recent cached screenshot path for a specific device.
-   */
   static getRecentCachedScreenshotPathForDevice(deviceId: string): string | undefined {
-    const state = RealObserveScreen.findLatestScreenshotState(deviceId);
-    return state?.path ?? undefined;
+    return getScreenshotStateStore().getPath(deviceId);
   }
 
-  /**
-   * Get the most recent cached screenshot error (if any) across all devices.
-   */
   static getRecentCachedScreenshotError(): string | undefined {
-    const state = RealObserveScreen.findLatestScreenshotState();
-    return state?.error ?? undefined;
+    return getScreenshotStateStore().getError();
   }
 
-  /**
-   * Get the most recent cached screenshot error for a specific device.
-   */
   static getRecentCachedScreenshotErrorForDevice(deviceId: string): string | undefined {
-    const state = RealObserveScreen.findLatestScreenshotState(deviceId);
-    return state?.error ?? undefined;
+    return getScreenshotStateStore().getError(deviceId);
   }
 
   /**
-   * Clear the in-memory cache.
+   * Clear the in-memory cache (and disk cache).
    * @param deviceId - If provided, only clears cache for that device. Otherwise clears all.
    */
   static clearCache(deviceId?: string): void {
+    getObserveCacheStore().clear(deviceId);
+    getScreenshotStateStore().clear(deviceId);
     if (deviceId) {
-      for (const [key, entry] of RealObserveScreen.observeResultCache.entries()) {
-        if (entry.deviceId === deviceId) {
-          RealObserveScreen.observeResultCache.delete(key);
-        }
-      }
-      RealObserveScreen.screenshotStateByDevice.delete(deviceId);
       ScreenshotJobTracker.cancelJob(deviceId);
     } else {
-      RealObserveScreen.observeResultCache.clear();
-      RealObserveScreen.screenshotStateByDevice.clear();
       ScreenshotJobTracker.clear();
     }
   }
+
+  // ---------- Constructor ----------
 
   constructor(
     device: BootedDevice,
@@ -188,12 +110,10 @@ export class RealObserveScreen implements ObserveScreen {
     timer: Timer = defaultTimer
   ) {
     this.device = device;
-    // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
       this.adb = this.adbFactory.create(device);
     } else if (adbFactoryOrExecutor) {
-      // Legacy path: wrap the executor in a factory for downstream dependencies
       const executor = adbFactoryOrExecutor as AdbExecutor;
       this.adb = executor;
       this.adbFactory = { create: () => executor };
@@ -201,696 +121,93 @@ export class RealObserveScreen implements ObserveScreen {
       this.adbFactory = defaultAdbClientFactory;
       this.adb = this.adbFactory.create(device);
     }
-
-    // Use injected dependencies or create defaults
-    this.screenSize = dependencies?.screenSize ?? new GetScreenSize(device, this.adbFactory);
-    this.systemInsets = dependencies?.systemInsets ?? new GetSystemInsets(device, this.adbFactory);
-    this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
-    this.window = dependencies?.window ?? new Window(device, this.adbFactory);
-    this.screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
-    this.dumpsysWindow = dependencies?.dumpsysWindow ?? new GetDumpsysWindow(device, this.adbFactory);
-    this.backStack = dependencies?.backStack ?? new GetBackStack(this.adbFactory, device);
-    this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
     this.timer = timer;
 
-    // Ensure observe result cache directory exists
-    if (!existsSync(RealObserveScreen.observeResultCacheDir)) {
-      mkdirSync(RealObserveScreen.observeResultCacheDir, { recursive: true });
+    // Data sources (either injected or default)
+    const screenSize = dependencies?.screenSize ?? new GetScreenSize(device, this.adbFactory);
+    const systemInsets = dependencies?.systemInsets ?? new GetSystemInsets(device, this.adbFactory);
+    this.viewHierarchy = dependencies?.viewHierarchy ?? new ViewHierarchy(device, this.adbFactory);
+    const window = dependencies?.window ?? new Window(device, this.adbFactory);
+    const screenshotUtil = dependencies?.screenshot ?? new TakeScreenshot(device, this.adbFactory);
+    this.dumpsysWindow = dependencies?.dumpsysWindow ?? new GetDumpsysWindow(device, this.adbFactory);
+    const backStack = dependencies?.backStack ?? new GetBackStack(this.adbFactory, device);
+    this.predictiveUIState = dependencies?.predictiveUIState ?? new PredictiveUIState();
+
+    // Caches: install injected stores into the registry so instance methods AND
+    // the static accessors (used by server resource handlers) share state.
+    // Tests that need isolation should call setObserveCacheStore / setScreenshotStateStore
+    // with a fake in beforeEach and resetObserveCacheStore / resetScreenshotStateStore
+    // in afterEach.
+    if (dependencies?.cacheStore) {
+      setObserveCacheStore(dependencies.cacheStore);
     }
-  }
-
-  private static findLatestScreenshotState(deviceId?: string): { path: string | null; error: string | null } | null {
-    const now = defaultTimer.now();
-
-    if (deviceId) {
-      const state = RealObserveScreen.screenshotStateByDevice.get(deviceId);
-      if (!state) {
-        return null;
-      }
-      if (now - state.timestamp > RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS) {
-        RealObserveScreen.screenshotStateByDevice.delete(deviceId);
-        return null;
-      }
-      return { path: state.path, error: state.error };
-    }
-
-    // Find most recent across all devices
-    let mostRecent: ScreenshotState | null = null;
-    for (const [id, state] of RealObserveScreen.screenshotStateByDevice.entries()) {
-      if (now - state.timestamp > RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS) {
-        RealObserveScreen.screenshotStateByDevice.delete(id);
-        continue;
-      }
-      if (!mostRecent || state.timestamp > mostRecent.timestamp) {
-        mostRecent = state;
-      }
+    if (dependencies?.screenshotStateStore) {
+      setScreenshotStateStore(dependencies.screenshotStateStore);
     }
 
-    if (!mostRecent) {
-      return null;
-    }
-    return { path: mostRecent.path, error: mostRecent.error };
-  }
-
-  private static updateLatestScreenshotCache(deviceId: string, path?: string, error?: string): void {
-    RealObserveScreen.screenshotStateByDevice.set(deviceId, {
-      path: path ?? null,
-      error: error ?? null,
-      timestamp: defaultTimer.now(),
+    // Composed services
+    this.screenshotRecorder = dependencies?.screenshotRecorder ?? new DefaultObserveScreenshotRecorder(
+      device,
+      screenshotUtil as TrackedScreenshotService,
+      getScreenshotStateStore()
+    );
+    this.hierarchyCollector = dependencies?.hierarchyCollector ?? new HierarchyCollector({
+      device,
+      viewHierarchy: this.viewHierarchy,
+      adb: this.adb,
+      adbFactory: this.adbFactory,
+      timer: this.timer,
+    });
+    this.deviceStateCollector = dependencies?.deviceStateCollector ?? new DeviceStateCollector({
+      device,
+      screenSize,
+      systemInsets,
+      window,
+      backStack,
+      adb: this.adb,
+      timer: this.timer,
+    });
+    this.performanceAuditor = dependencies?.performanceAuditor ?? new PerformanceAuditor({
+      device,
+      adb: this.adb,
+    });
+    this.accessibilityAuditor = dependencies?.accessibilityAuditor ?? new AccessibilityAuditor({
+      device,
+      // Prefer the recorder-backed cached path before falling back to disk scan.
+      screenshotPathResolver: () => resolveLatestScreenshotPath(
+        () => getScreenshotStateStore().getPath(this.device.deviceId)
+      ),
+    });
+    this.accessibilityStateDetector = dependencies?.accessibilityStateDetector ?? new AccessibilityStateDetector({
+      device,
+      adb: this.adb,
     });
   }
 
-  private async handleScreenshotResult(
-    screenshotResult: ScreenshotResult,
-    options: { ignoreCancel?: boolean } = {}
-  ): Promise<void> {
-    if (!screenshotResult.success) {
-      const errorMessage = screenshotResult.error || "Failed to capture screenshot";
-      if (options.ignoreCancel && errorMessage.includes(OPERATION_CANCELLED_MESSAGE)) {
-        logger.debug("[OBSERVE] Screenshot capture cancelled");
-        return;
-      }
-      RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, errorMessage);
-      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMessage}`);
-      return;
-    }
-
-    if (!screenshotResult.path) {
-      RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, "Screenshot capture returned no file path");
-      logger.warn("[OBSERVE] Screenshot capture succeeded but no file path was returned");
-      return;
-    }
-
-    const exists = await pathExists(screenshotResult.path);
-    if (!exists) {
-      RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, "Screenshot file missing after capture");
-      logger.warn(`[OBSERVE] Screenshot capture reported success but file missing: ${screenshotResult.path}`);
-      return;
-    }
-
-    RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, screenshotResult.path);
-  }
-
-  /**
-   * Collect screen size and handle errors
-   * @param dumpsysWindow - ExecResult containing dumpsys window output
-   * @param result - ObserveResult to update
-   */
-  public async collectScreenSize(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    try {
-      const screenSizeStart = this.timer.now();
-      result.screenSize = await this.screenSize.execute(dumpsysWindow);
-      logger.debug(`Screen size retrieval took ${this.timer.now() - screenSizeStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get screen size:", error);
-      this.appendError(result, "Failed to retrieve screen dimensions");
-    }
-  }
-
-  /**
-   * Collect system insets using cached dumpsys window output
-   * @param dumpsysWindow - ExecResult containing dumpsys window output
-   * @param result - ObserveResult to update
-   */
-  public async collectSystemInsets(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    try {
-      const insetsStart = this.timer.now();
-      // Pass cached dumpsys window output to avoid duplicate call
-      result.systemInsets = await this.systemInsets.execute(dumpsysWindow);
-      logger.debug(`System insets retrieval took ${this.timer.now() - insetsStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get system insets:", error);
-      this.appendError(result, "Failed to retrieve system insets");
-    }
-  }
-
-  /**
-   * Collect rotation info using cached dumpsys window output
-   * @param dumpsysWindow - ExecResult containing dumpsys window output
-   * @param result - ObserveResult to update
-   */
-  public async collectRotationInfo(dumpsysWindow: ExecResult, result: ObserveResult): Promise<void> {
-    try {
-      const rotationStart = this.timer.now();
-      const rotationMatch = dumpsysWindow.stdout.match(/mRotation=(\d)/);
-      if (rotationMatch) {
-        result.rotation = parseInt(rotationMatch[1], 10);
-      }
-      logger.debug(`Rotation info retrieval took ${this.timer.now() - rotationStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get rotation info:", error);
-    }
-  }
-
-  /**
-   * Collect wakefulness state (Android only)
-   * @param result - ObserveResult to update
-   */
-  public async collectWakefulness(result: ObserveResult, signal?: AbortSignal): Promise<void> {
-    try {
-      const wakefulness = await this.adb.getWakefulness(signal);
-      if (wakefulness) {
-        result.wakefulness = wakefulness;
-      }
-    } catch (error) {
-      logger.warn("Failed to get wakefulness state:", error);
-    }
-  }
-
-  /**
-   * Collect back stack information (Android only)
-   * @param result - ObserveResult to update
-   * @param perf - Performance tracker for timing data
-   */
-  public async collectBackStack(
-    result: ObserveResult,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
-  ): Promise<void> {
-    try {
-      const backStackStart = this.timer.now();
-      const backStackInfo = await this.backStack.execute(perf, signal);
-      result.backStack = backStackInfo;
-      logger.debug(`Back stack retrieval took ${this.timer.now() - backStackStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get back stack:", error);
-      this.appendError(result, "Failed to retrieve back stack information");
-    }
-  }
-
-  /**
-   * Collect view hierarchy and handle errors with accessibility service caching
-   * @param result - ObserveResult to update
-   * @param queryOptions - ViewHierarchyQueryOptions to pass to viewHierarchy.getViewHierarchy
-   * @param perf - Performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value
-   */
-  public async collectViewHierarchy(
-    result: ObserveResult,
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal
-  ): Promise<void> {
-    try {
-      if (this.device.platform === "android") {
-        await this.viewHierarchy.configureRecompositionTracking(true, perf);
-      }
-
-      const viewHierarchyStart = this.timer.now();
-      const viewHierarchy = await this.viewHierarchy.getViewHierarchy(queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
-      logger.debug("Accessibility service availability cached as: true");
-
-      if (viewHierarchy) {
-        result.viewHierarchy = viewHierarchy;
-
-        // Use the updatedAt from the view hierarchy if available (from accessibility service)
-        if (viewHierarchy.updatedAt) {
-          result.updatedAt = viewHierarchy.updatedAt;
-          logger.debug(`Using updatedAt from view hierarchy: ${viewHierarchy.updatedAt}`);
-        }
-
-        const focusedElement = this.viewHierarchy.findFocusedElement(viewHierarchy);
-        if (focusedElement) {
-          result.focusedElement = focusedElement;
-          logger.debug(`Found focused element: ${focusedElement.text || focusedElement["resource-id"] || "no text/id"}`);
-        }
-
-        const accessibilityFocusedElement = this.viewHierarchy.findAccessibilityFocusedElement(viewHierarchy);
-        if (accessibilityFocusedElement) {
-          result.accessibilityFocusedElement = accessibilityFocusedElement;
-          logger.debug(`Found accessibility-focused element: ${accessibilityFocusedElement.text || accessibilityFocusedElement["resource-id"] || accessibilityFocusedElement["content-desc"] || "no text/id/desc"}`);
-        }
-
-        await this.detectIntentChooser(result);
-        if (viewHierarchy.notificationPermissionDetected !== undefined) {
-          result.notificationPermissionDetected = viewHierarchy.notificationPermissionDetected;
-          if (viewHierarchy.notificationPermissionDetected) {
-            logger.debug("[ObserveScreen] Notification permission dialog detected in view hierarchy");
-          }
-        }
-      }
-
-      logger.debug(`View hierarchy retrieval took ${this.timer.now() - viewHierarchyStart}ms`);
-    } catch (error) {
-      logger.warn("Failed to get view hierarchy:", error);
-
-      // Clear cache on failure
-      AndroidCtrlProxyManager.getInstance(this.device, this.adb).clearAvailabilityCache();
-
-      // Check if the error is due to screen being off
-      const errorStr = String(error);
-      if (
-        errorStr.includes("null root node returned by UiTestAutomationBridge") ||
-        (errorStr.includes("cat:") && errorStr.includes("No such file or directory")) ||
-        (errorStr.includes("screen appears to be off"))
-      ) {
-        this.appendError(result, "Screen appears to be off or device is locked");
-      } else {
-        this.appendError(result, "Failed to retrieve view hierarchy");
-      }
-    }
-  }
-
-  /**
-   * Detect intent chooser dialog in the view hierarchy
-   * @param result - ObserveResult to update
-   */
-  private async detectIntentChooser(result: ObserveResult): Promise<void> {
-
-    if (!result.viewHierarchy) {
-      return;
-    }
-
-    try {
-      const intentChooserDetected = result.viewHierarchy.intentChooserDetected;
-
-      // Add intent chooser detection to result
-      result.intentChooserDetected = intentChooserDetected;
-
-      if (intentChooserDetected) {
-        logger.debug("[ObserveScreen] Intent chooser dialog detected in view hierarchy");
-      }
-    } catch (error) {
-      logger.warn(`[ObserveScreen] Failed to detect intent chooser: ${error}`);
-      // Don't fail the observation if intent chooser detection fails
-    }
-  }
-
-
-  /**
-   * Collect active window information using cache if available
-   * @param result - ObserveResult to update
-   */
-  public async collectActiveWindow(result: ObserveResult): Promise<void> {
-    try {
-      logger.debug("[OBSERVER] collectActiveWindow");
-      const windowStart = this.timer.now();
-
-      const activeWindow = await this.window.getActive();
-
-      logger.debug(`Active window retrieval took ${this.timer.now() - windowStart}ms`);
-      if (activeWindow) {
-        result.activeWindow = activeWindow;
-      }
-    } catch (error) {
-      logger.warn("Failed to get active window:", error);
-      this.appendError(result, "Failed to retrieve active window information");
-    }
-  }
-
-  /**
-   * Fetch raw (unfiltered) view hierarchy from the device and attach to an existing result.
-   * On Android: requests the accessibility service hierarchy with all filtering disabled.
-   * On iOS: requests the CtrlProxy iOS hierarchy with all filtering disabled.
-   * Invalidates the shared cache after fetching so that the unfiltered snapshot does not
-   * bleed into subsequent normal observe calls.
-   */
-  private async collectRawViewHierarchyData(result: ObserveResult, signal?: AbortSignal): Promise<void> {
-    try {
-      if (this.device.platform === "android") {
-        const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-        // Use requestHierarchySync directly to bypass the cache — getAccessibilityHierarchy
-        // with minTimestamp=0 returns any cached result, which may already be filtered.
-        const syncResult = await client.requestHierarchySync(
-          new NoOpPerformanceTracker(),
-          true, // disableAllFiltering
-          signal
-        );
-        // Invalidate the cache so the unfiltered snapshot is not served to subsequent
-        // normal observe calls that expect a filtered hierarchy.
-        client.invalidateCache();
-        if (syncResult?.hierarchy) {
-          result.rawViewHierarchy = {
-            json: JSON.stringify(syncResult.hierarchy, null, 2),
-            source: "accessibility-service",
-            timestamp: this.timer.now(),
-            device: { deviceId: this.device.deviceId, platform: this.device.platform }
-          };
-        }
-      } else {
-        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const hierarchyResult = await xcTestClient.requestHierarchySync(
-          new NoOpPerformanceTracker(),
-          true, // disableAllFiltering
-          signal
-        );
-        // Invalidate the cache so the unfiltered snapshot is not served to subsequent
-        // normal observe calls that expect a filtered hierarchy.
-        xcTestClient.invalidateCache();
-        if (hierarchyResult?.hierarchy) {
-          result.rawViewHierarchy = {
-            xcuitest: JSON.stringify(hierarchyResult.hierarchy, null, 2),
-            source: "xcuitest",
-            timestamp: this.timer.now(),
-            device: { deviceId: this.device.deviceId, platform: this.device.platform }
-          };
-        }
-      }
-    } catch (error) {
-      logger.warn("[ObserveScreen] Failed to collect raw view hierarchy:", error);
-    }
-  }
+  // ---------- Public API ----------
 
   /**
    * Fetch raw view hierarchy and attach it to an existing observe result.
    * Call this after execute() when raw hierarchy data is needed.
    */
-  public async appendRawViewHierarchy(result: ObserveResult, signal?: AbortSignal): Promise<void> {
-    await this.collectRawViewHierarchyData(result, signal);
+  async appendRawViewHierarchy(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+    await this.hierarchyCollector.collectRaw(result, signal);
   }
 
   /**
-   * Collect all observation data with parallelization
-   * @param result - ObserveResult to update
-   * @param queryOptions - ViewHierarchyQueryOptions to pass to viewHierarchy.getViewHierarchy
-   * @param perf - Performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value
-   */
-  public async collectAllData(
-    result: ObserveResult,
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    skipWaitForFresh: boolean = false,
-    minTimestamp: number = 0,
-    signal?: AbortSignal,
-    skipBackStack: boolean = false
-  ): Promise<void> {
-    switch (this.device.platform) {
-      case "android":
-        // Phase 1: Get view hierarchy first (includes screen info from accessibility service)
-        perf.serial("phase1_hierarchy");
-
-        // Get view hierarchy (includes all device metadata from accessibility service)
-        await this.collectViewHierarchy(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
-
-        perf.end();
-
-        // Use device metadata from accessibility service (no dumpsys fallback)
-        const hierarchy = result.viewHierarchy;
-        if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
-          result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
-          if (hierarchy.rotation !== undefined) {
-            result.rotation = hierarchy.rotation;
-          }
-          if (hierarchy.systemInsets) {
-            result.systemInsets = hierarchy.systemInsets;
-          }
-          // Use wakefulness from accessibility service, fall back to ADB
-          if (hierarchy.wakefulness) {
-            result.wakefulness = hierarchy.wakefulness;
-          } else {
-            await perf.track("wakefulness", () => this.collectWakefulness(result, signal));
-          }
-          // Use foreground activity from accessibility service for activeWindow
-          if (hierarchy.foregroundActivity) {
-            const parts = hierarchy.foregroundActivity.split("/");
-            const packageName = parts[0];
-            const activityName = parts[1]?.startsWith(".")
-              ? packageName + parts[1]
-              : parts[1] || "";
-            result.activeWindow = {
-              appId: packageName,
-              activityName,
-              layoutSeqSum: 0
-            };
-          }
-          if (!skipBackStack) {
-            await perf.track("backStack", () => this.collectBackStack(result, perf, signal));
-          }
-          logger.debug("[OBSERVE] Using device metadata from accessibility service");
-        } else {
-          logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
-          // Fall back to ADB for all metadata
-          const tasks: Promise<void>[] = [
-            perf.track("wakefulness", () => this.collectWakefulness(result, signal)),
-          ];
-          if (!skipBackStack) {
-            tasks.push(perf.track("backStack", () => this.collectBackStack(result, perf, signal)));
-          }
-          await Promise.all(tasks);
-        }
-
-        // Note: Offscreen filtering is now done in the Android accessibility service (Kotlin)
-        // for better performance (avoids serializing/transferring filtered data)
-
-        // Populate activeWindow from view hierarchy packageName if not already set
-        if (result.viewHierarchy?.packageName && !result.activeWindow) {
-          result.activeWindow = {
-            appId: result.viewHierarchy.packageName,
-            activityName: "",
-            layoutSeqSum: 0
-          };
-        }
-
-        // Fallback: if activeWindow still not populated, use the Window class
-        if (!result.activeWindow) {
-          await this.collectActiveWindow(result);
-        }
-
-        if (result.notificationPermissionDetected && result.activeWindow) {
-          result.activeWindow.type = "notification_permission_dialog";
-        }
-
-        break;
-
-      case "ios":
-        // iOS-specific data collection logic here
-        perf.serial("ios_collect");
-
-        // Collect view hierarchy (fast via CtrlProxy iOS WebSocket)
-        await this.collectViewHierarchy(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
-
-        // Extract screen size from hierarchy
-        {
-          const extractedSize = this.extractScreenSizeFromHierarchy(result.viewHierarchy);
-          if (extractedSize) {
-            result.screenSize = extractedSize;
-            logger.debug(`[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`);
-          } else if (result.viewHierarchy?.screenWidth && result.viewHierarchy?.screenHeight) {
-            // Fallback to screenWidth/screenHeight from CtrlProxy iOS (logical points)
-            result.screenSize = {
-              width: result.viewHierarchy.screenWidth,
-              height: result.viewHierarchy.screenHeight
-            };
-            logger.debug(`[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`);
-          } else {
-            logger.warn("[iOS] Failed to extract screen size from hierarchy");
-          }
-        }
-
-        // Filter out completely offscreen nodes to reduce hierarchy size
-        if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
-          const rawHierarchy = result.viewHierarchy;
-          result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
-            rawHierarchy,
-            result.screenSize.width,
-            result.screenSize.height
-          );
-          if (serverConfig.isRawElementSearchEnabled()) {
-            attachRawViewHierarchy(result.viewHierarchy, rawHierarchy);
-          }
-        }
-
-        // Populate activeWindow from view hierarchy packageName if not already set
-        if (result.viewHierarchy?.packageName && !result.activeWindow) {
-          result.activeWindow = {
-            appId: result.viewHierarchy.packageName,
-            activityName: "",
-            layoutSeqSum: 0
-          };
-        }
-
-        perf.end();
-        break;
-    }
-  }
-
-  /**
-   * Capture a screenshot for the latest observation.
-   */
-  private async captureObservationScreenshot(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
-  ): Promise<void> {
-    try {
-      await perf.track("screenshot", async () => {
-        const { promise } = this.screenshotUtil.startTrackedCapture(
-          { format: "png" },
-          {
-            parentSignal: signal,
-            onComplete: async completion => {
-              if (!completion.isLatest) {
-                return;
-              }
-              if (completion.aborted) {
-                logger.debug("[OBSERVE] Screenshot capture cancelled");
-                return;
-              }
-              try {
-                await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
-              } catch (err) {
-                logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
-              }
-            }
-          }
-        );
-        await promise;
-      });
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      if (errorMessage.includes(OPERATION_CANCELLED_MESSAGE)) {
-        logger.debug("[OBSERVE] Screenshot capture cancelled");
-        return;
-      }
-      RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, errorMessage);
-      logger.warn(`[OBSERVE] Screenshot capture failed: ${errorMessage}`);
-    }
-  }
-
-  private startObservationScreenshot(
-    perf: PerformanceTracker = new NoOpPerformanceTracker(),
-    signal?: AbortSignal
-  ): void {
-    perf.startOperation("screenshot");
-    const { promise } = this.screenshotUtil.startTrackedCapture(
-      { format: "png" },
-      {
-        parentSignal: signal,
-        onComplete: async completion => {
-          if (!completion.isLatest) {
-            return;
-          }
-          if (completion.aborted) {
-            logger.debug("[OBSERVE] Screenshot capture cancelled");
-            return;
-          }
-          try {
-            await this.handleScreenshotResult(completion.result, { ignoreCancel: true });
-          } catch (err) {
-            logger.warn(`[OBSERVE] Failed to finalize screenshot capture: ${err}`);
-          }
-        }
-      }
-    );
-
-    promise.finally(() => {
-      perf.endOperation("screenshot");
-    });
-  }
-
-  /**
-   * Extract screen size from view hierarchy root node bounds.
-   * Supports both Android format ("[left,top][right,bottom]") and iOS format ({left, top, right, bottom}).
-   * @param viewHierarchy - View hierarchy result
-   * @returns Screen size or null if unable to extract
-   */
-  private extractScreenSizeFromHierarchy(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
-    // Android format: hierarchy.node.$.bounds = "[0,0][402,874]"
-    const rootNode = viewHierarchy?.hierarchy?.node;
-    if (rootNode?.$?.bounds) {
-      const boundsStr = rootNode.$.bounds;
-      const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
-      if (match) {
-        const width = parseInt(match[3], 10) - parseInt(match[1], 10);
-        const height = parseInt(match[4], 10) - parseInt(match[2], 10);
-        if (width > 0 && height > 0) {
-          return { width, height };
-        }
-      }
-    }
-
-    // iOS format: hierarchy is the root XCTestNode with bounds as {left, top, right, bottom}
-    const iosHierarchy = viewHierarchy?.hierarchy;
-    if (iosHierarchy?.bounds && typeof iosHierarchy.bounds === "object" && !Array.isArray(iosHierarchy.bounds)) {
-      const { left, top, right, bottom } = iosHierarchy.bounds;
-      if (typeof right === "number" && typeof bottom === "number") {
-        const width = right - (left ?? 0);
-        const height = bottom - (top ?? 0);
-        if (width > 0 && height > 0) {
-          return { width, height };
-        }
-      }
-    }
-
-    return null;
-  }
-
-  /**
-   * Append error message to result
-   * @param result - ObserveResult to update
-   * @param newError - Error message to append
-   */
-  appendError(result: ObserveResult, newError: string): void {
-    if (result.error) {
-      result.error += `; ${newError}`;
-    } else {
-      result.error = newError;
-    }
-  }
-
-  /**
-   * Create base observe result object
-   * @returns Base ObserveResult with updatedAt and default values
-   */
-  createBaseResult(): ObserveResult {
-    return {
-      updatedAt: new Date().toISOString(),
-      screenSize: { width: 0, height: 0 },
-      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
-    };
-  }
-
-  /**
-   * Resolve observation timestamp in milliseconds (device time if available).
-   */
-  private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
-    const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;
-    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
-      return candidate;
-    }
-    if (typeof candidate === "string") {
-      const parsed = Date.parse(candidate);
-      if (!Number.isNaN(parsed)) {
-        return parsed;
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * Get the most recent cached observe result from memory or disk cache
-   * @returns Promise<ObserveResult> - The most recent cached observe result
+   * Get the most recent cached observe result from memory or disk cache.
    */
   async getMostRecentCachedObserveResult(): Promise<ObserveResult> {
     const startTime = this.timer.now();
-
     try {
       logger.debug("[OBSERVE_CACHE] Getting most recent cached observe result");
-
-      // Check in-memory cache first
-      const memoryResult = await this.checkInMemoryObserveCache();
-      if (memoryResult) {
-        const duration = this.timer.now() - startTime;
-        logger.debug(`[OBSERVE_CACHE] Found recent result in memory cache (${duration}ms)`);
-        return memoryResult;
-      }
-
-      // Check disk cache
-      const diskResult = await this.checkDiskObserveCache();
-      if (diskResult) {
-        const duration = this.timer.now() - startTime;
-        logger.debug(`[OBSERVE_CACHE] Found recent result in disk cache (${duration}ms)`);
-        return diskResult;
-      }
-
-      // No cached result available
+      const cached = await getObserveCacheStore().getMostRecent(this.device.deviceId);
       const duration = this.timer.now() - startTime;
+      if (cached) {
+        logger.debug(`[OBSERVE_CACHE] Found recent result in cache (${duration}ms)`);
+        return cached;
+      }
       logger.debug(`[OBSERVE_CACHE] No cached observe result available (${duration}ms)`);
-
       return {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
@@ -900,7 +217,6 @@ export class RealObserveScreen implements ObserveScreen {
     } catch (error) {
       const duration = this.timer.now() - startTime;
       logger.warn(`[OBSERVE_CACHE] Error getting cached observe result after ${duration}ms: ${error}`);
-
       return {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
@@ -911,438 +227,7 @@ export class RealObserveScreen implements ObserveScreen {
   }
 
   /**
-   * Check in-memory cache for most recent observe result
-   * @returns Promise<ObserveResult | null> - Most recent cached result or null
-   */
-  private async checkInMemoryObserveCache(): Promise<ObserveResult | null> {
-    const cacheSize = RealObserveScreen.observeResultCache.size;
-    const deviceId = this.device.deviceId;
-    logger.debug(`[OBSERVE_CACHE] Checking in-memory cache for device ${deviceId}, size: ${cacheSize}`);
-
-    if (cacheSize === 0) {
-      logger.debug("[OBSERVE_CACHE] In-memory cache is empty");
-      return null;
-    }
-
-    const now = this.timer.now();
-    const ttl = RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS;
-
-    // Remove expired entries and find most recent for this device
-    const expiredKeys: string[] = [];
-    let mostRecentEntry: ObserveResultCache | null = null;
-
-    for (const [key, cachedEntry] of RealObserveScreen.observeResultCache.entries()) {
-      const age = now - cachedEntry.timestamp;
-
-      if (age >= ttl) {
-        expiredKeys.push(key);
-        logger.debug(`[OBSERVE_CACHE] Removing expired cache entry: ${key} (age: ${age}ms > TTL: ${ttl}ms)`);
-      } else if (cachedEntry.deviceId === deviceId) {
-        // Only consider entries for this device
-        if (!mostRecentEntry || cachedEntry.timestamp > mostRecentEntry.timestamp) {
-          mostRecentEntry = cachedEntry;
-        }
-      }
-    }
-
-    // Remove expired entries
-    for (const key of expiredKeys) {
-      RealObserveScreen.observeResultCache.delete(key);
-    }
-
-    if (mostRecentEntry) {
-      const age = now - mostRecentEntry.timestamp;
-      logger.debug(`[OBSERVE_CACHE] Found most recent in-memory result for device ${deviceId} (age: ${age}ms)`);
-      return mostRecentEntry.observeResult;
-    }
-
-    logger.debug(`[OBSERVE_CACHE] No valid entries in in-memory cache for device ${deviceId}`);
-    return null;
-  }
-
-  /**
-   * Check disk cache for most recent observe result
-   * @returns Promise<ObserveResult | null> - Most recent cached result or null
-   */
-  private async checkDiskObserveCache(): Promise<ObserveResult | null> {
-    logger.debug("[OBSERVE_CACHE] Checking disk cache");
-
-    try {
-      // Get JSON files in the cache directory for this device
-      const deviceId = this.device.deviceId;
-      const devicePrefix = `observe_${deviceId.replace(/:/g, "_")}_`;
-      const files = await readdirAsync(RealObserveScreen.observeResultCacheDir);
-      const jsonFiles = files.filter(file => file.endsWith(".json") && file.startsWith(devicePrefix));
-
-      if (jsonFiles.length === 0) {
-        logger.debug("[OBSERVE_CACHE] No observe result files found in disk cache");
-        return null;
-      }
-
-      const now = this.timer.now();
-      const ttl = RealObserveScreen.OBSERVE_RESULT_CACHE_TTL_MS;
-      let mostRecentFile: { path: string, mtime: number } | null = null;
-
-      // Find the most recent valid file
-      for (const file of jsonFiles) {
-        const filePath = path.join(RealObserveScreen.observeResultCacheDir, file);
-        const stats = await statAsync(filePath);
-        const age = now - stats.mtime.getTime();
-
-        if (age < ttl) {
-          if (!mostRecentFile || stats.mtime.getTime() > mostRecentFile.mtime) {
-            mostRecentFile = { path: filePath, mtime: stats.mtime.getTime() };
-          }
-        } else {
-          // TODO: Remove old file
-          logger.debug(`[OBSERVE_CACHE] Disk cache file expired: ${file} (age: ${age}ms > TTL: ${ttl}ms)`);
-        }
-      }
-
-      if (mostRecentFile) {
-        const age = now - mostRecentFile.mtime;
-        logger.debug(`[OBSERVE_CACHE] Loading most recent disk cache file (age: ${age}ms)`);
-
-        const cacheData = await readFileAsync(mostRecentFile.path, "utf8");
-        const cachedResult: ObserveResult = JSON.parse(cacheData);
-
-        // Also update the in-memory cache
-        const deviceId = this.device.deviceId;
-        const cacheKey = `${deviceId}:${mostRecentFile.mtime}`;
-        RealObserveScreen.observeResultCache.set(cacheKey, {
-          timestamp: mostRecentFile.mtime,
-          deviceId,
-          observeResult: cachedResult,
-        });
-
-        logger.debug(`[OBSERVE_CACHE] Updated in-memory cache from disk cache`);
-        return cachedResult;
-      }
-
-      logger.debug("[OBSERVE_CACHE] No valid files in disk cache");
-      return null;
-    } catch (error) {
-      logger.warn(`[OBSERVE_CACHE] Error checking disk cache: ${error}`);
-      return null;
-    }
-  }
-
-  /**
-   * Cache observe result in memory and disk
-   * @param observeResult - The observe result to cache
-   */
-  async cacheObserveResult(observeResult: ObserveResult): Promise<void> {
-    const timestamp = this.timer.now();
-    const deviceId = this.device.deviceId;
-    const cacheKey = `${deviceId}:${timestamp}`;
-
-    try {
-      logger.debug(`[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`);
-
-      // Cache in memory
-      RealObserveScreen.observeResultCache.set(cacheKey, {
-        timestamp,
-        deviceId,
-        observeResult,
-      });
-
-      // Cache on disk
-      await this.saveObserveResultToDisk(cacheKey, observeResult);
-
-      logger.debug(`[OBSERVE_CACHE] Successfully cached observe result, in-memory cache size: ${RealObserveScreen.observeResultCache.size}`);
-    } catch (error) {
-      logger.warn(`[OBSERVE_CACHE] Error caching observe result: ${error}`);
-    }
-  }
-
-  /**
-   * Save observe result to disk cache
-   * @param cacheKey - Cache key (deviceId:timestamp) for filename
-   * @param observeResult - The observe result to save
-   */
-  private async saveObserveResultToDisk(cacheKey: string, observeResult: ObserveResult): Promise<void> {
-    try {
-      // Replace colons with underscores for filesystem safety
-      const filename = `observe_${cacheKey.replace(/:/g, "_")}.json`;
-      const filePath = path.join(RealObserveScreen.observeResultCacheDir, filename);
-
-      await writeFileAsync(filePath, JSON.stringify(observeResult, null, 2));
-      logger.debug(`[OBSERVE_CACHE] Saved observe result to disk: ${filename}`);
-    } catch (error) {
-      logger.warn(`[OBSERVE_CACHE] Failed to save observe result to disk: ${error}`);
-    }
-  }
-
-  /**
-   * Run performance audit if enabled
-   * Checks --ui-perf-mode CLI flag to enable/disable
-   * @param result - ObserveResult to attach audit results to
-   * @param perf - Performance tracker
-   */
-  private async runPerformanceAudit(
-    result: ObserveResult,
-    perf: PerformanceTracker
-  ): Promise<void> {
-    // Check if performance audit is enabled via CLI flag
-    // This will be replaced with global configuration in issue #67
-    const auditEnabled = serverConfig.isUiPerfModeEnabled();
-
-    if (!auditEnabled) {
-      return;
-    }
-
-    // Only run on Android for now
-    if (this.device.platform !== "android") {
-      logger.debug("[PerformanceAudit] Skipping audit, only Android is supported");
-      return;
-    }
-
-    // Need an active window with app ID
-    if (!result.activeWindow?.appId) {
-      logger.debug("[PerformanceAudit] Skipping audit, no active app");
-      return;
-    }
-
-    try {
-      await perf.track("performanceAudit", async () => {
-        logger.info(`[PerformanceAudit] Running UI performance audit for ${result.activeWindow?.appId}`);
-
-        // Initialize components
-        const capabilitiesDetector = new DeviceCapabilitiesDetector(this.device, this.adb);
-        const thresholdManager = new ThresholdManager();
-        const performanceAudit = new PerformanceAudit(this.device, this.adb);
-
-        // Get device capabilities
-        const capabilities = await capabilitiesDetector.getCapabilities();
-
-        // Get or create thresholds
-        const thresholds = await thresholdManager.getOrCreateThresholds(
-          this.device.deviceId,
-          capabilities
-        );
-
-        // Run the audit
-        const auditResult = await performanceAudit.runAudit(
-          result.activeWindow!.appId,
-          thresholds,
-          result.screenSize,
-          perf
-        );
-
-        // Attach audit result to observe result
-        result.performanceAudit = auditResult;
-
-        // Update threshold weight based on result
-        const sessionId = new Date().toISOString().split("T")[0];
-        await thresholdManager.updateThresholdWeight(
-          this.device.deviceId,
-          sessionId,
-          auditResult.passed
-        );
-
-        if (!auditResult.passed) {
-          logger.warn(
-            `[PerformanceAudit] Performance audit FAILED with ${auditResult.violations.length} violations`
-          );
-        } else {
-          logger.info("[PerformanceAudit] Performance audit PASSED");
-        }
-
-        // Start continuous performance monitoring for this device/package
-        const { getPerformanceMonitor } = await import("../performance/PerformanceMonitor");
-        getPerformanceMonitor().startMonitoring(this.device.deviceId, result.activeWindow!.appId, this.device.platform);
-      });
-    } catch (error) {
-      logger.error(`[PerformanceAudit] Failed to run performance audit: ${error}`);
-      // Don't fail the entire observation if audit fails
-    }
-  }
-
-  /**
-   * Run accessibility audit if enabled
-   * Checks --accessibility-audit CLI flag to enable/disable
-   * @param result - ObserveResult to attach audit results to
-   * @param perf - Performance tracker
-   */
-  private async runAccessibilityAudit(
-    result: ObserveResult,
-    perf: PerformanceTracker
-  ): Promise<void> {
-    // Check if accessibility audit is enabled via CLI flag
-    const auditConfig = serverConfig.getAccessibilityAuditConfig();
-
-    if (!auditConfig) {
-      return;
-    }
-
-    // Only run on Android for now
-    if (this.device.platform !== "android") {
-      logger.debug("[AccessibilityAudit] Skipping audit, only Android is supported");
-      return;
-    }
-
-    // Need view hierarchy
-    if (!result.viewHierarchy?.hierarchy) {
-      logger.debug("[AccessibilityAudit] Skipping audit, no view hierarchy available");
-      return;
-    }
-
-    // Need active window for screen ID
-    if (!result.activeWindow?.appId) {
-      logger.debug("[AccessibilityAudit] Skipping audit, no active app");
-      return;
-    }
-
-    try {
-      await perf.track("accessibilityAudit", async () => {
-        logger.info(`[AccessibilityAudit] Running WCAG ${auditConfig.level} audit for ${result.activeWindow?.appId}`);
-
-        // Initialize audit
-        const wcagAudit = new WcagAudit();
-
-        // Extract elements directly from view hierarchy for audit
-        const elementParser = new DefaultElementParser();
-        const allElements: Element[] = elementParser.flattenViewHierarchy(result.viewHierarchy!)
-          .map(entry => entry.element);
-
-        // Get screenshot path if available (from TakeScreenshot cache)
-        const screenshotPath = await this.getLatestScreenshotPath();
-
-        // Run the audit
-        const auditResult = await wcagAudit.audit(
-          allElements,
-          result.viewHierarchy!.hierarchy,
-          screenshotPath,
-          result.activeWindow!.appId,
-          auditConfig
-        );
-
-        // Attach audit result to observe result
-        result.accessibilityAudit = auditResult;
-
-        if (!auditResult.summary.passed) {
-          logger.warn(
-            `[AccessibilityAudit] Accessibility audit FAILED with ${auditResult.violations.length} violations (${auditResult.summary.bySeverity.error} errors, ${auditResult.summary.bySeverity.warning} warnings)`
-          );
-        } else {
-          logger.info("[AccessibilityAudit] Accessibility audit PASSED");
-        }
-      });
-    } catch (error) {
-      logger.error(`[AccessibilityAudit] Failed to run accessibility audit: ${error}`);
-      // Don't fail the entire observation if audit fails
-    }
-  }
-
-  /**
-   * Detect accessibility state (TalkBack/VoiceOver) and attach to result
-   * @param result - ObserveResult to attach accessibility state to
-   * @param perf - Performance tracker
-   * @param signal - Abort signal
-   */
-  private async detectAccessibilityState(
-    result: ObserveResult,
-    perf: PerformanceTracker,
-    signal?: AbortSignal
-  ): Promise<void> {
-    try {
-      await perf.track("accessibilityDetection", async () => {
-        throwIfAborted(signal);
-
-        // Get feature flag service instance
-        const featureFlags = FeatureFlagService.getInstance();
-
-        if (this.device.platform === "android") {
-          // Detect TalkBack state via ADB
-          const enabled = await accessibilityDetector.isAccessibilityEnabled(
-            this.device.deviceId,
-            this.adb,
-            featureFlags
-          );
-
-          const service = await accessibilityDetector.detectMethod(
-            this.device.deviceId,
-            this.adb,
-            featureFlags
-          );
-
-          result.accessibilityState = { enabled, service };
-          logger.debug(
-            `[AccessibilityDetector] Android accessibility state: enabled=${enabled}, service=${service}`
-          );
-        } else if (this.device.platform === "ios") {
-          // Detect VoiceOver state via CtrlProxy WebSocket
-          const client = IOSCtrlProxyClient.getInstance(this.device);
-          const enabled = await iosVoiceOverDetector.isVoiceOverEnabled(
-            this.device.deviceId,
-            client,
-            featureFlags
-          );
-
-          result.accessibilityState = {
-            enabled,
-            service: enabled ? "voiceover" : "unknown",
-          };
-          logger.debug(`[IosVoiceOverDetector] iOS VoiceOver state: enabled=${enabled}`);
-        }
-      });
-    } catch (error) {
-      logger.error(`[detectAccessibilityState] Failed to detect accessibility state: ${error}`);
-      // Don't fail the entire observation if detection fails
-      // Result will simply not include accessibilityState field
-    }
-  }
-
-  /**
-   * Get the latest screenshot path from cache
-   */
-  private async getLatestScreenshotPath(): Promise<string | undefined> {
-    try {
-      const cachedPath = RealObserveScreen.getRecentCachedScreenshotPathForDevice(this.device.deviceId);
-      if (cachedPath) {
-        const exists = await pathExists(cachedPath);
-        if (exists) {
-          return cachedPath;
-        }
-      }
-
-      const cacheDir = getTempDir(TEMP_SUBDIRS.SCREENSHOTS);
-      if (!existsSync(cacheDir)) {
-        return undefined;
-      }
-
-      const files = await readdirAsync(cacheDir);
-      const imageFiles = files.filter(f => f.endsWith(".png") || f.endsWith(".webp"));
-
-      if (imageFiles.length === 0) {
-        return undefined;
-      }
-
-      // Sort by modification time (most recent first)
-      const fileStats = await Promise.all(
-        imageFiles.map(async f => {
-          const fullPath = path.join(cacheDir, f);
-          const stat = await statAsync(fullPath);
-          return { path: fullPath, mtime: stat.mtime };
-        })
-      );
-
-      fileStats.sort((a, b) => b.mtime.getTime() - a.mtime.getTime());
-
-      return fileStats[0]?.path;
-    } catch (error) {
-      logger.warn(`[AccessibilityAudit] Failed to get latest screenshot: ${error}`);
-      return undefined;
-    }
-  }
-
-  /**
-   * Execute the observe command
-   * @param queryOptions - ViewHierarchyQueryOptions to pass to viewHierarchy.getViewHierarchy
-   * @param perf - Performance tracker for timing data
-   * @param skipWaitForFresh - If true, skip WebSocket wait and go straight to sync method (default: true for direct observe calls)
-   * @param minTimestamp - If provided, cached data must have updatedAt >= this value (used after actions to ensure fresh data)
-   * @returns The observation result
+   * Execute the observe command.
    */
   async execute(options?: ObserveScreenExecuteOptions): Promise<ObserveResult> {
     const queryOptions = options?.queryOptions;
@@ -1352,41 +237,38 @@ export class RealObserveScreen implements ObserveScreen {
     const signal = options?.signal;
     const skipBackStack = options?.skipBackStack ?? false;
     const skipScreenshot = options?.skipScreenshot ?? false;
+
     try {
       logger.debug(`Executing observe command (skipWaitForFresh=${skipWaitForFresh}, minTimestamp=${minTimestamp})`);
       const startTime = this.timer.now();
       throwIfAborted(signal);
 
-      // Create base result object with timestamp
       const result = this.createBaseResult();
 
-      // Wrap entire observation in serial tracking
       perf.serial("observe");
 
-      // Collect all data components with parallelization
-      // Note: collectAllData tracks its phases internally, so we just call it directly
+      // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
 
+      // Screenshot: fire-and-forget unless an accessibility audit is configured
+      // (the audit needs the screenshot file on disk before it runs).
       if (!skipScreenshot) {
         if (serverConfig.getAccessibilityAuditConfig()) {
-          await this.captureObservationScreenshot(perf, signal);
+          await this.screenshotRecorder.capture(perf, signal);
         } else {
-          this.startObservationScreenshot(perf, signal);
+          this.screenshotRecorder.start(perf, signal);
         }
       }
 
       // Attach recomposition metrics if enabled
       await RecompositionTracker.getInstance().processObservation(result, this.device);
 
-      // Run performance audit if enabled
-      await this.runPerformanceAudit(result, perf);
+      // Audits + accessibility state detection (each is config-gated; failures don't propagate)
+      await this.performanceAuditor.run(result, perf);
+      await this.accessibilityAuditor.run(result, perf);
+      await this.accessibilityStateDetector.run(result, perf, signal);
 
-      // Run accessibility audit if enabled
-      await this.runAccessibilityAudit(result, perf);
-
-      // Detect accessibility state (TalkBack/VoiceOver)
-      await this.detectAccessibilityState(result, perf, signal);
-
+      // Predictive UI (opt-in via config)
       if (serverConfig.isPredictiveUiEnabled()) {
         try {
           const predictions = await this.predictiveUIState.generate(result);
@@ -1399,10 +281,11 @@ export class RealObserveScreen implements ObserveScreen {
       }
 
       // Cache the result for future use
-      await perf.track("cacheResult", () => this.cacheObserveResult(result));
+      await perf.track("cacheResult", () => getObserveCacheStore().put(this.device.deviceId, result));
 
       perf.end();
 
+      // Freshness diagnostics
       const requestedAfter = minTimestamp > 0 ? minTimestamp : undefined;
       const actualTimestamp = this.resolveObservationTimestampMs(result);
       const isFresh = requestedAfter === undefined
@@ -1411,12 +294,7 @@ export class RealObserveScreen implements ObserveScreen {
       const staleDurationMs = requestedAfter !== undefined && actualTimestamp !== undefined && actualTimestamp < requestedAfter
         ? requestedAfter - actualTimestamp
         : undefined;
-      result.freshness = {
-        requestedAfter,
-        actualTimestamp,
-        isFresh,
-        staleDurationMs
-      };
+      result.freshness = { requestedAfter, actualTimestamp, isFresh, staleDurationMs };
 
       // Attach performance timing if enabled (with filtering and truncation)
       const timings = perf.getTimings();
@@ -1435,13 +313,203 @@ export class RealObserveScreen implements ObserveScreen {
       const errorMessage = err instanceof Error ? (err.stack || err.message) : String(err);
       logger.error(`Critical error in observe command: ${errorMessage}`);
       ScreenshotJobTracker.cancelJob(this.device.deviceId);
-      RealObserveScreen.updateLatestScreenshotCache(this.device.deviceId, undefined, `Observation failed: ${errorMessage}`);
-      return {
+      getScreenshotStateStore().update(this.device.deviceId, undefined, `Observation failed: ${errorMessage}`);
+      const fallback: ObserveResult = {
         updatedAt: new Date().toISOString(),
         screenSize: { width: 0, height: 0 },
         systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
-        error: "Observation failed due to device access error"
       };
+      appendObserveError(fallback, {
+        phase: "critical",
+        message: "Observation failed due to device access error",
+        cause: errorMessage
+      });
+      return fallback;
     }
+  }
+
+  // ---------- Public collector wrappers (kept for back-compat with existing tests) ----------
+
+  /**
+   * Back-compat shim: prefer `appendObserveError(result, { phase, message, cause })`.
+   * This wrapper records errors with phase "critical" so they land in `result.errors`
+   * as well as the derived `result.error` string.
+   */
+  appendError(result: ObserveResult, newError: string): void {
+    appendObserveError(result, { phase: "critical", message: newError });
+  }
+
+  /**
+   * Back-compat shim around {@link HierarchyCollector.extractScreenSize}.
+   */
+  extractScreenSizeFromHierarchy(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
+    return this.hierarchyCollector.extractScreenSize(viewHierarchy);
+  }
+
+  createBaseResult(): ObserveResult {
+    return {
+      updatedAt: new Date().toISOString(),
+      screenSize: { width: 0, height: 0 },
+      systemInsets: { top: 0, right: 0, bottom: 0, left: 0 }
+    };
+  }
+
+  /**
+   * Cache an observe result. Public for back-compat with tests.
+   */
+  async cacheObserveResult(observeResult: ObserveResult): Promise<void> {
+    await getObserveCacheStore().put(this.device.deviceId, observeResult);
+  }
+
+  // ---------- Orchestration ----------
+
+  /**
+   * Collect all observation data with platform-specific orchestration.
+   *
+   * Public + parameterized for back-compat with existing tests and for callers
+   * that need to assemble an `ObserveResult` without the full `execute()` pipeline.
+   */
+  async collectAllData(
+    result: ObserveResult,
+    queryOptions?: import("../../models/ViewHierarchyQueryOptions").ViewHierarchyQueryOptions,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    skipWaitForFresh: boolean = false,
+    minTimestamp: number = 0,
+    signal?: AbortSignal,
+    skipBackStack: boolean = false
+  ): Promise<void> {
+    switch (this.device.platform) {
+      case "android":
+        perf.serial("phase1_hierarchy");
+        await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+        perf.end();
+
+        // Prefer accessibility-service-supplied metadata for screen/insets/rotation/wakefulness/foreground.
+        const hierarchy = result.viewHierarchy;
+        if (hierarchy?.screenWidth && hierarchy?.screenHeight) {
+          result.screenSize = { width: hierarchy.screenWidth, height: hierarchy.screenHeight };
+          if (hierarchy.rotation !== undefined) {
+            result.rotation = hierarchy.rotation;
+          }
+          if (hierarchy.systemInsets) {
+            result.systemInsets = hierarchy.systemInsets;
+          }
+          if (hierarchy.foregroundActivity) {
+            const parts = hierarchy.foregroundActivity.split("/");
+            const packageName = parts[0];
+            const activityName = parts[1]?.startsWith(".")
+              ? packageName + parts[1]
+              : parts[1] || "";
+            result.activeWindow = {
+              appId: packageName,
+              activityName,
+              layoutSeqSum: 0
+            };
+          }
+          const parallelTasks: Promise<void>[] = [];
+          if (hierarchy.wakefulness) {
+            result.wakefulness = hierarchy.wakefulness;
+          } else {
+            parallelTasks.push(perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)));
+          }
+          if (!skipBackStack) {
+            parallelTasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));
+          }
+          if (parallelTasks.length > 0) {
+            await Promise.all(parallelTasks);
+          }
+          logger.debug("[OBSERVE] Using device metadata from accessibility service");
+        } else {
+          logger.warn("[OBSERVE] No screen info from accessibility service - check if APK is updated");
+          const tasks: Promise<void>[] = [
+            perf.track("wakefulness", () => this.deviceStateCollector.collectWakefulness(result, signal)),
+          ];
+          if (!skipBackStack) {
+            tasks.push(perf.track("backStack", () => this.deviceStateCollector.collectBackStack(result, perf, signal)));
+          }
+          await Promise.all(tasks);
+        }
+
+        // Populate activeWindow from view hierarchy packageName if not already set.
+        if (result.viewHierarchy?.packageName && !result.activeWindow) {
+          result.activeWindow = {
+            appId: result.viewHierarchy.packageName,
+            activityName: "",
+            layoutSeqSum: 0
+          };
+        }
+
+        // Fallback: if activeWindow still not populated, use the Window class.
+        if (!result.activeWindow) {
+          await this.deviceStateCollector.collectActiveWindow(result);
+        }
+
+        if (result.notificationPermissionDetected && result.activeWindow) {
+          result.activeWindow.type = "notification_permission_dialog";
+        }
+
+        break;
+
+      case "ios":
+        perf.serial("ios_collect");
+        await this.hierarchyCollector.collect(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal);
+
+        // Resolve screen size: hierarchy-derived bounds, then CtrlProxy-reported logical points.
+        const extractedSize = this.hierarchyCollector.extractScreenSize(result.viewHierarchy);
+        if (extractedSize) {
+          result.screenSize = extractedSize;
+          logger.debug(`[iOS] Extracted screen size from hierarchy: ${extractedSize.width}x${extractedSize.height}`);
+        } else if (result.viewHierarchy?.screenWidth && result.viewHierarchy?.screenHeight) {
+          result.screenSize = {
+            width: result.viewHierarchy.screenWidth,
+            height: result.viewHierarchy.screenHeight
+          };
+          logger.debug(`[iOS] Using screen size from CtrlProxy iOS: ${result.screenSize.width}x${result.screenSize.height}`);
+        } else {
+          logger.warn("[iOS] Failed to extract screen size from hierarchy");
+        }
+
+        // Filter offscreen nodes to keep payload small. Original hierarchy stays
+        // attached for raw element search when enabled.
+        if (result.viewHierarchy && result.screenSize?.width > 0 && result.screenSize?.height > 0) {
+          const rawHierarchy = result.viewHierarchy;
+          result.viewHierarchy = this.viewHierarchy.filterOffscreenNodes(
+            rawHierarchy,
+            result.screenSize.width,
+            result.screenSize.height
+          );
+          if (serverConfig.isRawElementSearchEnabled()) {
+            attachRawViewHierarchy(result.viewHierarchy, rawHierarchy);
+          }
+        }
+
+        // Populate activeWindow from view hierarchy packageName if not already set.
+        if (result.viewHierarchy?.packageName && !result.activeWindow) {
+          result.activeWindow = {
+            appId: result.viewHierarchy.packageName,
+            activityName: "",
+            layoutSeqSum: 0
+          };
+        }
+
+        perf.end();
+        break;
+    }
+  }
+
+  // ---------- Helpers ----------
+
+  private resolveObservationTimestampMs(result: ObserveResult): number | undefined {
+    const candidate = result.viewHierarchy?.updatedAt ?? result.updatedAt;
+    if (typeof candidate === "number" && !Number.isNaN(candidate)) {
+      return candidate;
+    }
+    if (typeof candidate === "string") {
+      const parsed = Date.parse(candidate);
+      if (!Number.isNaN(parsed)) {
+        return parsed;
+      }
+    }
+    return undefined;
   }
 }

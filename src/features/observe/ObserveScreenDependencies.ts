@@ -6,12 +6,21 @@ import type { Window } from "./interfaces/Window";
 import type { DumpsysWindow } from "./interfaces/DumpsysWindow";
 import type { BackStack } from "./interfaces/BackStack";
 import type { PredictiveUIState } from "./interfaces/PredictiveUIState";
+import type { ObserveResultCacheStore } from "./cache/ObserveResultCacheStore";
+import type { ScreenshotStateStore } from "./screenshot/ScreenshotStateRegistry";
+import type { ObserveScreenshotRecorder } from "./screenshot/ObserveScreenshotRecorder";
+import type { HierarchyCollector } from "./collectors/HierarchyCollector";
+import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
+import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
+import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
+import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 
 /**
  * Dependencies for ObserveScreen that can be injected for testing.
  * All properties are optional - defaults will be created if not provided.
  */
 export interface ObserveScreenDependencies {
+  // Data sources
   screenSize?: ScreenSize;
   systemInsets?: SystemInsets;
   viewHierarchy?: ViewHierarchy;
@@ -20,4 +29,17 @@ export interface ObserveScreenDependencies {
   dumpsysWindow?: DumpsysWindow;
   backStack?: BackStack;
   predictiveUIState?: PredictiveUIState;
+
+  // Cache + screenshot state — process-wide singletons used by server resource handlers.
+  // Tests can swap these to isolate state across cases.
+  cacheStore?: ObserveResultCacheStore;
+  screenshotStateStore?: ScreenshotStateStore;
+
+  // Composed services. If omitted, defaults are built from the data sources above.
+  screenshotRecorder?: ObserveScreenshotRecorder;
+  hierarchyCollector?: HierarchyCollector;
+  deviceStateCollector?: DeviceStateCollector;
+  performanceAuditor?: PerformanceAuditor;
+  accessibilityAuditor?: AccessibilityAuditor;
+  accessibilityStateDetector?: AccessibilityStateDetector;
 }

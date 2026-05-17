@@ -13,6 +13,7 @@ import { DisplayedTimeMetric } from "./DisplayedTimeMetric";
 import { SelectedElement } from "../utils/interfaces/NavigationGraph";
 import { RawViewHierarchyResult } from "./RawViewHierarchyResult";
 import type { MediaView } from "../features/observe/IdentifyMediaViews";
+import type { ObserveError } from "../features/observe/ObserveError";
 
 export interface PredictionTarget {
   text?: string;
@@ -133,8 +134,17 @@ export interface ObserveResult {
    */
   backStack?: BackStackInfo;
 
-  /** Error message if observation failed partially or completely */
+  /** Error message if observation failed partially or completely.
+   * Back-compat derived field: equivalent to `errors.map(e => e.message).join("; ")`.
+   * Prefer reading from `errors` for structured per-phase failure info. */
   error?: string;
+
+  /**
+   * Structured per-phase errors accumulated during observation.
+   * The `error` field above is derived from this list (semicolon-joined messages)
+   * for back-compat with existing string-based consumers.
+   */
+  errors?: ObserveError[];
 
   /**
    * Element detected while waiting for a match via observe waitFor

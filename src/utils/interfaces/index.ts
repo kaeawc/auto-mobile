@@ -1,9 +1,4 @@
 export { PlatformDeviceManager } from "./DeviceUtils";
-export {
-  PlatformExecutor,
-  ExecutorOptions,
-  SpawnOptions,
-} from "./PlatformExecutor";
 // Re-export from co-located interfaces
 export { AppLifecycleMonitor } from "../AppLifecycleMonitor";
 export { DeviceSessionManager } from "../DeviceSessionManager";

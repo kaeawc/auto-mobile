@@ -1,7 +1,7 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
-import { CtrlProxyClient } from "../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -376,7 +376,7 @@ describe("RecentApps", () => {
       (iosRecentApps as any).awaitIdle = fakeAwaitIdle;
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
         fakeIOSCtrlProxy as any
       );
     });

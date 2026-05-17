@@ -8,7 +8,7 @@ import { TapOnElement } from "../../src/features/action/TapOnElement";
 import { SwipeOn } from "../../src/features/action/swipeon";
 import { InputText } from "../../src/features/action/InputText";
 import { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
-import { CtrlProxyClient } from "../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { SharpImageUtils } from "../../src/utils/image-utils";
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -272,8 +272,8 @@ export async function createStressHarness(): Promise<StressHarness> {
   };
 
   const fakeA11yClient = createFakeAccessibilityClient();
-  const originalGetInstance = CtrlProxyClient.getInstance;
-  (CtrlProxyClient as unknown as { getInstance: () => unknown }).getInstance = () => fakeA11yClient;
+  const originalGetInstance = AndroidCtrlProxyClient.getInstance;
+  (AndroidCtrlProxyClient as unknown as { getInstance: () => unknown }).getInstance = () => fakeA11yClient;
 
   const viewHierarchy = new ViewHierarchy(
     device,
@@ -349,8 +349,8 @@ export async function createStressHarness(): Promise<StressHarness> {
   };
 
   const cleanup = async () => {
-    (CtrlProxyClient as unknown as { getInstance: unknown }).getInstance = originalGetInstance;
-    CtrlProxyClient.resetInstances();
+    (AndroidCtrlProxyClient as unknown as { getInstance: unknown }).getInstance = originalGetInstance;
+    AndroidCtrlProxyClient.resetInstances();
     RealObserveScreen.clearCache();
   };
 

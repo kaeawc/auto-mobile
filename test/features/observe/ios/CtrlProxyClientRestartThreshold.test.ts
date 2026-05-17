@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import {
   createInstantFailureWebSocketFactory,
@@ -31,15 +31,15 @@ const testDevice: BootedDevice = {
   name: "Test iPhone",
 };
 
-describe("CtrlProxyClient restart threshold", () => {
-  let client: CtrlProxyClient | null = null;
+describe("IOSCtrlProxyClient restart threshold", () => {
+  let client: IOSCtrlProxyClient | null = null;
 
   afterEach(async () => {
     if (client) {
       await client.close();
       client = null;
     }
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   test("triggerServiceRestart fires exactly once at failure threshold", async () => {
@@ -49,7 +49,7 @@ describe("CtrlProxyClient restart threshold", () => {
     const fakeManager = createFakeManager();
     const serviceManagerFactory = (_device: BootedDevice) => fakeManager;
 
-    client = CtrlProxyClient.createForTesting(
+    client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -76,7 +76,7 @@ describe("CtrlProxyClient restart threshold", () => {
     const fakeManager = createFakeManager();
     const serviceManagerFactory = (_device: BootedDevice) => fakeManager;
 
-    client = CtrlProxyClient.createForTesting(
+    client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -121,7 +121,7 @@ describe("CtrlProxyClient restart threshold", () => {
       return new FakeWebSocket(url, wsAttempt === 4 ? "none" : "instant", 0, fakeTimer);
     };
 
-    client = CtrlProxyClient.createForTesting(
+    client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       8765,
       wsFactory,
@@ -145,12 +145,12 @@ describe("CtrlProxyClient restart threshold", () => {
 
     // Now close and fail 3 more times — should trigger a second restart
     await client.close();
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
 
     // New client for the next cycle
     wsAttempt = 0; // Reset factory
     const fakeManager2 = createFakeManager();
-    client = CtrlProxyClient.createForTesting(
+    client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -172,7 +172,7 @@ describe("CtrlProxyClient restart threshold", () => {
     const fakeManager = createFakeManager();
     const serviceManagerFactory = (_device: BootedDevice) => fakeManager;
 
-    client = CtrlProxyClient.createForTesting(
+    client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       8765,
       createInstantFailureWebSocketFactory(fakeTimer),

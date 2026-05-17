@@ -2,8 +2,8 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, SelectAllTextResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 
 export class SelectAllText extends BaseVisualChange {

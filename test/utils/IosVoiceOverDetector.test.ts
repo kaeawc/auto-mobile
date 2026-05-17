@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { DefaultIosVoiceOverDetector } from "../../src/utils/IosVoiceOverDetector";
 import { FakeTimer } from "../fakes/FakeTimer";
-import type { CtrlProxyService } from "../../src/features/observe/ios/CtrlProxyClient";
+import type { IOSCtrlProxy } from "../../src/features/observe/ios";
 import type { CtrlProxyVoiceOverResult } from "../../src/features/observe/ios/types";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
- * Minimal fake CtrlProxyService for VoiceOver detection tests
+ * Minimal fake IOSCtrlProxy for VoiceOver detection tests
  */
 class FakeCtrlProxyService {
   voiceOverEnabled = false;
@@ -73,7 +73,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService
+        fakeClient as unknown as IOSCtrlProxy
       );
 
       expect(enabled).toBe(true);
@@ -85,7 +85,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService
+        fakeClient as unknown as IOSCtrlProxy
       );
 
       expect(enabled).toBe(false);
@@ -97,7 +97,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService
+        fakeClient as unknown as IOSCtrlProxy
       );
 
       expect(enabled).toBe(false);
@@ -112,7 +112,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        throwingClient as unknown as CtrlProxyService
+        throwingClient as unknown as IOSCtrlProxy
       );
 
       expect(enabled).toBe(false);
@@ -126,7 +126,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       // First call — hits CtrlProxy
       const first = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService
+        fakeClient as unknown as IOSCtrlProxy
       );
       expect(first).toBe(true);
       expect(fakeClient.callCount).toBe(1);
@@ -134,7 +134,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       // Second call — uses cache
       const second = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService
+        fakeClient as unknown as IOSCtrlProxy
       );
       expect(second).toBe(true);
       expect(fakeClient.callCount).toBe(1); // still 1
@@ -143,38 +143,38 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
     test("cache expires after TTL", async () => {
       fakeClient.voiceOverEnabled = true;
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
 
       // Advance time past 60-second TTL
       fakeTimer.advanceTime(61000);
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(2);
     });
 
     test("cache does not expire before TTL", async () => {
       fakeClient.voiceOverEnabled = true;
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
 
       // Advance time but stay within TTL
       fakeTimer.advanceTime(59000);
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1); // still cached
     });
 
     test("invalidateCache forces a fresh detection", async () => {
       fakeClient.voiceOverEnabled = false;
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
 
       detector.invalidateCache("device123");
 
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(2);
     });
 
@@ -182,11 +182,11 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeClient.shouldFail = true;
 
       // First call — fails, should not cache
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
 
       // Second call — should retry, not use a cached false
-      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", fakeClient as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(2);
     });
 
@@ -200,26 +200,26 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       };
 
       // First call — throws, should not cache
-      await detector.isVoiceOverEnabled("device123", throwingClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", throwingClient as unknown as IOSCtrlProxy);
       expect(callCount).toBe(1);
 
       // Second call — should retry, not use a cached false
-      await detector.isVoiceOverEnabled("device123", throwingClient as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device123", throwingClient as unknown as IOSCtrlProxy);
       expect(callCount).toBe(2);
     });
 
     test("clearAllCache clears entries for all devices", async () => {
       const client2 = new FakeCtrlProxyService();
 
-      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as CtrlProxyService);
-      await detector.isVoiceOverEnabled("device2", client2 as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as IOSCtrlProxy);
+      await detector.isVoiceOverEnabled("device2", client2 as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
       expect(client2.callCount).toBe(1);
 
       detector.clearAllCache();
 
-      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as CtrlProxyService);
-      await detector.isVoiceOverEnabled("device2", client2 as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as IOSCtrlProxy);
+      await detector.isVoiceOverEnabled("device2", client2 as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(2);
       expect(client2.callCount).toBe(2);
     });
@@ -229,15 +229,15 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeClient.voiceOverEnabled = true;
       client2.voiceOverEnabled = false;
 
-      const enabled1 = await detector.isVoiceOverEnabled("device1", fakeClient as unknown as CtrlProxyService);
-      const enabled2 = await detector.isVoiceOverEnabled("device2", client2 as unknown as CtrlProxyService);
+      const enabled1 = await detector.isVoiceOverEnabled("device1", fakeClient as unknown as IOSCtrlProxy);
+      const enabled2 = await detector.isVoiceOverEnabled("device2", client2 as unknown as IOSCtrlProxy);
 
       expect(enabled1).toBe(true);
       expect(enabled2).toBe(false);
 
       // Second calls use cache
-      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as CtrlProxyService);
-      await detector.isVoiceOverEnabled("device2", client2 as unknown as CtrlProxyService);
+      await detector.isVoiceOverEnabled("device1", fakeClient as unknown as IOSCtrlProxy);
+      await detector.isVoiceOverEnabled("device2", client2 as unknown as IOSCtrlProxy);
       expect(fakeClient.callCount).toBe(1);
       expect(client2.callCount).toBe(1);
     });
@@ -250,7 +250,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService,
+        fakeClient as unknown as IOSCtrlProxy,
         fakeFeatureFlags as unknown as FeatureFlagService
       );
 
@@ -265,7 +265,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
 
       const enabled = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService,
+        fakeClient as unknown as IOSCtrlProxy,
         fakeFeatureFlags as unknown as FeatureFlagService
       );
 
@@ -281,7 +281,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       // Populate cache with false
       const first = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService,
+        fakeClient as unknown as IOSCtrlProxy,
         fakeFeatureFlags as unknown as FeatureFlagService
       );
       expect(first).toBe(false);
@@ -291,7 +291,7 @@ describe("IosVoiceOverDetector - Unit Tests", () => {
       fakeFeatureFlags.setFlag("force-accessibility-mode", true);
       const second = await detector.isVoiceOverEnabled(
         "device123",
-        fakeClient as unknown as CtrlProxyService,
+        fakeClient as unknown as IOSCtrlProxy,
         fakeFeatureFlags as unknown as FeatureFlagService
       );
       expect(second).toBe(true);

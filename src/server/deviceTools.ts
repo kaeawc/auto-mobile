@@ -10,7 +10,7 @@ import { DEVICE_IMAGE_RESOURCE_URIS, notifyDeviceImageResourcesUpdated } from ".
 import { syncInstalledAppResources } from "./appResources";
 import { listActiveVideoRecordings, stopVideoRecording } from "./videoRecordingManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";

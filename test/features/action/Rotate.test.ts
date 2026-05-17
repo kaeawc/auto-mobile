@@ -5,7 +5,7 @@ import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { CtrlProxyClient } from "../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { ExecResult, BootedDevice, ObserveResult } from "../../../src/models";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
@@ -283,7 +283,7 @@ describe("Rotate", () => {
       };
 
       fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+      getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
         fakeIOSCtrlProxy as any
       );
     });

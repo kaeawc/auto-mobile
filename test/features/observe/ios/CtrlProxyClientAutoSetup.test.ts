@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import {
   createInstantFailureWebSocketFactory,
@@ -7,9 +7,9 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../../../fakes/FakeIOSCtrlProxyManager";
-import type { ServiceManagerFactory, BootedDeviceLister } from "../../../../src/features/observe/ios/CtrlProxyClient";
+import type { ServiceManagerFactory, BootedDeviceLister } from "../../../../src/features/observe/ios/IOSCtrlProxyClient";
 
-describe("CtrlProxyClient auto-setup", function() {
+describe("IOSCtrlProxyClient auto-setup", function() {
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   let fakeManager: FakeIOSCtrlProxyManager;
@@ -27,11 +27,11 @@ describe("CtrlProxyClient auto-setup", function() {
 
     fakeManager = new FakeIOSCtrlProxyManager();
 
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   afterEach(async function() {
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   const createManagerFactory = (): ServiceManagerFactory => {
@@ -39,7 +39,7 @@ describe("CtrlProxyClient auto-setup", function() {
   };
 
   test("auto-setup triggered when WebSocket fails", async function() {
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -66,7 +66,7 @@ describe("CtrlProxyClient auto-setup", function() {
       return createSuccessWebSocketFactory(fakeTimer)(url);
     };
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       wsFactory,
@@ -83,7 +83,7 @@ describe("CtrlProxyClient auto-setup", function() {
   });
 
   test("no auto-setup when already connected", async function() {
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createSuccessWebSocketFactory(fakeTimer),
@@ -102,7 +102,7 @@ describe("CtrlProxyClient auto-setup", function() {
   test("setup failure handled gracefully", async function() {
     fakeManager.setSetupShouldFail(true);
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -122,7 +122,7 @@ describe("CtrlProxyClient auto-setup", function() {
     // Create a manager where setup triggers another ensureConnected call
     let reentrantCallResult: boolean | null = null;
     // Use a ref object so the closure captures a mutable reference
-    const clientRef: { current: CtrlProxyClient | null } = { current: null };
+    const clientRef: { current: IOSCtrlProxyClient | null } = { current: null };
 
     const reentrantManager = new FakeIOSCtrlProxyManager();
     const originalSetup = reentrantManager.setup.bind(reentrantManager);
@@ -132,7 +132,7 @@ describe("CtrlProxyClient auto-setup", function() {
       return originalSetup(force, perf);
     };
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -153,7 +153,7 @@ describe("CtrlProxyClient auto-setup", function() {
     // Device lister returns empty — simulator has been shut down
     const lister: BootedDeviceLister = async () => [];
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -180,7 +180,7 @@ describe("CtrlProxyClient auto-setup", function() {
     };
     const lister: BootedDeviceLister = async () => [otherDevice];
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -201,7 +201,7 @@ describe("CtrlProxyClient auto-setup", function() {
     // Device lister returns our target simulator as booted
     const lister: BootedDeviceLister = async () => [testDevice];
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),
@@ -224,7 +224,7 @@ describe("CtrlProxyClient auto-setup", function() {
       throw new Error("simctl not available");
     };
 
-    const client = CtrlProxyClient.createForTesting(
+    const client = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createInstantFailureWebSocketFactory(fakeTimer),

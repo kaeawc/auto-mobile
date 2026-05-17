@@ -9,8 +9,8 @@ import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { ObserveResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import { CtrlProxyClient as IosCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 
 /**
@@ -275,7 +275,7 @@ export class RecentApps extends BaseVisualChange {
   }
 
   private async executeIosRecentApps(): Promise<void> {
-    const client = IosCtrlProxyClient.getInstance(this.device);
+    const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestRecentApps();
     if (!result.success) {
       throw new Error(result.error ?? "Failed to open iOS recent apps");

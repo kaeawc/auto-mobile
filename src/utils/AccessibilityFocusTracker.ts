@@ -1,4 +1,4 @@
-import { CtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { Element, CurrentFocusResult, TraversalOrderResult } from "../models/index";
 import { PerformanceTracker, NoOpPerformanceTracker } from "./PerformanceTracker";
 import { logger } from "./logger";
@@ -190,7 +190,7 @@ export class AccessibilityFocusTracker implements AccessibilityFocusService {
       }
 
       // Query accessibility service for current focus
-      const client = CtrlProxyClient.getInstance(deviceId);
+      const client = AndroidCtrlProxyClient.getInstance(deviceId);
       const result: CurrentFocusResult = await client.requestCurrentFocus(5000, perf);
 
       if (result.error) {
@@ -242,7 +242,7 @@ export class AccessibilityFocusTracker implements AccessibilityFocusService {
       }
 
       // Query accessibility service for traversal order
-      const client = CtrlProxyClient.getInstance(deviceId);
+      const client = AndroidCtrlProxyClient.getInstance(deviceId);
       const result: TraversalOrderResult = await client.requestTraversalOrder(5000, perf);
 
       if (result.error) {

@@ -3,7 +3,7 @@ import { SessionManager } from "../../src/daemon/sessionManager";
 import { DevicePool } from "../../src/daemon/devicePool";
 import { createToolExecutionContext } from "../../src/server/ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { CtrlProxyClient } from "../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
@@ -15,7 +15,7 @@ describe("ToolExecutionContext", () => {
   let fakeAppsRepo: FakeInstalledAppsRepository;
   let fakeTimer: FakeTimer;
   let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
-  let originalClientGetInstance: typeof CtrlProxyClient.getInstance;
+  let originalClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   const sessionOptions = { keepScreenAwake: false };
   const createBootedDevice = (deviceId: string): BootedDevice => ({
     name: deviceId,
@@ -32,17 +32,17 @@ describe("ToolExecutionContext", () => {
     devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager);
     await devicePool.initializeWithDevices([createBootedDevice("device-1")]);
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    originalClientGetInstance = CtrlProxyClient.getInstance;
+    originalClientGetInstance = AndroidCtrlProxyClient.getInstance;
 
-    // Reset CtrlProxyClient instances for clean test state
-    CtrlProxyClient.resetInstances();
+    // Reset AndroidCtrlProxyClient instances for clean test state
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
     AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    CtrlProxyClient.getInstance = originalClientGetInstance;
-    CtrlProxyClient.resetInstances();
+    AndroidCtrlProxyClient.getInstance = originalClientGetInstance;
+    AndroidCtrlProxyClient.resetInstances();
   });
 
   test("should run accessibility setup when creating a new session", async () => {
@@ -56,8 +56,8 @@ describe("ToolExecutionContext", () => {
         }
       } as any);
 
-    // Mock CtrlProxyClient to use fake WebSocket (no real connection)
-    CtrlProxyClient.getInstance = ((deviceId: string) => ({
+    // Mock AndroidCtrlProxyClient to use fake WebSocket (no real connection)
+    AndroidCtrlProxyClient.getInstance = ((deviceId: string) => ({
       waitForConnection: async () => true,
       close: async () => {}
     })) as any;

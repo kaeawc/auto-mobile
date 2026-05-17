@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -23,7 +23,7 @@ describe("CtrlProxyVoiceOver", function() {
       name: "iPhone 16 Simulator",
     };
 
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ describe("CtrlProxyVoiceOver", function() {
   describe("requestVoiceOverState", function() {
     test("returns enabled=true when VoiceOver is running", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -117,7 +117,7 @@ describe("CtrlProxyVoiceOver", function() {
 
     test("returns enabled=false when VoiceOver is not running", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.requestVoiceOverState();
@@ -144,7 +144,7 @@ describe("CtrlProxyVoiceOver", function() {
     });
 
     test("returns success=false and enabled=false when not connected", async function() {
-      const client = CtrlProxyClient.createForTesting(
+      const client = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         createInstantFailureWebSocketFactory(fakeTimer),
@@ -163,7 +163,7 @@ describe("CtrlProxyVoiceOver", function() {
 
     test("sends correct message type get_voiceover_state", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.requestVoiceOverState();

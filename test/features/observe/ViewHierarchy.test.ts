@@ -3,7 +3,7 @@ import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 // Note: the previous version of this file patched fs-extra's readFile to mock
 // screenshot reads. That dependency has been removed from production code, so
@@ -15,7 +15,7 @@ describe("ViewHierarchy", function() {
   describe("Unit Tests for Public Methods", function() {
     let viewHierarchy: ViewHierarchy;
     let fakeAdbFactory: FakeAdbClientFactory;
-    let mockCtrlProxyClient: CtrlProxyClient;
+    let mockCtrlProxyClient: AndroidCtrlProxyClient;
     let mockDevice: BootedDevice;
 
     beforeEach(function() {
@@ -32,7 +32,7 @@ describe("ViewHierarchy", function() {
         convertToViewHierarchyResult: () => ({ hierarchy: {} }),
         convertAccessibilityNode: () => ({}),
         getAccessibilityHierarchy: async () => null
-      } as unknown as CtrlProxyClient;
+      } as unknown as AndroidCtrlProxyClient;
 
       viewHierarchy = new ViewHierarchy(mockDevice, fakeAdbFactory, mockCtrlProxyClient);
       setupReadFileMock();
@@ -164,7 +164,7 @@ describe("ViewHierarchy", function() {
   describe("Error Handling Tests", function() {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: CtrlProxyClient;
+    let mockCtrlProxyClient: AndroidCtrlProxyClient;
     let mockDevice: BootedDevice;
 
     beforeEach(function() {
@@ -180,7 +180,7 @@ describe("ViewHierarchy", function() {
         convertToViewHierarchyResult: () => ({ hierarchy: {} }),
         convertAccessibilityNode: () => ({}),
         getAccessibilityHierarchy: async () => null
-      } as unknown as CtrlProxyClient;
+      } as unknown as AndroidCtrlProxyClient;
 
       viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
       setupReadFileMock();
@@ -203,7 +203,7 @@ describe("ViewHierarchy", function() {
         convertToViewHierarchyResult: () => ({ hierarchy: {} }),
         convertAccessibilityNode: () => ({}),
         getAccessibilityHierarchy: async () => { throw new Error("Accessibility service error"); }
-      } as unknown as CtrlProxyClient;
+      } as unknown as AndroidCtrlProxyClient;
 
       const viewHierarchyWithMocks = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClientError);
 
@@ -218,7 +218,7 @@ describe("ViewHierarchy", function() {
   describe("FilterViewHierarchy Tests", function() {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: CtrlProxyClient;
+    let mockCtrlProxyClient: AndroidCtrlProxyClient;
     let mockDevice: BootedDevice;
 
     beforeEach(function() {
@@ -234,7 +234,7 @@ describe("ViewHierarchy", function() {
         convertToViewHierarchyResult: () => ({ hierarchy: {} }),
         convertAccessibilityNode: () => ({}),
         getAccessibilityHierarchy: async () => null
-      } as unknown as CtrlProxyClient;
+      } as unknown as AndroidCtrlProxyClient;
 
       viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
     });
@@ -279,7 +279,7 @@ describe("ViewHierarchy", function() {
   describe("Edge Cases and Additional Coverage", function() {
     let viewHierarchy: ViewHierarchy;
     let fakeAdb: FakeAdbExecutor;
-    let mockCtrlProxyClient: CtrlProxyClient;
+    let mockCtrlProxyClient: AndroidCtrlProxyClient;
     let mockDevice: BootedDevice;
 
     beforeEach(function() {
@@ -295,7 +295,7 @@ describe("ViewHierarchy", function() {
         convertToViewHierarchyResult: () => ({ hierarchy: {} }),
         convertAccessibilityNode: () => ({}),
         getAccessibilityHierarchy: async () => null
-      } as unknown as CtrlProxyClient;
+      } as unknown as AndroidCtrlProxyClient;
 
       viewHierarchy = new ViewHierarchy(mockDevice, fakeAdb, mockCtrlProxyClient);
     });

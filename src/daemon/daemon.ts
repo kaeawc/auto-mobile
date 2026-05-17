@@ -32,9 +32,9 @@ import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, ge
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
-import { CtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios/CtrlProxyClient";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
@@ -611,7 +611,7 @@ export class Daemon {
             platform: pooledDevice.platform as "android",
           };
           const adb = defaultAdbClientFactory.create(pooledDevice.id);
-          const client = CtrlProxyClient.getInstance(bootedDevice, adb);
+          const client = AndroidCtrlProxyClient.getInstance(bootedDevice, adb);
           client.ensureConnected().then(connected => {
             if (connected) {
               logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);

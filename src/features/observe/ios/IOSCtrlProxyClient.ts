@@ -1,5 +1,5 @@
 /**
- * CtrlProxyClient - Main client for iOS CtrlProxy.
+ * IOSCtrlProxyClient - Main client for iOS CtrlProxy.
  *
  * This client provides a unified interface to the iOS CtrlProxy
  * via WebSocket connection. It uses composition with delegate modules to handle
@@ -41,6 +41,7 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
 import {
@@ -131,15 +132,8 @@ import type {
  * Interface for CtrlProxy providing iOS UI hierarchy and interaction capabilities
  * via WebSocket connection to iOS CtrlProxy
  */
-export interface CtrlProxyService {
-  getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean
-  ): Promise<ViewHierarchyResult | null>;
-
+// eslint-disable-next-line @typescript-eslint/naming-convention -- IOS is an acronym, not a Hungarian-notation interface prefix
+export interface IOSCtrlProxy extends CtrlProxyClient {
   getLatestHierarchy(
     waitForFresh?: boolean,
     timeout?: number,
@@ -240,26 +234,19 @@ export interface CtrlProxyService {
     fingerCount: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySwipeResult>;
 
-  ensureConnected(perf?: PerformanceTracker): Promise<boolean>;
-  isConnected(): boolean;
-  waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
-  verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
-  hasCtrlProxyCachedHierarchy(): boolean;
-  invalidateCache(): void;
   clearCache(): void;
-  close(): Promise<void>;
 
   onPushUpdate(callback: (hierarchy: CtrlProxyHierarchy) => void): () => void;
 }
 
 /**
- * CtrlProxyClient - WebSocket client for iOS CtrlProxy
- * Provides iOS UI hierarchy and interaction capabilities matching Android CtrlProxyClient
+ * IOSCtrlProxyClient - WebSocket client for iOS CtrlProxy
+ * Provides iOS UI hierarchy and interaction capabilities matching Android IOSCtrlProxyClient
  *
  * Extends DeviceServiceClient for shared connection lifecycle management.
  */
-export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxyService {
-  private static instances: Map<string, CtrlProxyClient> = new Map();
+export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlProxy {
+  private static instances: Map<string, IOSCtrlProxyClient> = new Map();
 
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
@@ -297,7 +284,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   private _storage: CtrlProxyStorage | null = null;
 
   // Logging tag for base class
-  protected readonly logTag = "CtrlProxyClient";
+  protected readonly logTag = "IOSCtrlProxyClient";
 
   // Screenshot backoff scheduler for real-time screenshot streaming
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
@@ -315,7 +302,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
   private constructor(
     device: BootedDevice,
-    port: number = CtrlProxyClient.DEFAULT_PORT,
+    port: number = IOSCtrlProxyClient.DEFAULT_PORT,
     wsFactory: WebSocketFactory = defaultWebSocketFactory,
     timer: Timer = defaultTimer,
     serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
@@ -334,15 +321,15 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   public static getInstance(
     device: BootedDevice,
     port?: number
-  ): CtrlProxyClient {
+  ): IOSCtrlProxyClient {
     const resolvedPort = port ?? (
-      device.platform === "ios" ? PortManager.allocate(device.deviceId) : CtrlProxyClient.DEFAULT_PORT
+      device.platform === "ios" ? PortManager.allocate(device.deviceId) : IOSCtrlProxyClient.DEFAULT_PORT
     );
     const key = `${device.deviceId}:${resolvedPort}`;
-    if (!CtrlProxyClient.instances.has(key)) {
-      CtrlProxyClient.instances.set(key, new CtrlProxyClient(device, resolvedPort));
+    if (!IOSCtrlProxyClient.instances.has(key)) {
+      IOSCtrlProxyClient.instances.set(key, new IOSCtrlProxyClient(device, resolvedPort));
     }
-    return CtrlProxyClient.instances.get(key)!;
+    return IOSCtrlProxyClient.instances.get(key)!;
   }
 
   /**
@@ -378,21 +365,21 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     timer: Timer,
     serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory,
     bootedDeviceLister?: BootedDeviceLister
-  ): CtrlProxyClient {
+  ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
     const lister = bootedDeviceLister ?? (async () => [device]);
-    return new CtrlProxyClient(device, port, wsFactory, timer, serviceManagerFactory, lister);
+    return new IOSCtrlProxyClient(device, port, wsFactory, timer, serviceManagerFactory, lister);
   }
 
   /**
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    for (const instance of CtrlProxyClient.instances.values()) {
+    for (const instance of IOSCtrlProxyClient.instances.values()) {
       void instance.close();
     }
-    CtrlProxyClient.instances.clear();
+    IOSCtrlProxyClient.instances.clear();
   }
 
   // ===========================================================================
@@ -425,7 +412,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       // full setup/download cycle — just reset attempts and retry the connection.
       const alreadyRunning = await manager.isRunning();
       if (alreadyRunning) {
-        logger.info(`[CtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
+        logger.info(`[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
         this.connectionAttempts = 0;
         return await super.ensureConnected(perf);
       }
@@ -437,28 +424,28 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         const bootedDevices = await this.bootedDeviceLister();
         const stillBooted = bootedDevices.some(d => d.deviceId === this.device.deviceId);
         if (!stillBooted) {
-          logger.info(`[CtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`);
+          logger.info(`[IOSCtrlProxyClient] Target simulator ${this.device.deviceId} is no longer booted, skipping auto-setup`);
           return false;
         }
       } catch (error) {
-        logger.warn(`[CtrlProxyClient] Failed to check simulator boot state: ${error}`);
+        logger.warn(`[IOSCtrlProxyClient] Failed to check simulator boot state: ${error}`);
         // Proceed with auto-setup on failure to check — better to attempt than to silently skip
       }
 
-      logger.info(`[CtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);
+      logger.info(`[IOSCtrlProxyClient] WebSocket connection failed, attempting auto-setup of CtrlProxy`);
       const result = await manager.setup(true, perf);
 
       if (!result.success) {
-        logger.warn(`[CtrlProxyClient] Auto-setup failed: ${result.message}`);
+        logger.warn(`[IOSCtrlProxyClient] Auto-setup failed: ${result.message}`);
         return false;
       }
 
-      logger.info(`[CtrlProxyClient] Auto-setup succeeded, retrying WebSocket connection`);
+      logger.info(`[IOSCtrlProxyClient] Auto-setup succeeded, retrying WebSocket connection`);
       // Reset connection attempts to allow fresh connection attempts
       this.connectionAttempts = 0;
       return await super.ensureConnected(perf);
     } catch (error) {
-      logger.warn(`[CtrlProxyClient] Auto-setup error: ${error}`);
+      logger.warn(`[IOSCtrlProxyClient] Auto-setup error: ${error}`);
       return false;
     } finally {
       this.isAttemptingAutoSetup = false;
@@ -482,7 +469,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
   private createHierarchyDelegateContext(): HierarchyDelegateContext {
     return {
       ...this.createDelegateContext(),
-      cacheFreshTtlMs: CtrlProxyClient.CACHE_FRESH_TTL_MS,
+      cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
       setCachedHierarchy: h => { this.cachedHierarchy = h; },
     };
@@ -562,7 +549,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       const message = JSON.parse(data.toString()) as WebSocketMessage;
       this.processMessage(message);
     } catch (error) {
-      logger.warn(`[CtrlProxyClient] Failed to parse message: ${error}`);
+      logger.warn(`[IOSCtrlProxyClient] Failed to parse message: ${error}`);
     }
   }
 
@@ -572,7 +559,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     // Reset failure counter on successful connection
     this.consecutiveConnectionFailures = 0;
     this.isRequestingServiceRestart = false;
-    logger.info(`[CtrlProxyClient] Connection established, reset failure counter`);
+    logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
@@ -589,10 +576,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
     // Track connection failure and potentially trigger service restart
     this.consecutiveConnectionFailures++;
-    logger.info(`[CtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`);
+    logger.info(`[IOSCtrlProxyClient] Connection closed (failure count: ${this.consecutiveConnectionFailures})`);
 
     if (this.consecutiveConnectionFailures > 0 &&
-        this.consecutiveConnectionFailures % CtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
+        this.consecutiveConnectionFailures % IOSCtrlProxyClient.MAX_FAILURES_BEFORE_RESTART === 0 &&
         !this.isRequestingServiceRestart) {
       this.triggerServiceRestart();
     }
@@ -808,7 +795,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         return await screenshotManager.storeScreenshot(applicationId, destination, bytes, result.format ?? "png");
       }
     } catch (error) {
-      logger.debug(`[CtrlProxyClient] iOS nav screenshot capture skipped: ${error}`);
+      logger.debug(`[IOSCtrlProxyClient] iOS nav screenshot capture skipped: ${error}`);
     }
     return null;
   }
@@ -871,28 +858,28 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     }
 
     this.isRequestingServiceRestart = true;
-    logger.info(`[CtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`);
+    logger.info(`[IOSCtrlProxyClient] Triggering CtrlProxy restart after ${this.consecutiveConnectionFailures} connection failures`);
 
     const manager = this.serviceManagerFactory(this.device);
 
     // Check if service is actually not running before restarting
     void manager.isRunning().then(running => {
       if (!running) {
-        logger.info(`[CtrlProxyClient] CtrlProxy not running, requesting restart`);
+        logger.info(`[IOSCtrlProxyClient] CtrlProxy not running, requesting restart`);
         void manager.forceRestart().then(() => {
-          logger.info(`[CtrlProxyClient] CtrlProxy restart completed`);
+          logger.info(`[IOSCtrlProxyClient] CtrlProxy restart completed`);
           this.consecutiveConnectionFailures = 0;
           this.isRequestingServiceRestart = false;
         }).catch(error => {
-          logger.warn(`[CtrlProxyClient] CtrlProxy restart failed: ${error}`);
+          logger.warn(`[IOSCtrlProxyClient] CtrlProxy restart failed: ${error}`);
           this.isRequestingServiceRestart = false;
         });
       } else {
-        logger.info(`[CtrlProxyClient] CtrlProxy is running, connection issue may be transient`);
+        logger.info(`[IOSCtrlProxyClient] CtrlProxy is running, connection issue may be transient`);
         this.isRequestingServiceRestart = false;
       }
     }).catch(error => {
-      logger.warn(`[CtrlProxyClient] Failed to check CtrlProxy status: ${error}`);
+      logger.warn(`[IOSCtrlProxyClient] Failed to check CtrlProxy status: ${error}`);
       this.isRequestingServiceRestart = false;
     });
   }
@@ -918,7 +905,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
 
     // Handle push messages (no requestId)
     if (type === "connected") {
-      logger.info(`[CtrlProxyClient] Received connected message`);
+      logger.info(`[IOSCtrlProxyClient] Received connected message`);
       return;
     }
 
@@ -1109,7 +1096,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
         fresh: true,
         perfTiming: message.perfTiming as CtrlProxyPerfTiming | undefined
       };
-      logger.info(`[CtrlProxyClient] Received hierarchy push update - UI changed`);
+      logger.info(`[IOSCtrlProxyClient] Received hierarchy push update - UI changed`);
 
       // Convert and push to observation stream for IDE plugins
       const viewHierarchyResult = this.convertToViewHierarchyResult(message.data);
@@ -1131,7 +1118,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       if (message.performanceData) {
         this.handlePerformanceUpdate(message.performanceData);
       } else {
-        logger.warn(`[CtrlProxyClient] Received performance_update but no performanceData field`);
+        logger.warn(`[IOSCtrlProxyClient] Received performance_update but no performanceData field`);
       }
       return;
     }
@@ -1165,10 +1152,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       server.pushPerformanceUpdate(this.device.deviceId, streamData);
       // Log occasionally to avoid spam
       if (this.timer.now() % 5000 < 600) {
-        logger.info(`[CtrlProxyClient] iOS FPS: ${streamData.fps.toFixed(1)}, frameTime: ${streamData.frameTimeMs.toFixed(1)}ms, memory: ${streamData.memoryUsageMb.toFixed(1)}MB`);
+        logger.info(`[IOSCtrlProxyClient] iOS FPS: ${streamData.fps.toFixed(1)}, frameTime: ${streamData.frameTimeMs.toFixed(1)}ms, memory: ${streamData.memoryUsageMb.toFixed(1)}MB`);
       }
     } catch (error) {
-      logger.warn(`[CtrlProxyClient] Failed to push performance update: ${error}`);
+      logger.warn(`[IOSCtrlProxyClient] Failed to push performance update: ${error}`);
     }
   }
 
@@ -1209,7 +1196,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     return this.hierarchy.convertToViewHierarchyResult(hierarchy);
   }
 
-  hasCtrlProxyCachedHierarchy(): boolean {
+  hasCachedHierarchy(): boolean {
     return this.hierarchy.hasCachedHierarchy();
   }
 
@@ -1446,7 +1433,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
       try {
         callback(hierarchy);
       } catch (error) {
-        logger.warn(`[CtrlProxyClient] Push update callback error: ${error}`);
+        logger.warn(`[IOSCtrlProxyClient] Push update callback error: ${error}`);
       }
     }
   }
@@ -1463,7 +1450,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     try {
       server.pushHierarchyUpdate(this.device.deviceId, hierarchy);
     } catch (error) {
-      logger.warn(`[CtrlProxyClient] Failed to push hierarchy to observation stream: ${error}`);
+      logger.warn(`[IOSCtrlProxyClient] Failed to push hierarchy to observation stream: ${error}`);
     }
   }
 
@@ -1479,7 +1466,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     try {
       server.pushScreenshotUpdate(this.device.deviceId, screenshotBase64, screenWidth, screenHeight);
     } catch (error) {
-      logger.debug(`[CtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
+      logger.debug(`[IOSCtrlProxyClient] Failed to push screenshot to observation stream: ${error}`);
     }
   }
 
@@ -1581,24 +1568,24 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxySer
     perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[]
   ): void {
     if (!hierarchy.hierarchy) {
-      logger.warn("[CtrlProxyClient] Skipping navigation detection: hierarchy missing in update");
+      logger.warn("[IOSCtrlProxyClient] Skipping navigation detection: hierarchy missing in update");
       return;
     }
 
     if (hierarchy.error) {
-      logger.warn(`[CtrlProxyClient] Skipping navigation detection due to hierarchy error: ${hierarchy.error}`);
+      logger.warn(`[IOSCtrlProxyClient] Skipping navigation detection due to hierarchy error: ${hierarchy.error}`);
       return;
     }
 
     // Track foreground bundle and start performance monitoring when app changes
     const bundleId = hierarchy.packageName;
-    logger.debug(`[CtrlProxyClient] Hierarchy update - bundleId: "${bundleId}", lastForeground: "${this.lastForegroundBundleId}"`);
+    logger.debug(`[IOSCtrlProxyClient] Hierarchy update - bundleId: "${bundleId}", lastForeground: "${this.lastForegroundBundleId}"`);
     if (bundleId && bundleId !== this.lastForegroundBundleId) {
       this.lastForegroundBundleId = bundleId;
       // Start performance monitoring for this device/bundle
       const monitor = getPerformanceMonitor();
       monitor.startMonitoring(this.device.deviceId, bundleId, "ios");
-      logger.info(`[CtrlProxyClient] Started performance monitoring for ${bundleId} on ${this.device.deviceId}`);
+      logger.info(`[IOSCtrlProxyClient] Started performance monitoring for ${bundleId} on ${this.device.deviceId}`);
     }
 
     const conversionStart = this.timer.now();

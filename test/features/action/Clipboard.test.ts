@@ -1,7 +1,7 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice } from "../../../src/models";
-import { CtrlProxyClient } from "../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 
 describe("Clipboard iOS", () => {
@@ -18,9 +18,9 @@ describe("Clipboard iOS", () => {
 
     fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
 
-    // Mock CtrlProxyClient.getInstance to return our fake
-    spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIOSCtrlProxy as unknown as CtrlProxyClient
+    // Mock IOSCtrlProxyClient.getInstance to return our fake
+    spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeIOSCtrlProxy as unknown as IOSCtrlProxyClient
     );
 
     clipboard = new Clipboard(mockDevice);

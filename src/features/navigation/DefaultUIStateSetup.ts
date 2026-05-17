@@ -1,7 +1,7 @@
 import { BootedDevice } from "../../models";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../utils/logger";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { ToolRegistry } from "../../server/toolRegistry";
 import { NavigationEdge, UIState } from "./NavigationGraphManager";
 import { ModalState, ScrollPosition } from "../../utils/interfaces/NavigationGraph";

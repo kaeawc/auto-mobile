@@ -12,7 +12,7 @@ import { DisplayedTimeMetricsCollector } from "../performance/DisplayedTimeMetri
 import { setLastTtiMs } from "../performance/PerformanceMonitor";
 import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { CtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
 
 export interface TargetUserDetector {
@@ -244,7 +244,7 @@ export class LaunchApp extends BaseVisualChange {
           // stale pre-terminate data via the cache fast path. clearCache() nulls
           // the cache entirely; invalidateCache() only marks it not-fresh but the
           // time-based freshness check in getLatestHierarchy would still match.
-          CtrlProxyClient.getInstance(this.device).clearCache();
+          IOSCtrlProxyClient.getInstance(this.device).clearCache();
           launchResult = await perf.track("simctlLaunch", () =>
             this.simctl.launchApp(bundleId, { foregroundIfRunning: false })
           );
@@ -277,7 +277,7 @@ export class LaunchApp extends BaseVisualChange {
           }
 
           // CtrlProxy WebSocket launch path (disabled — kept for future comparison):
-          // const xcTestClient = CtrlProxyClient.getInstance(this.device);
+          // const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
           // perf.serial("ctrlProxyLaunch");
           // const xcTestLaunchResult = await xcTestClient.requestLaunchApp(
           //   bundleId, undefined, perf, coldBoot
@@ -330,7 +330,7 @@ export class LaunchApp extends BaseVisualChange {
     timeoutMs: number = 5000,
     expectedPackageName?: string
   ): Promise<void> {
-    const xcTestClient = CtrlProxyClient.getInstance(this.device);
+    const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
     const startTime = this.timer.now();
 
     // Fast path: if cache already has the correct app's hierarchy, skip the round-trip.

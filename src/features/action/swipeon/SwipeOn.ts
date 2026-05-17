@@ -20,7 +20,7 @@ import { DefaultElementParser } from "../../utility/ElementParser";
 import { ExecuteGesture } from "../ExecuteGesture";
 import { logger } from "../../../utils/logger";
 import { createGlobalPerformanceTracker, PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { CtrlProxyClient } from "../../observe/android";
+import { AndroidCtrlProxyClient } from "../../observe/android";
 import { buildElementSearchDebugContext } from "../../../utils/DebugContextBuilder";
 import type { ObserveScreen } from "../../observe/interfaces/ObserveScreen";
 import { resolveSwipeDirection } from "../../../utils/swipeOnUtils";
@@ -45,14 +45,14 @@ import { ScrollUntilVisible } from "./ScrollUntilVisible";
 import { buildContainerFromElement } from "../../../utils/elementProperties";
 import { getScreenBounds } from "../../../utils/screenBounds";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../../observe/ios";
+import { IOSCtrlProxyClient } from "../../observe/ios";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
 
 export class SwipeOn extends BaseVisualChange {
   private executeGesture: GestureExecutor;
   private finder: ElementFinder;
   private geometry: ElementGeometry;
-  private accessibilityService: CtrlProxyClient;
+  private accessibilityService: AndroidCtrlProxyClient;
   private accessibilityDetector: AccessibilityDetector;
   private overlayDetector: OverlayDetector;
   private autoTargetSelector: AutoTargetSelectorService;
@@ -76,7 +76,7 @@ export class SwipeOn extends BaseVisualChange {
     const parser = dependencies.parser ?? new DefaultElementParser();
     this.finder = dependencies.finder ?? new DefaultElementFinder();
     this.geometry = dependencies.geometry ?? new DefaultElementGeometry();
-    this.accessibilityService = CtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.accessibilityDetector = dependencies.accessibilityDetector || defaultAccessibilityDetector;
     this.visionConfig = dependencies.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer = dependencies.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);

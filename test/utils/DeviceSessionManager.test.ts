@@ -8,8 +8,8 @@ import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
-import { CtrlProxyClient } from "../../src/features/observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../../src/features/observe/ios/CtrlProxyClient";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { Window } from "../../src/features/observe/Window";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
@@ -26,7 +26,7 @@ describe("DeviceSessionManager", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let originalGetActive: typeof Window.prototype.getActive;
   let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
-  let originalAccessibilityClientGetInstance: typeof CtrlProxyClient.getInstance;
+  let originalAccessibilityClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -52,13 +52,13 @@ describe("DeviceSessionManager", () => {
     };
 
     originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    originalAccessibilityClientGetInstance = CtrlProxyClient.getInstance;
+    originalAccessibilityClientGetInstance = AndroidCtrlProxyClient.getInstance;
   });
 
   afterEach(() => {
     Window.prototype.getActive = originalGetActive;
     AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    CtrlProxyClient.getInstance = originalAccessibilityClientGetInstance;
+    AndroidCtrlProxyClient.getInstance = originalAccessibilityClientGetInstance;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
@@ -67,7 +67,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false
       } as any);
@@ -85,7 +85,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(false);
     accessibilityManager.setVersionCompatible(true);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -105,7 +105,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(true);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -124,7 +124,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(false);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -141,7 +141,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true),
@@ -159,7 +159,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true)
@@ -177,7 +177,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(false)  // WebSocket fails - cache is stale
@@ -202,7 +202,7 @@ describe("DeviceSessionManager", () => {
         setup: async () => ({ success: true, message: "ok" })
       } as any;
     };
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(true)
@@ -219,7 +219,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({
         isConnected: () => true,
         verifyServiceReady: () => Promise.resolve(false),  // Service not responsive
@@ -380,7 +380,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   let fakeAdbFactory: AdbClientFactory;
   let originalGetActive: typeof Window.prototype.getActive;
   let originalAndroidCtrlProxyMgr: typeof AndroidCtrlProxyManager.getInstance;
-  let originalAndroidCtrlProxyClient: typeof CtrlProxyClient.getInstance;
+  let originalAndroidCtrlProxyClient: typeof AndroidCtrlProxyClient.getInstance;
   let originalIOSCtrlProxyMgr: typeof IOSCtrlProxyManager.getInstance;
   let originalIOSCtrlProxyClient: typeof IOSCtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
@@ -414,7 +414,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     };
 
     originalAndroidCtrlProxyMgr = AndroidCtrlProxyManager.getInstance;
-    originalAndroidCtrlProxyClient = CtrlProxyClient.getInstance;
+    originalAndroidCtrlProxyClient = AndroidCtrlProxyClient.getInstance;
     originalIOSCtrlProxyMgr = IOSCtrlProxyManager.getInstance;
     originalIOSCtrlProxyClient = IOSCtrlProxyClient.getInstance;
 
@@ -423,7 +423,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     fakeCtrlProxy.setEnabled(true);
     fakeCtrlProxy.setVersionCompatible(true);
     AndroidCtrlProxyManager.getInstance = () => fakeCtrlProxy as any;
-    CtrlProxyClient.getInstance = () =>
+    AndroidCtrlProxyClient.getInstance = () =>
       ({ isConnected: () => true, verifyServiceReady: () => Promise.resolve(true) }) as any;
 
     IOSCtrlProxyManager.getInstance = () =>
@@ -439,7 +439,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   afterEach(() => {
     Window.prototype.getActive = originalGetActive;
     AndroidCtrlProxyManager.getInstance = originalAndroidCtrlProxyMgr;
-    CtrlProxyClient.getInstance = originalAndroidCtrlProxyClient;
+    AndroidCtrlProxyClient.getInstance = originalAndroidCtrlProxyClient;
     IOSCtrlProxyManager.getInstance = originalIOSCtrlProxyMgr;
     IOSCtrlProxyClient.getInstance = originalIOSCtrlProxyClient;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);

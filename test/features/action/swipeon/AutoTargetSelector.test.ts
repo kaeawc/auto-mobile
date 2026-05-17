@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { SwipeOn } from "../../../../src/features/action/swipeon";
 import { ObserveResult } from "../../../../src/models";
-import { CtrlProxyClient } from "../../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import { FakeAwaitIdle } from "../../../fakes/FakeAwaitIdle";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
@@ -59,7 +59,7 @@ describe("SwipeOn autoTarget", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue({} as CtrlProxyClient);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({} as AndroidCtrlProxyClient);
     fakeObserveScreen = new FakeObserveScreen();
     fakeGesture = new FakeGestureExecutor();
     fakeAwaitIdle = new FakeAwaitIdle();

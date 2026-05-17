@@ -1,5 +1,5 @@
 /**
- * CtrlProxyClient - Main client for Android accessibility service.
+ * AndroidCtrlProxyClient - Main client for Android accessibility service.
  *
  * This client provides a unified interface to the Android accessibility service
  * via WebSocket connection. It uses composition with delegate modules to handle
@@ -62,6 +62,7 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 
 // Import delegates
@@ -559,15 +560,7 @@ type WebSocketMessage =
 /**
  * Interface for accessibility service providing Android UI hierarchy and interaction capabilities
  */
-export interface CtrlProxy {
-  getAccessibilityHierarchy(
-    queryOptions?: ViewHierarchyQueryOptions,
-    perf?: PerformanceTracker,
-    skipWaitForFresh?: boolean,
-    minTimestamp?: number,
-    disableAllFiltering?: boolean
-  ): Promise<ViewHierarchyResult | null>;
-
+export interface AndroidCtrlProxy extends CtrlProxyClient {
   setRecompositionTrackingEnabled(
     enabled: boolean,
     perf?: PerformanceTracker
@@ -657,21 +650,13 @@ export interface CtrlProxy {
   ): Promise<HighlightOperationResult>;
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
-
-  ensureConnected(perf?: PerformanceTracker): Promise<boolean>;
-  isConnected(): boolean;
-  waitForConnection(maxAttempts?: number, delayMs?: number): Promise<boolean>;
-  verifyServiceReady(maxAttempts?: number, delayMs?: number, timeoutMs?: number): Promise<boolean>;
-  hasCachedHierarchy(): boolean;
-  invalidateCache(): void;
-  close(): Promise<void>;
 }
 
 /**
  * Client for interacting with the AutoMobile Accessibility Service via WebSocket.
  * Uses singleton pattern per device to maintain persistent WebSocket connection.
  */
-export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
+export class AndroidCtrlProxyClient extends DeviceServiceClient implements AndroidCtrlProxy {
   private device: BootedDevice;
   private adb: AdbExecutor;
 
@@ -679,7 +664,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   private localPort: number;
 
   // Singleton instances per device
-  private static instances: Map<string, CtrlProxyClient> = new Map();
+  private static instances: Map<string, AndroidCtrlProxyClient> = new Map();
 
   // Session binding for multi-agent isolation
   private boundSessionId: string | null = null;
@@ -752,16 +737,16 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
   /**
    * Get singleton instance for a device
    */
-  public static getInstance(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory): CtrlProxyClient {
+  public static getInstance(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory): AndroidCtrlProxyClient {
     const deviceId = device.deviceId;
-    if (!CtrlProxyClient.instances.has(deviceId)) {
+    if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);
-      CtrlProxyClient.instances.set(
+      AndroidCtrlProxyClient.instances.set(
         deviceId,
-        new CtrlProxyClient(device, adbFactory.create(device))
+        new AndroidCtrlProxyClient(device, adbFactory.create(device))
       );
     }
-    return CtrlProxyClient.instances.get(deviceId)!;
+    return AndroidCtrlProxyClient.instances.get(deviceId)!;
   }
 
   /**
@@ -792,10 +777,10 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
    * Reset all instances (for testing)
    */
   public static resetInstances(): void {
-    for (const instance of CtrlProxyClient.instances.values()) {
+    for (const instance of AndroidCtrlProxyClient.instances.values()) {
       instance.close().catch(() => {});
     }
-    CtrlProxyClient.instances.clear();
+    AndroidCtrlProxyClient.instances.clear();
     PortManager.reset();
     logger.info("[CTRL_PROXY] Reset all singleton instances and port allocations");
   }
@@ -810,8 +795,8 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor
-  ): CtrlProxyClient {
-    return new CtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor);
+  ): AndroidCtrlProxyClient {
+    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor);
   }
 
   // ===========================================================================
@@ -951,7 +936,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         expiresAtEpochMs: sim?.expiresAt ?? null,
       }));
     } catch (e) {
-      logger.debug(`[CtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
+      logger.debug(`[AndroidCtrlProxyClient] Failed to sync network state on reconnect: ${e}`);
     }
   }
 
@@ -965,7 +950,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       }
 
       logger.info(
-        `[CtrlProxyClient] Sending accessibility flags config: ` +
+        `[AndroidCtrlProxyClient] Sending accessibility flags config: ` +
         `includeNotImportantViews=${flags.includeNotImportantViews}, ` +
         `reportViewIds=${flags.reportViewIds}, ` +
         `retrieveInteractiveWindows=${flags.retrieveInteractiveWindows}`
@@ -977,7 +962,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
         retrieveInteractiveWindows: flags.retrieveInteractiveWindows,
       }));
     } catch (e) {
-      logger.debug(`[CtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);
+      logger.debug(`[AndroidCtrlProxyClient] Failed to sync accessibility flags on reconnect: ${e}`);
     }
   }
 
@@ -2309,7 +2294,7 @@ export class CtrlProxyClient extends DeviceServiceClient implements CtrlProxy {
       if (!result.success || !result.data) {
         this.a11yScreenshotFailures++;
         if (this.a11yScreenshotSupported === null &&
-            this.a11yScreenshotFailures >= CtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES) {
+            this.a11yScreenshotFailures >= AndroidCtrlProxyClient.A11Y_SCREENSHOT_MAX_FAILURES) {
           logger.info("[CTRL_PROXY] Accessibility service screenshot not supported after " +
             `${this.a11yScreenshotFailures} consecutive failures, falling back to ADB screencap`);
           this.a11yScreenshotSupported = false;

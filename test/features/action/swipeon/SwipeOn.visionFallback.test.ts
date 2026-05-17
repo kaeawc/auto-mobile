@@ -6,7 +6,7 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeAccessibilityDetector } from "../../../fakes/FakeAccessibilityDetector";
 import { FakeTimer } from "../../../fakes/FakeTimer";
-import { CtrlProxyClient } from "../../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../../src/features/observe/android";
 import type { VisionFallbackConfig } from "../../../../src/vision/VisionTypes";
 import type { ObserveResult } from "../../../../src/models";
 
@@ -38,7 +38,7 @@ describe("SwipeOn vision fallback", () => {
   beforeEach(() => {
     fakeAccessibilityDetector = new FakeAccessibilityDetector();
     fakeAccessibilityDetector.setTalkBackEnabled(false);
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue({
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
       getAccessibilityHierarchy: async () => null,
       clearAccessibilityFocus: async () => {}
     } as any);

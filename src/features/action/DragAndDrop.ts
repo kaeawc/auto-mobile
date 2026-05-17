@@ -11,7 +11,7 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
-import { CtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
@@ -43,7 +43,7 @@ interface DragAndDropDeps {
 export class DragAndDrop extends BaseVisualChange {
   private finder: ElementFinder;
   private geometry: ElementGeometry;
-  private accessibilityService: CtrlProxyClient;
+  private accessibilityService: AndroidCtrlProxyClient;
   private viewHierarchy: ViewHierarchy;
   private visionConfig: VisionFallbackConfig;
   private screenshotCapturer: ScreenshotCapturer;
@@ -58,7 +58,7 @@ export class DragAndDrop extends BaseVisualChange {
     super(device, adb, timer);
     this.finder = new DefaultElementFinder();
     this.geometry = new DefaultElementGeometry();
-    this.accessibilityService = CtrlProxyClient.getInstance(device, this.adbFactory);
+    this.accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     this.viewHierarchy = new ViewHierarchy(device, this.adbFactory);
     this.visionConfig = deps.visionConfig ?? DEFAULT_VISION_CONFIG;
     this.screenshotCapturer = deps.screenshotCapturer ?? new TakeScreenshotCapturer(device, this.adbFactory);

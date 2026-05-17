@@ -1,5 +1,5 @@
 import type { IosVoiceOverDetector } from "../../src/utils/interfaces/IosVoiceOverDetector";
-import type { CtrlProxyService } from "../../src/features/observe/ios/CtrlProxyClient";
+import type { IOSCtrlProxy } from "../../src/features/observe/ios";
 import type { FeatureFlagService } from "../../src/features/featureFlags/FeatureFlagService";
 
 /**
@@ -43,7 +43,7 @@ export class FakeIosVoiceOverDetector implements IosVoiceOverDetector {
 
   async isVoiceOverEnabled(
     _deviceId: string,
-    _client: CtrlProxyService,
+    _client: IOSCtrlProxy,
     _featureFlags?: FeatureFlagService
   ): Promise<boolean> {
     this.callCount++;

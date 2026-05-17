@@ -9,7 +9,7 @@ import { VoiceOverToggle } from "../features/accessibility/VoiceOverToggle";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { accessibilityDetector } from "../utils/AccessibilityDetector";
 import { iosVoiceOverDetector } from "../utils/IosVoiceOverDetector";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios/CtrlProxyClient";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../utils/logger";
 import { accessibilityStateSchema } from "./toolOutputSchemas";

@@ -3,20 +3,19 @@ import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, ImeActionResult, ObserveResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
-import { CtrlProxy } from "../observe/interfaces/CtrlProxy";
+import { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 export class ImeAction extends BaseVisualChange {
-  private a11yService: CtrlProxy | null = null;
+  private a11yService: AndroidCtrlProxy | null = null;
   private imeTimer: Timer;
 
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    a11yService: CtrlProxy | null = null,
+    a11yService: AndroidCtrlProxy | null = null,
     timer: Timer = defaultTimer
   ) {
     super(device, adb, timer);

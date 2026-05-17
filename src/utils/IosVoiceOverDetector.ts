@@ -1,7 +1,7 @@
 import { logger } from "./logger";
 import type { IosVoiceOverDetector as IIosVoiceOverDetector } from "./interfaces/IosVoiceOverDetector";
 import { SystemTimer, type Timer } from "./SystemTimer";
-import type { CtrlProxyService } from "../features/observe/ios/CtrlProxyClient";
+import type { IOSCtrlProxy } from "../features/observe/ios";
 import type { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { TTLCache } from "./cache/Cache";
 
@@ -35,7 +35,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    */
   async isVoiceOverEnabled(
     deviceId: string,
-    client: CtrlProxyService,
+    client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService
   ): Promise<boolean> {
     // Check feature flag override first
@@ -102,7 +102,7 @@ export class DefaultIosVoiceOverDetector implements IIosVoiceOverDetector {
    * completed (connection failure, timeout, or error response from CtrlProxy).
    * Null results are not cached so the next call will retry.
    */
-  private async detectVoiceOverState(deviceId: string, client: CtrlProxyService): Promise<boolean | null> {
+  private async detectVoiceOverState(deviceId: string, client: IOSCtrlProxy): Promise<boolean | null> {
     try {
       const result = await client.requestVoiceOverState();
       if (!result.success) {

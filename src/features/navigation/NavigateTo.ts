@@ -2,7 +2,7 @@ import { BootedDevice, NavigateToResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { ToolRegistry } from "../../server/toolRegistry";
 import {

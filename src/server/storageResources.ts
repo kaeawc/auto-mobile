@@ -1,7 +1,7 @@
 import { ResourceRegistry, ResourceContent } from "./resourceRegistry";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../features/observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios/CtrlProxyClient";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";

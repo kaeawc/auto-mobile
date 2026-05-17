@@ -32,7 +32,7 @@ import {
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { IOSCtrlProxyManager } from "../utils/IOSCtrlProxyManager";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
-import { CtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import type { KeyValueType } from "../features/storage/storageTypes";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
@@ -449,7 +449,7 @@ export class UnixSocketServer {
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
-        const client = CtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         if (args.value === null || args.value === undefined) {
           await client.removePreference(args.appId, args.fileName, args.key);
         } else {
@@ -478,7 +478,7 @@ export class UnixSocketServer {
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
-        const client = CtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         await client.removePreference(args.appId, args.fileName, args.key);
         return { success: true };
       }
@@ -496,7 +496,7 @@ export class UnixSocketServer {
         if (!targetDevice) {
           throw new Error(`Device not found: ${args.deviceId}`);
         }
-        const client = CtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
+        const client = AndroidCtrlProxyClient.getInstance(targetDevice, defaultAdbClientFactory);
         await client.clearPreferenceStore(args.appId, args.fileName);
         return { success: true };
       }

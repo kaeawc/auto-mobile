@@ -1,7 +1,7 @@
 import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { HomeScreen } from "../../../src/features/action/HomeScreen";
 import { BootedDevice, ObserveResult } from "../../../src/models";
-import { CtrlProxyClient } from "../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -103,7 +103,7 @@ describe("HomeScreen", () => {
       (iosHomeScreen as any).awaitIdle = fakeAwaitIdle;
 
       const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-      const getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
         fakeIOSCtrlProxy as any
       );
 

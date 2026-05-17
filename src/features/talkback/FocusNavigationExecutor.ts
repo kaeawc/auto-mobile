@@ -6,7 +6,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-c
 import { DeviceDetection } from "../../utils/DeviceDetection";
 import { defaultTimer, type Timer } from "../../utils/SystemTimer";
 import { logger } from "../../utils/logger";
-import { CtrlProxyClient, type A11ySwipeResult } from "../observe/android";
+import { AndroidCtrlProxyClient, type A11ySwipeResult } from "../observe/android";
 import { GetScreenSize } from "../observe/GetScreenSize";
 import { FocusElementMatcher } from "./FocusElementMatcher";
 import { FocusPathCalculator, type FocusNavigationPath } from "./FocusPathCalculator";
@@ -50,10 +50,10 @@ interface FocusNavigationExecutorDependencies {
 }
 
 class DefaultFocusNavigationDriver implements FocusNavigationDriver {
-  private accessibilityService: CtrlProxyClient;
+  private accessibilityService: AndroidCtrlProxyClient;
   private screenSizeProvider: GetScreenSize;
 
-  constructor(accessibilityService: CtrlProxyClient, screenSizeProvider: GetScreenSize) {
+  constructor(accessibilityService: AndroidCtrlProxyClient, screenSizeProvider: GetScreenSize) {
     this.accessibilityService = accessibilityService;
     this.screenSizeProvider = screenSizeProvider;
   }
@@ -89,7 +89,7 @@ class DefaultFocusNavigationDriverFactory implements FocusNavigationDriverFactor
   }
 
   createDriver(device: BootedDevice): FocusNavigationDriver {
-    const accessibilityService = CtrlProxyClient.getInstance(device, this.adbFactory);
+    const accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     const screenSizeProvider = new GetScreenSize(device, this.adbFactory);
     return new DefaultFocusNavigationDriver(accessibilityService, screenSizeProvider);
   }

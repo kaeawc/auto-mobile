@@ -10,7 +10,7 @@ import { FakeTargetUserDetector } from "../../fakes/FakeTargetUserDetector";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
-import { CtrlProxyClient } from "../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { IOSCtrlProxyManager } from "../../../src/utils/IOSCtrlProxyManager";
 
 describe("LaunchApp", () => {
@@ -207,8 +207,8 @@ describe("LaunchApp", () => {
     const iosDevice: BootedDevice = { name: "test-ios-device", platform: "ios", deviceId: "ios-123" };
     const systemBundleId = "com.apple.Preferences";
     const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
-    const getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-      fakeIOSCtrlProxy as unknown as CtrlProxyClient
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeIOSCtrlProxy as unknown as IOSCtrlProxyClient
     );
 
     const iosObserveResult: ObserveResult = {
@@ -266,8 +266,8 @@ describe("LaunchApp", () => {
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-target" };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
-      const ctrlProxySpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        fakeCtrlProxy as unknown as CtrlProxyClient
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient
       );
 
       const targetBundleIdCalls: string[] = [];
@@ -311,8 +311,8 @@ describe("LaunchApp", () => {
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "ios-order" };
       const callOrder: string[] = [];
 
-      const ctrlProxySpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-        new FakeIOSCtrlProxy() as unknown as CtrlProxyClient
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        new FakeIOSCtrlProxy() as unknown as IOSCtrlProxyClient
       );
       const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
         setTargetBundleId: (id: string) => callOrder.push(`setTargetBundleId:${id}`),

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { PinchOn } from "../../../src/features/action/PinchOn";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -67,7 +67,7 @@ describe("PinchOn", () => {
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true
     } as any);
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeA11yService as any);
 
     pinchOn = new PinchOn(device);
     (pinchOn as any).observeScreen = fakeObserveScreen;

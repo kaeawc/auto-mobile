@@ -6,8 +6,8 @@
  */
 
 // Main client
-export { CtrlProxyClient } from "./CtrlProxyClient";
-export type { CtrlProxyService } from "./CtrlProxyClient";
+export { IOSCtrlProxyClient } from "./IOSCtrlProxyClient";
+export type { IOSCtrlProxy } from "./IOSCtrlProxyClient";
 
 // Delegate modules (for advanced usage)
 export { CtrlProxyGestures } from "./CtrlProxyGestures";

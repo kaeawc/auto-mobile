@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import type { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
 import { DragAndDrop } from "../../../src/features/action/DragAndDrop";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -76,7 +76,7 @@ describe("DragAndDrop vision fallback", () => {
     managerSpy = spyOn(AndroidCtrlProxyManager, "getInstance").mockReturnValue({
       isAvailable: async () => true
     } as any);
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
   });
 
   afterEach(() => {

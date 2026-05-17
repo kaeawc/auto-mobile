@@ -8,7 +8,7 @@ import { buildNetworkGraph } from "./networkGraph";
 import { serverConfig } from "../utils/ServerConfig";
 import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
-import { CtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { BootedDevice } from "../utils/deviceUtils";
 import { logger } from "../utils/logger";
 
@@ -110,7 +110,7 @@ type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void {
   if (device.platform !== "android") {return;}
   try {
-    const client = CtrlProxyClient.getInstance(device);
+    const client = AndroidCtrlProxyClient.getInstance(device);
     // Use limit (not remaining) since the server never tracks consumption —
     // the device-side NetworkMockRuleStore manages its own remaining count
     const rules = Array.from(state.getMocks().values()).map(r => ({
@@ -136,7 +136,7 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
 function syncErrorSimulationToDevice(device: BootedDevice, state: NetworkState): void {
   if (device.platform !== "android") {return;}
   try {
-    const client = CtrlProxyClient.getInstance(device);
+    const client = AndroidCtrlProxyClient.getInstance(device);
     const sim = state.simulation;
     client.sendMessage(JSON.stringify({
       type: "set_network_error_simulation",

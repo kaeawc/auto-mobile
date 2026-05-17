@@ -4,7 +4,7 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/Perfo
 import { SwipeResult } from "../../../models/SwipeResult";
 import { BoomerangConfig, GestureExecutor, VoiceOverSwipeRunner } from "./types";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
-import type { CtrlProxyService } from "../../observe/ios/CtrlProxyClient";
+import type { IOSCtrlProxy } from "../../observe/ios";
 import { Timer } from "../../../utils/interfaces/Timer";
 
 /**
@@ -24,7 +24,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly iosClient: CtrlProxyService,
+    private readonly iosClient: IOSCtrlProxy,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector,
     private readonly timer: Timer
   ) {}

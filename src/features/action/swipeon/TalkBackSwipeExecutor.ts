@@ -7,7 +7,7 @@ import {
 } from "../../../models";
 import { logger } from "../../../utils/logger";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
-import { CtrlProxyClient } from "../../observe/android";
+import { AndroidCtrlProxyClient } from "../../observe/android";
 import { AccessibilityDetector } from "../../../utils/interfaces/AccessibilityDetector";
 import { SwipeResult } from "../../../models/SwipeResult";
 import { GestureExecutor, BoomerangConfig, TalkBackSwipeRunner } from "./types";
@@ -20,7 +20,7 @@ export class TalkBackSwipeExecutor implements TalkBackSwipeRunner {
   constructor(
     private readonly device: BootedDevice,
     private readonly executeGesture: GestureExecutor,
-    private readonly accessibilityService: CtrlProxyClient,
+    private readonly accessibilityService: AndroidCtrlProxyClient,
     private readonly accessibilityDetector: AccessibilityDetector,
     private readonly timer: Timer
   ) {}

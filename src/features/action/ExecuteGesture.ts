@@ -5,8 +5,8 @@ import { GestureOptions } from "../../models";
 import { BaseVisualChange } from "./BaseVisualChange";
 import { SwipeResult } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { logger } from "../../utils/logger";
 
 /**

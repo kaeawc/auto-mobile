@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -9,8 +9,8 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 
-describe("CtrlProxyClient", function() {
-  let ctrlProxyClient: CtrlProxyClient;
+describe("IOSCtrlProxyClient", function() {
+  let ctrlProxyClient: IOSCtrlProxyClient;
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
   const serverPort: number = 8765;
@@ -28,9 +28,9 @@ describe("CtrlProxyClient", function() {
     };
 
     // Reset singleton instances for clean test state
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
 
-    ctrlProxyClient = CtrlProxyClient.createForTesting(
+    ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
       testDevice,
       serverPort,
       createSuccessWebSocketFactory(fakeTimer),
@@ -134,7 +134,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -177,7 +177,7 @@ describe("CtrlProxyClient", function() {
     test("should return null hierarchy when not connected", async function() {
       const testTimer = fakeTimer;
 
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         createInstantFailureWebSocketFactory(testTimer),
@@ -200,7 +200,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -242,7 +242,7 @@ describe("CtrlProxyClient", function() {
     test("should return error when not connected", async function() {
       const testTimer = fakeTimer;
 
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         createInstantFailureWebSocketFactory(testTimer),
@@ -265,7 +265,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -305,7 +305,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -344,7 +344,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -385,7 +385,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -425,7 +425,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -464,7 +464,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -489,7 +489,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -512,7 +512,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -548,7 +548,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         factory,
@@ -589,7 +589,7 @@ describe("CtrlProxyClient", function() {
   describe("convertToViewHierarchyResult", function() {
     test("should convert CtrlProxyHierarchy to ViewHierarchyResult format", async function() {
       const testTimer = fakeTimer;
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = IOSCtrlProxyClient.createForTesting(
         testDevice,
         serverPort,
         createSuccessWebSocketFactory(testTimer),

@@ -2,8 +2,8 @@ import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, HomeScreenResult } from "../../models";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
-import { CtrlProxyClient } from "../observe/ios";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 
 /**
@@ -64,7 +64,7 @@ export class HomeScreen extends BaseVisualChange {
   }
 
   private async executeIosHomeNavigation(perf?: PerformanceTracker): Promise<void> {
-    const client = CtrlProxyClient.getInstance(this.device);
+    const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestPressHome(5000, perf);
     if (!result.success) {
       throw new Error(result.error ?? "Failed to press iOS home button");

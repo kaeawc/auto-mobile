@@ -1,5 +1,5 @@
-import { CtrlProxy } from "../../src/features/observe/interfaces/CtrlProxy";
 import {
+  AndroidCtrlProxy,
   ScreenshotResult,
   A11yDragResult,
   A11yPinchResult,
@@ -22,7 +22,7 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
  * Allows configuring responses for hierarchy, screenshots, and gesture operations
  * Tracks method calls for test assertions
  */
-export class FakeCtrlProxy implements CtrlProxy {
+export class FakeCtrlProxy implements AndroidCtrlProxy {
   // Session binding (matches CtrlProxyClient.bindSession for test compatibility)
   private boundSessionId: string | null = null;
 

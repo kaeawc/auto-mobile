@@ -12,7 +12,7 @@ import { ScreenshotJobHandle, ScreenshotJobOptions, ScreenshotJobTracker } from 
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
-import { CtrlProxyClient } from "./ios";
+import { IOSCtrlProxyClient } from "./ios";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 
@@ -263,7 +263,7 @@ export class TakeScreenshot implements ScreenshotService {
     const startTime = this.timer.now();
 
     try {
-      const client = CtrlProxyClient.getInstance(this.device);
+      const client = IOSCtrlProxyClient.getInstance(this.device);
 
       // Ensure connected before requesting screenshot
       if (!await client.ensureConnected()) {

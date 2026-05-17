@@ -1,7 +1,7 @@
 import { logger } from "../../../utils/logger";
 import type { BootedDevice, PlanStep, Element } from "../../../models";
 import type { GestureEmitter, GestureEvent, A11ySource } from "./types";
-import { CtrlProxyClient } from "../../observe/android";
+import { AndroidCtrlProxyClient } from "../../observe/android";
 import { defaultAdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import { discoverTouchNode } from "./TouchNodeDiscovery";
 import { buildAxisRanges, buildScaler, queryDensity, queryRotation } from "./AxisRanges";
@@ -49,8 +49,8 @@ export class DualTrackRecorder {
   private lastInputText: { elementKey: string; text: string; stepIndex: number } | null = null;
   private activeEmitter: GestureEmitter | null = null;
   private unsubscribeA11y: (() => void) | null = null;
-  /** Reference to the real CtrlProxyClient when not in test mode */
-  private activeA11y: CtrlProxyClient | null = null;
+  /** Reference to the real AndroidCtrlProxyClient when not in test mode */
+  private activeA11y: AndroidCtrlProxyClient | null = null;
   private stopped = false;
 
   get stepCount(): number {
@@ -61,18 +61,18 @@ export class DualTrackRecorder {
     private readonly device: BootedDevice,
     /** Optional override for testing — defaults to a real GetEventReader */
     private readonly gestureEmitter?: GestureEmitter,
-    /** Optional override for testing — defaults to CtrlProxyClient */
+    /** Optional override for testing — defaults to AndroidCtrlProxyClient */
     private readonly a11ySource?: A11ySource,
     /** Optional override for testing — defaults to the system timer */
     private readonly timer: Timer = defaultTimer
   ) {}
 
   async start(): Promise<void> {
-    // In real mode (no test override), obtain the CtrlProxyClient directly
+    // In real mode (no test override), obtain the AndroidCtrlProxyClient directly
     // so we can send start/stop recording notifications to the Kotlin service.
-    let a11yClient: CtrlProxyClient | undefined;
+    let a11yClient: AndroidCtrlProxyClient | undefined;
     if (!this.a11ySource) {
-      a11yClient = CtrlProxyClient.getInstance(this.device);
+      a11yClient = AndroidCtrlProxyClient.getInstance(this.device);
     }
 
     const a11y: A11ySource = this.a11ySource ?? a11yClient!;

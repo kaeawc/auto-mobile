@@ -1,5 +1,5 @@
 import type { FeatureFlagService } from "../../features/featureFlags/FeatureFlagService";
-import type { CtrlProxyService } from "../../features/observe/ios/CtrlProxyClient";
+import type { IOSCtrlProxy } from "../../features/observe/ios";
 
 /**
  * Interface for iOS VoiceOver detection
@@ -16,7 +16,7 @@ export interface IosVoiceOverDetector {
    */
   isVoiceOverEnabled(
     deviceId: string,
-    client: CtrlProxyService,
+    client: IOSCtrlProxy,
     featureFlags?: FeatureFlagService
   ): Promise<boolean>;
 

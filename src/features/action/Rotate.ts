@@ -5,7 +5,7 @@ import { logger } from "../../utils/logger";
 import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { CtrlProxyClient } from "../observe/ios";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 export class Rotate extends BaseVisualChange {
   constructor(
@@ -87,7 +87,7 @@ export class Rotate extends BaseVisualChange {
     return this.observedInteraction(
       async () => {
         try {
-          const client = CtrlProxyClient.getInstance(this.device);
+          const client = IOSCtrlProxyClient.getInstance(this.device);
           const result = await perf.track("iOSRotation", () =>
             client.requestRotate(orientation, 5000, perf)
           );

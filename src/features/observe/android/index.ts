@@ -6,8 +6,8 @@
  */
 
 // Main client
-export { CtrlProxyClient } from "./CtrlProxyClient";
-export type { CtrlProxy, InteractionEvent } from "./CtrlProxyClient";
+export { AndroidCtrlProxyClient } from "./AndroidCtrlProxyClient";
+export type { AndroidCtrlProxy, InteractionEvent } from "./AndroidCtrlProxyClient";
 
 // Delegate modules (for advanced usage)
 export { CtrlProxyGestures } from "./CtrlProxyGestures";

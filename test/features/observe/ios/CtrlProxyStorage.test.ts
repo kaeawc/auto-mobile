@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient } from "../../../../src/features/observe/ios";
+import { IOSCtrlProxyClient } from "../../../../src/features/observe/ios";
 import type { BootedDevice } from "../../../../src/models";
 import {
   FakeWebSocket,
@@ -23,7 +23,7 @@ describe("CtrlProxyStorage (iOS)", function() {
       name: "iPhone 16 Simulator",
     };
 
-    CtrlProxyClient.resetInstances();
+    IOSCtrlProxyClient.resetInstances();
   });
 
   // ---------------------------------------------------------------------------
@@ -86,7 +86,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("listPreferenceFiles", function() {
     test("sends list_preference_files request and returns files", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.listPreferenceFiles("com.example.app");
@@ -123,7 +123,7 @@ describe("CtrlProxyStorage (iOS)", function() {
     });
 
     test("throws on connection failure", async function() {
-      const client = CtrlProxyClient.createForTesting(
+      const client = IOSCtrlProxyClient.createForTesting(
         testDevice, serverPort,
         createInstantFailureWebSocketFactory(fakeTimer),
         fakeTimer
@@ -144,7 +144,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("getPreferenceEntries", function() {
     test("sends get_preferences and returns entries", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.getPreferenceEntries("com.example.app", "Standard");
@@ -186,7 +186,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("getPreference", function() {
     test("returns entry when found", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "theme");
@@ -222,7 +222,7 @@ describe("CtrlProxyStorage (iOS)", function() {
 
     test("returns null when not found", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.getPreference("com.example.app", "Standard", "missing");
@@ -255,7 +255,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("setPreference", function() {
     test("sends set_preference with correct parameters", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.setPreference("com.example.app", "Standard", "theme", "dark", "STRING");
@@ -285,7 +285,7 @@ describe("CtrlProxyStorage (iOS)", function() {
 
     test("throws on failure response", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.setPreference("com.example.app", "Standard", "count", "bad", "INT");
@@ -317,7 +317,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("removePreference", function() {
     test("sends remove_preference request", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.removePreference("com.example.app", "Standard", "theme");
@@ -351,7 +351,7 @@ describe("CtrlProxyStorage (iOS)", function() {
   describe("clearPreferenceStore", function() {
     test("sends clear_preferences request", async function() {
       const { factory, getSocket } = createCapturingFactory(fakeTimer);
-      const client = CtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
+      const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
       try {
         const resultPromise = client.clearPreferenceStore("com.example.app", "com.example.settings");

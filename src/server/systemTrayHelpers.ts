@@ -15,7 +15,7 @@ import {
 import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces/ObserveScreen";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../features/observe/ios";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";

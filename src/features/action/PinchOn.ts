@@ -13,7 +13,7 @@ import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementParser } from "../utility/ElementParser";
-import { CtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { boundsArea, clamp } from "../../utils/bounds";
@@ -136,7 +136,7 @@ export class PinchOn extends BaseVisualChange {
       const duration = options.duration ?? 300;
       const rotationDegrees = options.rotationDegrees ?? 0;
 
-      const a11yClient = CtrlProxyClient.getInstance(this.device, this.adb);
+      const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
 
       const pinchResult = await this.observedInteraction(
         async () => {

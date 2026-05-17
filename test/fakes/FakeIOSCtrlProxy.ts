@@ -1,4 +1,4 @@
-import { CtrlProxyService } from "../../src/features/observe/ios";
+import { IOSCtrlProxy } from "../../src/features/observe/ios";
 import {
   CtrlProxyScreenshotResult,
   CtrlProxyDragResult,
@@ -28,11 +28,11 @@ import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 /**
- * Fake implementation of CtrlProxyService for testing
+ * Fake implementation of IOSCtrlProxy for testing
  * Allows configuring responses for hierarchy, screenshots, and gesture operations
  * Tracks method calls for test assertions
  */
-export class FakeIOSCtrlProxy implements CtrlProxyService {
+export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   // Configurable response data
   private hierarchyData: CtrlProxyHierarchy | null = null;
   private screenshotData: string | null = null;
@@ -436,7 +436,7 @@ export class FakeIOSCtrlProxy implements CtrlProxyService {
     }
   }
 
-  // MARK: - CtrlProxyService Implementation
+  // MARK: - IOSCtrlProxy Implementation
 
   async getAccessibilityHierarchy(
     queryOptions?: ViewHierarchyQueryOptions,

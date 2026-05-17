@@ -1,8 +1,8 @@
 /**
  * Interface compliance tests for DeviceService implementations.
  *
- * These tests verify that both CtrlProxyClient (Android) and
- * CtrlProxyClient (iOS) properly implement the DeviceService interface.
+ * These tests verify that both AndroidCtrlProxyClient and
+ * IOSCtrlProxyClient properly implement the DeviceService interface.
  *
  * The tests focus on:
  * 1. Type compatibility - instances can be assigned to interface type
@@ -12,8 +12,8 @@
 
 import { describe, expect, test } from "bun:test";
 import type { DeviceService, AndroidDeviceService } from "../../../src/features/observe/DeviceService";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { BootedDevice } from "../../../src/models";
 import {
@@ -28,8 +28,8 @@ describe("DeviceService Interface Compliance", () => {
   // ===========================================================================
 
   describe("Type Compliance", () => {
-    test("CtrlProxyClient implements DeviceService interface", () => {
-      // This test verifies at compile-time that CtrlProxyClient
+    test("AndroidCtrlProxyClient implements DeviceService interface", () => {
+      // This test verifies at compile-time that AndroidCtrlProxyClient
       // is assignable to the DeviceService interface
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
@@ -43,16 +43,16 @@ describe("DeviceService Interface Compliance", () => {
         name: "Test Android Device",
       };
 
-      CtrlProxyClient.resetInstances();
+      AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = CtrlProxyClient.createForTesting(
+      const client = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
         fakeTimer
       );
 
-      // Type assertion: CtrlProxyClient should be assignable to DeviceService
+      // Type assertion: AndroidCtrlProxyClient should be assignable to DeviceService
       const deviceService: DeviceService = client;
 
       // Verify the interface methods exist
@@ -73,8 +73,8 @@ describe("DeviceService Interface Compliance", () => {
       void client.close();
     });
 
-    test("CtrlProxyClient (iOS) implements DeviceService interface", () => {
-      // This test verifies at compile-time that CtrlProxyClient (iOS)
+    test("AndroidCtrlProxyClient (iOS) implements DeviceService interface", () => {
+      // This test verifies at compile-time that AndroidCtrlProxyClient (iOS)
       // is assignable to the DeviceService interface
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
@@ -93,7 +93,7 @@ describe("DeviceService Interface Compliance", () => {
         fakeTimer
       );
 
-      // Type assertion: CtrlProxyClient (iOS) should be assignable to DeviceService
+      // Type assertion: AndroidCtrlProxyClient (iOS) should be assignable to DeviceService
       const deviceService: DeviceService = client;
 
       // Verify the interface methods exist
@@ -114,7 +114,7 @@ describe("DeviceService Interface Compliance", () => {
       void client.close();
     });
 
-    test("CtrlProxyClient implements AndroidDeviceService interface", () => {
+    test("AndroidCtrlProxyClient implements AndroidDeviceService interface", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
       const fakeAdb = new FakeAdbExecutor();
@@ -127,16 +127,16 @@ describe("DeviceService Interface Compliance", () => {
         name: "Test Android Device",
       };
 
-      CtrlProxyClient.resetInstances();
+      AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = CtrlProxyClient.createForTesting(
+      const client = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),
         fakeTimer
       );
 
-      // Type assertion: CtrlProxyClient should be assignable to AndroidDeviceService
+      // Type assertion: AndroidCtrlProxyClient should be assignable to AndroidDeviceService
       const androidService: AndroidDeviceService = client;
 
       // Verify Android-specific interface methods exist
@@ -150,7 +150,7 @@ describe("DeviceService Interface Compliance", () => {
       void client.close();
     });
 
-    test("CtrlProxyClient (iOS) has Apple-specific methods", () => {
+    test("AndroidCtrlProxyClient (iOS) has Apple-specific methods", () => {
       const fakeTimer = new FakeTimer();
       fakeTimer.enableAutoAdvance();
 
@@ -169,7 +169,7 @@ describe("DeviceService Interface Compliance", () => {
       );
 
       // Verify Apple-specific interface methods exist
-      // Note: CtrlProxyClient (iOS) currently implements requestLaunchApp and requestPressHome
+      // Note: AndroidCtrlProxyClient (iOS) currently implements requestLaunchApp and requestPressHome
       // but not all AppleDeviceService methods (requestTerminateApp, requestPressButton)
       expect(typeof client.requestLaunchApp).toBe("function");
       expect(typeof client.requestPressHome).toBe("function");
@@ -197,9 +197,9 @@ describe("DeviceService Interface Compliance", () => {
         name: "Test Android Device",
       };
 
-      CtrlProxyClient.resetInstances();
+      AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = CtrlProxyClient.createForTesting(
+      const client = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(fakeTimer),
@@ -223,9 +223,9 @@ describe("DeviceService Interface Compliance", () => {
         name: "Test Android Device",
       };
 
-      CtrlProxyClient.resetInstances();
+      AndroidCtrlProxyClient.resetInstances();
       // Pass FakeAdbExecutor directly since it implements AdbExecutor interface
-      const client = CtrlProxyClient.createForTesting(
+      const client = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createInstantFailureWebSocketFactory(fakeTimer),

@@ -6,7 +6,7 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { logger } from "../utils/logger";
 import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
-import { CtrlProxyClient } from "../features/observe/android";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { createPerformanceTracker, type TimingData } from "../utils/PerformanceTracker";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
 
@@ -173,7 +173,7 @@ async function ensureAccessibilityServiceReady(
       logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
     }
 
-    const accessibilityClient = CtrlProxyClient.getInstance(deviceId);
+    const accessibilityClient = AndroidCtrlProxyClient.getInstance(deviceId);
     const connected = await perf.track("waitForConnection", () => accessibilityClient.waitForConnection());
 
     perf.end();

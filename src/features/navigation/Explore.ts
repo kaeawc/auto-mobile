@@ -3,7 +3,7 @@ import { BaseVisualChange, ProgressCallback } from "../action/BaseVisualChange";
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { createGlobalPerformanceTracker, PerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { NavigationGraphManager, type NavigationEdge, type NavigationGraphService } from "./NavigationGraphManager";
 import { ExportedGraph } from "../../utils/interfaces/NavigationGraph";
 import { TapOnElement } from "../action/TapOnElement";

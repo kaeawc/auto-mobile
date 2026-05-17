@@ -1,6 +1,6 @@
 import type { BootedDevice } from "../../models";
 import type { A11yActionResult, A11yTapCoordinatesResult } from "../observe/android/types";
-import { CtrlProxyClient } from "../observe/android";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { GetScreenSize } from "../observe/GetScreenSize";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { FocusNavigationDriver } from "./FocusNavigationExecutor";
@@ -27,13 +27,13 @@ export interface TalkBackNavigationDriver extends FocusNavigationDriver {
 }
 
 /**
- * Default implementation of TalkBackNavigationDriver using CtrlProxyClient.
+ * Default implementation of TalkBackNavigationDriver using AndroidCtrlProxyClient.
  */
 class DefaultTalkBackNavigationDriver implements TalkBackNavigationDriver {
-  private accessibilityService: CtrlProxyClient;
+  private accessibilityService: AndroidCtrlProxyClient;
   private screenSizeProvider: GetScreenSize;
 
-  constructor(accessibilityService: CtrlProxyClient, screenSizeProvider: GetScreenSize) {
+  constructor(accessibilityService: AndroidCtrlProxyClient, screenSizeProvider: GetScreenSize) {
     this.accessibilityService = accessibilityService;
     this.screenSizeProvider = screenSizeProvider;
   }
@@ -81,7 +81,7 @@ export class DefaultTalkBackNavigationDriverFactory implements TalkBackNavigatio
   }
 
   createDriver(device: BootedDevice): TalkBackNavigationDriver {
-    const accessibilityService = CtrlProxyClient.getInstance(device, this.adbFactory);
+    const accessibilityService = AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     const screenSizeProvider = new GetScreenSize(device, this.adbFactory);
     return new DefaultTalkBackNavigationDriver(accessibilityService, screenSizeProvider);
   }

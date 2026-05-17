@@ -3,8 +3,8 @@ import { BaseVisualChange } from "./BaseVisualChange";
 import { BootedDevice, SendTextResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
-import { CtrlProxyClient as AndroidCtrlProxyClient } from "../observe/android";
-import { CtrlProxyClient as IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer } from "../../utils/SystemTimer";
 
 export class InputText extends BaseVisualChange {

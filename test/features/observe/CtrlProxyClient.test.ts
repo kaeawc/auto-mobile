@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
@@ -14,8 +14,8 @@ import {
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
 
-describe("CtrlProxyClient", function() {
-  let accessibilityServiceClient: CtrlProxyClient;
+describe("AndroidCtrlProxyClient", function() {
+  let accessibilityServiceClient: AndroidCtrlProxyClient;
   let fakeAdb: FakeAdbExecutor;
   let testDevice: BootedDevice;
   let fakeTimer: FakeTimer;
@@ -45,10 +45,10 @@ describe("CtrlProxyClient", function() {
 
     // Reset singleton instances for clean test state
     AndroidCtrlProxyManager.resetInstances();
-    CtrlProxyClient.resetInstances();
+    AndroidCtrlProxyClient.resetInstances();
 
     // Pass FakeAdbExecutor directly to createForTesting since it implements AdbExecutor
-    accessibilityServiceClient = CtrlProxyClient.createForTesting(
+    accessibilityServiceClient = AndroidCtrlProxyClient.createForTesting(
       testDevice,
       fakeAdb,
       createSuccessWebSocketFactory(),
@@ -157,7 +157,7 @@ describe("CtrlProxyClient", function() {
       testTimer.enableAutoAdvance();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -203,7 +203,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       // Don't use autoAdvance - we need to control time for polling
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -248,7 +248,7 @@ describe("CtrlProxyClient", function() {
       // Use FakeWebSocket that connects successfully but sends no data
       // Use delayed mode with 1ms for fast execution
 
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(fakeTimer),
@@ -271,7 +271,7 @@ describe("CtrlProxyClient", function() {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)
 
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createInstantFailureWebSocketFactory(fakeTimer),
@@ -296,7 +296,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -349,7 +349,7 @@ describe("CtrlProxyClient", function() {
       const testTimer = new FakeTimer();
       testTimer.enableAutoAdvance();
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -521,7 +521,7 @@ describe("CtrlProxyClient", function() {
       // Use delayed mode with 1ms for faster test execution
 
       // Create a new client with FakeWebSocket that fails instantly and FakeTimer
-      const failingClient = CtrlProxyClient.createForTesting(
+      const failingClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createInstantFailureWebSocketFactory(fakeTimer),
@@ -546,7 +546,7 @@ describe("CtrlProxyClient", function() {
       const timestamp = timer.now();
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -610,7 +610,7 @@ describe("CtrlProxyClient", function() {
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -670,7 +670,7 @@ describe("CtrlProxyClient", function() {
       ]);
 
       const { factory, getSocket } = createCapturingWebSocketFactory(timer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -711,7 +711,7 @@ describe("CtrlProxyClient", function() {
       // Don't use autoAdvance - we need to control time for the request timeout
 
       const { factory, getSocket } = createCapturingWebSocketFactory(highlightTimer);
-      const testClient = CtrlProxyClient.createForTesting(
+      const testClient = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         factory,
@@ -804,7 +804,7 @@ describe("CtrlProxyClient", function() {
       // We verify by checking that no session instances are created
       NavigationGraphManager.resetInstance();
 
-      const client = CtrlProxyClient.createForTesting(
+      const client = AndroidCtrlProxyClient.createForTesting(
         testDevice,
         fakeAdb,
         createSuccessWebSocketFactory(),

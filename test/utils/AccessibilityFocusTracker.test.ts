@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { AccessibilityFocusTracker } from "../../src/utils/AccessibilityFocusTracker";
-import { CtrlProxyClient } from "../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
 import type { CurrentFocusResult, Element, TraversalOrderResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 
@@ -75,8 +75,8 @@ describe("AccessibilityFocusTracker", () => {
     requestCurrentFocusSpy = spyOn(fakeClient, "requestCurrentFocus");
     requestTraversalOrderSpy = spyOn(fakeClient, "requestTraversalOrder");
 
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(
-      fakeClient as CtrlProxyClient
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(
+      fakeClient as AndroidCtrlProxyClient
     );
   });
 

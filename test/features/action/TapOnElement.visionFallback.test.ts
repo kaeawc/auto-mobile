@@ -4,7 +4,7 @@ import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { FakeVisionAnalyzer } from "../../fakes/FakeVisionAnalyzer";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import type { VisionFallbackConfig } from "../../../src/vision/VisionTypes";
-import { CtrlProxyClient } from "../../../src/features/observe/android";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import type { ObserveResult, TapOnElementOptions } from "../../../src/models";
 import { SelectionStateTracker } from "../../../src/features/navigation/SelectionStateTracker";
@@ -34,7 +34,7 @@ describe("TapOnElement vision fallback (handleElementNotFound)", () => {
 
   beforeEach(() => {
     fakeCtrlProxy = new FakeCtrlProxy();
-    getInstanceSpy = spyOn(CtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
+    getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeCtrlProxy as any);
   });
 
   afterEach(() => {

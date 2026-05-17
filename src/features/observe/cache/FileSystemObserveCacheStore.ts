@@ -1,4 +1,4 @@
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readdirSync } from "node:fs";
 import path from "path";
 import { readdirAsync, readFileAsync, statAsync, unlinkAsync, writeFileAsync } from "../../../utils/io";
 import { logger } from "../../../utils/logger";
@@ -232,23 +232,30 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   }
 
   private deleteDiskFilesMatching(predicate: (filename: string) => boolean): void {
-    // Fire-and-forget; matches the synchronous signature of the old clearCache while still cleaning disk state.
-    void (async () => {
-      try {
-        const files = await readdirAsync(this.cacheDir);
-        const matches = files.filter(predicate);
-        await Promise.all(
-          matches.map(async file => {
-            try {
-              await unlinkAsync(path.join(this.cacheDir, file));
-            } catch (error) {
-              logger.warn(`[OBSERVE_CACHE] Failed to delete cache file ${file}: ${error}`);
-            }
-          })
-        );
-      } catch (error) {
-        logger.warn(`[OBSERVE_CACHE] Failed to enumerate cache directory for cleanup: ${error}`);
-      }
-    })();
+    // Snapshot the file list synchronously before returning so a put() that
+    // races immediately after clear() cannot have its fresh file caught up in
+    // the deletion. New files written after clear() returns are not in the
+    // snapshot.
+    let matches: string[];
+    try {
+      matches = readdirSync(this.cacheDir).filter(predicate);
+    } catch (error) {
+      logger.warn(`[OBSERVE_CACHE] Failed to enumerate cache directory for cleanup: ${error}`);
+      return;
+    }
+
+    if (matches.length === 0) {
+      return;
+    }
+
+    void Promise.all(
+      matches.map(async file => {
+        try {
+          await unlinkAsync(path.join(this.cacheDir, file));
+        } catch (error) {
+          logger.warn(`[OBSERVE_CACHE] Failed to delete cache file ${file}: ${error}`);
+        }
+      })
+    );
   }
 }

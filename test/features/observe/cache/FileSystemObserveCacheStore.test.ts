@@ -127,4 +127,34 @@ describe("FileSystemObserveCacheStore", function() {
     const result = await store.getMostRecent("device-1");
     expect(result).toBeUndefined();
   });
+
+  test("clear() followed immediately by put() does not delete the fresh file", async function() {
+    // Seed an existing entry so clear() has something to delete.
+    await store.put("device-1", makeResult("stale"));
+    expect(readdirSync(cacheDir).filter(f => f.endsWith(".json")).length).toBe(1);
+
+    // Advance the clock so the fresh write gets a different filename than the
+    // stale one — otherwise the keys collide and the cleanup deletes the
+    // overwritten file (a separate concern from the race).
+    timer.setCurrentTime(1_000_001);
+
+    // Race: clear() then immediate put(). The fire-and-forget cleanup must not
+    // race against the fresh write and delete it.
+    store.clear("device-1");
+    await store.put("device-1", makeResult("fresh"));
+
+    // Drain the microtask queue so any in-flight unlinks resolve. The snapshot
+    // taken inside clear() should NOT include the post-clear write, so the
+    // file count must settle at exactly one.
+    for (let i = 0; i < 20; i++) {
+      await new Promise(resolve => setImmediate(resolve));
+    }
+
+    const files = readdirSync(cacheDir).filter(f => f.endsWith(".json"));
+    expect(files.length).toBe(1);
+
+    // The surviving file must be the fresh one, not the stale one.
+    const restored = await store.getMostRecent("device-1");
+    expect(restored?.updatedAt).toBe("fresh");
+  });
 });

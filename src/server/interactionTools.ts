@@ -77,8 +77,11 @@ import {
   tapElement,
   swipeElement,
   resolveAppLabel,
+  isMatchInCollapsedGroup,
+  expandNotificationGroup,
   SYSTEM_TRAY_CLEAR_MAX_ITERATIONS,
   SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+  EXPAND_GROUP_SETTLE_MS,
 } from "./systemTrayHelpers";
 
 // Re-export types for backward compatibility
@@ -526,7 +529,7 @@ export function registerInteractionTools() {
     RecompositionTracker.getInstance().recordInteraction();
     try {
       const pressButton = new PressButton(device);
-      const result = await pressButton.execute(args.button, progress); // observe = true
+      const result = await pressButton.execute(args.button, progress);
 
       return createJSONToolResponse({
         message: `Pressed button ${args.button}`,
@@ -604,7 +607,7 @@ export function registerInteractionTools() {
       }
 
       if (args.action === "tap") {
-        const { match } = await waitForNotificationMatch(
+        let { match } = await waitForNotificationMatch(
           device,
           notification,
           appMatchTexts,
@@ -614,6 +617,28 @@ export function registerInteractionTools() {
 
         if (!match) {
           throw new ActionableError(`Notification not found after ${awaitTimeoutMs}ms.`);
+        }
+
+        if (isMatchInCollapsedGroup(match)) {
+          await expandNotificationGroup(device, match);
+          const { timer } = getSystemTrayDependencies();
+          await timer.sleep(EXPAND_GROUP_SETTLE_MS);
+          const remainingMs = Math.max(0, awaitTimeoutMs - EXPAND_GROUP_SETTLE_MS);
+          const reMatch = await waitForNotificationMatch(
+            device,
+            notification,
+            appMatchTexts,
+            remainingMs,
+            progress
+          );
+          if (reMatch.match) {
+            match = reMatch.match;
+          } else {
+            throw new ActionableError(
+              "Expanded collapsed notification group but could not re-match the notification. " +
+              "The group may have changed after expansion."
+            );
+          }
         }
 
         const tapMatch = resolveNotificationTapElement(match, notification);

@@ -176,6 +176,26 @@ export interface A11yClipboardResult extends BaseResult {
   text?: string; // For 'get' action, the clipboard content
 }
 
+/** Settings.System/Secure/Global namespace */
+export type SettingsNamespace = "system" | "secure" | "global";
+
+/** Settings value type for writes */
+export type SettingsValueType = "string" | "int" | "long" | "float";
+
+/** Result of a settings read via accessibility service */
+export interface A11ySettingsGetResult extends BaseResult {
+  value?: string;
+  found: boolean;
+}
+
+/** Result of a settings write via accessibility service */
+export type A11ySettingsPutResult = BaseResult;
+
+/** Result of a settings list via accessibility service */
+export interface A11ySettingsListResult extends BaseResult {
+  entries?: Record<string, string>;
+}
+
 /** CA certificate result from accessibility service */
 export interface A11yCaCertResult extends BaseResult {
   action: "install" | "remove";

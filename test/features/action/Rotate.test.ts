@@ -193,12 +193,14 @@ describe("Rotate", () => {
       // Setup: device is in portrait, rotating to landscape
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("0"));
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("1"));
-      fakeAdb.setCommandResponse("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\"", createExecResult());
+      fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 0", createExecResult());
+      fakeAdb.setCommandResponse("shell settings put system user_rotation 1", createExecResult());
 
       await rotate.execute("landscape");
 
-      // Verify the combined rotation command was executed
-      expect(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 1\"")).toBe(true);
+      // Verify both rotation commands were executed
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 1")).toBe(true);
     });
 
     test("should unlock orientation if locked before rotation", async () => {
@@ -206,15 +208,17 @@ describe("Rotate", () => {
       fakeAdb.setCommandResponse("shell settings get system user_rotation", createExecResult("1"));
       fakeAdb.setCommandResponse("shell settings get system accelerometer_rotation", createExecResult("0")); // Locked
       fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 1", createExecResult()); // Unlock
-      fakeAdb.setCommandResponse("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 0\"", createExecResult());
+      fakeAdb.setCommandResponse("shell settings put system accelerometer_rotation 0", createExecResult());
+      fakeAdb.setCommandResponse("shell settings put system user_rotation 0", createExecResult());
 
       const result = await rotate.execute("portrait");
 
       expect(result.success).toBe(true);
       // Verify that the unlock command was executed
       expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 1")).toBe(true);
-      // Verify the rotation command was executed
-      expect(fakeAdb.wasCommandExecuted("shell \"settings put system accelerometer_rotation 0; settings put system user_rotation 0\"")).toBe(true);
+      // Verify the rotation commands were executed
+      expect(fakeAdb.wasCommandExecuted("shell settings put system accelerometer_rotation 0")).toBe(true);
+      expect(fakeAdb.wasCommandExecuted("shell settings put system user_rotation 0")).toBe(true);
     });
   });
 

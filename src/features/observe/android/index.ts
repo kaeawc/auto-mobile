@@ -37,6 +37,11 @@ export type {
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
   A11yPermissionResult,
+  A11ySettingsGetResult,
+  A11ySettingsPutResult,
+  A11ySettingsListResult,
+  SettingsNamespace,
+  SettingsValueType,
   AndroidPerfTiming,
 
   // Internal types (for delegate usage)

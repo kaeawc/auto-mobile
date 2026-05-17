@@ -6,6 +6,7 @@ import { ProgressCallback } from "./BaseVisualChange";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 
 export class Rotate extends BaseVisualChange {
   constructor(
@@ -20,29 +21,40 @@ export class Rotate extends BaseVisualChange {
      * Get the current device orientation
      * @returns Promise with current orientation ("portrait" or "landscape")
      */
-  async getCurrentOrientation(): Promise<string> {
+  private async readSystemSetting(key: string): Promise<string | null> {
     try {
-      // Get current user_rotation setting
-      const result = await this.adb.executeCommand("shell settings get system user_rotation");
-      const userRotationStr = result.stdout.trim();
-
-      // Check if the result is a valid number
-      if (!/^\d+$/.test(userRotationStr)) {
-        logger.warn(`Invalid user_rotation value: ${userRotationStr}, defaulting to portrait`);
-        return "portrait";
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsGet("system", key);
+      if (a11yResult.success) {
+        return a11yResult.found ? (a11yResult.value ?? null) : null;
       }
-
-      const userRotation = parseInt(userRotationStr, 10);
-
-      // Convert numeric value to orientation string
-      // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
-      // For simplicity, we'll treat 0,2 as portrait and 1,3 as landscape
-      return (userRotation === 0 || userRotation === 2) ? "portrait" : "landscape";
     } catch (error) {
-      logger.warn(`Failed to get current orientation: ${error}`);
-      // If we can't detect current orientation, assume portrait as default
+      logger.debug(`[Rotate] a11y settings get failed for ${key}: ${error}`);
+    }
+    try {
+      const result = await this.adb.executeCommand(`shell settings get system ${key}`);
+      const out = result.stdout.trim();
+      return (!out || out === "null") ? null : out;
+    } catch (error) {
+      logger.warn(`Failed to read system setting ${key}: ${error}`);
+      return null;
+    }
+  }
+
+  async getCurrentOrientation(): Promise<string> {
+    const userRotationStr = await this.readSystemSetting("user_rotation");
+
+    if (!userRotationStr || !/^\d+$/.test(userRotationStr)) {
+      logger.warn(`Invalid user_rotation value: ${userRotationStr}, defaulting to portrait`);
       return "portrait";
     }
+
+    const userRotation = parseInt(userRotationStr, 10);
+
+    // Convert numeric value to orientation string
+    // 0 = portrait, 1 = landscape (90°), 2 = reverse portrait (180°), 3 = reverse landscape (270°)
+    // For simplicity, we'll treat 0,2 as portrait and 1,3 as landscape
+    return (userRotation === 0 || userRotation === 2) ? "portrait" : "landscape";
   }
 
   /**
@@ -50,16 +62,27 @@ export class Rotate extends BaseVisualChange {
      * @returns Promise with boolean indicating if auto-rotation is disabled
      */
   async isOrientationLocked(): Promise<boolean> {
-    try {
-      const result = await this.adb.executeCommand("shell settings get system accelerometer_rotation");
-      const autoRotate = parseInt(result.stdout.trim(), 10);
-      // 0 = locked (auto-rotation disabled), 1 = unlocked (auto-rotation enabled)
-      return autoRotate === 0;
-    } catch (error) {
-      logger.warn(`Failed to check orientation lock status: ${error}`);
-      // If we can't check, assume it's not locked
+    const val = await this.readSystemSetting("accelerometer_rotation");
+    if (val === null) {
       return false;
     }
+    const autoRotate = parseInt(val, 10);
+    // 0 = locked (auto-rotation disabled), 1 = unlocked (auto-rotation enabled)
+    return autoRotate === 0;
+  }
+
+  private async writeSystemSetting(key: string, value: string): Promise<void> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsPut("system", key, value, "int");
+      if (a11yResult.success) {
+        return;
+      }
+      logger.debug(`[Rotate] a11y settings put failed for ${key}: ${a11yResult.error}`);
+    } catch (error) {
+      logger.debug(`[Rotate] a11y settings put threw for ${key}: ${error}`);
+    }
+    await this.adb.executeCommand(`shell settings put system ${key} ${value}`);
   }
 
   async execute(
@@ -166,15 +189,15 @@ export class Rotate extends BaseVisualChange {
           // If orientation is locked, unlock it temporarily
           if (isLocked) {
             logger.info("Orientation is locked, temporarily unlocking for rotation");
-            await this.adb.executeCommand("shell settings put system accelerometer_rotation 1");
+            await this.writeSystemSetting("accelerometer_rotation", "1");
             orientationUnlocked = true;
           }
 
-          // Disable accelerometer rotation and set user rotation in single command
-          // Note: Use semicolon inside quotes to run both commands in Android shell
-          await perf.track("setRotation", () =>
-            this.adb.executeCommand(`shell "settings put system accelerometer_rotation 0; settings put system user_rotation ${value}"`)
-          );
+          // Disable accelerometer rotation and set user rotation
+          await perf.track("setRotation", async () => {
+            await this.writeSystemSetting("accelerometer_rotation", "0");
+            await this.writeSystemSetting("user_rotation", String(value));
+          });
 
           // Wait for rotation to complete (also serves as verification)
           await perf.track("waitForRotation", () =>
@@ -198,7 +221,7 @@ export class Rotate extends BaseVisualChange {
           // Restore orientation lock if we unlocked it
           if (orientationUnlocked) {
             try {
-              await this.adb.executeCommand("shell settings put system accelerometer_rotation 0");
+              await this.writeSystemSetting("accelerometer_rotation", "0");
               logger.info("Restored orientation lock after error");
             } catch (restoreError) {
               logger.warn(`Failed to restore orientation lock: ${restoreError}`);

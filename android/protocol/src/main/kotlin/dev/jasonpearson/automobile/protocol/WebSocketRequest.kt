@@ -178,6 +178,35 @@ data class RequestClipboard(
 ) : WebSocketRequest()
 
 // =============================================================================
+// Settings Requests
+// =============================================================================
+
+@Serializable
+@SerialName("request_settings_get")
+data class RequestSettingsGet(
+  override val requestId: String? = null,
+  val namespace: String, // "system" | "secure" | "global"
+  val key: String,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_settings_put")
+data class RequestSettingsPut(
+  override val requestId: String? = null,
+  val namespace: String, // "system" | "secure" | "global"
+  val key: String,
+  val value: String? = null, // null = delete
+  val valueType: String = "string", // "string" | "int" | "long" | "float"
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_settings_list")
+data class RequestSettingsList(
+  override val requestId: String? = null,
+  val namespace: String,
+) : WebSocketRequest()
+
+// =============================================================================
 // Certificate Requests
 // =============================================================================
 

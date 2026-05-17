@@ -17,6 +17,7 @@ import android.graphics.Bitmap
 import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
+import android.provider.Settings
 import android.os.PowerManager
 import android.util.Base64
 import android.util.DisplayMetrics
@@ -926,6 +927,15 @@ class CtrlProxy : AccessibilityService() {
               onStopRecording = {
                 isRecording = false
                 Log.d(TAG, "Recording stopped")
+              },
+              onRequestSettingsGet = { requestId, namespace, key ->
+                performSettingsRead(requestId, namespace, key)
+              },
+              onRequestSettingsPut = { requestId, namespace, key, value, valueType ->
+                performSettingsWrite(requestId, namespace, key, value, valueType)
+              },
+              onRequestSettingsList = { requestId, namespace ->
+                performSettingsList(requestId, namespace)
               },
           )
       webSocketServer.start()
@@ -3206,6 +3216,206 @@ class CtrlProxy : AccessibilityService() {
     }
   }
 
+  private fun performSettingsRead(requestId: String?, namespace: String, key: String) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performSettingsRead: namespace=$namespace key=$key")
+    perfProvider.serial("performSettingsRead")
+
+    var success = false
+    var value: String? = null
+    var found = false
+    var error: String? = null
+
+    try {
+      perfProvider.startOperation("readSetting")
+      value = when (namespace) {
+        "system" -> Settings.System.getString(contentResolver, key)
+        "secure" -> Settings.Secure.getString(contentResolver, key)
+        "global" -> Settings.Global.getString(contentResolver, key)
+        else -> {
+          error = "Unknown namespace: $namespace"
+          null
+        }
+      }
+      perfProvider.endOperation("readSetting")
+      if (error == null) {
+        success = true
+        found = value != null
+      }
+    } catch (e: SecurityException) {
+      // Why: surface permission errors cleanly so the TS caller can fall back to ADB
+      error = "SecurityException: ${e.message}"
+      Log.w(TAG, "Settings read denied: $namespace/$key", e)
+    } catch (e: Exception) {
+      error = "Read failed: ${e.message}"
+      Log.e(TAG, "Settings read failed: $namespace/$key", e)
+    } finally {
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastSettingsGetResult(requestId, namespace, key, success, value, found, error, totalTime)
+      }
+    }
+  }
+
+  private fun performSettingsWrite(
+      requestId: String?,
+      namespace: String,
+      key: String,
+      value: String?,
+      valueType: String,
+  ) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performSettingsWrite: namespace=$namespace key=$key valueType=$valueType")
+    perfProvider.serial("performSettingsWrite")
+
+    var success = false
+    var error: String? = null
+
+    try {
+      perfProvider.startOperation("writeSetting")
+      if (value == null) {
+        success = writeSettingString(namespace, key, null)
+      } else {
+        success = when (valueType) {
+          "int" -> {
+            val intVal = value.toIntOrNull()
+            if (intVal == null) {
+              error = "Invalid int value: $value"
+              false
+            } else {
+              writeSettingInt(namespace, key, intVal)
+            }
+          }
+          "long" -> {
+            val longVal = value.toLongOrNull()
+            if (longVal == null) {
+              error = "Invalid long value: $value"
+              false
+            } else {
+              writeSettingLong(namespace, key, longVal)
+            }
+          }
+          "float" -> {
+            val floatVal = value.toFloatOrNull()
+            if (floatVal == null) {
+              error = "Invalid float value: $value"
+              false
+            } else {
+              writeSettingFloat(namespace, key, floatVal)
+            }
+          }
+          else -> writeSettingString(namespace, key, value)
+        }
+      }
+      perfProvider.endOperation("writeSetting")
+      if (!success && error == null) {
+        error = "Unknown namespace: $namespace"
+      }
+    } catch (e: SecurityException) {
+      // Why: writes to Settings.System require WRITE_SETTINGS; Secure/Global require system app.
+      // Surface SecurityException so the TS client can fall back to ADB instead of crashing.
+      error = "SecurityException: ${e.message}"
+      Log.w(TAG, "Settings write denied: $namespace/$key", e)
+    } catch (e: Exception) {
+      error = "Write failed: ${e.message}"
+      Log.e(TAG, "Settings write failed: $namespace/$key", e)
+    } finally {
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastSettingsPutResult(requestId, namespace, key, success, error, totalTime)
+      }
+    }
+  }
+
+  private fun performSettingsList(requestId: String?, namespace: String) {
+    val startTime = System.currentTimeMillis()
+    Log.d(TAG, "performSettingsList: namespace=$namespace")
+    perfProvider.serial("performSettingsList")
+
+    var success = false
+    var entries: Map<String, String>? = null
+    var error: String? = null
+
+    try {
+      perfProvider.startOperation("listSettings")
+      val uri = when (namespace) {
+        "system" -> Settings.System.CONTENT_URI
+        "secure" -> Settings.Secure.CONTENT_URI
+        "global" -> Settings.Global.CONTENT_URI
+        else -> null
+      }
+      if (uri == null) {
+        error = "Unknown namespace: $namespace"
+      } else {
+        val map = HashMap<String, String>()
+        contentResolver.query(uri, arrayOf("name", "value"), null, null, null)?.use { cursor ->
+          val nameIdx = cursor.getColumnIndex("name")
+          val valueIdx = cursor.getColumnIndex("value")
+          if (nameIdx >= 0 && valueIdx >= 0) {
+            while (cursor.moveToNext()) {
+              val name = cursor.getString(nameIdx) ?: continue
+              val v = cursor.getString(valueIdx) ?: ""
+              map[name] = v
+            }
+          }
+        }
+        entries = map
+        success = true
+      }
+      perfProvider.endOperation("listSettings")
+    } catch (e: SecurityException) {
+      error = "SecurityException: ${e.message}"
+      Log.w(TAG, "Settings list denied: $namespace", e)
+    } catch (e: Exception) {
+      error = "List failed: ${e.message}"
+      Log.e(TAG, "Settings list failed: $namespace", e)
+    } finally {
+      perfProvider.end()
+      val totalTime = System.currentTimeMillis() - startTime
+      kotlinx.coroutines.runBlocking {
+        broadcastSettingsListResult(requestId, namespace, success, entries, error, totalTime)
+      }
+    }
+  }
+
+  private fun writeSettingString(namespace: String, key: String, value: String?): Boolean {
+    return when (namespace) {
+      "system" -> Settings.System.putString(contentResolver, key, value)
+      "secure" -> Settings.Secure.putString(contentResolver, key, value)
+      "global" -> Settings.Global.putString(contentResolver, key, value)
+      else -> false
+    }
+  }
+
+  private fun writeSettingInt(namespace: String, key: String, value: Int): Boolean {
+    return when (namespace) {
+      "system" -> Settings.System.putInt(contentResolver, key, value)
+      "secure" -> Settings.Secure.putInt(contentResolver, key, value)
+      "global" -> Settings.Global.putInt(contentResolver, key, value)
+      else -> false
+    }
+  }
+
+  private fun writeSettingLong(namespace: String, key: String, value: Long): Boolean {
+    return when (namespace) {
+      "system" -> Settings.System.putLong(contentResolver, key, value)
+      "secure" -> Settings.Secure.putLong(contentResolver, key, value)
+      "global" -> Settings.Global.putLong(contentResolver, key, value)
+      else -> false
+    }
+  }
+
+  private fun writeSettingFloat(namespace: String, key: String, value: Float): Boolean {
+    return when (namespace) {
+      "system" -> Settings.System.putFloat(contentResolver, key, value)
+      "secure" -> Settings.Secure.putFloat(contentResolver, key, value)
+      "global" -> Settings.Global.putFloat(contentResolver, key, value)
+      else -> false
+    }
+  }
+
   /** Install a CA certificate via DevicePolicyManager (device owner only). */
   private fun performInstallCaCertificate(requestId: String?, certificate: String) {
     val startTime = System.currentTimeMillis()
@@ -3904,6 +4114,132 @@ class CtrlProxy : AccessibilityService() {
       Log.d(TAG, "Broadcasted clipboard result to ${webSocketServer.getConnectionCount()} clients")
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting clipboard result", e)
+    }
+  }
+
+  private suspend fun broadcastSettingsGetResult(
+      requestId: String?,
+      namespace: String,
+      key: String,
+      success: Boolean,
+      value: String?,
+      found: Boolean,
+      error: String?,
+      totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping settings_get_result broadcast")
+      return
+    }
+    try {
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"settings_get_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"${escapeJsonString(requestId)}"""")
+          }
+          append(""","success":$success""")
+          append(""","namespace":"${escapeJsonString(namespace)}"""")
+          append(""","key":"${escapeJsonString(key)}"""")
+          append(""","found":$found""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          if (value != null) {
+            append(""","value":"${escapeJsonString(value)}"""")
+          }
+          if (error != null) {
+            append(""","error":"${escapeJsonString(error)}"""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting settings_get_result", e)
+    }
+  }
+
+  private suspend fun broadcastSettingsPutResult(
+      requestId: String?,
+      namespace: String,
+      key: String,
+      success: Boolean,
+      error: String?,
+      totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping settings_put_result broadcast")
+      return
+    }
+    try {
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"settings_put_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"${escapeJsonString(requestId)}"""")
+          }
+          append(""","success":$success""")
+          append(""","namespace":"${escapeJsonString(namespace)}"""")
+          append(""","key":"${escapeJsonString(key)}"""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          if (error != null) {
+            append(""","error":"${escapeJsonString(error)}"""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting settings_put_result", e)
+    }
+  }
+
+  private suspend fun broadcastSettingsListResult(
+      requestId: String?,
+      namespace: String,
+      success: Boolean,
+      entries: Map<String, String>?,
+      error: String?,
+      totalTimeMs: Long,
+  ) {
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
+      Log.d(TAG, "WebSocket server not running, skipping settings_list_result broadcast")
+      return
+    }
+    try {
+      webSocketServer.broadcastWithPerf { perfTiming ->
+        buildString {
+          append("""{"type":"settings_list_result","timestamp":${System.currentTimeMillis()}""")
+          if (requestId != null) {
+            append(""","requestId":"${escapeJsonString(requestId)}"""")
+          }
+          append(""","success":$success""")
+          append(""","namespace":"${escapeJsonString(namespace)}"""")
+          append(""","totalTimeMs":$totalTimeMs""")
+          if (entries != null) {
+            append(""","entries":{""")
+            var first = true
+            for ((k, v) in entries) {
+              if (!first) append(",")
+              first = false
+              append("\"${escapeJsonString(k)}\":\"${escapeJsonString(v)}\"")
+            }
+            append("}")
+          }
+          if (error != null) {
+            append(""","error":"${escapeJsonString(error)}"""")
+          }
+          if (perfTiming != null) {
+            append(""","perfTiming":$perfTiming""")
+          }
+          append("}")
+        }
+      }
+    } catch (e: Exception) {
+      Log.e(TAG, "Error broadcasting settings_list_result", e)
     }
   }
 

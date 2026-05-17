@@ -12,6 +12,8 @@ import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import type { SettingsNamespace } from "../observe/android";
 
 export interface CaptureSnapshotArgs {
   snapshotName: string;
@@ -271,8 +273,21 @@ export class CaptureSnapshot {
 
     for (const type of settingsTypes) {
       try {
-        const result = await this.adb.executeCommand(`shell settings list ${type}`);
-        settings[type] = this.parseSettings(result.stdout);
+        let captured = false;
+        try {
+          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+          const a11yResult = await a11y.requestSettingsList(type as SettingsNamespace);
+          if (a11yResult.success && a11yResult.entries) {
+            settings[type] = a11yResult.entries;
+            captured = true;
+          }
+        } catch (error) {
+          logger.debug(`[CaptureSnapshot] a11y settings list failed for ${type}: ${error}`);
+        }
+        if (!captured) {
+          const result = await this.adb.executeCommand(`shell settings list ${type}`);
+          settings[type] = this.parseSettings(result.stdout);
+        }
         logger.info(`Captured ${Object.keys(settings[type]).length} ${type} settings`);
       } catch (error) {
         logger.warn(`Failed to capture ${type} settings: ${error}`);

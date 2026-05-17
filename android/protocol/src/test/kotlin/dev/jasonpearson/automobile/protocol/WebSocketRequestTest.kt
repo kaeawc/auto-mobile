@@ -186,4 +186,51 @@ class WebSocketRequestTest {
     assertEquals("com.example.app", request.packageName)
     assertEquals("settings.xml", request.fileName)
   }
+
+  @Test
+  fun `deserialize request_settings_get`() {
+    val message = """{"type":"request_settings_get","requestId":"sg-1","namespace":"system","key":"user_rotation"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestSettingsGet>(request)
+    assertEquals("sg-1", request.requestId)
+    assertEquals("system", request.namespace)
+    assertEquals("user_rotation", request.key)
+  }
+
+  @Test
+  fun `deserialize request_settings_put with int value`() {
+    val message = """{"type":"request_settings_put","requestId":"sp-1","namespace":"system","key":"user_rotation","value":"1","valueType":"int"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestSettingsPut>(request)
+    assertEquals("sp-1", request.requestId)
+    assertEquals("system", request.namespace)
+    assertEquals("user_rotation", request.key)
+    assertEquals("1", request.value)
+    assertEquals("int", request.valueType)
+  }
+
+  @Test
+  fun `deserialize request_settings_put with null value defaults to string type`() {
+    val message = """{"type":"request_settings_put","requestId":"sp-2","namespace":"secure","key":"enabled_accessibility_services","value":null}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestSettingsPut>(request)
+    assertEquals("sp-2", request.requestId)
+    assertEquals("secure", request.namespace)
+    assertEquals("enabled_accessibility_services", request.key)
+    assertEquals(null, request.value)
+    assertEquals("string", request.valueType)
+  }
+
+  @Test
+  fun `deserialize request_settings_list`() {
+    val message = """{"type":"request_settings_list","requestId":"sl-1","namespace":"global"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestSettingsList>(request)
+    assertEquals("sl-1", request.requestId)
+    assertEquals("global", request.namespace)
+  }
 }

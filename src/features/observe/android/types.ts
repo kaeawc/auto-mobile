@@ -176,6 +176,26 @@ export interface A11yClipboardResult extends BaseResult {
   text?: string; // For 'get' action, the clipboard content
 }
 
+/** Settings.System/Secure/Global namespace */
+export type SettingsNamespace = "system" | "secure" | "global";
+
+/** Settings value type for writes */
+export type SettingsValueType = "string" | "int" | "long" | "float";
+
+/** Result of a settings read via accessibility service */
+export interface A11ySettingsGetResult extends BaseResult {
+  value?: string;
+  found: boolean;
+}
+
+/** Result of a settings write via accessibility service */
+export type A11ySettingsPutResult = BaseResult;
+
+/** Result of a settings list via accessibility service */
+export interface A11ySettingsListResult extends BaseResult {
+  entries?: Record<string, string>;
+}
+
 /** CA certificate result from accessibility service */
 export interface A11yCaCertResult extends BaseResult {
   action: "install" | "remove";
@@ -198,6 +218,38 @@ export interface A11yPermissionResult extends BaseResult {
   requiresSettings: boolean;
   instructions?: string;
   adbCommand?: string;
+}
+
+export interface InstalledPackageRecord {
+  packageName: string;
+  isSystem: boolean;
+  versionName?: string;
+  versionCode?: number;
+}
+
+export interface A11yInstalledPackagesResult extends BaseResult {
+  userId: number;
+  packages: InstalledPackageRecord[];
+}
+
+export interface A11yPackageInfoResult extends BaseResult {
+  packageName: string;
+  isSystem: boolean;
+  applicationLabel?: string;
+  versionName?: string;
+  versionCode?: number;
+  installerPackage?: string;
+  firstInstallTime?: number;
+  lastUpdateTime?: number;
+  allowBackup?: boolean;
+  requestedPermissions: string[];
+  grantedPermissions: Record<string, boolean>;
+  mainActivity?: string;
+}
+
+export interface A11yLaunchIntentResult extends BaseResult {
+  packageName: string;
+  componentName?: string;
 }
 
 /**

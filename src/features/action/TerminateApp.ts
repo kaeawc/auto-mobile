@@ -4,6 +4,7 @@ import { BootedDevice, TerminateAppResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { AndroidCtrlProxyClient } from "../observe/android";
 
 export class TerminateApp extends BaseVisualChange {
   private simctl: SimCtlClient;
@@ -74,6 +75,15 @@ export class TerminateApp extends BaseVisualChange {
 
       // Check if app is installed
       const isInstalled = await perf.track("checkInstalled", async () => {
+        try {
+          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+          const result = await a11y.requestInstalledPackages(true, undefined, 3000);
+          if (result.success && result.userId === targetUserId) {
+            return result.packages.some(p => p.packageName === packageName);
+          }
+        } catch {
+          // fall through
+        }
         try {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
           const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true);

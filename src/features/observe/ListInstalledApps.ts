@@ -6,6 +6,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedAppsRepository";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
+import { AndroidCtrlProxyClient } from "./android";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -189,10 +190,7 @@ export class ListInstalledApps {
       try {
         logger.info(`[ListInstalledApps] Listing packages for user ${user.userId}...`);
 
-        const allPackages = await this.listPackagesForUser(user.userId);
-        const systemPackages = await this.listPackagesForUser(user.userId, "-s");
-        const systemPackageSet = new Set(systemPackages);
-        const userPackages = allPackages.filter(packageName => !systemPackageSet.has(packageName));
+        const { userPackages, systemPackages } = await this.partitionPackagesForUser(user.userId);
 
         logger.info(`[ListInstalledApps] Found ${userPackages.length} user package(s) and ${systemPackages.length} system package(s) for user ${user.userId}`);
 
@@ -278,12 +276,36 @@ export class ListInstalledApps {
     return installedApps;
   }
 
-  private async listPackagesForUser(userId: number, filterFlag?: "-s" | "-3"): Promise<string[]> {
-    const flag = filterFlag ? ` ${filterFlag}` : "";
-    const { stdout } = await this.adb.executeCommand(
-      `shell pm list packages${flag} --user ${userId}`
-    );
-    return this.parsePackages(stdout);
+  // Why: PackageManager runs as the service user, so cross-user queries
+  // (`--user N` for non-current user) fall back to ADB.
+  private async partitionPackagesForUser(
+    userId: number
+  ): Promise<{ userPackages: string[]; systemPackages: string[] }> {
+    if (this.device.platform === "android") {
+      try {
+        const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+        const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+        if (result.success && result.userId === userId) {
+          const userPackages: string[] = [];
+          const systemPackages: string[] = [];
+          for (const p of result.packages) {
+            (p.isSystem ? systemPackages : userPackages).push(p.packageName);
+          }
+          return { userPackages, systemPackages };
+        }
+      } catch (error) {
+        logger.debug(`[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`);
+      }
+    }
+
+    const [allRes, systemRes] = await Promise.all([
+      this.adb.executeCommand(`shell pm list packages --user ${userId}`),
+      this.adb.executeCommand(`shell pm list packages -s --user ${userId}`),
+    ]);
+    const systemPackages = this.parsePackages(systemRes.stdout);
+    const systemSet = new Set(systemPackages);
+    const userPackages = this.parsePackages(allRes.stdout).filter(p => !systemSet.has(p));
+    return { userPackages, systemPackages };
   }
 
   private parsePackages(stdout: string): string[] {

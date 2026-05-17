@@ -6,6 +6,7 @@ import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbCl
 import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
 import { accessibilityDetector } from "../../utils/AccessibilityDetector";
 import { type Timer, defaultTimer } from "../../utils/SystemTimer";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 
 const TALKBACK_PACKAGE = "com.google.android.marvin.talkback";
 const TALKBACK_SERVICE_FALLBACK = `${TALKBACK_PACKAGE}/${TALKBACK_PACKAGE}.TalkBackService`;
@@ -72,6 +73,48 @@ export class TalkBackToggle {
     };
   }
 
+  // Why: try the a11y service first to skip ADB round-trip latency; fall back to ADB
+  // because Settings.Secure writes require system-app privileges that the service may lack.
+  private async writeSecureSetting(key: string, value: string, valueType: "string" | "int" = "string"): Promise<void> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestSettingsPut("secure", key, value, valueType);
+      if (result.success) {
+        return;
+      }
+    } catch (error) {
+      logger.debug(`[TalkBackToggle] a11y settings put failed for secure/${key}: ${error}`);
+    }
+    await this.adb.executeCommand(`shell settings put secure ${key} ${value}`);
+  }
+
+  private async deleteSecureSetting(key: string): Promise<void> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestSettingsPut("secure", key, null);
+      if (result.success) {
+        return;
+      }
+    } catch (error) {
+      logger.debug(`[TalkBackToggle] a11y settings delete failed for secure/${key}: ${error}`);
+    }
+    await this.adb.executeCommand(`shell settings delete secure ${key}`);
+  }
+
+  private async readSecureSetting(key: string): Promise<string> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestSettingsGet("secure", key);
+      if (result.success) {
+        return result.found ? (result.value ?? "") : "";
+      }
+    } catch (error) {
+      logger.debug(`[TalkBackToggle] a11y settings get failed for secure/${key}: ${error}`);
+    }
+    const adbResult = await this.adb.executeCommand(`shell settings get secure ${key}`);
+    return adbResult.stdout.trim();
+  }
+
   /**
    * Add TalkBack to the enabled services list while preserving any other
    * active accessibility services (e.g. CtrlProxy).
@@ -79,12 +122,8 @@ export class TalkBackToggle {
   private async enableTalkBack(serviceComponent: string): Promise<void> {
     const otherServices = await this.getOtherServices();
     const updatedServices = [...otherServices, serviceComponent].join(":");
-    await this.adb.executeCommand(
-      `shell settings put secure enabled_accessibility_services ${updatedServices}`
-    );
-    await this.adb.executeCommand(
-      "shell settings put secure accessibility_enabled 1"
-    );
+    await this.writeSecureSetting("enabled_accessibility_services", updatedServices);
+    await this.writeSecureSetting("accessibility_enabled", "1", "int");
   }
 
   /**
@@ -96,18 +135,12 @@ export class TalkBackToggle {
     const otherServices = await this.getOtherServices();
 
     if (otherServices.length === 0) {
-      await this.adb.executeCommand(
-        "shell settings delete secure enabled_accessibility_services"
-      );
-      await this.adb.executeCommand(
-        "shell settings put secure accessibility_enabled 0"
-      );
+      await this.deleteSecureSetting("enabled_accessibility_services");
+      await this.writeSecureSetting("accessibility_enabled", "0", "int");
     } else {
       // Other services are still active — update the list without TalkBack
       // and leave accessibility_enabled at 1
-      await this.adb.executeCommand(
-        `shell settings put secure enabled_accessibility_services ${otherServices.join(":")}`
-      );
+      await this.writeSecureSetting("enabled_accessibility_services", otherServices.join(":"));
     }
   }
 
@@ -116,10 +149,7 @@ export class TalkBackToggle {
    * entries that are NOT part of TalkBack, preserving other active services.
    */
   private async getOtherServices(): Promise<string[]> {
-    const result = await this.adb.executeCommand(
-      "shell settings get secure enabled_accessibility_services"
-    );
-    const currentServices = result.stdout.trim();
+    const currentServices = await this.readSecureSetting("enabled_accessibility_services");
 
     const otherServices: string[] = [];
     if (currentServices && currentServices !== "null") {

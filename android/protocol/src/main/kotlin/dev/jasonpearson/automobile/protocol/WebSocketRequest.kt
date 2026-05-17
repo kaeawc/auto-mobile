@@ -178,6 +178,35 @@ data class RequestClipboard(
 ) : WebSocketRequest()
 
 // =============================================================================
+// Settings Requests
+// =============================================================================
+
+@Serializable
+@SerialName("request_settings_get")
+data class RequestSettingsGet(
+  override val requestId: String? = null,
+  val namespace: String, // "system" | "secure" | "global"
+  val key: String,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_settings_put")
+data class RequestSettingsPut(
+  override val requestId: String? = null,
+  val namespace: String, // "system" | "secure" | "global"
+  val key: String,
+  val value: String? = null, // null = delete
+  val valueType: String = "string", // "string" | "int" | "long" | "float"
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_settings_list")
+data class RequestSettingsList(
+  override val requestId: String? = null,
+  val namespace: String,
+) : WebSocketRequest()
+
+// =============================================================================
 // Certificate Requests
 // =============================================================================
 
@@ -382,4 +411,31 @@ data class SetNetworkErrorSimulation(
   val errorType: String? = null,
   val limit: Int? = null,
   val expiresAtEpochMs: Long? = null,
+) : WebSocketRequest()
+
+// =============================================================================
+// Package Manager Requests
+// =============================================================================
+
+@Serializable
+@SerialName("request_installed_packages")
+data class RequestInstalledPackages(
+  override val requestId: String? = null,
+  val includeSystem: Boolean = true,
+  val userId: Int? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_package_info")
+data class RequestPackageInfo(
+  override val requestId: String? = null,
+  val packageName: String,
+  val includePermissions: Boolean = true,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_launch_intent")
+data class RequestLaunchIntent(
+  override val requestId: String? = null,
+  val packageName: String,
 ) : WebSocketRequest()

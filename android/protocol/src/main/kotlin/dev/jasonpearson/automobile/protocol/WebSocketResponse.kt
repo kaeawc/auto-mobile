@@ -401,6 +401,51 @@ data class ClipboardResult(
 ) : WebSocketResponse()
 
 // =============================================================================
+// Settings Results
+// =============================================================================
+
+@Serializable
+@SerialName("settings_get_result")
+data class SettingsGetResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val key: String,
+  val value: String? = null,
+  val found: Boolean = false,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("settings_put_result")
+data class SettingsPutResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val key: String,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("settings_list_result")
+data class SettingsListResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val entries: Map<String, String>? = null,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+// =============================================================================
 // Certificate Result
 // =============================================================================
 
@@ -629,5 +674,63 @@ data class ClearPreferencesResult(
   val success: Boolean,
   val packageName: String,
   val fileName: String,
+  val error: String? = null,
+) : WebSocketResponse()
+
+// =============================================================================
+// Package Manager Results
+// =============================================================================
+
+@Serializable
+data class InstalledPackageRecord(
+  val packageName: String,
+  val isSystem: Boolean,
+  val versionName: String? = null,
+  val versionCode: Long? = null,
+)
+
+@Serializable
+@SerialName("installed_packages_result")
+data class InstalledPackagesResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val userId: Int,
+  val packages: List<InstalledPackageRecord> = emptyList(),
+  val totalTimeMs: Long,
+  val error: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("package_info_result")
+data class PackageInfoResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val packageName: String,
+  val isSystem: Boolean = false,
+  val applicationLabel: String? = null,
+  val versionName: String? = null,
+  val versionCode: Long? = null,
+  val installerPackage: String? = null,
+  val firstInstallTime: Long? = null,
+  val lastUpdateTime: Long? = null,
+  val allowBackup: Boolean? = null,
+  val requestedPermissions: List<String> = emptyList(),
+  val grantedPermissions: Map<String, Boolean> = emptyMap(),
+  val mainActivity: String? = null,
+  val totalTimeMs: Long,
+  val error: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("launch_intent_result")
+data class LaunchIntentResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val packageName: String,
+  val componentName: String? = null,
+  val totalTimeMs: Long,
   val error: String? = null,
 ) : WebSocketResponse()

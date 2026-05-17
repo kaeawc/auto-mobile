@@ -1,0 +1,212 @@
+/**
+ * CtrlProxyPackages - Delegate for PackageManager-backed queries over WebSocket.
+ *
+ * Replaces ADB `pm list packages` / `dumpsys package <pkg>` / `pm dump <pkg>` round-trips
+ * with a direct PackageManager call inside the accessibility service.
+ */
+
+import WebSocket from "ws";
+import type { DelegateContext } from "./types";
+import { generateSecureId } from "./types";
+import type {
+  A11yInstalledPackagesResult,
+  A11yPackageInfoResult,
+  A11yLaunchIntentResult,
+} from "./types";
+
+export interface PackageInfoOptions {
+  includePermissions?: boolean;
+}
+
+export class CtrlProxyPackages {
+  private readonly context: DelegateContext;
+
+  constructor(context: DelegateContext) {
+    this.context = context;
+  }
+
+  async requestInstalledPackages(
+    includeSystem: boolean = true,
+    userId?: number,
+    timeoutMs: number = 5000
+  ): Promise<A11yInstalledPackagesResult> {
+    const startTime = this.context.timer.now();
+
+    try {
+      const ws0 = this.context.getWebSocket();
+      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
+      // Why: package queries are an optimization over ADB. Don't trigger a slow
+      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
+      if (!connected) {
+        return {
+          success: false,
+          userId: userId ?? -1,
+          packages: [],
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
+      }
+
+      const requestId = `installed_packages_${this.context.timer.now()}_${generateSecureId()}`;
+      const resultPromise = this.context.requestManager.register<A11yInstalledPackagesResult>(
+        requestId,
+        "installed_packages",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          userId: userId ?? -1,
+          packages: [],
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Installed packages timeout after ${timeout}ms`,
+        })
+      );
+
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      ws.send(
+        JSON.stringify({
+          type: "request_installed_packages",
+          requestId,
+          includeSystem,
+          userId: userId ?? null,
+        })
+      );
+
+      return await resultPromise;
+    } catch (error) {
+      return {
+        success: false,
+        userId: userId ?? -1,
+        packages: [],
+        totalTimeMs: this.context.timer.now() - startTime,
+        error: `${error}`,
+      };
+    }
+  }
+
+  async requestPackageInfo(
+    packageName: string,
+    options: PackageInfoOptions = {},
+    timeoutMs: number = 5000
+  ): Promise<A11yPackageInfoResult> {
+    const startTime = this.context.timer.now();
+
+    try {
+      const ws0 = this.context.getWebSocket();
+      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
+      // Why: package queries are an optimization over ADB. Don't trigger a slow
+      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
+      if (!connected) {
+        return {
+          success: false,
+          packageName,
+          isSystem: false,
+          requestedPermissions: [],
+          grantedPermissions: {},
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
+      }
+
+      const requestId = `package_info_${this.context.timer.now()}_${generateSecureId()}`;
+      const resultPromise = this.context.requestManager.register<A11yPackageInfoResult>(
+        requestId,
+        "package_info",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          packageName,
+          isSystem: false,
+          requestedPermissions: [],
+          grantedPermissions: {},
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Package info timeout after ${timeout}ms`,
+        })
+      );
+
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      ws.send(
+        JSON.stringify({
+          type: "request_package_info",
+          requestId,
+          packageName,
+          includePermissions: options.includePermissions ?? true,
+        })
+      );
+
+      return await resultPromise;
+    } catch (error) {
+      return {
+        success: false,
+        packageName,
+        isSystem: false,
+        requestedPermissions: [],
+        grantedPermissions: {},
+        totalTimeMs: this.context.timer.now() - startTime,
+        error: `${error}`,
+      };
+    }
+  }
+
+  async requestLaunchIntent(
+    packageName: string,
+    timeoutMs: number = 5000
+  ): Promise<A11yLaunchIntentResult> {
+    const startTime = this.context.timer.now();
+
+    try {
+      const ws0 = this.context.getWebSocket();
+      const connected = ws0 !== null && ws0 !== undefined && ws0.readyState === WebSocket.OPEN;
+      // Why: package queries are an optimization over ADB. Don't trigger a slow
+      // WebSocket setup just for the optimistic path — let callers fall back to ADB.
+      if (!connected) {
+        return {
+          success: false,
+          packageName,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: "WebSocket not connected",
+        };
+      }
+
+      const requestId = `launch_intent_${this.context.timer.now()}_${generateSecureId()}`;
+      const resultPromise = this.context.requestManager.register<A11yLaunchIntentResult>(
+        requestId,
+        "launch_intent",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          packageName,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Launch intent timeout after ${timeout}ms`,
+        })
+      );
+
+      const ws = this.context.getWebSocket();
+      if (!ws || ws.readyState !== WebSocket.OPEN) {
+        throw new Error("WebSocket not connected");
+      }
+      ws.send(
+        JSON.stringify({
+          type: "request_launch_intent",
+          requestId,
+          packageName,
+        })
+      );
+
+      return await resultPromise;
+    } catch (error) {
+      return {
+        success: false,
+        packageName,
+        totalTimeMs: this.context.timer.now() - startTime,
+        error: `${error}`,
+      };
+    }
+  }
+
+}

@@ -84,6 +84,9 @@ data class LegacyWebSocketRequest(
     // Storage inspection parameters
     val packageName: String? = null,
     val fileName: String? = null,
+    val key: String? = null,
+    val value: String? = null,
+    val valueType: String? = null,
 )
 
 /** Type alias for backward compatibility */
@@ -212,6 +215,26 @@ class WebSocketServer(
         null,
     private val onStartRecording: (() -> Unit)? = null,
     private val onStopRecording: (() -> Unit)? = null,
+    // Settings callbacks
+    private val onRequestSettingsGet:
+        ((requestId: String?, namespace: String, key: String) -> Unit)? =
+        null,
+    private val onRequestSettingsPut:
+        ((requestId: String?, namespace: String, key: String, value: String?, valueType: String) -> Unit)? =
+        null,
+    private val onRequestSettingsList:
+        ((requestId: String?, namespace: String) -> Unit)? =
+        null,
+    // Package manager query callbacks
+    private val onRequestInstalledPackages:
+        ((requestId: String?, includeSystem: Boolean, userId: Int?) -> Unit)? =
+        null,
+    private val onRequestPackageInfo:
+        ((requestId: String?, packageName: String, includePermissions: Boolean) -> Unit)? =
+        null,
+    private val onRequestLaunchIntent:
+        ((requestId: String?, packageName: String) -> Unit)? =
+        null,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -868,6 +891,39 @@ class WebSocketServer(
             Log.w(TAG, "clear_preferences request missing packageName or fileName")
           }
         }
+        "request_settings_get" -> {
+          Log.d(TAG, "Received request_settings_get (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsGet>(message)
+            onRequestSettingsGet?.invoke(parsed.requestId, parsed.namespace, parsed.key)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_get: ${e.message}")
+          }
+        }
+        "request_settings_put" -> {
+          Log.d(TAG, "Received request_settings_put (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsPut>(message)
+            onRequestSettingsPut?.invoke(
+              parsed.requestId,
+              parsed.namespace,
+              parsed.key,
+              parsed.value,
+              parsed.valueType,
+            )
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_put: ${e.message}")
+          }
+        }
+        "request_settings_list" -> {
+          Log.d(TAG, "Received request_settings_list (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsList>(message)
+            onRequestSettingsList?.invoke(parsed.requestId, parsed.namespace)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_list: ${e.message}")
+          }
+        }
         "start_recording" -> {
           Log.d(TAG, "Received start_recording request")
           onStartRecording?.invoke()
@@ -875,6 +931,37 @@ class WebSocketServer(
         "stop_recording" -> {
           Log.d(TAG, "Received stop_recording request")
           onStopRecording?.invoke()
+        }
+        "request_installed_packages" -> {
+          Log.d(TAG, "Received request_installed_packages (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestInstalledPackages>(message)
+            onRequestInstalledPackages?.invoke(parsed.requestId, parsed.includeSystem, parsed.userId)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_installed_packages: ${e.message}")
+          }
+        }
+        "request_package_info" -> {
+          Log.d(TAG, "Received request_package_info (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestPackageInfo>(message)
+            onRequestPackageInfo?.invoke(
+              parsed.requestId,
+              parsed.packageName,
+              parsed.includePermissions,
+            )
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_package_info: ${e.message}")
+          }
+        }
+        "request_launch_intent" -> {
+          Log.d(TAG, "Received request_launch_intent (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestLaunchIntent>(message)
+            onRequestLaunchIntent?.invoke(parsed.requestId, parsed.packageName)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_launch_intent: ${e.message}")
+          }
         }
         else -> {
           Log.d(TAG, "Unknown message type: ${request.type}")

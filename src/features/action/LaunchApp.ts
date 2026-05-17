@@ -14,6 +14,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { IOSCtrlProxyManager } from "../../utils/IOSCtrlProxyManager";
+import { AndroidCtrlProxyClient } from "../observe/android";
 
 export interface TargetUserDetector {
   detectTargetUserId(packageName: string, userId?: number): Promise<number>;
@@ -72,6 +73,29 @@ export class LaunchApp extends BaseVisualChange {
   ): Promise<string[]> {
     logger.info("extractLauncherActivities");
     const activities: string[] = [];
+
+    // Try the WebSocket-backed PackageManager launch intent first.
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = perf
+        ? await perf.track("a11yLaunchIntent", () => a11y.requestLaunchIntent(packageName, 3000))
+        : await a11y.requestLaunchIntent(packageName, 3000);
+      if (result.success && result.componentName) {
+        // componentName is "package/.Activity" or "package/com.foo.Activity"
+        const slash = result.componentName.indexOf("/");
+        if (slash >= 0) {
+          let activity = result.componentName.slice(slash + 1);
+          if (activity.startsWith(".")) {
+            activity = packageName + activity;
+          }
+          activities.push(activity);
+          logger.info(`[LaunchApp] Resolved launcher activity via a11y: ${activity}`);
+          return activities;
+        }
+      }
+    } catch (error) {
+      logger.debug(`[LaunchApp] a11y launch intent failed, falling back to ADB: ${error}`);
+    }
 
     try {
       logger.info(`[LaunchApp] Extracting launcher activities for ${packageName}`);

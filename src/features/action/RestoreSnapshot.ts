@@ -12,6 +12,8 @@ import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import type { SettingsNamespace } from "../observe/android";
 
 export interface RestoreSnapshotArgs {
   snapshotName: string;
@@ -217,9 +219,21 @@ export class RestoreSnapshot {
 
       for (const [key, value] of Object.entries(values)) {
         try {
-          // Escape special characters in value
-          const escapedValue = value.replace(/'/g, "'\\''");
-          await this.adb.executeCommand(`shell settings put ${settingsType} ${key} '${escapedValue}'`);
+          let applied = false;
+          try {
+            const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+            const a11yResult = await a11y.requestSettingsPut(settingsType as SettingsNamespace, key, value, "string");
+            if (a11yResult.success) {
+              applied = true;
+            }
+          } catch (error) {
+            logger.debug(`[RestoreSnapshot] a11y settings put failed for ${settingsType}/${key}: ${error}`);
+          }
+          if (!applied) {
+            // Escape special characters in value
+            const escapedValue = value.replace(/'/g, "'\\''");
+            await this.adb.executeCommand(`shell settings put ${settingsType} ${key} '${escapedValue}'`);
+          }
           successCount++;
         } catch (error) {
           failureCount++;

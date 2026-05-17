@@ -2,6 +2,7 @@ import { BootedDevice } from "../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "./logger";
+import { AndroidCtrlProxyClient } from "../features/observe/android/AndroidCtrlProxyClient";
 
 export const KEEP_SCREEN_AWAKE_STATE_KEY = "keepScreenAwakeState";
 
@@ -206,18 +207,14 @@ export class KeepScreenAwakeManager {
     };
 
     try {
-      await this.adb.executeCommand(
-        `shell settings put global stay_on_while_plugged_in ${STAY_ON_WHILE_PLUGGED_IN_MASK}`
-      );
+      await this.putSetting("global", "stay_on_while_plugged_in", STAY_ON_WHILE_PLUGGED_IN_MASK, "int");
       appliedSettings.stayOnWhilePluggedIn = true;
     } catch (error) {
       logger.warn(`[KeepScreenAwake] Failed to set stay_on_while_plugged_in on ${this.device.deviceId}: ${error}`);
     }
 
     try {
-      await this.adb.executeCommand(
-        `shell settings put system screen_off_timeout ${MAX_SCREEN_OFF_TIMEOUT_MS}`
-      );
+      await this.putSetting("system", "screen_off_timeout", MAX_SCREEN_OFF_TIMEOUT_MS, "long");
       appliedSettings.screenOffTimeout = true;
     } catch (error) {
       logger.warn(`[KeepScreenAwake] Failed to set screen_off_timeout on ${this.device.deviceId}: ${error}`);
@@ -268,6 +265,20 @@ export class KeepScreenAwakeManager {
     key: string
   ): Promise<string | null | undefined> {
     try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsGet(scope, key);
+      if (a11yResult.success) {
+        const value = a11yResult.found ? (a11yResult.value ?? null) : null;
+        if (value === null) {
+          return null;
+        }
+        const trimmed = value.trim();
+        return (!trimmed || trimmed === "null") ? null : trimmed;
+      }
+    } catch (error) {
+      logger.debug(`[KeepScreenAwake] a11y settings get failed for ${scope}/${key}: ${error}`);
+    }
+    try {
       const result = await this.adb.executeCommand(`shell settings get ${scope} ${key}`, undefined, undefined, true);
       const trimmed = result.stdout.trim();
       if (!trimmed || trimmed === "null") {
@@ -280,6 +291,40 @@ export class KeepScreenAwakeManager {
     }
   }
 
+  private async putSetting(
+    scope: "global" | "system",
+    key: string,
+    value: string,
+    valueType: "string" | "int" | "long" | "float" = "string"
+  ): Promise<void> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsPut(scope, key, value, valueType);
+      if (a11yResult.success) {
+        return;
+      }
+    } catch (error) {
+      logger.debug(`[KeepScreenAwake] a11y settings put failed for ${scope}/${key}: ${error}`);
+    }
+    await this.adb.executeCommand(`shell settings put ${scope} ${key} ${value}`);
+  }
+
+  private async deleteSetting(
+    scope: "global" | "system",
+    key: string
+  ): Promise<void> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsPut(scope, key, null);
+      if (a11yResult.success) {
+        return;
+      }
+    } catch (error) {
+      logger.debug(`[KeepScreenAwake] a11y settings delete failed for ${scope}/${key}: ${error}`);
+    }
+    await this.adb.executeCommand(`shell settings delete ${scope} ${key}`);
+  }
+
   private async restoreSetting(
     scope: "global" | "system",
     key: string,
@@ -290,12 +335,12 @@ export class KeepScreenAwakeManager {
       return false;
     }
 
-    const command = originalValue === null
-      ? `shell settings delete ${scope} ${key}`
-      : `shell settings put ${scope} ${key} ${originalValue}`;
-
     try {
-      await this.adb.executeCommand(command);
+      if (originalValue === null) {
+        await this.deleteSetting(scope, key);
+      } else {
+        await this.putSetting(scope, key, originalValue);
+      }
       return true;
     } catch (error) {
       logger.warn(`[KeepScreenAwake] Failed to restore ${scope} ${key} on ${this.device.deviceId}: ${error}`);

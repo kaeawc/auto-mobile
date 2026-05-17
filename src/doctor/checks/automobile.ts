@@ -255,6 +255,9 @@ export async function checkWorkProfileAccessibility(
     const profilesWithoutService: { userId: number; name: string }[] = [];
 
     for (const profile of workProfiles) {
+      // Why: kept on ADB because Settings APIs from the accessibility service run as
+      // the service user only; the multi-user --user flag is required to query
+      // settings in each work profile, which the WebSocket settings_get API can't do.
       const result = await deviceAdb.executeCommand(
         `shell settings --user ${profile.userId} get secure enabled_accessibility_services`,
         undefined,

@@ -16,6 +16,7 @@ import type { ObserveScreenExecuteOptions } from "../features/observe/interfaces
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import { AndroidCtrlProxyClient } from "../features/observe/android";
 import type { ElementFinder } from "../utils/interfaces/ElementFinder";
 import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
@@ -444,6 +445,19 @@ const parseAppLabelFromDumpsys = (stdout: string): string | null => {
 export const resolveAppLabel = async (device: BootedDevice, appId: string): Promise<string | null> => {
   if (device.platform !== "android") {
     return null;
+  }
+
+  // Why: PackageManager.getApplicationLabel returns the same label that the
+  // dumpsys output exposes via application-label resources, but in a single
+  // WebSocket call rather than a multi-KB ADB roundtrip.
+  try {
+    const a11y = AndroidCtrlProxyClient.getInstance(device);
+    const info = await a11y.requestPackageInfo(appId, { includePermissions: false }, 3000);
+    if (info.success && info.applicationLabel) {
+      return info.applicationLabel;
+    }
+  } catch {
+    // fall through
   }
 
   try {

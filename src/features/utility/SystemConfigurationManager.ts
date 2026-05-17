@@ -5,6 +5,8 @@ import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
 import { logger } from "../../utils/logger";
 import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import type { SettingsNamespace } from "../observe/android";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -99,7 +101,7 @@ export class SystemConfigurationManager {
 
     for (const attempt of commandAttempts) {
       try {
-        await this.adb.executeCommand(attempt.command);
+        await this.runShellCommand(attempt.command);
         appliedMethod = attempt.method;
         break;
       } catch (error) {
@@ -213,7 +215,7 @@ export class SystemConfigurationManager {
 
     for (const key of targetKeys) {
       try {
-        await this.adb.executeCommand(`shell settings put global ${key} ${value}`);
+        await this.runShellCommand(`shell settings put global ${key} ${value}`);
         appliedSettings.push(key);
       } catch (error) {
         logger.warn(`[SystemConfigurationManager] Failed to set ${key}: ${error}`);
@@ -273,7 +275,7 @@ export class SystemConfigurationManager {
     const value = enabled ? "24" : "12";
 
     try {
-      await this.adb.executeCommand(`shell settings put system time_12_24 ${value}`);
+      await this.runShellCommand(`shell settings put system time_12_24 ${value}`);
       return {
         success: true,
         enabled,
@@ -316,7 +318,7 @@ export class SystemConfigurationManager {
     const previousCalendarSystem = previous.calendarSystem ?? null;
 
     try {
-      await this.adb.executeCommand(`shell settings put system calendar_type ${trimmed}`);
+      await this.runShellCommand(`shell settings put system calendar_type ${trimmed}`);
       const readBack = await this.readSetting("shell settings get system calendar_type");
       if (!readBack || readBack !== trimmed) {
         return {
@@ -458,6 +460,20 @@ export class SystemConfigurationManager {
   }
 
   private async readSetting(command: string): Promise<string | null> {
+    const match = command.match(/^shell\s+settings\s+get\s+(system|secure|global)\s+(\S+)\s*$/);
+    if (match && this.device.platform === "android") {
+      const namespace = match[1] as SettingsNamespace;
+      const key = match[2];
+      try {
+        const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+        const a11yResult = await a11y.requestSettingsGet(namespace, key);
+        if (a11yResult.success) {
+          return this.normalizeSettingValue(a11yResult.found ? (a11yResult.value ?? null) : null);
+        }
+      } catch (error) {
+        logger.debug(`[SystemConfigurationManager] a11y settings get failed for ${namespace}/${key}: ${error}`);
+      }
+    }
     try {
       const result = await this.adb.executeCommand(command, undefined, undefined, true);
       return this.normalizeSettingValue(result.stdout);
@@ -465,6 +481,28 @@ export class SystemConfigurationManager {
       logger.warn(`[SystemConfigurationManager] Failed to read setting (${command}): ${error}`);
       return null;
     }
+  }
+
+  // Intercepts "shell settings put <ns> <key> <value>" and routes through the
+  // accessibility service first, falling back to ADB. Any other shell command
+  // is passed through to adb.executeCommand unchanged.
+  private async runShellCommand(command: string): Promise<void> {
+    const putMatch = command.match(/^shell\s+settings\s+put\s+(system|secure|global)\s+(\S+)\s+(.+)$/);
+    if (putMatch && this.device.platform === "android") {
+      const namespace = putMatch[1] as SettingsNamespace;
+      const key = putMatch[2];
+      const value = putMatch[3].trim();
+      try {
+        const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+        const a11yResult = await a11y.requestSettingsPut(namespace, key, value, "string");
+        if (a11yResult.success) {
+          return;
+        }
+      } catch (error) {
+        logger.debug(`[SystemConfigurationManager] a11y settings put failed for ${namespace}/${key}: ${error}`);
+      }
+    }
+    await this.adb.executeCommand(command);
   }
 
   private parseLocaleList(value: string | null): string | null {

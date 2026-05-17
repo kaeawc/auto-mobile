@@ -520,7 +520,7 @@ describe("IOSCtrlProxyClient", function() {
       );
 
       try {
-        expect(testClient.hasCtrlProxyCachedHierarchy()).toBe(false);
+        expect(testClient.hasCachedHierarchy()).toBe(false);
 
         const resultPromise = testClient.getLatestHierarchy(true, 2000);
         const socket = await waitForSocket(getSocket);
@@ -538,7 +538,7 @@ describe("IOSCtrlProxyClient", function() {
         }));
 
         await resultPromise;
-        expect(testClient.hasCtrlProxyCachedHierarchy()).toBe(true);
+        expect(testClient.hasCachedHierarchy()).toBe(true);
       } finally {
         await testClient.close();
       }
@@ -573,13 +573,13 @@ describe("IOSCtrlProxyClient", function() {
         }));
 
         await resultPromise;
-        expect(testClient.hasCtrlProxyCachedHierarchy()).toBe(true);
+        expect(testClient.hasCachedHierarchy()).toBe(true);
 
         // Invalidate cache
         testClient.invalidateCache();
 
         // Cache still exists but is marked as stale
-        expect(testClient.hasCtrlProxyCachedHierarchy()).toBe(true);
+        expect(testClient.hasCachedHierarchy()).toBe(true);
       } finally {
         await testClient.close();
       }

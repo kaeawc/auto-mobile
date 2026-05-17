@@ -234,7 +234,6 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     fingerCount: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySwipeResult>;
 
-  hasCtrlProxyCachedHierarchy(): boolean;
   clearCache(): void;
 
   onPushUpdate(callback: (hierarchy: CtrlProxyHierarchy) => void): () => void;
@@ -1197,7 +1196,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.hierarchy.convertToViewHierarchyResult(hierarchy);
   }
 
-  hasCtrlProxyCachedHierarchy(): boolean {
+  hasCachedHierarchy(): boolean {
     return this.hierarchy.hasCachedHierarchy();
   }
 

@@ -650,8 +650,6 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<HighlightOperationResult>;
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
-
-  hasCachedHierarchy(): boolean;
 }
 
 /**

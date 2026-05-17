@@ -948,7 +948,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.isConnectedState;
   }
 
-  hasCtrlProxyCachedHierarchy(): boolean {
+  hasCachedHierarchy(): boolean {
     return this.hasCachedHierarchyState;
   }
 

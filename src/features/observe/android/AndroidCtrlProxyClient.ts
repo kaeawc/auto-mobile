@@ -96,6 +96,11 @@ import type {
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
   A11yPermissionResult,
+  A11ySettingsGetResult,
+  A11ySettingsPutResult,
+  A11ySettingsListResult,
+  SettingsNamespace,
+  SettingsValueType,
   AndroidPerfTiming,
 } from "./types";
 
@@ -270,6 +275,26 @@ interface WsClipboardResultMessage extends WsRequestBase {
   type: "clipboard_result";
   action: "copy" | "paste" | "clear" | "get";
   text?: string;
+}
+
+interface WsSettingsGetResultMessage extends WsRequestBase {
+  type: "settings_get_result";
+  namespace: SettingsNamespace;
+  key: string;
+  value?: string;
+  found?: boolean;
+}
+
+interface WsSettingsPutResultMessage extends WsRequestBase {
+  type: "settings_put_result";
+  namespace: SettingsNamespace;
+  key: string;
+}
+
+interface WsSettingsListResultMessage extends WsRequestBase {
+  type: "settings_list_result";
+  namespace: SettingsNamespace;
+  entries?: Record<string, string>;
 }
 
 interface WsCaCertResultMessage extends WsRequestBase {
@@ -528,6 +553,9 @@ type WebSocketMessage =
   | WsSelectAllResultMessage
   | WsActionResultMessage
   | WsClipboardResultMessage
+  | WsSettingsGetResultMessage
+  | WsSettingsPutResultMessage
+  | WsSettingsListResultMessage
   | WsCaCertResultMessage
   | WsDeviceOwnerStatusResultMessage
   | WsPermissionResultMessage
@@ -624,6 +652,20 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     action: "copy" | "paste" | "clear" | "get",
     text?: string, timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yClipboardResult>;
+
+  requestSettingsGet(
+    namespace: SettingsNamespace, key: string,
+    timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySettingsGetResult>;
+
+  requestSettingsPut(
+    namespace: SettingsNamespace, key: string, value: string | null,
+    valueType?: SettingsValueType, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySettingsPutResult>;
+
+  requestSettingsList(
+    namespace: SettingsNamespace, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<A11ySettingsListResult>;
 
   requestInstallCaCertificate(
     certificate: string, timeoutMs?: number, perf?: PerformanceTracker
@@ -1310,6 +1352,109 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  async requestSettingsGet(
+    namespace: SettingsNamespace,
+    key: string,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySettingsGetResult> {
+    const startTime = this.timer.now();
+    try {
+      if (!this.isConnected()) {
+        return { success: false, found: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+      }
+
+      const requestId = this.requestManager.generateId("settings_get");
+      const promise = this.requestManager.register<A11ySettingsGetResult>(
+        requestId, "settings_get", timeoutMs,
+        (_id, _type, timeout) => ({ success: false, found: false, totalTimeMs: this.timer.now() - startTime, error: `Settings get timeout after ${timeout}ms` })
+      );
+
+      await perf.track("sendRequest", async () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket not connected");
+        }
+        this.ws.send(JSON.stringify({ type: "request_settings_get", requestId, namespace, key }));
+      });
+
+      const result = await perf.track("waitForSettingsGet", () => promise);
+      return result;
+    } catch (error) {
+      const duration = this.timer.now() - startTime;
+      logger.warn(`[CTRL_PROXY] Settings get failed after ${duration}ms: ${error}`);
+      return { success: false, found: false, totalTimeMs: duration, error: `${error}` };
+    }
+  }
+
+  async requestSettingsPut(
+    namespace: SettingsNamespace,
+    key: string,
+    value: string | null,
+    valueType: SettingsValueType = "string",
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySettingsPutResult> {
+    const startTime = this.timer.now();
+    try {
+      if (!this.isConnected()) {
+        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+      }
+
+      const requestId = this.requestManager.generateId("settings_put");
+      const promise = this.requestManager.register<A11ySettingsPutResult>(
+        requestId, "settings_put", timeoutMs,
+        (_id, _type, timeout) => ({ success: false, totalTimeMs: this.timer.now() - startTime, error: `Settings put timeout after ${timeout}ms` })
+      );
+
+      await perf.track("sendRequest", async () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket not connected");
+        }
+        this.ws.send(JSON.stringify({ type: "request_settings_put", requestId, namespace, key, value, valueType }));
+      });
+
+      const result = await perf.track("waitForSettingsPut", () => promise);
+      return result;
+    } catch (error) {
+      const duration = this.timer.now() - startTime;
+      logger.warn(`[CTRL_PROXY] Settings put failed after ${duration}ms: ${error}`);
+      return { success: false, totalTimeMs: duration, error: `${error}` };
+    }
+  }
+
+  async requestSettingsList(
+    namespace: SettingsNamespace,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<A11ySettingsListResult> {
+    const startTime = this.timer.now();
+    try {
+      if (!this.isConnected()) {
+        return { success: false, totalTimeMs: this.timer.now() - startTime, error: "WebSocket not connected" };
+      }
+
+      const requestId = this.requestManager.generateId("settings_list");
+      const promise = this.requestManager.register<A11ySettingsListResult>(
+        requestId, "settings_list", timeoutMs,
+        (_id, _type, timeout) => ({ success: false, totalTimeMs: this.timer.now() - startTime, error: `Settings list timeout after ${timeout}ms` })
+      );
+
+      await perf.track("sendRequest", async () => {
+        if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket not connected");
+        }
+        this.ws.send(JSON.stringify({ type: "request_settings_list", requestId, namespace }));
+      });
+
+      const result = await perf.track("waitForSettingsList", () => promise);
+      return result;
+    } catch (error) {
+      const duration = this.timer.now() - startTime;
+      logger.warn(`[CTRL_PROXY] Settings list failed after ${duration}ms: ${error}`);
+      return { success: false, totalTimeMs: duration, error: `${error}` };
+    }
+  }
+
   /**
    * Execute a global action (back, home, recents, etc.) via the accessibility service.
    */
@@ -1716,6 +1861,28 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
+      }
+
+      // Handle settings results
+      if (message.type === "settings_get_result" && message.requestId) {
+        this.requestManager.resolve<A11ySettingsGetResult>(message.requestId, {
+          success: message.success, value: message.value, found: message.found ?? false,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+        });
+      }
+
+      if (message.type === "settings_put_result" && message.requestId) {
+        this.requestManager.resolve<A11ySettingsPutResult>(message.requestId, {
+          success: message.success,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+        });
+      }
+
+      if (message.type === "settings_list_result" && message.requestId) {
+        this.requestManager.resolve<A11ySettingsListResult>(message.requestId, {
+          success: message.success, entries: message.entries,
+          totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
+        });
       }
 
       // Handle CA certificate result

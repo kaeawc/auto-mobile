@@ -3,6 +3,8 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
+import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import { logger } from "../../utils/logger";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -170,6 +172,15 @@ export class DeviceState {
   }
 
   private async getAndroidDoNotDisturb(): Promise<DoNotDisturbState> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const a11yResult = await a11y.requestSettingsGet("global", "zen_mode");
+      if (a11yResult.success) {
+        return parseAndroidZenMode(a11yResult.value ?? "");
+      }
+    } catch (error) {
+      logger.debug(`[DeviceState] a11y zen_mode get failed: ${error}`);
+    }
     try {
       const adb = this.adbFactory.create(this.device);
       const result = await adb.executeCommand("shell settings get global zen_mode", undefined, undefined, true);

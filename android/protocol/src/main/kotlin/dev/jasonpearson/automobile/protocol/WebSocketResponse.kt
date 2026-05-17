@@ -401,6 +401,51 @@ data class ClipboardResult(
 ) : WebSocketResponse()
 
 // =============================================================================
+// Settings Results
+// =============================================================================
+
+@Serializable
+@SerialName("settings_get_result")
+data class SettingsGetResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val key: String,
+  val value: String? = null,
+  val found: Boolean = false,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("settings_put_result")
+data class SettingsPutResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val key: String,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+@Serializable
+@SerialName("settings_list_result")
+data class SettingsListResult(
+  override val timestamp: Long,
+  val requestId: String? = null,
+  val success: Boolean,
+  val namespace: String,
+  val entries: Map<String, String>? = null,
+  val totalTimeMs: Long,
+  val error: String? = null,
+  val perfTiming: String? = null,
+) : WebSocketResponse()
+
+// =============================================================================
 // Certificate Result
 // =============================================================================
 

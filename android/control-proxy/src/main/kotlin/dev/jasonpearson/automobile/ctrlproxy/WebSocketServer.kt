@@ -84,6 +84,11 @@ data class LegacyWebSocketRequest(
     // Storage inspection parameters
     val packageName: String? = null,
     val fileName: String? = null,
+    // Settings parameters
+    val namespace: String? = null,
+    val key: String? = null,
+    val value: String? = null,
+    val valueType: String? = null,
 )
 
 /** Type alias for backward compatibility */
@@ -212,6 +217,16 @@ class WebSocketServer(
         null,
     private val onStartRecording: (() -> Unit)? = null,
     private val onStopRecording: (() -> Unit)? = null,
+    // Settings callbacks
+    private val onRequestSettingsGet:
+        ((requestId: String?, namespace: String, key: String) -> Unit)? =
+        null,
+    private val onRequestSettingsPut:
+        ((requestId: String?, namespace: String, key: String, value: String?, valueType: String) -> Unit)? =
+        null,
+    private val onRequestSettingsList:
+        ((requestId: String?, namespace: String) -> Unit)? =
+        null,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -866,6 +881,37 @@ class WebSocketServer(
             onClearPreferences?.invoke(request.requestId, packageName, fileName)
           } else {
             Log.w(TAG, "clear_preferences request missing packageName or fileName")
+          }
+        }
+        "request_settings_get" -> {
+          Log.d(TAG, "Received request_settings_get (requestId: ${request.requestId})")
+          val namespace = request.namespace
+          val key = request.key
+          if (!namespace.isNullOrBlank() && !key.isNullOrBlank()) {
+            onRequestSettingsGet?.invoke(request.requestId, namespace, key)
+          } else {
+            Log.w(TAG, "request_settings_get missing namespace or key")
+          }
+        }
+        "request_settings_put" -> {
+          Log.d(TAG, "Received request_settings_put (requestId: ${request.requestId})")
+          val namespace = request.namespace
+          val key = request.key
+          val value = request.value
+          val valueType = request.valueType ?: "string"
+          if (!namespace.isNullOrBlank() && !key.isNullOrBlank()) {
+            onRequestSettingsPut?.invoke(request.requestId, namespace, key, value, valueType)
+          } else {
+            Log.w(TAG, "request_settings_put missing namespace or key")
+          }
+        }
+        "request_settings_list" -> {
+          Log.d(TAG, "Received request_settings_list (requestId: ${request.requestId})")
+          val namespace = request.namespace
+          if (!namespace.isNullOrBlank()) {
+            onRequestSettingsList?.invoke(request.requestId, namespace)
+          } else {
+            Log.w(TAG, "request_settings_list missing namespace")
           }
         }
         "start_recording" -> {

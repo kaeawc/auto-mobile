@@ -113,4 +113,66 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""success":false"""))
     assertTrue(encoded.contains(""""error":"Gesture failed: timeout""""))
   }
+
+  @Test
+  fun `serialize settings_get_result`() {
+    val response: WebSocketResponse = SettingsGetResult(
+      timestamp = 1234567890L,
+      requestId = "sg-1",
+      success = true,
+      namespace = "system",
+      key = "user_rotation",
+      value = "0",
+      found = true,
+      totalTimeMs = 5L,
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"settings_get_result""""))
+    assertTrue(encoded.contains(""""namespace":"system""""))
+    assertTrue(encoded.contains(""""key":"user_rotation""""))
+    assertTrue(encoded.contains(""""value":"0""""))
+    assertTrue(encoded.contains(""""found":true"""))
+    assertTrue(encoded.contains(""""totalTimeMs":5"""))
+  }
+
+  @Test
+  fun `serialize settings_put_result with error`() {
+    val response: WebSocketResponse = SettingsPutResult(
+      timestamp = 1234567890L,
+      requestId = "sp-1",
+      success = false,
+      namespace = "secure",
+      key = "accessibility_enabled",
+      totalTimeMs = 12L,
+      error = "SecurityException: write secure requires WRITE_SECURE_SETTINGS"
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"settings_put_result""""))
+    assertTrue(encoded.contains(""""success":false"""))
+    assertTrue(encoded.contains(""""namespace":"secure""""))
+    assertTrue(encoded.contains(""""error":"SecurityException"""))
+  }
+
+  @Test
+  fun `serialize settings_list_result with entries`() {
+    val response: WebSocketResponse = SettingsListResult(
+      timestamp = 1234567890L,
+      requestId = "sl-1",
+      success = true,
+      namespace = "global",
+      entries = mapOf("zen_mode" to "0", "device_provisioned" to "1"),
+      totalTimeMs = 30L,
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"settings_list_result""""))
+    assertTrue(encoded.contains(""""namespace":"global""""))
+    assertTrue(encoded.contains(""""zen_mode":"0""""))
+    assertTrue(encoded.contains(""""device_provisioned":"1""""))
+  }
 }

@@ -431,8 +431,6 @@ data class RequestPackageInfo(
   override val requestId: String? = null,
   val packageName: String,
   val includePermissions: Boolean = true,
-  val includeActivities: Boolean = false,
-  val includeIntentFilters: Boolean = false,
 ) : WebSocketRequest()
 
 @Serializable

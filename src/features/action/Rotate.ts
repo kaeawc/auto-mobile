@@ -193,11 +193,12 @@ export class Rotate extends BaseVisualChange {
             orientationUnlocked = true;
           }
 
-          // Disable accelerometer rotation and set user rotation
-          await perf.track("setRotation", async () => {
-            await this.writeSystemSetting("accelerometer_rotation", "0");
-            await this.writeSystemSetting("user_rotation", String(value));
-          });
+          await perf.track("setRotation", () =>
+            Promise.all([
+              this.writeSystemSetting("accelerometer_rotation", "0"),
+              this.writeSystemSetting("user_rotation", String(value)),
+            ])
+          );
 
           // Wait for rotation to complete (also serves as verification)
           await perf.track("waitForRotation", () =>

@@ -84,8 +84,6 @@ data class LegacyWebSocketRequest(
     // Storage inspection parameters
     val packageName: String? = null,
     val fileName: String? = null,
-    // Settings parameters
-    val namespace: String? = null,
     val key: String? = null,
     val value: String? = null,
     val valueType: String? = null,
@@ -232,7 +230,7 @@ class WebSocketServer(
         ((requestId: String?, includeSystem: Boolean, userId: Int?) -> Unit)? =
         null,
     private val onRequestPackageInfo:
-        ((requestId: String?, packageName: String, includePermissions: Boolean, includeActivities: Boolean, includeIntentFilters: Boolean) -> Unit)? =
+        ((requestId: String?, packageName: String, includePermissions: Boolean) -> Unit)? =
         null,
     private val onRequestLaunchIntent:
         ((requestId: String?, packageName: String) -> Unit)? =
@@ -895,33 +893,35 @@ class WebSocketServer(
         }
         "request_settings_get" -> {
           Log.d(TAG, "Received request_settings_get (requestId: ${request.requestId})")
-          val namespace = request.namespace
-          val key = request.key
-          if (!namespace.isNullOrBlank() && !key.isNullOrBlank()) {
-            onRequestSettingsGet?.invoke(request.requestId, namespace, key)
-          } else {
-            Log.w(TAG, "request_settings_get missing namespace or key")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsGet>(message)
+            onRequestSettingsGet?.invoke(parsed.requestId, parsed.namespace, parsed.key)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_get: ${e.message}")
           }
         }
         "request_settings_put" -> {
           Log.d(TAG, "Received request_settings_put (requestId: ${request.requestId})")
-          val namespace = request.namespace
-          val key = request.key
-          val value = request.value
-          val valueType = request.valueType ?: "string"
-          if (!namespace.isNullOrBlank() && !key.isNullOrBlank()) {
-            onRequestSettingsPut?.invoke(request.requestId, namespace, key, value, valueType)
-          } else {
-            Log.w(TAG, "request_settings_put missing namespace or key")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsPut>(message)
+            onRequestSettingsPut?.invoke(
+              parsed.requestId,
+              parsed.namespace,
+              parsed.key,
+              parsed.value,
+              parsed.valueType,
+            )
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_put: ${e.message}")
           }
         }
         "request_settings_list" -> {
           Log.d(TAG, "Received request_settings_list (requestId: ${request.requestId})")
-          val namespace = request.namespace
-          if (!namespace.isNullOrBlank()) {
-            onRequestSettingsList?.invoke(request.requestId, namespace)
-          } else {
-            Log.w(TAG, "request_settings_list missing namespace")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestSettingsList>(message)
+            onRequestSettingsList?.invoke(parsed.requestId, parsed.namespace)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_settings_list: ${e.message}")
           }
         }
         "start_recording" -> {
@@ -949,8 +949,6 @@ class WebSocketServer(
               parsed.requestId,
               parsed.packageName,
               parsed.includePermissions,
-              parsed.includeActivities,
-              parsed.includeIntentFilters,
             )
           } catch (e: Exception) {
             Log.w(TAG, "Failed to parse request_package_info: ${e.message}")

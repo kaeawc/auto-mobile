@@ -260,15 +260,13 @@ class WebSocketRequestTest {
   @Test
   fun `deserialize request_package_info`() {
     val message =
-        """{"type":"request_package_info","requestId":"pi-1","packageName":"com.example.app","includePermissions":true,"includeActivities":true}"""
+        """{"type":"request_package_info","requestId":"pi-1","packageName":"com.example.app","includePermissions":true}"""
     val request = json.decodeFromString<WebSocketRequest>(message)
 
     assertIs<RequestPackageInfo>(request)
     assertEquals("pi-1", request.requestId)
     assertEquals("com.example.app", request.packageName)
     assertEquals(true, request.includePermissions)
-    assertEquals(true, request.includeActivities)
-    assertEquals(false, request.includeIntentFilters)
   }
 
   @Test

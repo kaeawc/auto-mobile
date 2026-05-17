@@ -940,8 +940,8 @@ class CtrlProxy : AccessibilityService() {
               onRequestInstalledPackages = { requestId, includeSystem, userId ->
                 performInstalledPackages(requestId, includeSystem, userId)
               },
-              onRequestPackageInfo = { requestId, packageName, includePermissions, includeActivities, includeIntentFilters ->
-                performPackageInfo(requestId, packageName, includePermissions, includeActivities, includeIntentFilters)
+              onRequestPackageInfo = { requestId, packageName, includePermissions ->
+                performPackageInfo(requestId, packageName, includePermissions)
               },
               onRequestLaunchIntent = { requestId, packageName ->
                 performLaunchIntent(requestId, packageName)
@@ -3513,8 +3513,6 @@ class CtrlProxy : AccessibilityService() {
       requestId: String?,
       packageName: String,
       includePermissions: Boolean,
-      @Suppress("UNUSED_PARAMETER") includeActivities: Boolean,
-      @Suppress("UNUSED_PARAMETER") includeIntentFilters: Boolean,
   ) {
     val startTime = System.currentTimeMillis()
     try {
@@ -4380,34 +4378,21 @@ class CtrlProxy : AccessibilityService() {
       error: String?,
       totalTimeMs: Long,
   ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping settings_get_result broadcast")
-      return
-    }
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
     try {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"settings_get_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"${escapeJsonString(requestId)}"""")
-          }
-          append(""","success":$success""")
-          append(""","namespace":"${escapeJsonString(namespace)}"""")
-          append(""","key":"${escapeJsonString(key)}"""")
-          append(""","found":$found""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (value != null) {
-            append(""","value":"${escapeJsonString(value)}"""")
-          }
-          if (error != null) {
-            append(""","error":"${escapeJsonString(error)}"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
+      webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.SettingsGetResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = requestId,
+              success = success,
+              namespace = namespace,
+              key = key,
+              value = value,
+              found = found,
+              totalTimeMs = totalTimeMs,
+              error = error,
+          )
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting settings_get_result", e)
     }
@@ -4421,30 +4406,19 @@ class CtrlProxy : AccessibilityService() {
       error: String?,
       totalTimeMs: Long,
   ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping settings_put_result broadcast")
-      return
-    }
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
     try {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"settings_put_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"${escapeJsonString(requestId)}"""")
-          }
-          append(""","success":$success""")
-          append(""","namespace":"${escapeJsonString(namespace)}"""")
-          append(""","key":"${escapeJsonString(key)}"""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (error != null) {
-            append(""","error":"${escapeJsonString(error)}"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
+      webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.SettingsPutResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = requestId,
+              success = success,
+              namespace = namespace,
+              key = key,
+              totalTimeMs = totalTimeMs,
+              error = error,
+          )
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting settings_put_result", e)
     }
@@ -4458,39 +4432,19 @@ class CtrlProxy : AccessibilityService() {
       error: String?,
       totalTimeMs: Long,
   ) {
-    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) {
-      Log.d(TAG, "WebSocket server not running, skipping settings_list_result broadcast")
-      return
-    }
+    if (!::webSocketServer.isInitialized || !webSocketServer.isRunning()) return
     try {
-      webSocketServer.broadcastWithPerf { perfTiming ->
-        buildString {
-          append("""{"type":"settings_list_result","timestamp":${System.currentTimeMillis()}""")
-          if (requestId != null) {
-            append(""","requestId":"${escapeJsonString(requestId)}"""")
-          }
-          append(""","success":$success""")
-          append(""","namespace":"${escapeJsonString(namespace)}"""")
-          append(""","totalTimeMs":$totalTimeMs""")
-          if (entries != null) {
-            append(""","entries":{""")
-            var first = true
-            for ((k, v) in entries) {
-              if (!first) append(",")
-              first = false
-              append("\"${escapeJsonString(k)}\":\"${escapeJsonString(v)}\"")
-            }
-            append("}")
-          }
-          if (error != null) {
-            append(""","error":"${escapeJsonString(error)}"""")
-          }
-          if (perfTiming != null) {
-            append(""","perfTiming":$perfTiming""")
-          }
-          append("}")
-        }
-      }
+      webSocketServer.broadcast(
+          dev.jasonpearson.automobile.protocol.SettingsListResult(
+              timestamp = System.currentTimeMillis(),
+              requestId = requestId,
+              success = success,
+              namespace = namespace,
+              entries = entries,
+              totalTimeMs = totalTimeMs,
+              error = error,
+          )
+      )
     } catch (e: Exception) {
       Log.e(TAG, "Error broadcasting settings_list_result", e)
     }

@@ -16,8 +16,6 @@ import type {
 
 export interface PackageInfoOptions {
   includePermissions?: boolean;
-  includeActivities?: boolean;
-  includeIntentFilters?: boolean;
 }
 
 export class CtrlProxyPackages {
@@ -138,8 +136,6 @@ export class CtrlProxyPackages {
           requestId,
           packageName,
           includePermissions: options.includePermissions ?? true,
-          includeActivities: options.includeActivities ?? false,
-          includeIntentFilters: options.includeIntentFilters ?? false,
         })
       );
 

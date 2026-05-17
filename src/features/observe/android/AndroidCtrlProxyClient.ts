@@ -73,6 +73,7 @@ import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyCertificates } from "./CtrlProxyCertificates";
 import { CtrlProxyFocus } from "./CtrlProxyFocus";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+import { CtrlProxyPackages, type PackageInfoOptions } from "./CtrlProxyPackages";
 
 // Import types
 import type {
@@ -96,6 +97,10 @@ import type {
   A11yCaCertResult,
   A11yDeviceOwnerStatusResult,
   A11yPermissionResult,
+  A11yInstalledPackagesResult,
+  A11yPackageInfoResult,
+  A11yLaunchIntentResult,
+  InstalledPackageRecord,
   AndroidPerfTiming,
 } from "./types";
 
@@ -406,6 +411,43 @@ interface WsClearPreferencesResultMessage extends WsMessageBase {
   totalTimeMs?: number;
 }
 
+interface WsInstalledPackagesResultMessage extends WsMessageBase {
+  type: "installed_packages_result";
+  requestId: string;
+  success?: boolean;
+  userId?: number;
+  packages?: InstalledPackageRecord[];
+  totalTimeMs?: number;
+}
+
+interface WsPackageInfoResultMessage extends WsMessageBase {
+  type: "package_info_result";
+  requestId: string;
+  success?: boolean;
+  packageName?: string;
+  isSystem?: boolean;
+  applicationLabel?: string;
+  versionName?: string;
+  versionCode?: number;
+  installerPackage?: string;
+  firstInstallTime?: number;
+  lastUpdateTime?: number;
+  allowBackup?: boolean;
+  requestedPermissions?: string[];
+  grantedPermissions?: Record<string, boolean>;
+  mainActivity?: string;
+  totalTimeMs?: number;
+}
+
+interface WsLaunchIntentResultMessage extends WsMessageBase {
+  type: "launch_intent_result";
+  requestId: string;
+  success?: boolean;
+  packageName?: string;
+  componentName?: string;
+  totalTimeMs?: number;
+}
+
 interface WsNavigationEventMessage extends WsMessageBase {
   type: "navigation_event";
   event?: NavigationEvent;
@@ -544,6 +586,9 @@ type WebSocketMessage =
   | WsSetPreferenceResultMessage
   | WsRemovePreferenceResultMessage
   | WsClearPreferencesResultMessage
+  | WsInstalledPackagesResultMessage
+  | WsPackageInfoResultMessage
+  | WsLaunchIntentResultMessage
   | WsNavigationEventMessage
   | WsPackageEventMessage
   | WsInteractionEventMessage
@@ -650,6 +695,23 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<HighlightOperationResult>;
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
+
+  requestInstalledPackages(
+    includeSystem?: boolean,
+    userId?: number,
+    timeoutMs?: number
+  ): Promise<A11yInstalledPackagesResult>;
+
+  requestPackageInfo(
+    packageName: string,
+    options?: PackageInfoOptions,
+    timeoutMs?: number
+  ): Promise<A11yPackageInfoResult>;
+
+  requestLaunchIntent(
+    packageName: string,
+    timeoutMs?: number
+  ): Promise<A11yLaunchIntentResult>;
 }
 
 /**
@@ -684,6 +746,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private _certificates: CtrlProxyCertificates | null = null;
   private _focus: CtrlProxyFocus | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
+  private _packages: CtrlProxyPackages | null = null;
 
   // Interaction listeners
   private interactionListeners: Set<(event: InteractionEvent) => void> = new Set();
@@ -883,6 +946,36 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       this._highlights = new CtrlProxyHighlights(this.createDelegateContext());
     }
     return this._highlights;
+  }
+
+  private get packages(): CtrlProxyPackages {
+    if (!this._packages) {
+      this._packages = new CtrlProxyPackages(this.createDelegateContext());
+    }
+    return this._packages;
+  }
+
+  async requestInstalledPackages(
+    includeSystem: boolean = true,
+    userId?: number,
+    timeoutMs: number = 5000
+  ): Promise<A11yInstalledPackagesResult> {
+    return this.packages.requestInstalledPackages(includeSystem, userId, timeoutMs);
+  }
+
+  async requestPackageInfo(
+    packageName: string,
+    options: PackageInfoOptions = {},
+    timeoutMs: number = 5000
+  ): Promise<A11yPackageInfoResult> {
+    return this.packages.requestPackageInfo(packageName, options, timeoutMs);
+  }
+
+  async requestLaunchIntent(
+    packageName: string,
+    timeoutMs: number = 5000
+  ): Promise<A11yLaunchIntentResult> {
+    return this.packages.requestLaunchIntent(packageName, timeoutMs);
   }
 
   // ===========================================================================
@@ -1716,6 +1809,49 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
           totalTimeMs: message.totalTimeMs, error: message.error, perfTiming: message.perfTiming
         });
 
+      }
+
+      // Handle installed packages result
+      if (message.type === "installed_packages_result" && message.requestId) {
+        this.requestManager.resolve<A11yInstalledPackagesResult>(message.requestId, {
+          success: message.success ?? false,
+          userId: message.userId ?? -1,
+          packages: message.packages ?? [],
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
+        });
+      }
+
+      // Handle package info result
+      if (message.type === "package_info_result" && message.requestId) {
+        this.requestManager.resolve<A11yPackageInfoResult>(message.requestId, {
+          success: message.success ?? false,
+          packageName: message.packageName ?? "",
+          isSystem: message.isSystem ?? false,
+          applicationLabel: message.applicationLabel,
+          versionName: message.versionName,
+          versionCode: message.versionCode,
+          installerPackage: message.installerPackage,
+          firstInstallTime: message.firstInstallTime,
+          lastUpdateTime: message.lastUpdateTime,
+          allowBackup: message.allowBackup,
+          requestedPermissions: message.requestedPermissions ?? [],
+          grantedPermissions: message.grantedPermissions ?? {},
+          mainActivity: message.mainActivity,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
+        });
+      }
+
+      // Handle launch intent result
+      if (message.type === "launch_intent_result" && message.requestId) {
+        this.requestManager.resolve<A11yLaunchIntentResult>(message.requestId, {
+          success: message.success ?? false,
+          packageName: message.packageName ?? "",
+          componentName: message.componentName,
+          totalTimeMs: message.totalTimeMs ?? 0,
+          error: message.error,
+        });
       }
 
       // Handle CA certificate result

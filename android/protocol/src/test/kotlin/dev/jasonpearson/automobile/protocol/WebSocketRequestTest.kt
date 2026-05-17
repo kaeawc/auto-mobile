@@ -186,4 +186,52 @@ class WebSocketRequestTest {
     assertEquals("com.example.app", request.packageName)
     assertEquals("settings.xml", request.fileName)
   }
+
+  @Test
+  fun `deserialize request_installed_packages`() {
+    val message =
+        """{"type":"request_installed_packages","requestId":"pkg-1","includeSystem":false,"userId":10}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestInstalledPackages>(request)
+    assertEquals("pkg-1", request.requestId)
+    assertEquals(false, request.includeSystem)
+    assertEquals(10, request.userId)
+  }
+
+  @Test
+  fun `deserialize request_installed_packages with defaults`() {
+    val message = """{"type":"request_installed_packages","requestId":"pkg-2"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestInstalledPackages>(request)
+    assertEquals("pkg-2", request.requestId)
+    assertEquals(true, request.includeSystem)
+    assertEquals(null, request.userId)
+  }
+
+  @Test
+  fun `deserialize request_package_info`() {
+    val message =
+        """{"type":"request_package_info","requestId":"pi-1","packageName":"com.example.app","includePermissions":true,"includeActivities":true}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestPackageInfo>(request)
+    assertEquals("pi-1", request.requestId)
+    assertEquals("com.example.app", request.packageName)
+    assertEquals(true, request.includePermissions)
+    assertEquals(true, request.includeActivities)
+    assertEquals(false, request.includeIntentFilters)
+  }
+
+  @Test
+  fun `deserialize request_launch_intent`() {
+    val message =
+        """{"type":"request_launch_intent","requestId":"li-1","packageName":"com.example.app"}"""
+    val request = json.decodeFromString<WebSocketRequest>(message)
+
+    assertIs<RequestLaunchIntent>(request)
+    assertEquals("li-1", request.requestId)
+    assertEquals("com.example.app", request.packageName)
+  }
 }

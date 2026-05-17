@@ -3,6 +3,7 @@ import type { AppMetadataResult } from "../../models/AppMetadataResult";
 import type { BootedDevice, ExecResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
+import { AndroidCtrlProxyClient } from "./android";
 
 /**
  * Source of iOS app metadata — injectable for testing.
@@ -35,6 +36,33 @@ export class GetAppMetadata {
   }
 
   private async getAndroidMetadata(packageName: string): Promise<AppMetadataResult | null> {
+    // Prefer WebSocket-backed PackageManager call; fall back to ADB dumpsys.
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const info = await a11y.requestPackageInfo(packageName, { includePermissions: false }, 4000);
+      if (info.success) {
+        const versionName = info.versionName ?? "";
+        const buildNumber = info.versionCode !== undefined && info.versionCode !== null ? String(info.versionCode) : "";
+        const firstInstallTime = info.firstInstallTime ? new Date(info.firstInstallTime).toString() : undefined;
+        const lastUpdateTime = info.lastUpdateTime ? new Date(info.lastUpdateTime).toString() : undefined;
+        if (!versionName && !buildNumber) {
+          return null;
+        }
+        return {
+          appId: packageName,
+          platform: "android",
+          versionName,
+          buildNumber,
+          installPath: "",
+          ...(firstInstallTime ? { firstInstallTime } : {}),
+          ...(lastUpdateTime ? { lastUpdateTime } : {})
+        };
+      }
+      logger.debug(`[GetAppMetadata] a11y package info failed: ${info.error}`);
+    } catch (error) {
+      logger.debug(`[GetAppMetadata] a11y package info threw: ${error}`);
+    }
+
     let result: ExecResult;
     try {
       result = await this.adb.executeCommand(`shell dumpsys package ${packageName}`);

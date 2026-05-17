@@ -383,3 +383,32 @@ data class SetNetworkErrorSimulation(
   val limit: Int? = null,
   val expiresAtEpochMs: Long? = null,
 ) : WebSocketRequest()
+
+// =============================================================================
+// Package Manager Requests
+// =============================================================================
+
+@Serializable
+@SerialName("request_installed_packages")
+data class RequestInstalledPackages(
+  override val requestId: String? = null,
+  val includeSystem: Boolean = true,
+  val userId: Int? = null,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_package_info")
+data class RequestPackageInfo(
+  override val requestId: String? = null,
+  val packageName: String,
+  val includePermissions: Boolean = true,
+  val includeActivities: Boolean = false,
+  val includeIntentFilters: Boolean = false,
+) : WebSocketRequest()
+
+@Serializable
+@SerialName("request_launch_intent")
+data class RequestLaunchIntent(
+  override val requestId: String? = null,
+  val packageName: String,
+) : WebSocketRequest()

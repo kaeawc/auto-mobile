@@ -212,6 +212,16 @@ class WebSocketServer(
         null,
     private val onStartRecording: (() -> Unit)? = null,
     private val onStopRecording: (() -> Unit)? = null,
+    // Package manager query callbacks
+    private val onRequestInstalledPackages:
+        ((requestId: String?, includeSystem: Boolean, userId: Int?) -> Unit)? =
+        null,
+    private val onRequestPackageInfo:
+        ((requestId: String?, packageName: String, includePermissions: Boolean, includeActivities: Boolean, includeIntentFilters: Boolean) -> Unit)? =
+        null,
+    private val onRequestLaunchIntent:
+        ((requestId: String?, packageName: String) -> Unit)? =
+        null,
 ) {
   companion object {
     private const val TAG = "WebSocketServer"
@@ -875,6 +885,39 @@ class WebSocketServer(
         "stop_recording" -> {
           Log.d(TAG, "Received stop_recording request")
           onStopRecording?.invoke()
+        }
+        "request_installed_packages" -> {
+          Log.d(TAG, "Received request_installed_packages (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestInstalledPackages>(message)
+            onRequestInstalledPackages?.invoke(parsed.requestId, parsed.includeSystem, parsed.userId)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_installed_packages: ${e.message}")
+          }
+        }
+        "request_package_info" -> {
+          Log.d(TAG, "Received request_package_info (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestPackageInfo>(message)
+            onRequestPackageInfo?.invoke(
+              parsed.requestId,
+              parsed.packageName,
+              parsed.includePermissions,
+              parsed.includeActivities,
+              parsed.includeIntentFilters,
+            )
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_package_info: ${e.message}")
+          }
+        }
+        "request_launch_intent" -> {
+          Log.d(TAG, "Received request_launch_intent (requestId: ${request.requestId})")
+          try {
+            val parsed = protocolJson.decodeFromString<RequestLaunchIntent>(message)
+            onRequestLaunchIntent?.invoke(parsed.requestId, parsed.packageName)
+          } catch (e: Exception) {
+            Log.w(TAG, "Failed to parse request_launch_intent: ${e.message}")
+          }
         }
         else -> {
           Log.d(TAG, "Unknown message type: ${request.type}")

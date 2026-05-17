@@ -8,6 +8,7 @@ import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { AndroidCtrlProxyClient } from "../observe/android";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -116,8 +117,17 @@ export class InstallApp {
 
     let isInstalled = false;
     if (packageName) {
-      // Check if app is already installed for this user
+      // Check if app is already installed for this user.
       isInstalled = await perf.track("checkInstalled", async () => {
+        try {
+          const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+          const result = await a11y.requestInstalledPackages(true, undefined, 3000);
+          if (result.success && result.userId === targetUserId) {
+            return result.packages.some(p => p.packageName === packageName);
+          }
+        } catch {
+          // fall through to ADB
+        }
         try {
           const isInstalledCmd = `shell pm list packages --user ${targetUserId} -f ${packageName} | grep -c ${packageName}`;
           const isInstalledOutput = await this.adb.executeCommand(isInstalledCmd, undefined, undefined, true, signal);

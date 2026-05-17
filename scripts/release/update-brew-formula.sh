@@ -1,39 +1,99 @@
 #!/usr/bin/env bash
-# Update Formula/auto-mobile.rb with a new version's npm tarball URL and SHA256.
+# Render and push the Homebrew formula for the current release to the
+# kaeawc/homebrew-tap repository.
 #
-# Usage: scripts/release/update-brew-formula.sh <version>
+# Required env:
+#   GH_TOKEN  PAT with Contents:Write on kaeawc/homebrew-tap
+#   TAG       Release tag (e.g. v0.1.0)
+#   REPO      Source repo, owner/name (e.g. kaeawc/auto-mobile)
 #
-# Resolves the published tarball from the npm registry and rewrites the
-# `url` and `sha256` lines in Formula/auto-mobile.rb in place.
+# Optional env:
+#   RENDER_ONLY=1  Write the rendered formula to ./auto-mobile.rb in the
+#                  current directory and exit without git operations. Used
+#                  by tests; in CI the unset default does the full publish.
+#
+# Resolves the published npm tarball SHA256 from the registry; the npm
+# publish step must run before this script.
+
 set -euo pipefail
 
-if [[ $# -ne 1 ]]; then
-  echo "usage: $0 <version>" >&2
-  exit 64
-fi
+: "${TAG:?TAG is required}"
+: "${REPO:?REPO is required}"
 
-VERSION="$1"
-FORMULA="Formula/auto-mobile.rb"
+VERSION="${TAG#v}"
 PKG="@kaeawc/auto-mobile"
-TARBALL="https://registry.npmjs.org/${PKG}/-/auto-mobile-${VERSION}.tgz"
-
-if [[ ! -f "$FORMULA" ]]; then
-  echo "error: $FORMULA not found" >&2
-  exit 1
-fi
+TARBALL_URL="https://registry.npmjs.org/${PKG}/-/auto-mobile-${VERSION}.tgz"
 
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
-curl -fsSL "$TARBALL" -o "$tmp/auto-mobile-${VERSION}.tgz"
-SHA="$(shasum -a 256 "$tmp/auto-mobile-${VERSION}.tgz" | awk '{print $1}')"
+# Pull the just-published tarball and compute its sha256. Retries cover
+# the brief window where the npm CDN hasn't propagated the new version
+# yet immediately after `npm publish`.
+attempt=1
+while ! curl -fsSL "$TARBALL_URL" -o "$tmp/auto-mobile.tgz"; do
+  if [[ "$attempt" -ge 10 ]]; then
+    echo "ERROR: failed to fetch ${TARBALL_URL} after ${attempt} attempts" >&2
+    exit 1
+  fi
+  echo "tarball not yet available, retrying in 6s (attempt ${attempt})" >&2
+  attempt=$((attempt + 1))
+  sleep 6
+done
 
-# Cross-platform in-place sed: write to tmp file then mv
-sed -e "s|^  url \".*\"$|  url \"${TARBALL}\"|" \
-    -e "s|^  sha256 \".*\"$|  sha256 \"${SHA}\"|" \
-    "$FORMULA" > "$tmp/formula.rb"
-mv "$tmp/formula.rb" "$FORMULA"
+SHA="$(shasum -a 256 "$tmp/auto-mobile.tgz" | awk '{print $1}')"
 
-echo "Updated $FORMULA to v${VERSION}"
-echo "  url:    $TARBALL"
-echo "  sha256: $SHA"
+render_formula() {
+  cat <<EOF
+class AutoMobile < Formula
+  desc "Mobile device interaction automation via MCP"
+  homepage "https://github.com/${REPO}"
+  url "${TARBALL_URL}"
+  sha256 "${SHA}"
+  license "Apache-2.0"
+
+  depends_on "bun"
+
+  def install
+    libexec.install Dir["*"]
+    (bin/"auto-mobile").write <<~SH
+      #!/bin/bash
+      exec "#{Formula["bun"].opt_bin}/bun" "#{libexec}/dist/src/index.js" "\$@"
+    SH
+    chmod 0755, bin/"auto-mobile"
+  end
+
+  test do
+    output = shell_output("#{bin}/auto-mobile --cli help 2>&1")
+    assert_match(/Usage|help|tool/i, output)
+  end
+end
+EOF
+}
+
+if [[ "${RENDER_ONLY:-0}" == "1" ]]; then
+  render_formula > auto-mobile.rb
+  echo "Rendered auto-mobile.rb (RENDER_ONLY)"
+  exit 0
+fi
+
+: "${GH_TOKEN:?GH_TOKEN is required}"
+
+WORKDIR="$(mktemp -d)"
+trap 'rm -rf "$tmp" "$WORKDIR"' EXIT
+cd "$WORKDIR"
+
+git clone "https://x-access-token:${GH_TOKEN}@github.com/kaeawc/homebrew-tap.git" .
+git config user.name "github-actions[bot]"
+git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+mkdir -p Formula
+render_formula > Formula/auto-mobile.rb
+
+git add Formula/auto-mobile.rb
+if git diff --cached --quiet; then
+  echo "no changes to brew formula"
+  exit 0
+fi
+git commit -m "auto-mobile ${TAG}"
+git push origin HEAD

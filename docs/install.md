@@ -12,13 +12,12 @@ Once you've finished that, learn [how to use AutoMobile](using/ux-exploration.md
 
 ## Homebrew (macOS)
 
-AutoMobile ships a Homebrew formula that installs the `auto-mobile` CLI and its
-Bun runtime dependency. Until the formula is accepted into homebrew-core, tap
-this repository directly:
+AutoMobile is published to the shared `kaeawc/tap` Homebrew tap on every
+tagged release. The formula installs the `auto-mobile` CLI and pulls in
+Bun as a runtime dependency.
 
 ``` bash title="Install via Homebrew"
-brew tap kaeawc/auto-mobile https://github.com/kaeawc/auto-mobile
-brew install auto-mobile
+brew install kaeawc/tap/auto-mobile
 ```
 
 Verify the install:

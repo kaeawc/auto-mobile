@@ -159,6 +159,13 @@ jobs:
       - name: Publish to npm
         run: npm publish --provenance --access public
 
+      - name: Publish Homebrew formula
+        env:
+          GH_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+          TAG: ${{ steps.version.outputs.tag }}
+          REPO: ${{ github.repository }}
+        run: bash scripts/release/update-brew-formula.sh
+
       - name: Install mcp-publisher
         run: |
           URL="https://github.com/modelcontextprotocol/registry"

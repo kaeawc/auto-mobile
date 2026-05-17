@@ -220,6 +220,38 @@ export interface A11yPermissionResult extends BaseResult {
   adbCommand?: string;
 }
 
+export interface InstalledPackageRecord {
+  packageName: string;
+  isSystem: boolean;
+  versionName?: string;
+  versionCode?: number;
+}
+
+export interface A11yInstalledPackagesResult extends BaseResult {
+  userId: number;
+  packages: InstalledPackageRecord[];
+}
+
+export interface A11yPackageInfoResult extends BaseResult {
+  packageName: string;
+  isSystem: boolean;
+  applicationLabel?: string;
+  versionName?: string;
+  versionCode?: number;
+  installerPackage?: string;
+  firstInstallTime?: number;
+  lastUpdateTime?: number;
+  allowBackup?: boolean;
+  requestedPermissions: string[];
+  grantedPermissions: Record<string, boolean>;
+  mainActivity?: string;
+}
+
+export interface A11yLaunchIntentResult extends BaseResult {
+  packageName: string;
+  componentName?: string;
+}
+
 /**
  * Extended context for hierarchy delegate with additional state access.
  */

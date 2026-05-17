@@ -12,7 +12,7 @@ import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
-import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import type { SettingsNamespace } from "../observe/android";
 
 export interface CaptureSnapshotArgs {
@@ -237,6 +237,15 @@ export class CaptureSnapshot {
    * Get list of installed packages
    */
   private async getInstalledPackages(): Promise<string[]> {
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+      if (result.success) {
+        return result.packages.map(p => p.packageName);
+      }
+    } catch (error) {
+      logger.debug(`[CaptureSnapshot] a11y package list failed, falling back to ADB: ${error}`);
+    }
     const result = await this.adb.executeCommand("shell pm list packages");
     return result.stdout
       .split("\n")
@@ -452,6 +461,20 @@ export class CaptureSnapshot {
    * Filter packages to only include user-installed apps
    */
   private async filterUserPackages(packages: string[]): Promise<string[]> {
+    // Try WebSocket-backed PackageManager once and partition.
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+      if (result.success) {
+        const userSet = new Set(
+          result.packages.filter(p => !p.isSystem).map(p => p.packageName)
+        );
+        return packages.filter(p => userSet.has(p));
+      }
+    } catch (error) {
+      logger.debug(`[CaptureSnapshot] a11y filterUserPackages failed, falling back to ADB: ${error}`);
+    }
+
     const userPackages: string[] = [];
 
     for (const packageName of packages) {
@@ -477,21 +500,37 @@ export class CaptureSnapshot {
   }> {
     const allowedPackages: string[] = [];
     const skippedPackages: string[] = [];
+    const a11y = AndroidCtrlProxyClient.getInstance(this.device);
 
     for (const packageName of packages) {
+      let resolved = false;
       try {
-        // Check if app allows backup using dumpsys
-        const result = await this.adb.executeCommand(`shell dumpsys package ${packageName}`);
+        const info = await a11y.requestPackageInfo(
+          packageName,
+          { includePermissions: false },
+          2000
+        );
+        if (info.success && info.allowBackup !== undefined) {
+          if (info.allowBackup === false) {
+            skippedPackages.push(packageName);
+          } else {
+            allowedPackages.push(packageName);
+          }
+          resolved = true;
+        }
+      } catch {
+        // fall through to ADB
+      }
+      if (resolved) {continue;}
 
-        // Look for ALLOW_BACKUP flag in the output
-        // If allowBackup is false, the output will contain "ALLOW_BACKUP=false"
+      try {
+        const result = await this.adb.executeCommand(`shell dumpsys package ${packageName}`);
         if (result.stdout.includes("ALLOW_BACKUP=false")) {
           skippedPackages.push(packageName);
         } else {
           allowedPackages.push(packageName);
         }
       } catch (error) {
-        // If we can't determine, assume it allows backup
         logger.debug(`Failed to check backup flag for ${packageName}, assuming allowed: ${error}`);
         allowedPackages.push(packageName);
       }

@@ -1,6 +1,7 @@
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../../models";
+import { AndroidCtrlProxyClient } from "../observe/android";
 import { GrantAndroidPermissions } from "./GrantAndroidPermissions";
 import { SetAndroidNotificationPolicyAccess } from "./SetAndroidNotificationPolicyAccess";
 import { SetAndroidScheduleExactAlarmAppOp, type ScheduleExactAlarmAppOpMode } from "./SetAndroidScheduleExactAlarmAppOp";
@@ -296,6 +297,46 @@ export class AppPermissions {
 
     if (!normalizedAppId) {
       return this.androidQueryFailure(normalizedAppId, "appId must be a non-empty Android package name");
+    }
+
+    // Try WebSocket PackageManager first; fall back to ADB dumpsys on failure.
+    try {
+      const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+      const info = await a11y.requestPackageInfo(
+        normalizedAppId,
+        { includePermissions: true },
+        4000
+      );
+      if (info.success) {
+        const granted = info.grantedPermissions;
+        const allKeys = info.requestedPermissions.length > 0
+          ? info.requestedPermissions
+          : Object.keys(granted);
+        const permissionNames = requestedPermissions.length > 0 ? requestedPermissions : allKeys;
+        return {
+          success: true,
+          appId: normalizedAppId,
+          deviceId: this.device.deviceId,
+          platform: "android",
+          permissions: permissionNames.map(permission => {
+            if (permission in granted) {
+              return {
+                permission,
+                state: granted[permission] ? "granted" : "denied",
+                source: "androidRuntime" as const,
+                raw: { granted: granted[permission] },
+              };
+            }
+            return {
+              permission,
+              state: "unknown" as const,
+              source: "androidRuntime" as const,
+            };
+          }),
+        };
+      }
+    } catch {
+      // fall through to ADB
     }
 
     try {

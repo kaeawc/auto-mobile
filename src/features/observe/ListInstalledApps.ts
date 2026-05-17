@@ -6,6 +6,7 @@ import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { InstalledAppsRepository, InstalledAppsStore } from "../../db/installedAppsRepository";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import type { InstalledApp as DbInstalledApp, NewInstalledApp } from "../../db/types";
+import { AndroidCtrlProxyClient } from "./android";
 
 const INSTALLED_APPS_CACHE_TTL_MS = 5 * 60 * 1000;
 
@@ -279,6 +280,27 @@ export class ListInstalledApps {
   }
 
   private async listPackagesForUser(userId: number, filterFlag?: "-s" | "-3"): Promise<string[]> {
+    // Try WebSocket first when targeting the service's current user. PackageManager runs
+    // as the service user, so cross-user queries (`--user N` for non-current user) must
+    // fall back to ADB.
+    if (this.device.platform === "android") {
+      try {
+        const a11y = AndroidCtrlProxyClient.getInstance(this.device);
+        const result = await a11y.requestInstalledPackages(true, undefined, 4000);
+        if (result.success && result.userId === userId) {
+          let packages = result.packages;
+          if (filterFlag === "-s") {
+            packages = packages.filter(p => p.isSystem);
+          } else if (filterFlag === "-3") {
+            packages = packages.filter(p => !p.isSystem);
+          }
+          return packages.map(p => p.packageName);
+        }
+      } catch (error) {
+        logger.debug(`[ListInstalledApps] WebSocket package list failed, falling back to ADB: ${error}`);
+      }
+    }
+
     const flag = filterFlag ? ` ${filterFlag}` : "";
     const { stdout } = await this.adb.executeCommand(
       `shell pm list packages${flag} --user ${userId}`

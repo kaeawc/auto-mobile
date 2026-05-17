@@ -175,4 +175,81 @@ class WebSocketResponseTest {
     assertTrue(encoded.contains(""""zen_mode":"0""""))
     assertTrue(encoded.contains(""""device_provisioned":"1""""))
   }
+
+  @Test
+  fun `serialize installed_packages_result`() {
+    val response: WebSocketResponse = InstalledPackagesResult(
+      timestamp = 1234567890L,
+      requestId = "pkg-1",
+      success = true,
+      userId = 0,
+      packages = listOf(
+        InstalledPackageRecord(packageName = "com.example.app", isSystem = false, versionName = "1.0", versionCode = 1L),
+        InstalledPackageRecord(packageName = "com.android.systemui", isSystem = true),
+      ),
+      totalTimeMs = 15L,
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"installed_packages_result""""))
+    assertTrue(encoded.contains(""""userId":0"""))
+    assertTrue(encoded.contains(""""packageName":"com.example.app""""))
+    assertTrue(encoded.contains(""""isSystem":false"""))
+    assertTrue(encoded.contains(""""versionName":"1.0""""))
+    assertTrue(encoded.contains(""""versionCode":1"""))
+    assertTrue(encoded.contains(""""packageName":"com.android.systemui""""))
+  }
+
+  @Test
+  fun `serialize package_info_result`() {
+    val response: WebSocketResponse = PackageInfoResult(
+      timestamp = 1234567890L,
+      requestId = "pi-1",
+      success = true,
+      packageName = "com.example.app",
+      isSystem = false,
+      applicationLabel = "Example",
+      versionName = "2.3",
+      versionCode = 42L,
+      installerPackage = "com.android.vending",
+      firstInstallTime = 100L,
+      lastUpdateTime = 200L,
+      allowBackup = true,
+      requestedPermissions = listOf("android.permission.CAMERA", "android.permission.INTERNET"),
+      grantedPermissions = mapOf("android.permission.CAMERA" to true, "android.permission.INTERNET" to false),
+      mainActivity = "com.example.app/.MainActivity",
+      totalTimeMs = 5L,
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"package_info_result""""))
+    assertTrue(encoded.contains(""""packageName":"com.example.app""""))
+    assertTrue(encoded.contains(""""applicationLabel":"Example""""))
+    assertTrue(encoded.contains(""""versionName":"2.3""""))
+    assertTrue(encoded.contains(""""versionCode":42"""))
+    assertTrue(encoded.contains(""""installerPackage":"com.android.vending""""))
+    assertTrue(encoded.contains(""""mainActivity":"com.example.app/.MainActivity""""))
+    assertTrue(encoded.contains(""""android.permission.CAMERA":true"""))
+    assertTrue(encoded.contains(""""android.permission.INTERNET":false"""))
+  }
+
+  @Test
+  fun `serialize launch_intent_result`() {
+    val response: WebSocketResponse = LaunchIntentResult(
+      timestamp = 1234567890L,
+      requestId = "li-1",
+      success = true,
+      packageName = "com.example.app",
+      componentName = "com.example.app/.MainActivity",
+      totalTimeMs = 3L,
+    )
+
+    val encoded = json.encodeToString(WebSocketResponse.serializer(), response)
+
+    assertTrue(encoded.contains(""""type":"launch_intent_result""""))
+    assertTrue(encoded.contains(""""componentName":"com.example.app/.MainActivity""""))
+    assertTrue(encoded.contains(""""packageName":"com.example.app""""))
+  }
 }

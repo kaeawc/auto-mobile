@@ -100,8 +100,7 @@ public class GesturePerformer: GesturePerforming {
         /// Heuristic for treating an `.other`-typed snapshot as a text-input
         /// wrapper. Text fields expose a non-empty `value` (current content)
         /// or a `placeholderValue` (hint text); plain buttons / containers
-        /// do not. False positives would cause `clearViaDeletes` to send
-        /// delete keys to a non-text element.
+        /// do not.
         private static func snapshotLooksLikeTextInput(_ snapshot: XCUIElementSnapshot) -> Bool {
             if let value = snapshot.value as? String, !value.isEmpty {
                 return true
@@ -417,183 +416,8 @@ public class GesturePerformer: GesturePerforming {
 
             try runOnMainThread {
                 try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-                // Clear any existing text per-character so RN's onChangeText
-                // fires for each delete (see clearViaDeletes for rationale).
-                GesturePerformer.clearViaDeletes(element: element)
-                element.typeText(text)
-            }
-        }
-
-        /// Delete-burst size per iteration in `clearViaDeletes`. Sized to
-        /// stay under the empirically observed threshold where XCUITest's
-        /// typeText falls back to touch synthesis (XCTouchGesturePerformer)
-        /// during very long single-string bursts, which can trigger
-        /// spurious home-screen transitions. Overkill deletes on an empty
-        /// field are harmless no-ops.
-        private static let clearViaDeletesBurstSize = 50
-
-        /// Maximum loop iterations in `clearViaDeletes`. 20 × 50 = up to
-        /// 1000 chars clearable, which is far beyond any realistic form
-        /// field. The loop typically exits much earlier via the
-        /// no-progress or empty-value break conditions.
-        private static let clearViaDeletesMaxIterations = 20
-
-        /// Clear a text element by looping tap + delete-burst up to
-        /// `clearViaDeletesMaxIterations` times, with an early-exit when
-        /// `element.value` reports an empty string. Returns the
-        /// approximate number of delete keystrokes dispatched.
-        ///
-        /// **Why not Cmd+A + Delete?** Bypasses React Native's
-        /// `onChangeText` bridge — the native buffer clears but RN JS state
-        /// stays stale.
-        ///
-        /// **Why not an HID `Clear` keyboard event (WDA's fast path)?**
-        /// We tried it with `XCDeviceEvent` + `kHIDUsage_KeyboardClear`
-        /// (0x9C) and confirmed it dispatches successfully (native
-        /// UITextField buffer went from 162 → 0 chars in ~240ms per
-        /// `element.value`). But it's a strict regression for RN: the
-        /// event bypasses RN's `onChangeText` bridge exactly like
-        /// Cmd+A+Delete does, so RN's JS state stays stale and RN
-        /// restores the content on its next re-render. Worse, it breaks
-        /// the loop's progress detection because `element.value` ends up
-        /// reading the placeholder instead of the restored text, so the
-        /// loop runs to the iteration cap without making visible
-        /// progress. The per-char delete loop is the only path that
-        /// reliably fires `onChangeText`.
-        ///
-        /// **Why a loop?** A tap at `dx=0.95` does not reliably place the
-        /// cursor at end-of-content: when the text width exceeds the
-        /// field's visible width, the field scrolls to keep the cursor
-        /// visible, so the right-edge tap can land mid-text rather than in
-        /// trailing padding. A single 50-delete burst from a mid-text
-        /// cursor only consumes chars to the left of the cursor and then
-        /// no-ops on the remaining buffer. Iterating tap + burst lets us
-        /// chip away at the content regardless of cursor position.
-        ///
-        /// **Why only an isEmpty early-exit, no value-equality check?**
-        /// RN `TextInput` wrappers and `placeholderValue` both tend to
-        /// surface the accessibility identifier rather than the real text
-        /// buffer or true placeholder, which would false-positive either a
-        /// "no progress" or "matches placeholder" break after a single
-        /// iteration and leave residual content. Extra deletes on an
-        /// already-empty field are harmless no-ops, so we accept the
-        /// worst-case cost of running the full iteration count on RN
-        /// fields in exchange for correctness.
-        @discardableResult
-        private static func clearViaDeletes(element: XCUIElement) -> Int {
-            // Some native text inputs (notably UISearchBar) surface their
-            // `placeholderValue` as `value` once the buffer is empty rather
-            // than returning an empty string. Without an additional exit,
-            // the loop runs the full iteration cap (~6s of no-op deletes)
-            // and the proxy round-trip exceeds the MCP request timeout.
-            //
-            // The doc above warned that a naive `value == placeholderValue`
-            // check would false-positive on RN wrappers, where both `value`
-            // and `placeholderValue` may equal the accessibility identifier
-            // and stay constant throughout typing. Guard the placeholder
-            // check by also requiring a *change* in `value` since the
-            // previous iteration — i.e., we observed real progress. RN's
-            // value never changes between iterations (its JS state restores
-            // the buffer), so the guard suppresses the false positive.
-            let placeholder = element.placeholderValue
-            var totalDeleted = 0
-            var previousValue: String? = nil
-            for iteration in 0..<clearViaDeletesMaxIterations {
-                let current = (element.value as? String) ?? ""
-                gestureLog.debug("clearViaDeletes iter=\(iteration, privacy: .public) valueCount=\(current.count, privacy: .public)")
-                if current.isEmpty {
-                    break
-                }
-                if let placeholder = placeholder,
-                   current == placeholder,
-                   let previous = previousValue,
-                   previous != current
-                {
-                    break
-                }
-                element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-                element.typeText(String(
-                    repeating: XCUIKeyboardKey.delete.rawValue,
-                    count: clearViaDeletesBurstSize
-                ))
-                totalDeleted += clearViaDeletesBurstSize
-                previousValue = current
-            }
-            return totalDeleted
-        }
-
-        /// Resolve the currently-focused text-input element for the bare
-        /// `clearText` / `selectAll` / `performImeAction` paths. Mirrors
-        /// `detectKeyboardFocus`'s first two strategies but returns the
-        /// actual `XCUIElement` so callers can dispatch `typeText` against
-        /// it (and have React Native's `onChangeText` bridge fire).
-        ///
-        /// Strategy 1 (predicate): `hasKeyboardFocus == true` — cheap, works
-        /// for standard UIKit apps.
-        ///
-        /// Strategy 2 (snapshot walk): iterate candidate text-input element
-        /// types (`textFields`, `secureTextFields`, `textViews`,
-        /// `searchFields`) and check each element's snapshot for
-        /// `hasFocus`. Catches RN `TextInput`s whose UITextField wrapper
-        /// doesn't propagate `hasKeyboardFocus` but does report
-        /// `snapshot.hasFocus`. More expensive (one `.snapshot()` per
-        /// candidate) but only runs when the predicate misses.
-        ///
-        /// Strategy 3 (`.other` snapshot walk): `detectKeyboardFocus` treats
-        /// focused `.other` snapshots as text inputs when they expose a
-        /// non-empty `value` or `placeholderValue` (see
-        /// `snapshotLooksLikeTextInput`). Mirror that here so flows where
-        /// focus is exposed only via an `.other` wrapper can be resolved —
-        /// otherwise `requireKeyboardFocus` passes and `clearText` throws
-        /// because this method returns nil.
-        ///
-        /// No keyboard-visibility fallback here: visibility proves focus
-        /// exists somewhere but doesn't name an element, and we need an
-        /// element to dispatch deletes against. Callers that hit that case
-        /// should use `clearText(resourceId:)` with a concrete selector.
-        private func resolveFocusedTextElement(app: XCUIApplication) throws -> XCUIElement? {
-            return try runOnMainThread {
-                // Strategy 1: predicate
-                let byPredicate = app.descendants(matching: .any)
-                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
-                    .firstMatch
-                if byPredicate.exists {
-                    return byPredicate
-                }
-
-                // Strategy 2: per-type snapshot traversal
-                let queries: [XCUIElementQuery] = [
-                    app.textFields,
-                    app.secureTextFields,
-                    app.textViews,
-                    app.searchFields,
-                ]
-                for query in queries {
-                    let count = query.count
-                    guard count > 0 else { continue }
-                    for i in 0..<count {
-                        let candidate = query.element(boundBy: i)
-                        guard let snap = try? candidate.snapshot() else { continue }
-                        if snap.hasFocus {
-                            return candidate
-                        }
-                    }
-                }
-
-                // Strategy 3: .other elements that look like text inputs
-                let otherQuery = app.otherElements
-                let otherCount = otherQuery.count
-                if otherCount > 0 {
-                    for i in 0..<otherCount {
-                        let candidate = otherQuery.element(boundBy: i)
-                        guard let snap = try? candidate.snapshot() else { continue }
-                        if snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap) {
-                            return candidate
-                        }
-                    }
-                }
-
-                return nil
+                GesturePerformer.clearFocusedText(app: app, element: element)
+                app.typeText(text)
             }
         }
 
@@ -608,25 +432,102 @@ public class GesturePerformer: GesturePerforming {
                 }
                 try runOnMainThread {
                     try self.tapAndAwaitKeyboardFocus(app: app, element: element, resourceId: resourceId)
-                    _ = GesturePerformer.clearViaDeletes(element: element)
+                    GesturePerformer.clearFocusedText(app: app, element: element)
                 }
-                return
+            } else {
+                try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
+                let focused = resolveFocusedTextElement(app: app)
+                runOnMainThread {
+                    if let focused = focused {
+                        GesturePerformer.clearFocusedText(app: app, element: focused)
+                    } else {
+                        app.typeKey("a", modifierFlags: .command)
+                        app.typeText(XCUIKeyboardKey.delete.rawValue)
+                    }
+                }
             }
+        }
 
-            // Bare clearText: require focus (3-strategy), then resolve the
-            // focused element to dispatch per-character deletes against.
-            // Single code path — no Cmd+A/Delete fallback, because that
-            // path bypasses RN's onChangeText bridge.
-            try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
-            guard let focused = try resolveFocusedTextElement(app: app) else {
-                let diag = buildFocusDiagnostic(app: app, reason: "clearText: focus confirmed but no XCUITest-visible element resolved")
-                gestureLog.error("\(diag, privacy: .public)")
-                throw GestureError.gestureFailed(
-                    "clearText could not resolve a focused text element. Pass resourceId to clear a specific field. Diagnostic: \(diag)"
-                )
+        /// Resolve the focused text-input element so we can check its type.
+        /// Returns nil if no element can be identified (caller falls back to
+        /// Cmd+A+Delete which works for native inputs).
+        private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
+            return runOnMainThread {
+                let byPredicate = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "hasKeyboardFocus == true"))
+                    .firstMatch
+                if byPredicate.exists {
+                    return byPredicate
+                }
+
+                let queries: [XCUIElementQuery] = [
+                    app.textFields,
+                    app.secureTextFields,
+                    app.textViews,
+                    app.searchFields,
+                ]
+                for query in queries {
+                    let count = query.count
+                    guard count > 0 else { continue }
+                    for i in 0..<count {
+                        let candidate = query.element(boundBy: i)
+                        guard let snap = try? candidate.snapshot() else { continue }
+                        if snap.hasFocus { return candidate }
+                    }
+                }
+
+                let otherQuery = app.otherElements
+                let otherCount = otherQuery.count
+                for i in 0..<otherCount {
+                    let candidate = otherQuery.element(boundBy: i)
+                    guard let snap = try? candidate.snapshot() else { continue }
+                    if snap.hasFocus && GesturePerformer.snapshotLooksLikeTextInput(snap) {
+                        return candidate
+                    }
+                }
+
+                return nil
             }
-            _ = try runOnMainThread {
-                GesturePerformer.clearViaDeletes(element: focused)
+        }
+
+        /// Clear text from a focused element, choosing the strategy based on
+        /// element type. Native UIKit inputs use Cmd+A + Delete (O(1)). React
+        /// Native wrappers (`.other`) use per-character deletes so RN's
+        /// onChangeText JS bridge fires for each keystroke.
+        private static func clearFocusedText(app: XCUIApplication, element: XCUIElement) {
+            let type = element.elementType
+            let isNativeTextInput = type == .textField
+                || type == .textView
+                || type == .secureTextField
+                || type == .searchField
+
+            if isNativeTextInput {
+                app.typeKey("a", modifierFlags: .command)
+                app.typeText(XCUIKeyboardKey.delete.rawValue)
+            } else {
+                clearViaDeletes(element: element)
+            }
+        }
+
+        private static let clearViaDeletesBurstSize = 50
+        private static let clearViaDeletesMaxIterations = 20
+
+        /// Per-character delete loop for React Native TextInputs. RN's
+        /// onChangeText bridge requires individual delete keystrokes —
+        /// Cmd+A+Delete clears only the native buffer while JS state stays stale.
+        /// No value-based progress check: RN wrappers can report a stable
+        /// accessibility identifier as `value` regardless of actual content,
+        /// so the loop runs the full count. Extra deletes on an empty field
+        /// are harmless no-ops.
+        private static func clearViaDeletes(element: XCUIElement) {
+            for _ in 0..<clearViaDeletesMaxIterations {
+                let current = (element.value as? String) ?? ""
+                if current.isEmpty { break }
+                element.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+                element.typeText(String(
+                    repeating: XCUIKeyboardKey.delete.rawValue,
+                    count: clearViaDeletesBurstSize
+                ))
             }
         }
 

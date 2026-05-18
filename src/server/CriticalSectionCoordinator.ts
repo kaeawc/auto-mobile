@@ -53,8 +53,9 @@ export class CriticalSectionCoordinator {
       this.locks.set(lock, new Mutex());
     }
 
-    // Always reset barrier tracking on (re-)registration
-    this.barrierCounts.set(lock, new Set());
+    if (!this.barrierCounts.has(lock)) {
+      this.barrierCounts.set(lock, new Set());
+    }
     if (!this.barrierResolvers.has(lock)) {
       this.barrierResolvers.set(lock, []);
     }

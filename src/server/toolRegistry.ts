@@ -576,10 +576,9 @@ class ToolRegistryClass {
         const signal: AbortSignal | undefined = extra?.signal;
 
         if (tool.supportsProgress) {
-          // Construct a ProgressCallback that sends progress notifications via the MCP protocol
+          const progressToken = extra?._meta?.progressToken ?? `${tool.name}-${this.timer.now()}`;
           const progressCallback: ProgressCallback = async (progress: number, total?: number, message?: string) => {
             try {
-              const progressToken = extra?._meta?.progressToken ?? `${tool.name}-${Date.now()}`;
               await extra.sendNotification({
                 method: "notifications/progress",
                 params: {
@@ -590,13 +589,11 @@ class ToolRegistryClass {
                 }
               });
             } catch (error) {
-              // Log progress notification errors but don't fail the tool execution
               logger.warn(`Failed to send progress notification: ${error}`);
             }
           };
           return await tool.handler(args, progressCallback, signal);
         } else {
-          // For tools that don't support progress, just call the handler normally
           return await tool.handler(args, undefined, signal);
         }
       };

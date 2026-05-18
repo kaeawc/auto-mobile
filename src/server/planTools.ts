@@ -478,9 +478,6 @@ const executePlanTool = async (device: BootedDevice, params: {
       }
     }
 
-    // Guard: if executePlan threw, the exception propagates past the finally
-    // and result remains undefined. This guard prevents a TypeError from
-    // masking the original error if the control flow is ever refactored.
     if (!result) {
       throw new Error("Plan execution failed without producing a result");
     }

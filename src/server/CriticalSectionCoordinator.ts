@@ -59,10 +59,9 @@ export class CriticalSectionCoordinator {
       this.barrierResolvers.set(lock, []);
     }
 
-    // Cancel any existing cleanup timer
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
       this.cleanupTimers.delete(lock);
     }
   }
@@ -204,10 +203,9 @@ export class CriticalSectionCoordinator {
 	 * Schedule cleanup of lock resources after all devices have finished.
 	 */
   private scheduleCleanup(lock: string): void {
-    // Cancel any existing cleanup timer
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
     }
 
     // Schedule new cleanup
@@ -231,7 +229,7 @@ export class CriticalSectionCoordinator {
 
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
     }
 
     this.locks.delete(lock);
@@ -245,9 +243,8 @@ export class CriticalSectionCoordinator {
 	 * Reset all coordinator state (primarily for testing).
 	 */
   public reset(): void {
-    // Clear all timers
     for (const timer of this.cleanupTimers.values()) {
-      clearTimeout(timer);
+      defaultTimer.clearTimeout(timer);
     }
 
     this.locks.clear();

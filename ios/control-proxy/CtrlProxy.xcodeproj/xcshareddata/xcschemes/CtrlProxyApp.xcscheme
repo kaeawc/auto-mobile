@@ -49,6 +49,20 @@
                ReferencedContainer = "container:CtrlProxy.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
+         <BuildActionEntry
+            buildForTesting = "YES"
+            buildForRunning = "YES"
+            buildForProfiling = "YES"
+            buildForArchiving = "YES"
+            buildForAnalyzing = "YES">
+            <BuildableReference
+               BuildableIdentifier = "primary"
+               BlueprintIdentifier = "E35F925D729B7056D4E4B501"
+               BuildableName = "ObjCExceptionCatcher.framework"
+               BlueprintName = "ObjCExceptionCatcher"
+               ReferencedContainer = "container:CtrlProxy.xcodeproj">
+            </BuildableReference>
+         </BuildActionEntry>
       </BuildActionEntries>
    </BuildAction>
    <TestAction

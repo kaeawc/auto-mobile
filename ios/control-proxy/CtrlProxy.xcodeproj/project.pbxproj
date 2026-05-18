@@ -14,30 +14,41 @@
 		12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */; };
 		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
+		1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
 		261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
 		2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
+		2DD69FF84C0520EED9B77AFF /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
 		3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
+		416E49D98E779D4D7D060F16 /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
 		42E706C81F51E89DEBD9C1A9 /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */; };
 		45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
 		47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */ = {isa = PBXBuildFile; fileRef = A284B6FFBE969931BB03A2FF /* PerfProvider.swift */; };
+		51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */ = {isa = PBXBuildFile; fileRef = D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */; settings = {ATTRIBUTES = (Public, ); }; };
+		5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		53A41EE5F98E771345D6EA90 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4CB9272A186932D89EB1072 /* WebSocketServer.swift */; };
 		5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */; };
 		5651AAF00833750D1DFD55CE /* Logging.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3BF23F10C24C9F40E5CEC303 /* Logging.swift */; };
 		5BD7FFA4EE2841F197219322 /* DefaultStorageInspecting.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1CFB4EDEE20CB1CE002E68A5 /* DefaultStorageInspecting.swift */; };
 		5DF6CF60A8796BBB8C80341C /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 0CDD96577EB9823B5FCF2585 /* Assets.xcassets */; };
 		5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */ = {isa = PBXBuildFile; fileRef = F2144B84CD70DB35A1030624 /* GesturePerformer.swift */; };
+		6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */; };
 		74CA22BFA1779993CDCF59AE /* CtrlProxy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0EE277596991C059142C485B /* CtrlProxy.swift */; };
 		7F0A1FBC49EE6CFD37F53294 /* CtrlProxyUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */; };
+		818C27D4C9349EE5D7B46AC4 /* ObjCExceptionCatcher.m in Sources */ = {isa = PBXBuildFile; fileRef = F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */; };
 		81E23C054BAEC85A37171E29 /* CtrlProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		8AC18133C075D1909F9D04E6 /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
+		8E00E330C839DBF9AC5DCC8E /* ObjCExceptionCatcher.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; };
 		96ED92C8F268021CE148C4FF /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		9FE4564D1819768FEFD62606 /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
 		A603343B94D35DDF48F7AA4D /* Fakes.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A1B2931E58B158EE51C5F4F /* Fakes.swift */; };
 		A9D79278D7A9C7ED3E7E4F8C /* CtrlProxy.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		A9E8300EE35B13DED1A0E579 /* MainThreadRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */; };
+		AF0C3A37F5AD66261DF7ED24 /* MainThreadRunner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */; };
 		B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */ = {isa = PBXBuildFile; fileRef = B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */; };
 		BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
 		BD7D2FF024054ED74F17958D /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = D81453AD074F2A392251CFC3 /* Models.swift */; };
@@ -68,12 +79,33 @@
 			remoteGlobalIDString = 829FFB06AC273BEE7049A7F2;
 			remoteInfo = CtrlProxyApp;
 		};
+		3B1FEDBB84DB25101CE0F519 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E35F925D729B7056D4E4B501;
+			remoteInfo = ObjCExceptionCatcher;
+		};
 		54374A7FEA0119889A660A03 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
 			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
 			proxyType = 1;
 			remoteGlobalIDString = 61A21F82A43E4D436CD13CCD;
 			remoteInfo = CtrlProxy;
+		};
+		791EFE55A6C6D45E43240B7B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E35F925D729B7056D4E4B501;
+			remoteInfo = ObjCExceptionCatcher;
+		};
+		7EB55A13A30F9049B9BAAEA0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 47C2E526C953A554EECC01E3 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = E35F925D729B7056D4E4B501;
+			remoteInfo = ObjCExceptionCatcher;
 		};
 		B7C947B3DD74297C9B808552 /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -92,6 +124,7 @@
 			dstSubfolderSpec = 10;
 			files = (
 				A9D79278D7A9C7ED3E7E4F8C /* CtrlProxy.framework in Embed Frameworks */,
+				1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */,
 			);
 			name = "Embed Frameworks";
 			runOnlyForDeploymentPostprocessing = 0;
@@ -128,7 +161,10 @@
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCacheTests.swift; sourceTree = "<group>"; };
 		637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridgeTests.swift; sourceTree = "<group>"; };
 		652F5687D2FC57F3D6D4629C /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadRunner.swift; sourceTree = "<group>"; };
+		73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridge.swift; sourceTree = "<group>"; };
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
 		802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxyUITests.swift; sourceTree = "<group>"; };
 		83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyModels.swift; sourceTree = "<group>"; };
@@ -140,12 +176,15 @@
 		B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
 		B4CB9272A186932D89EB1072 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocatorTests.swift; sourceTree = "<group>"; };
+		D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
 		D81453AD074F2A392251CFC3 /* Models.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
 		DBA97A6C3A1240A055D9876C /* OSLogReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OSLogReader.swift; sourceTree = "<group>"; };
 		DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProviderTests.swift; sourceTree = "<group>"; };
 		E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyClient.swift; sourceTree = "<group>"; };
 		F2144B84CD70DB35A1030624 /* GesturePerformer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GesturePerformer.swift; sourceTree = "<group>"; };
+		F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = ObjCExceptionCatcher.m; sourceTree = "<group>"; };
 		FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyMerger.swift; sourceTree = "<group>"; };
+		FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = ObjCExceptionCatcher.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -154,6 +193,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				96ED92C8F268021CE148C4FF /* CtrlProxy.framework in Frameworks */,
+				5278294A4F04317461A1FBE4 /* ObjCExceptionCatcher.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -162,6 +202,22 @@
 			buildActionMask = 2147483647;
 			files = (
 				42E706C81F51E89DEBD9C1A9 /* CtrlProxy.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		83B091B691FE87A5F92733EB /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8E00E330C839DBF9AC5DCC8E /* ObjCExceptionCatcher.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DAD3A99273A4DAD849C7E1B0 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				8AC18133C075D1909F9D04E6 /* ObjCExceptionCatcher.framework in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -185,6 +241,7 @@
 				3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */,
 				0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */,
 				184CFC1280E0802EBF53965F /* ModelsTests.swift */,
+				649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */,
 				DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */,
 				5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */,
 			);
@@ -210,6 +267,8 @@
 				8F975B4ACF30326B292C01BE /* CtrlProxyApp */,
 				5F6475BE026D0B46115D178A /* CtrlProxyTests */,
 				7570CCD895BDD26847716F63 /* CtrlProxyUITests */,
+				C45CCD2AAA0E6F7D596C0A82 /* include */,
+				9D1EF7437AFF55F9346E7A05 /* ObjCExceptionCatcher */,
 				ECABFBABEC912FAB47B50B74 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -221,6 +280,24 @@
 				22671C94D317E15EED752E59 /* Info.plist */,
 			);
 			path = CtrlProxyApp;
+			sourceTree = "<group>";
+		};
+		9D1EF7437AFF55F9346E7A05 /* ObjCExceptionCatcher */ = {
+			isa = PBXGroup;
+			children = (
+				F9D3D13C3FE12BA2CD012082 /* ObjCExceptionCatcher.m */,
+			);
+			name = ObjCExceptionCatcher;
+			path = Sources/ObjCExceptionCatcher;
+			sourceTree = "<group>";
+		};
+		C45CCD2AAA0E6F7D596C0A82 /* include */ = {
+			isa = PBXGroup;
+			children = (
+				D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */,
+			);
+			name = include;
+			path = Sources/ObjCExceptionCatcher/include;
 			sourceTree = "<group>";
 		};
 		E5F13404E64357EACB45F12C /* CtrlProxy */ = {
@@ -236,7 +313,9 @@
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
 				FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */,
 				3BF23F10C24C9F40E5CEC303 /* Logging.swift */,
+				6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */,
 				D81453AD074F2A392251CFC3 /* Models.swift */,
+				73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */,
 				DBA97A6C3A1240A055D9876C /* OSLogReader.swift */,
 				B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */,
 				A284B6FFBE969931BB03A2FF /* PerfProvider.swift */,
@@ -257,11 +336,23 @@
 				9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */,
 				637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */,
 				009A6B01284035997298367F /* CtrlProxyUITests.xctest */,
+				FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
+
+/* Begin PBXHeadersBuildPhase section */
+		F8D41F46B21DC70F8603029E /* Headers */ = {
+			isa = PBXHeadersBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				51172531044918A0248559AE /* ObjCExceptionCatcher.h in Headers */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXHeadersBuildPhase section */
 
 /* Begin PBXNativeTarget section */
 		2B5458099134F47AA1A7C4DA /* CtrlProxyUITests */ = {
@@ -269,11 +360,13 @@
 			buildConfigurationList = FA86089DF9B8AC2EDABF94A0 /* Build configuration list for PBXNativeTarget "CtrlProxyUITests" */;
 			buildPhases = (
 				7CFC5122F30AA08D7EB28C15 /* Sources */,
+				DAD3A99273A4DAD849C7E1B0 /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
 				E20E35C9CD5E3D45AB8ED161 /* PBXTargetDependency */,
+				178622E36D486FB3DEDAE985 /* PBXTargetDependency */,
 			);
 			name = CtrlProxyUITests;
 			packageProductDependencies = (
@@ -287,10 +380,12 @@
 			buildConfigurationList = 9D178DC0AEA3EC333E3183D4 /* Build configuration list for PBXNativeTarget "CtrlProxy" */;
 			buildPhases = (
 				2477461A76859C0AB71BD1B8 /* Sources */,
+				83B091B691FE87A5F92733EB /* Frameworks */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				5002428D0FCBF441DB35112F /* PBXTargetDependency */,
 			);
 			name = CtrlProxy;
 			packageProductDependencies = (
@@ -312,6 +407,7 @@
 			);
 			dependencies = (
 				B22F8606D9BB5657FC266B25 /* PBXTargetDependency */,
+				11EA9F56C65EBABFFEAF6D81 /* PBXTargetDependency */,
 			);
 			name = CtrlProxyApp;
 			packageProductDependencies = (
@@ -340,6 +436,24 @@
 			productReference = 637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */;
 			productType = "com.apple.product-type.bundle.unit-test";
 		};
+		E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DC2067B9B434B671DDAFB9C8 /* Build configuration list for PBXNativeTarget "ObjCExceptionCatcher" */;
+			buildPhases = (
+				F8D41F46B21DC70F8603029E /* Headers */,
+				3D69C1BFF41FE92B741D62D2 /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = ObjCExceptionCatcher;
+			packageProductDependencies = (
+			);
+			productName = ObjCExceptionCatcher;
+			productReference = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */;
+			productType = "com.apple.product-type.framework";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -362,6 +476,9 @@
 					D665478F817F2DF283B43BFB = {
 						ProvisioningStyle = Automatic;
 					};
+					E35F925D729B7056D4E4B501 = {
+						ProvisioningStyle = Automatic;
+					};
 				};
 			};
 			buildConfigurationList = E05A42B658B1C02C052C128D /* Build configuration list for PBXProject "CtrlProxy" */;
@@ -382,6 +499,7 @@
 				829FFB06AC273BEE7049A7F2 /* CtrlProxyApp */,
 				D665478F817F2DF283B43BFB /* CtrlProxyTests */,
 				2B5458099134F47AA1A7C4DA /* CtrlProxyUITests */,
+				E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */,
 			);
 		};
 /* End PBXProject section */
@@ -412,8 +530,10 @@
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
 				158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */,
 				5651AAF00833750D1DFD55CE /* Logging.swift in Sources */,
+				A9E8300EE35B13DED1A0E579 /* MainThreadRunner.swift in Sources */,
 				BD7D2FF024054ED74F17958D /* Models.swift in Sources */,
 				C1398B388B401E28BC727863 /* OSLogReader.swift in Sources */,
+				2DD69FF84C0520EED9B77AFF /* ObjCExceptionBridge.swift in Sources */,
 				D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */,
 				E8327D679D58C8F804C064B1 /* PerformanceMetrics.swift in Sources */,
 				47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */,
@@ -421,6 +541,14 @@
 				0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */,
 				2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */,
 				C2DCB71857A14ED314300AAC /* WebSocketServer.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		3D69C1BFF41FE92B741D62D2 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				818C27D4C9349EE5D7B46AC4 /* ObjCExceptionCatcher.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -433,6 +561,7 @@
 				4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */,
 				CFCA362E1EF1F3251B19BC1B /* HierarchyMergerTests.swift in Sources */,
 				F7B78DBB0517EC004EF4ECF6 /* ModelsTests.swift in Sources */,
+				6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */,
 				0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */,
 				2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */,
 			);
@@ -452,8 +581,10 @@
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
 				45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */,
 				C72C24EBCEFADDCA5B2C99E9 /* Logging.swift in Sources */,
+				AF0C3A37F5AD66261DF7ED24 /* MainThreadRunner.swift in Sources */,
 				BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */,
 				141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */,
+				416E49D98E779D4D7D060F16 /* ObjCExceptionBridge.swift in Sources */,
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,
 				B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */,
 				2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */,
@@ -475,10 +606,25 @@
 /* End PBXSourcesBuildPhase section */
 
 /* Begin PBXTargetDependency section */
+		11EA9F56C65EBABFFEAF6D81 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */;
+			targetProxy = 7EB55A13A30F9049B9BAAEA0 /* PBXContainerItemProxy */;
+		};
+		178622E36D486FB3DEDAE985 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */;
+			targetProxy = 3B1FEDBB84DB25101CE0F519 /* PBXContainerItemProxy */;
+		};
 		312F7F921AF3E434019D2690 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
 			target = 61A21F82A43E4D436CD13CCD /* CtrlProxy */;
 			targetProxy = 54374A7FEA0119889A660A03 /* PBXContainerItemProxy */;
+		};
+		5002428D0FCBF441DB35112F /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = E35F925D729B7056D4E4B501 /* ObjCExceptionCatcher */;
+			targetProxy = 791EFE55A6C6D45E43240B7B /* PBXContainerItemProxy */;
 		};
 		B22F8606D9BB5657FC266B25 /* PBXTargetDependency */ = {
 			isa = PBXTargetDependency;
@@ -564,6 +710,31 @@
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
+		};
+		5B291F947811E13431272BED /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.objcexceptioncatcher;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Debug;
 		};
 		5FB327F8E51267F6C09AF654 /* Release */ = {
 			isa = XCBuildConfiguration;
@@ -672,6 +843,31 @@
 			};
 			name = Debug;
 		};
+		C824F8D42645B2E8D571DAD3 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_MODULES = YES;
+				CODE_SIGN_IDENTITY = "";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEFINES_MODULE = YES;
+				DYLIB_COMPATIBILITY_VERSION = 1;
+				DYLIB_CURRENT_VERSION = 1;
+				DYLIB_INSTALL_NAME_BASE = "@rpath";
+				GENERATE_INFOPLIST_FILE = YES;
+				INSTALL_PATH = "$(LOCAL_LIBRARY_DIR)/Frameworks";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.objcexceptioncatcher;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VERSIONING_SYSTEM = "apple-generic";
+			};
+			name = Release;
+		};
 		D4F72785148586BF7FF452C4 /* Debug */ = {
 			isa = XCBuildConfiguration;
 			buildSettings = {
@@ -733,6 +929,15 @@
 			buildConfigurations = (
 				93CBFA3F37A7BCA6FF9BC1B3 /* Debug */,
 				5FB327F8E51267F6C09AF654 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		DC2067B9B434B671DDAFB9C8 /* Build configuration list for PBXNativeTarget "ObjCExceptionCatcher" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				5B291F947811E13431272BED /* Debug */,
+				C824F8D42645B2E8D571DAD3 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Debug;

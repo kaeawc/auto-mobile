@@ -437,7 +437,7 @@ public class GesturePerformer: GesturePerforming {
             } else {
                 try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
                 let focused = resolveFocusedTextElement(app: app)
-                runOnMainThread {
+                try runOnMainThread {
                     if let focused = focused {
                         GesturePerformer.clearFocusedText(app: app, element: focused)
                     } else {
@@ -452,7 +452,7 @@ public class GesturePerformer: GesturePerforming {
         /// Returns nil if no element can be identified (caller falls back to
         /// Cmd+A+Delete which works for native inputs).
         private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
-            return runOnMainThread {
+            return (try? runOnMainThread {
                 let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
                     .firstMatch
@@ -487,7 +487,7 @@ public class GesturePerformer: GesturePerforming {
                 }
 
                 return nil
-            }
+            }) ?? nil
         }
 
         /// Clear text from a focused element, choosing the strategy based on

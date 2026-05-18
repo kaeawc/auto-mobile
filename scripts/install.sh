@@ -1632,7 +1632,7 @@ if "auto-mobile" in existing["mcpServers"]:
 # Merge (overwrites existing auto-mobile)
 existing["mcpServers"]["auto-mobile"] = new_auto_mobile
 
-print(json.dumps(existing, indent=2))
+sys.stdout.buffer.write(json.dumps(existing, indent=2, ensure_ascii=False).encode("utf-8") + b"\n")
 ' "${config_file}" "${auto_mobile_config}"
     elif command_exists jq; then
         jq --argjson new "${auto_mobile_config}" '.mcpServers["auto-mobile"] = $new' "${config_file}"

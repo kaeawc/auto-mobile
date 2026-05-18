@@ -53,10 +53,8 @@ export class CriticalSectionCoordinator {
       this.locks.set(lock, new Mutex());
     }
 
-    // Initialize barrier tracking
-    if (!this.barrierCounts.has(lock)) {
-      this.barrierCounts.set(lock, new Set());
-    }
+    // Always reset barrier tracking on (re-)registration
+    this.barrierCounts.set(lock, new Set());
     if (!this.barrierResolvers.has(lock)) {
       this.barrierResolvers.set(lock, []);
     }
@@ -154,7 +152,9 @@ export class CriticalSectionCoordinator {
         resolve();
       }
 
-      // Reset barrier for potential next round (though we don't support re-entry)
+      // Clear barrier state for potential reuse
+      arrivedDevices.clear();
+
       return;
     }
 
@@ -187,7 +187,7 @@ export class CriticalSectionCoordinator {
       // Store the timeout so we can clear it if resolved normally
       const originalResolve = resolve;
       const wrappedResolve = () => {
-        clearTimeout(timer);
+        defaultTimer.clearTimeout(timer);
         originalResolve();
       };
 

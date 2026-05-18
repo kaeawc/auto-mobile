@@ -633,4 +633,98 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
   });
+
+  describe("requestClearText", function() {
+    test("sends request_clear_text (not request_set_text)", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestClearText();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_clear_text");
+        expect(sentMessage.resourceId).toBeUndefined();
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "clear_text_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 30
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("passes resourceId when provided", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestClearText("com.app:id/email_field");
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_clear_text");
+        expect(sentMessage.resourceId).toBe("com.app:id/email_field");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "clear_text_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 45
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("returns error when not connected", async function() {
+      const testTimer = fakeTimer;
+
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+
+      try {
+        const result = await testClient.requestClearText(undefined, 100);
+
+        expect(result.success).toBe(false);
+        expect(result.error).toBe("Not connected");
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
 });

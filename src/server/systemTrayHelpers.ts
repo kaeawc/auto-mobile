@@ -1282,6 +1282,13 @@ export const waitForNotificationMatch = async (
   progress?: ProgressCallback
 ): Promise<{ observation: ObserveResult; match: SystemTrayNotificationMatch | null }> => {
   const { observeScreenFactory, timer } = getSystemTrayDependencies();
+  if (awaitTimeoutMs <= 0) {
+    logger.warn(
+      `[systemTray] waitForNotificationMatch called with non-positive timeout ` +
+      `(${awaitTimeoutMs}ms), using minimum of ${SYSTEM_TRAY_POLL_INTERVAL_MS}ms`
+    );
+    awaitTimeoutMs = SYSTEM_TRAY_POLL_INTERVAL_MS;
+  }
   const observeScreen = observeScreenFactory(device);
   const deadlineMs = timer.now() + awaitTimeoutMs;
   const remainingMs = Math.max(0, deadlineMs - timer.now());

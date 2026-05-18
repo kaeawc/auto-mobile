@@ -32,12 +32,32 @@ targets:
     dependencies:
       - target: CtrlProxy
         embed: true
+      - target: ObjCExceptionCatcher
+        embed: true
+
+  ObjCExceptionCatcher:
+    type: framework
+    platform: iOS
+    sources:
+      - path: Sources/ObjCExceptionCatcher/ObjCExceptionCatcher.m
+      - path: Sources/ObjCExceptionCatcher/include/ObjCExceptionCatcher.h
+        headerVisibility: public
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.objcexceptioncatcher
+        DEFINES_MODULE: YES
+        CLANG_ENABLE_MODULES: YES
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
 
   CtrlProxy:
     type: framework
     platform: iOS
     sources:
       - path: Sources/CtrlProxy
+    dependencies:
+      - target: ObjCExceptionCatcher
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy
@@ -71,6 +91,8 @@ targets:
       - target: CtrlProxyApp
         # Note: We don't depend on CtrlProxy framework - sources are compiled directly into UI tests
         # to give XCTest access for XCUIApplication
+      - target: ObjCExceptionCatcher
+        embed: false
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.ctrlproxy.uitests
@@ -84,6 +106,7 @@ schemes:
       targets:
         CtrlProxyApp: all
         CtrlProxy: all
+        ObjCExceptionCatcher: all
         CtrlProxyTests: [test]
     run:
       config: Debug

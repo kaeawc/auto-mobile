@@ -37,6 +37,26 @@ export interface AppLifecycleMonitor {
    * Poll for app state changes
    */
   checkForChanges(device: BootedDevice): Promise<void>;
+
+  /**
+   * Add event listener for specific event types
+   */
+  addEventListener(type: string, listener: AppLifecycleEventListener): void;
+
+  /**
+   * Remove event listener
+   */
+  removeEventListener(type: string, listener: AppLifecycleEventListener): void;
+
+  /**
+   * Remove all listeners for the given event type, or all listeners if no type given
+   */
+  removeAllListeners(event?: string): this;
+
+  /**
+   * Get the number of listeners for a specific event type
+   */
+  listenerCount(type: string): number;
 }
 
 export interface AppLifecycleEvent {
@@ -48,18 +68,18 @@ export interface AppLifecycleEvent {
     metadata?: Record<string, any>;
 }
 
-interface AppLifecycleEventListener {
+export interface AppLifecycleEventListener {
     (event: AppLifecycleEvent): Promise<void>;
 }
 
-export class AppLifecycleMonitor extends EventEmitter implements AppLifecycleMonitor {
+export class DefaultAppLifecycleMonitor extends EventEmitter implements AppLifecycleMonitor {
   private trackedPackages: Set<string> = new Set();
   private runningPackages: Set<string> = new Set();
   private adbFactory: AdbClientFactory;
-  private static instance: AppLifecycleMonitor;
+  private static instance: DefaultAppLifecycleMonitor;
 
   /**
-   * Constructor for AppLifecycleMonitor
+   * Constructor for DefaultAppLifecycleMonitor
    * @param adbFactory - Optional injected AdbClientFactory for dependency injection. Defaults to defaultAdbClientFactory.
    */
   constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
@@ -67,11 +87,11 @@ export class AppLifecycleMonitor extends EventEmitter implements AppLifecycleMon
     this.adbFactory = adbFactory;
   }
 
-  public static getInstance(): AppLifecycleMonitor {
-    if (!AppLifecycleMonitor.instance) {
-      AppLifecycleMonitor.instance = new AppLifecycleMonitor();
+  public static getInstance(): DefaultAppLifecycleMonitor {
+    if (!DefaultAppLifecycleMonitor.instance) {
+      DefaultAppLifecycleMonitor.instance = new DefaultAppLifecycleMonitor();
     }
-    return AppLifecycleMonitor.instance;
+    return DefaultAppLifecycleMonitor.instance;
   }
 
   /**

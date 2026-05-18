@@ -1,6 +1,6 @@
 export { PlatformDeviceManager } from "./DeviceUtils";
 // Re-export from co-located interfaces
-export { AppLifecycleMonitor } from "../AppLifecycleMonitor";
+export { AppLifecycleMonitor, DefaultAppLifecycleMonitor } from "../AppLifecycleMonitor";
 export { DeviceSessionManager } from "../DeviceSessionManager";
 export { DeepLinkManager } from "../DeepLinkManager";
 export { CtrlProxyManager } from "../CtrlProxyManager";

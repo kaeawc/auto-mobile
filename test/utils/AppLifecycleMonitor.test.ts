@@ -1,12 +1,12 @@
 import { expect, describe, test, beforeEach, afterEach } from "bun:test";
-import { AppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
+import { AppLifecycleMonitor, DefaultAppLifecycleMonitor, AppLifecycleEvent } from "../../src/utils/AppLifecycleMonitor";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { AppLifecycleMonitorFactory } from "../../src/utils/factories/AppLifecycleMonitorFactory";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { BootedDevice } from "../../src/models";
 
 describe("AppLifecycleMonitor", () => {
-  let monitor: AppLifecycleMonitor;
+  let monitor: DefaultAppLifecycleMonitor;
   let fakeAdb: FakeAdbExecutor;
   const testDevice: BootedDevice = {
     deviceId: "test-device-id",
@@ -227,6 +227,33 @@ describe("AppLifecycleMonitor", () => {
 
       // Should not throw
       await monitor.checkForChanges(testDevice);
+    });
+  });
+
+  describe("type safety", () => {
+    test("factory getInstance returns object with both interface and class-specific methods", () => {
+      const instance = AppLifecycleMonitorFactory.getInstance();
+
+      // Interface methods are accessible
+      expect(typeof instance.trackPackage).toBe("function");
+      expect(typeof instance.untrackPackage).toBe("function");
+      expect(typeof instance.getTrackedPackages).toBe("function");
+      expect(typeof instance.isPackageRunning).toBe("function");
+      expect(typeof instance.getRunningPackages).toBe("function");
+      expect(typeof instance.checkForChanges).toBe("function");
+
+      // Event listener methods (from the interface) are accessible
+      expect(typeof instance.addEventListener).toBe("function");
+      expect(typeof instance.removeEventListener).toBe("function");
+      expect(typeof instance.removeAllListeners).toBe("function");
+      expect(typeof instance.listenerCount).toBe("function");
+
+      // Verify it satisfies the interface type
+      const asInterface: AppLifecycleMonitor = instance;
+      expect(typeof asInterface.addEventListener).toBe("function");
+      expect(typeof asInterface.removeEventListener).toBe("function");
+      expect(typeof asInterface.removeAllListeners).toBe("function");
+      expect(typeof asInterface.listenerCount).toBe("function");
     });
   });
 });

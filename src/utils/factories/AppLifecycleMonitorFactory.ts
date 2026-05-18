@@ -1,4 +1,4 @@
-import { AppLifecycleMonitor } from "../AppLifecycleMonitor";
+import { DefaultAppLifecycleMonitor } from "../AppLifecycleMonitor";
 import { AdbClientFactory, defaultAdbClientFactory } from "../android-cmdline-tools/AdbClientFactory";
 import { logger } from "../logger";
 
@@ -8,7 +8,7 @@ import { logger } from "../logger";
  * Enables better testability and performance by reducing AdbClient instantiation
  */
 export class AppLifecycleMonitorFactory {
-  private static instance: AppLifecycleMonitor | null = null;
+  private static instance: DefaultAppLifecycleMonitor | null = null;
   private static injectedAdbFactory: AdbClientFactory | null = null;
 
   /**
@@ -27,13 +27,13 @@ export class AppLifecycleMonitorFactory {
   /**
    * Get the singleton instance of AppLifecycleMonitor
    * Injects the previously set AdbClientFactory, or uses default if none was set
-   * @returns The AppLifecycleMonitor instance
+   * @returns The DefaultAppLifecycleMonitor instance (which implements AppLifecycleMonitor)
    */
-  public static getInstance(): AppLifecycleMonitor {
+  public static getInstance(): DefaultAppLifecycleMonitor {
     if (!AppLifecycleMonitorFactory.instance) {
       // Use injected ADB factory or default
       const adbFactory = AppLifecycleMonitorFactory.injectedAdbFactory ?? defaultAdbClientFactory;
-      AppLifecycleMonitorFactory.instance = new AppLifecycleMonitor(adbFactory);
+      AppLifecycleMonitorFactory.instance = new DefaultAppLifecycleMonitor(adbFactory);
       logger.debug("AppLifecycleMonitor: Created new instance with " +
         (AppLifecycleMonitorFactory.injectedAdbFactory ? "injected" : "default") + " AdbClientFactory");
     }

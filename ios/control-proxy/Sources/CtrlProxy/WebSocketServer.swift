@@ -154,15 +154,9 @@ public class WebSocketServer: WebSocketServing {
 
         } catch {
             print("[WebSocketServer] Error handling message: \(error)")
-            perfProvider.clear() // Clear any partial timing data on error
-            let errorResponse = WebSocketResponse.error(
-                type: "error",
-                requestId: nil,
-                error: error.localizedDescription
-            )
-            if let data = try? JSONEncoder().encode(errorResponse) {
-                connection.send(data)
-            }
+            perfProvider.clear()
+            let requestId = Self.extractRequestId(from: data)
+            Self.sendErrorResponse(connection: connection, requestId: requestId, error: error)
         }
     }
 
@@ -283,6 +277,56 @@ public class WebSocketServer: WebSocketServing {
     /// Get access to the perf provider for tracking operations
     public var perf: PerfProvider {
         perfProvider
+    }
+
+    // MARK: - Error Response Helpers
+
+    /// Sends an error response with fallback to raw JSON if encoding fails.
+    static func sendErrorResponse(connection: WebSocketConnection, requestId: String?, error: Error) {
+        let data = buildErrorResponseData(requestId: requestId, error: error)
+        connection.send(data)
+    }
+
+    /// Builds error response data, falling back to hand-crafted JSON if encoding fails.
+    static func buildErrorResponseData(requestId: String?, error: Error) -> Data {
+        let errorResponse = WebSocketResponse.error(
+            type: "error",
+            requestId: requestId,
+            error: error.localizedDescription
+        )
+
+        do {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = .sortedKeys
+            return try encoder.encode(errorResponse)
+        } catch {
+            let sanitizedError = String(
+                errorResponse.error?
+                    .prefix(500)
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                    ?? "unknown error"
+            )
+            let requestIdJSON = requestId.map { id in
+                let escaped = id
+                    .replacingOccurrences(of: "\\", with: "\\\\")
+                    .replacingOccurrences(of: "\"", with: "\\\"")
+                return "\"\(escaped)\""
+            } ?? "null"
+            let fallbackJSON = """
+            {"type":"error","success":false,"requestId":\(requestIdJSON),"error":"[encoding fallback] \(sanitizedError)","timestamp":\(Int64(Date().timeIntervalSince1970 * 1000))}
+            """
+            print("[WebSocketServer] Error response encoding failed, using fallback")
+            return fallbackJSON.data(using: .utf8) ?? Data()
+        }
+    }
+
+    /// Best-effort extraction of requestId from raw JSON data for error correlation.
+    private static func extractRequestId(from data: Data) -> String? {
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+        return json["requestId"] as? String
     }
 }
 
@@ -465,8 +509,14 @@ class WebSocketConnection {
 
     private func sendConnectedEvent() {
         let event = ConnectedEvent(id: id)
-        if let data = try? JSONEncoder().encode(event) {
+        do {
+            let data = try JSONEncoder().encode(event)
             send(data)
+        } catch {
+            let fallback = "{\"type\":\"connected\",\"id\":\(id)}"
+            if let data = fallback.data(using: .utf8) {
+                send(data)
+            }
         }
     }
 

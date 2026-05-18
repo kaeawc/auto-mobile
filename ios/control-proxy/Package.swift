@@ -17,8 +17,13 @@ let package = Package(
     ],
     targets: [
         .target(
+            name: "ObjCExceptionCatcher",
+            path: "Sources/ObjCExceptionCatcher",
+            publicHeadersPath: "include"
+        ),
+        .target(
             name: "CtrlProxy",
-            dependencies: [],
+            dependencies: ["ObjCExceptionCatcher"],
             path: "Sources/CtrlProxy"
         ),
         .testTarget(

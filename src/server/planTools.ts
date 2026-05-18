@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
-import { ActionableError, BootedDevice, ExecutePlanResult } from "../models";
+import { ActionableError, BootedDevice, ExecutePlanResult, PlanExecutionResult } from "../models";
 import { importPlanFromYaml, executePlan } from "../utils/planUtils";
 import { logger } from "../utils/logger";
 import { createStructuredToolResponse } from "../utils/toolUtils";
@@ -433,7 +433,7 @@ const executePlanTool = async (device: BootedDevice, params: {
         : undefined;
 
     // Execute the plan with device context, ensuring video recording is stopped in finally block
-    let result;
+    let result: PlanExecutionResult | undefined;
     let videoFilePaths: string[] = [];
     let videoRecordingIds: string[] = [];
     try {
@@ -476,6 +476,13 @@ const executePlanTool = async (device: BootedDevice, params: {
           logger.warn(`[PERF +${defaultTimer.now() - perfStart}ms] Failed to stop automatic video recording: ${videoError}`);
         }
       }
+    }
+
+    // Guard: if executePlan threw, the exception propagates past the finally
+    // and result remains undefined. This guard prevents a TypeError from
+    // masking the original error if the control flow is ever refactored.
+    if (!result) {
+      throw new Error("Plan execution failed without producing a result");
     }
 
     // Capture step data and error message for recording

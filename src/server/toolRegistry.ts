@@ -573,13 +573,31 @@ class ToolRegistryClass {
 
       // Create a wrapper that adapts our ToolHandler to the MCP server's expected signature
       const wrappedHandler = async (args: any, extra: any) => {
+        const signal: AbortSignal | undefined = extra?.signal;
+
         if (tool.supportsProgress) {
-          // For tools that support progress, we'll handle the progress callback in the main server handler
-          // This is just a placeholder - the actual progress callback is set up in the server's CallToolRequestSchema handler
-          return await tool.handler(args);
+          // Construct a ProgressCallback that sends progress notifications via the MCP protocol
+          const progressCallback: ProgressCallback = async (progress: number, total?: number, message?: string) => {
+            try {
+              const progressToken = extra?._meta?.progressToken ?? `${tool.name}-${Date.now()}`;
+              await extra.sendNotification({
+                method: "notifications/progress",
+                params: {
+                  progressToken,
+                  progress,
+                  total,
+                  ...(message && { message })
+                }
+              });
+            } catch (error) {
+              // Log progress notification errors but don't fail the tool execution
+              logger.warn(`Failed to send progress notification: ${error}`);
+            }
+          };
+          return await tool.handler(args, progressCallback, signal);
         } else {
           // For tools that don't support progress, just call the handler normally
-          return await tool.handler(args);
+          return await tool.handler(args, undefined, signal);
         }
       };
 

@@ -74,39 +74,6 @@ public class ElementLocator: ElementLocating {
             self.perfProvider = perfProvider
         }
 
-        // MARK: - Main Thread Helper
-
-        /// Executes a throwing closure on the main thread and returns the result.
-        /// XCUITest APIs must be called on the main thread.
-        private func runOnMainThread<T>(_ block: @escaping () throws -> T) throws -> T {
-            if Thread.isMainThread {
-                return try block()
-            }
-
-            var result: Result<T, Error>!
-            DispatchQueue.main.sync {
-                do {
-                    result = try .success(block())
-                } catch {
-                    result = .failure(error)
-                }
-            }
-            return try result.get()
-        }
-
-        /// Executes a non-throwing closure on the main thread and returns the result.
-        private func runOnMainThread<T>(_ block: @escaping () -> T) -> T {
-            if Thread.isMainThread {
-                return block()
-            }
-
-            var result: T!
-            DispatchQueue.main.sync {
-                result = block()
-            }
-            return result
-        }
-
         public func setApplication(_ app: XCUIApplication) {
             // Release old app reference before setting new one
             foregroundApp = nil
@@ -156,9 +123,9 @@ public class ElementLocator: ElementLocating {
         }
 
         public func getAppState(bundleId: String) -> ObservedAppState {
-            let stateRaw: UInt = runOnMainThread {
+            let stateRaw: UInt = runOnMainThreadNonThrowing({
                 XCUIApplication(bundleIdentifier: bundleId).state.rawValue
-            }
+            }, fallback: 0)
             switch stateRaw {
             case 0: return .unknown
             case 1: return .notRunning
@@ -170,9 +137,9 @@ public class ElementLocator: ElementLocating {
 
         public func awaitAppState(bundleId: String, expectedState: AppStateExpectation) -> Bool {
             for _ in 0..<10 {
-                let stateRaw: UInt = runOnMainThread {
+                let stateRaw: UInt = runOnMainThreadNonThrowing({
                     XCUIApplication(bundleIdentifier: bundleId).state.rawValue
-                }
+                }, fallback: 0)
                 let matched: Bool
                 switch expectedState {
                 case .foreground:
@@ -202,13 +169,13 @@ public class ElementLocator: ElementLocating {
             // cached instances may return stale state values
             let stateInfo: (springboardState: UInt, currentAppState: UInt?, currentBundleId: String?) =
                 perfProvider.track("checkState") {
-                    runOnMainThread {
+                    runOnMainThreadNonThrowing({
                         let sbState = self.springboard.state.rawValue
                         let freshAppState: UInt? = self.foregroundBundleId.map { bundleId in
                             XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                         }
                         return (sbState, freshAppState, self.foregroundBundleId)
-                    }
+                    }, fallback: (0, nil, self.foregroundBundleId))
                 }
 
             print("[ElementLocator] ensureForegroundApp: current=\(stateInfo.currentBundleId ?? "nil") state=\(stateInfo.currentAppState.map { String($0) } ?? "nil") springboard=\(stateInfo.springboardState) observed=\(observedBundleIds)")
@@ -243,12 +210,12 @@ public class ElementLocator: ElementLocating {
         /// Returns foreground app if available and in foreground, otherwise springboard
         private var currentApplication: XCUIApplication {
             // Check state on main thread using fresh instance (cached instances return stale state)
-            let stateInfo: (state: UInt?, bundleId: String?) = runOnMainThread {
+            let stateInfo: (state: UInt?, bundleId: String?) = runOnMainThreadNonThrowing({
                 let freshState: UInt? = self.foregroundBundleId.map { bundleId in
                     XCUIApplication(bundleIdentifier: bundleId).state.rawValue
                 }
                 return (freshState, self.foregroundBundleId)
-            }
+            }, fallback: (nil, self.foregroundBundleId))
             let foregroundAppInForeground = (stateInfo.state ?? 0) >= 4 // .runningForeground only
             if let app = foregroundApp, foregroundAppInForeground {
                 return app
@@ -308,9 +275,9 @@ public class ElementLocator: ElementLocating {
             // First, try to find bundle IDs from springboard's element tree
             // This can work when apps embed their bundle ID in element identifiers
             let snapshot: XCUIElementSnapshot? = perfProvider.track("springboardSnapshot") {
-                runOnMainThread {
+                runOnMainThreadNonThrowing({
                     try? self.springboard.snapshot()
-                }
+                }, fallback: nil)
             }
 
             if let snapshot = snapshot {
@@ -325,10 +292,10 @@ public class ElementLocator: ElementLocating {
                             continue
                         }
 
-                        let stateRawValue: UInt = runOnMainThread {
+                        let stateRawValue: UInt = runOnMainThreadNonThrowing({
                             let testApp = XCUIApplication(bundleIdentifier: bundleId)
                             return testApp.state.rawValue
-                        }
+                        }, fallback: 0)
                         print("[ElementLocator] Candidate \(bundleId) state=\(stateRawValue)")
                         if stateRawValue >= 4 { // .runningForeground only
                             print("[ElementLocator] Found foreground app from springboard: \(bundleId)")
@@ -353,10 +320,10 @@ public class ElementLocator: ElementLocating {
                         continue
                     }
 
-                    let stateRawValue: UInt = runOnMainThread {
+                    let stateRawValue: UInt = runOnMainThreadNonThrowing({
                         let testApp = XCUIApplication(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
-                    }
+                    }, fallback: 0)
                     print("[ElementLocator] Observed \(bundleId) state=\(stateRawValue)")
                     if stateRawValue >= 4 { // .runningForeground only
                         return bundleId
@@ -382,10 +349,10 @@ public class ElementLocator: ElementLocating {
                         continue
                     }
 
-                    let stateRawValue: UInt = runOnMainThread {
+                    let stateRawValue: UInt = runOnMainThreadNonThrowing({
                         let testApp = XCUIApplication(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
-                    }
+                    }, fallback: 0)
                     if stateRawValue >= 4 { // .runningForeground only
                         print("[ElementLocator] Found foreground app from system apps: \(bundleId)")
                         return bundleId
@@ -530,8 +497,8 @@ public class ElementLocator: ElementLocating {
             // 1. Alerts in the app's own snapshot tree (permission dialogs presented within the app)
             // 2. Alerts in SpringBoard's tree (system dialogs managed by SpringBoard)
             // System permission dialogs may appear in either location depending on iOS version.
-            let systemAlerts = perfProvider.track("systemAlerts") {
-                getSystemAlerts(appSnapshot: snapshot, keyboardFocusFrame: keyboardFocusFrame)
+            let systemAlerts = try perfProvider.track("systemAlerts") {
+                try getSystemAlerts(appSnapshot: snapshot, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // If there are system alerts, include them in the hierarchy
@@ -559,7 +526,7 @@ public class ElementLocator: ElementLocating {
             // Get screen scale and dimensions for coordinate conversion
             // iOS reports bounds in points, but screenshots are in pixels
             // screenScale converts: pixels = points * screenScale
-            let (screenScale, screenWidth, screenHeight): (Float, Int, Int) = runOnMainThread {
+            let (screenScale, screenWidth, screenHeight): (Float, Int, Int) = try runOnMainThread {
                 let scale = Float(UIScreen.main.scale)
                 let bounds = UIScreen.main.bounds
                 return (scale, Int(bounds.width), Int(bounds.height))
@@ -584,14 +551,14 @@ public class ElementLocator: ElementLocating {
         /// Alert elements are extracted separately from the main hierarchy tree to ensure
         /// they are always visible as top-level children and never lost to optimization.
         /// Deduplicates by alert label text to avoid showing the same alert twice.
-        private func getSystemAlerts(appSnapshot: XCUIElementSnapshot, keyboardFocusFrame: CGRect? = nil) -> [UIElementInfo] {
+        private func getSystemAlerts(appSnapshot: XCUIElementSnapshot, keyboardFocusFrame: CGRect? = nil) throws -> [UIElementInfo] {
             // Check for alerts in the app's own snapshot tree
             let appAlerts = collectAlertElements(from: appSnapshot).map { snapshot in
                 buildElementInfoFromSnapshot(snapshot, depth: 0, screenBounds: snapshot.frame, keyboardFocusFrame: keyboardFocusFrame)
             }
 
             // Also check SpringBoard for alerts not in the app's tree
-            let springboardAlerts = getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
+            let springboardAlerts = try getAlertsFromSpringboard(keyboardFocusFrame: keyboardFocusFrame)
 
             // Deduplicate by alert label text
             var seenLabels: Set<String> = []
@@ -626,8 +593,8 @@ public class ElementLocator: ElementLocating {
         /// Uses single snapshot() + tree traversal instead of .alerts query which can hang
         /// indefinitely on system permission dialogs, blocking the main thread.
         /// IMPORTANT: Creates a new XCUIApplication each call to avoid stale cached state.
-        private func getAlertsFromSpringboard(keyboardFocusFrame: CGRect? = nil) -> [UIElementInfo] {
-            let alertSnapshots: [XCUIElementSnapshot] = runOnMainThread {
+        private func getAlertsFromSpringboard(keyboardFocusFrame: CGRect? = nil) throws -> [UIElementInfo] {
+            let alertSnapshots: [XCUIElementSnapshot] = try runOnMainThread {
                 let freshSpringboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                 guard let snapshot = try? freshSpringboard.snapshot() else { return [] }
                 return self.collectAlertElements(from: snapshot)
@@ -986,13 +953,6 @@ public class ElementLocator: ElementLocating {
             )]
         }
 
-        /// Legacy slow method - keeping for reference but not used
-        private func buildElementInfo(from _: XCUIElement, depth _: Int, maxDepth _: Int) -> UIElementInfo {
-            // This method accesses element properties individually which is SLOW
-            // Each property access is an IPC call to the accessibility service
-            // Use buildElementInfoFromSnapshot instead
-            fatalError("Use buildElementInfoFromSnapshot instead - this method is too slow")
-        }
 
         private func mapElementType(_ type: XCUIElement.ElementType) -> String {
             switch type {
@@ -1115,39 +1075,32 @@ public class ElementLocator: ElementLocating {
             // Query .any first (1 IPC call). If the match is a text-input type,
             // re-query with the specific type to get the outermost (parent) element
             // instead of an internal UIKit subview that shares the same identifier.
-            let element: XCUIElement = runOnMainThread {
+            guard let element: XCUIElement = runOnMainThreadNonThrowing({
                 let anyMatch = app.descendants(matching: .any)
                     .matching(identifier: resourceId).firstMatch
-                guard anyMatch.exists else { return anyMatch }
+                guard anyMatch.exists else { return nil as XCUIElement? }
 
-                // Check if the match is a text-input type that may have nested subviews
                 let matchedType = anyMatch.elementType
                 if Self.textInputElementTypes.contains(matchedType) {
-                    // Re-query with the specific type to prefer parent over internal subview
                     let typedMatch = app.descendants(matching: matchedType)
                         .matching(identifier: resourceId).firstMatch
                     if typedMatch.exists {
-                        return typedMatch
+                        return typedMatch as XCUIElement?
                     }
                 }
-                return anyMatch
-            }
-            let exists = runOnMainThread { element.exists }
-            if exists {
-                elementCache[resourceId] = element
-                return element
-            }
-            return nil
+                return anyMatch as XCUIElement?
+            }, fallback: nil) else { return nil }
+            elementCache[resourceId] = element
+            return element
         }
 
         public func findElement(byText text: String) -> Any? {
             let app = currentApplication
-            // Run on main thread since XCUITest APIs require it
-            let element: XCUIElement = runOnMainThread {
-                app.descendants(matching: .any).matching(NSPredicate(format: "label == %@", text)).firstMatch
-            }
-            let exists = runOnMainThread { element.exists }
-            return exists ? element : nil
+            return runOnMainThreadNonThrowing({
+                let match = app.descendants(matching: .any)
+                    .matching(NSPredicate(format: "label == %@", text)).firstMatch
+                return match.exists ? match as XCUIElement? : nil
+            }, fallback: nil)
         }
 
         public func getCachedElement(_ resourceId: String) -> XCUIElement? {

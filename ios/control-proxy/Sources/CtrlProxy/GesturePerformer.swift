@@ -125,8 +125,8 @@ public class GesturePerformer: GesturePerforming {
         ///
         /// Returns `(hasFocus, strategy)` so the caller can log which path
         /// won. Query runs on the main thread.
-        private func detectKeyboardFocus(app: XCUIApplication) -> (Bool, String) {
-            return runOnMainThread { [springboard] in
+        private func detectKeyboardFocus(app: XCUIApplication) throws -> (Bool, String) {
+            return try runOnMainThread { [springboard] in
                 // Strategy 1: predicate
                 let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
@@ -163,9 +163,9 @@ public class GesturePerformer: GesturePerforming {
         /// it surfaces in the MCP response — not just in device logs.
         private func requireKeyboardFocus(app: XCUIApplication, context: String) throws {
             let queryStart = Date()
-            let (hasFocus, strategy) = detectKeyboardFocus(app: app)
+            let (hasFocus, strategy) = try detectKeyboardFocus(app: app)
             let elapsedMs = Int(Date().timeIntervalSince(queryStart) * 1000)
-            let appLabel = runOnMainThread { app.label }
+            let appLabel = runOnMainThreadNonThrowing({ app.label }, fallback: "unknown")
             gestureLog.debug("requireKeyboardFocus hasFocus=\(hasFocus, privacy: .public) strategy=\(strategy, privacy: .public) context=\"\(context, privacy: .public)\" elapsedMs=\(elapsedMs, privacy: .public) appLabel=\(appLabel, privacy: .public)")
 
             guard hasFocus else {
@@ -198,7 +198,7 @@ public class GesturePerformer: GesturePerforming {
             var strategy = "none"
             var iterations = 0
             while !hasFocus && Date() < deadline {
-                let result = detectKeyboardFocus(app: app)
+                let result = try detectKeyboardFocus(app: app)
                 hasFocus = result.0
                 strategy = result.1
                 iterations += 1
@@ -222,7 +222,7 @@ public class GesturePerformer: GesturePerforming {
         /// elements and their focus state, for #1925-style "no keyboard focus"
         /// failures. Returned as a single line so it fits in a WebSocket error.
         private func buildFocusDiagnostic(app: XCUIApplication, reason: String) -> String {
-            return runOnMainThread { [springboard] in
+            return runOnMainThreadNonThrowing({ [springboard] in
                 var parts: [String] = []
                 parts.append("reason=\"\(reason)\"")
                 parts.append("app.label=\"\(app.label)\"")
@@ -259,45 +259,12 @@ public class GesturePerformer: GesturePerforming {
                 parts.append("app.keyboards.count=\(app.keyboards.count)")
                 parts.append("springboard.keyboards.count=\(springboard.keyboards.count)")
                 return parts.joined(separator: " | ")
-            }
+            }, fallback: "reason=\"\(reason)\" [diagnostic collection failed]")
         }
 
         public func setApplication(_ app: XCUIApplication) {
             ownedApplication = nil
             application = app
-        }
-
-        // MARK: - Main Thread Helper
-
-        /// Executes a throwing closure on the main thread and returns the result.
-        /// XCUITest APIs must be called on the main thread.
-        private func runOnMainThread<T>(_ block: @escaping () throws -> T) throws -> T {
-            if Thread.isMainThread {
-                return try block()
-            }
-
-            var result: Result<T, Error>!
-            DispatchQueue.main.sync {
-                do {
-                    result = try .success(block())
-                } catch {
-                    result = .failure(error)
-                }
-            }
-            return try result.get()
-        }
-
-        /// Executes a non-throwing closure on the main thread and returns the result.
-        private func runOnMainThread<T>(_ block: @escaping () -> T) -> T {
-            if Thread.isMainThread {
-                return block()
-            }
-
-            var result: T!
-            DispatchQueue.main.sync {
-                result = block()
-            }
-            return result
         }
 
         // MARK: - Tap Gestures
@@ -307,7 +274,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            runOnMainThread {
+            try runOnMainThread {
                 let coordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: x, dy: y))
 
@@ -324,7 +291,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            runOnMainThread {
+            try runOnMainThread {
                 let coordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: x, dy: y))
                 coordinate.doubleTap()
@@ -336,7 +303,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            runOnMainThread {
+            try runOnMainThread {
                 let coordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: x, dy: y))
                 coordinate.press(forDuration: duration)
@@ -350,7 +317,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            runOnMainThread {
+            try runOnMainThread {
                 let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: startX, dy: startY))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
@@ -380,7 +347,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            runOnMainThread {
+            try runOnMainThread {
                 let startCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: startX, dy: startY))
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
@@ -435,7 +402,7 @@ public class GesturePerformer: GesturePerforming {
 
             try requireKeyboardFocus(app: app, context: "ensure a text field is focused before typing")
 
-            runOnMainThread {
+            try runOnMainThread {
                 app.typeText(text)
             }
         }
@@ -584,8 +551,8 @@ public class GesturePerformer: GesturePerforming {
         /// exists somewhere but doesn't name an element, and we need an
         /// element to dispatch deletes against. Callers that hit that case
         /// should use `clearText(resourceId:)` with a concrete selector.
-        private func resolveFocusedTextElement(app: XCUIApplication) -> XCUIElement? {
-            return runOnMainThread {
+        private func resolveFocusedTextElement(app: XCUIApplication) throws -> XCUIElement? {
+            return try runOnMainThread {
                 // Strategy 1: predicate
                 let byPredicate = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "hasKeyboardFocus == true"))
@@ -651,14 +618,14 @@ public class GesturePerformer: GesturePerforming {
             // Single code path — no Cmd+A/Delete fallback, because that
             // path bypasses RN's onChangeText bridge.
             try requireKeyboardFocus(app: app, context: "ensure a text field is focused before clearing")
-            guard let focused = resolveFocusedTextElement(app: app) else {
+            guard let focused = try resolveFocusedTextElement(app: app) else {
                 let diag = buildFocusDiagnostic(app: app, reason: "clearText: focus confirmed but no XCUITest-visible element resolved")
                 gestureLog.error("\(diag, privacy: .public)")
                 throw GestureError.gestureFailed(
                     "clearText could not resolve a focused text element. Pass resourceId to clear a specific field. Diagnostic: \(diag)"
                 )
             }
-            _ = runOnMainThread {
+            _ = try runOnMainThread {
                 GesturePerformer.clearViaDeletes(element: focused)
             }
         }
@@ -670,7 +637,7 @@ public class GesturePerformer: GesturePerforming {
 
             try requireKeyboardFocus(app: app, context: "ensure a text field is focused before selecting")
 
-            runOnMainThread {
+            try runOnMainThread {
                 app.typeKey("a", modifierFlags: .command)
             }
         }
@@ -682,11 +649,11 @@ public class GesturePerformer: GesturePerforming {
 
             switch action.lowercased() {
             case "done", "go", "search", "send", "next":
-                runOnMainThread {
+                try runOnMainThread {
                     app.typeText("\n")
                 }
             case "previous":
-                runOnMainThread {
+                try runOnMainThread {
                     app.typeKey(.tab, modifierFlags: .shift)
                 }
             default:
@@ -735,7 +702,7 @@ public class GesturePerformer: GesturePerforming {
                 throw GestureError.noApplication
             }
 
-            return runOnMainThread {
+            return try runOnMainThread {
                 let screenshot = app.screenshot()
                 return screenshot.pngRepresentation
             }
@@ -763,7 +730,7 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func getOrientation() -> String {
-            return runOnMainThread {
+            return runOnMainThreadNonThrowing({
                 let device = XCUIDevice.shared
 
                 switch device.orientation {
@@ -773,7 +740,7 @@ public class GesturePerformer: GesturePerforming {
                 case .landscapeRight: return "landscape_right"
                 default: return "unknown"
                 }
-            }
+            }, fallback: "unknown")
         }
 
         // MARK: - Clipboard
@@ -829,14 +796,14 @@ public class GesturePerformer: GesturePerforming {
                 guard let text = text else {
                     throw GestureError.missingParameter("text required for copy")
                 }
-                runOnMainThread {
+                try runOnMainThread {
                     UIPasteboard.general.string = text
                 }
                 GesturePerformer.writeShadow(text)
                 return nil
 
             case "clear":
-                runOnMainThread {
+                try runOnMainThread {
                     UIPasteboard.general.items = []
                 }
                 GesturePerformer.writeShadow(nil)
@@ -859,13 +826,13 @@ public class GesturePerformer: GesturePerforming {
                 try requireKeyboardFocus(app: app, context: "ensure a text field is focused before pasting")
 
                 // Use Cmd+V for real paste — handles emoji, Unicode, and is a single operation
-                runOnMainThread {
+                try runOnMainThread {
                     app.typeKey("v", modifierFlags: .command)
                 }
 
                 // iOS 16+ may show "Allow Paste" system alert (label is English-only;
                 // no reliable cross-locale alternative exists without button index)
-                handlePasteAlert()
+                try handlePasteAlert()
                 return nil
 
             default:
@@ -876,8 +843,8 @@ public class GesturePerformer: GesturePerforming {
         /// Handle iOS 16+ "Allow Paste" system alert that appears when pasting
         /// content set by another process. Checks SpringBoard for the alert button
         /// and taps it if present. No-op on iOS 15 or if already permitted.
-        private func handlePasteAlert() {
-            runOnMainThread {
+        private func handlePasteAlert() throws {
+            try runOnMainThread {
                 let allowButton = self.springboard.buttons["Allow Paste"]
                 // Quick existence check avoids full 0.5s wait when no alert is present
                 if allowButton.exists || allowButton.waitForExistence(timeout: 0.3) {
@@ -887,13 +854,13 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressHome() throws {
-            runOnMainThread {
+            try runOnMainThread {
                 XCUIDevice.shared.press(.home)
             }
         }
 
         public func openRecentApps() throws {
-            runOnMainThread {
+            try runOnMainThread {
                 let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
                 let screenSize = springboard.frame.size
                 let startCoordinate = springboard.coordinate(withNormalizedOffset: .zero)
@@ -912,32 +879,32 @@ public class GesturePerformer: GesturePerforming {
         // MARK: - App Control
 
         public func launchApp(bundleId: String) throws {
-            runOnMainThread {
+            try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 app.launch()
             }
         }
 
         public func terminateApp(bundleId: String) throws {
-            runOnMainThread {
+            try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 app.terminate()
             }
         }
 
         public func activateApp(bundleId: String) throws {
-            runOnMainThread {
+            try runOnMainThread {
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 app.activate()
             }
         }
 
         public func updateApplication(bundleId: String) {
-            runOnMainThread {
+            runOnMainThreadNonThrowing({
                 let app = XCUIApplication(bundleIdentifier: bundleId)
                 self.ownedApplication = app
                 self.application = app
-            }
+            }, fallback: ())
         }
 
     #else

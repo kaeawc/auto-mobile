@@ -865,6 +865,109 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertTrue(errorResponse.error?.contains("orientation") == true)
     }
 
+    // MARK: - ObjCExceptionError Propagation Tests
+
+    func testTapWithObjCExceptionReturnsErrorResponse() {
+        fakeGesturePerformer.setFailure(
+            for: "tap",
+            error: ObjCExceptionError(name: "NSRangeException", reason: "index 5 beyond bounds [0..3]")
+        )
+
+        let request = WebSocketRequest(
+            type: "request_tap_coordinates",
+            requestId: "tap-objc-err",
+            x: 100,
+            y: 200
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertNotNil(errorResponse.error)
+        XCTAssertTrue(errorResponse.error?.contains("NSRangeException") ?? false)
+        XCTAssertTrue(errorResponse.error?.contains("index 5 beyond bounds") ?? false)
+    }
+
+    func testSwipeWithObjCExceptionReturnsErrorResponse() {
+        fakeGesturePerformer.setFailure(
+            for: "swipe",
+            error: ObjCExceptionError(name: "NSInternalInconsistencyException", reason: "Invalid snapshot")
+        )
+
+        let request = WebSocketRequest(
+            type: "request_swipe",
+            requestId: "swipe-objc-err",
+            duration: 300,
+            x1: 100,
+            y1: 200,
+            x2: 100,
+            y2: 500
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertTrue(errorResponse.error?.contains("NSInternalInconsistencyException") ?? false)
+        XCTAssertTrue(errorResponse.error?.contains("Invalid snapshot") ?? false)
+    }
+
+    func testHierarchyWithObjCExceptionReturnsErrorResponse() {
+        fakeElementLocator.setShouldThrow(
+            ObjCExceptionError(name: "NSGenericException", reason: "Stale element reference")
+        )
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "hier-objc-err"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse error")
+            return
+        }
+
+        XCTAssertFalse(errorResponse.success ?? true)
+        XCTAssertTrue(errorResponse.error?.contains("NSGenericException") ?? false)
+        XCTAssertTrue(errorResponse.error?.contains("Stale element reference") ?? false)
+    }
+
+    func testLaunchAppWithObjCExceptionReturnsErrorResponse() {
+        fakeElementLocator.getAppStateResult = .notRunning
+        fakeGesturePerformer.setFailure(
+            for: "launchApp",
+            error: ObjCExceptionError(name: "NSInvalidArgumentException", reason: "App not installed")
+        )
+
+        let request = WebSocketRequest(
+            type: "request_launch_app",
+            requestId: "launch-objc-err",
+            bundleId: "com.missing.app"
+        )
+
+        let response = commandHandler.handle(request)
+
+        guard let errorResponse = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse")
+            return
+        }
+
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertTrue(errorResponse.error?.contains("NSInvalidArgumentException") ?? false)
+        XCTAssertTrue(errorResponse.error?.contains("App not installed") ?? false)
+    }
+
     // MARK: - Unknown Command Tests
 
     func testUnknownCommand() {

@@ -211,6 +211,98 @@ describe("systemTray find", () => {
     expect(fakeAdb.wasCommandExecuted("cmd statusbar expand-notifications")).toBe(true);
     expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThan(1);
   });
+
+  test("uses minimum timeout when awaitTimeoutMs is zero", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Test Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    // With awaitTimeoutMs=0, the function should enforce a minimum timeout
+    // and still find the notification after the tray opens
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Test Notification" },
+      [],
+      0
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(result.observation.viewHierarchy?.packageName).toBe(SYSTEM_TRAY_PACKAGE);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  test("uses minimum timeout when awaitTimeoutMs is negative", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createClosedHierarchy()),
+      createObservation(createTrayHierarchy("Test Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    // With negative awaitTimeoutMs, the function should enforce a minimum timeout
+    // and still find the notification after the tray opens
+    const result = await waitForNotificationMatch(
+      device,
+      { title: "Test Notification" },
+      [],
+      -100
+    );
+
+    expect(result.match).not.toBeNull();
+    expect(result.observation.viewHierarchy?.packageName).toBe(SYSTEM_TRAY_PACKAGE);
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThanOrEqual(1);
+  });
+
+  test("zero timeout still polls when first observation has no match", async () => {
+    const fakeTimer = new FakeTimer();
+    const fakeAdb = new SequencedFakeAdbExecutor([1000, 2000]);
+    // Tray is already open with wrong notification on first check.
+    // ensureSystemTrayOpen sees tray open (skips expand), then the while loop
+    // finds no match on index 0, sleeps, and re-observes getting index 1 with the target.
+    const fakeObserveScreen = new SequencedObserveScreen([
+      createObservation(createTrayHierarchy("Other Notification")),
+      createObservation(createTrayHierarchy("Target Notification"))
+    ]);
+
+    setSystemTrayDependencies({
+      timer: fakeTimer,
+      adbFactory: () => fakeAdb,
+      observeScreenFactory: () => fakeObserveScreen
+    });
+
+    // Without the fix, awaitTimeoutMs=0 would return null immediately after
+    // the first observation check. With the fix, it uses minimum timeout and polls.
+    const resultPromise = waitForNotificationMatch(
+      device,
+      { title: "Target Notification" },
+      [],
+      0
+    );
+
+    await waitForPendingSleep(fakeTimer);
+    fakeTimer.advanceTime(POLL_INTERVAL_MS);
+
+    const result = await resultPromise;
+
+    expect(result.match).not.toBeNull();
+    expect(result.match!.match.matches.title?.text).toBe("Target Notification");
+    expect(fakeObserveScreen.getExecuteCallCount()).toBeGreaterThanOrEqual(2);
+  });
 });
 
 describe("Android systemTray close", () => {

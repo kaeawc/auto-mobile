@@ -53,7 +53,6 @@ export class CriticalSectionCoordinator {
       this.locks.set(lock, new Mutex());
     }
 
-    // Initialize barrier tracking
     if (!this.barrierCounts.has(lock)) {
       this.barrierCounts.set(lock, new Set());
     }
@@ -61,10 +60,9 @@ export class CriticalSectionCoordinator {
       this.barrierResolvers.set(lock, []);
     }
 
-    // Cancel any existing cleanup timer
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
       this.cleanupTimers.delete(lock);
     }
   }
@@ -154,7 +152,9 @@ export class CriticalSectionCoordinator {
         resolve();
       }
 
-      // Reset barrier for potential next round (though we don't support re-entry)
+      // Clear barrier state for potential reuse
+      arrivedDevices.clear();
+
       return;
     }
 
@@ -187,7 +187,7 @@ export class CriticalSectionCoordinator {
       // Store the timeout so we can clear it if resolved normally
       const originalResolve = resolve;
       const wrappedResolve = () => {
-        clearTimeout(timer);
+        defaultTimer.clearTimeout(timer);
         originalResolve();
       };
 
@@ -204,10 +204,9 @@ export class CriticalSectionCoordinator {
 	 * Schedule cleanup of lock resources after all devices have finished.
 	 */
   private scheduleCleanup(lock: string): void {
-    // Cancel any existing cleanup timer
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
     }
 
     // Schedule new cleanup
@@ -231,7 +230,7 @@ export class CriticalSectionCoordinator {
 
     const existingTimer = this.cleanupTimers.get(lock);
     if (existingTimer) {
-      clearTimeout(existingTimer);
+      defaultTimer.clearTimeout(existingTimer);
     }
 
     this.locks.delete(lock);
@@ -245,9 +244,8 @@ export class CriticalSectionCoordinator {
 	 * Reset all coordinator state (primarily for testing).
 	 */
   public reset(): void {
-    // Clear all timers
     for (const timer of this.cleanupTimers.values()) {
-      clearTimeout(timer);
+      defaultTimer.clearTimeout(timer);
     }
 
     this.locks.clear();

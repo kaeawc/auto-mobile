@@ -154,21 +154,21 @@ describe("CriticalSectionCoordinator", () => {
     );
   });
 
-  test("throws error if same device tries to enter twice (nesting detection)", async () => {
+  test("throws error if same device tries to enter twice before barrier passes", async () => {
     const lockName = "lock-5";
-    coordinator.registerExpectedDevices(lockName, 1);
+    coordinator.registerExpectedDevices(lockName, 2);
 
-    const release = await coordinator.enterCriticalSection(
-      lockName,
-      "device-1"
-    );
+    // First device arrives at barrier (waiting for second device)
+    const promise1 = coordinator.enterCriticalSection(lockName, "device-1", 100);
 
-    // Try to enter again before releasing
+    // Same device tries to arrive again before barrier passes
     await expect(
-      coordinator.enterCriticalSection(lockName, "device-1")
+      coordinator.enterCriticalSection(lockName, "device-1", 100)
     ).rejects.toThrow(/already arrived at barrier/);
 
-    release();
+    // Clean up: advance time to trigger timeout for the waiting device
+    fakeTimer.advanceTime(100);
+    await promise1.catch(() => {}); // Swallow the timeout error
   });
 
   test("throws error if expected device count is not registered", async () => {
@@ -265,6 +265,63 @@ describe("CriticalSectionCoordinator", () => {
     await expect(
       coordinator.enterCriticalSection(lockName, "device-2")
     ).rejects.toThrow(/No expected device count registered/);
+  });
+
+  test("clears barrier timeout when all devices arrive", async () => {
+    const lockName = "lock-timeout-clear";
+    coordinator.registerExpectedDevices(lockName, 2);
+
+    // Both devices enter concurrently and release immediately
+    await Promise.all([
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-1", 30000);
+        release();
+      })(),
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-2", 30000);
+        release();
+      })(),
+    ]);
+
+    // After all devices arrive, barrier timeouts should be cleared
+    // Only cleanup timers (5000ms) should remain, not barrier timeouts (30000ms)
+    const pendingTimeouts = fakeTimer.getPendingTimeouts();
+    for (const timeout of pendingTimeouts) {
+      expect(timeout).not.toBe(30000);
+    }
+  });
+
+  test("allows lock reuse after all devices complete", async () => {
+    const lockName = "lock-reuse";
+
+    // First round
+    coordinator.registerExpectedDevices(lockName, 2);
+
+    await Promise.all([
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-1");
+        release();
+      })(),
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-2");
+        release();
+      })(),
+    ]);
+
+    // Re-register for second round (without waiting for cleanup timer)
+    coordinator.registerExpectedDevices(lockName, 2);
+
+    // Second round should work without "already arrived" errors
+    await Promise.all([
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-1");
+        release();
+      })(),
+      (async () => {
+        const release = await coordinator.enterCriticalSection(lockName, "device-2");
+        release();
+      })(),
+    ]);
   });
 
   test("handles reregistration of same lock after cleanup", async () => {

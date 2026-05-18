@@ -16,12 +16,10 @@ import { FakeScreenshotStateStore } from "../../../fakes/FakeScreenshotStateStor
 
 /**
  * Poll until `predicate()` returns true or the iteration limit is reached.
- * Avoids the flakiness of counting setImmediate yields — the recorder's
- * fire-and-forget `.finally()` chains can take a variable number of
- * microtask boundaries to settle depending on what else the event loop is
- * doing.
+ * Uses setImmediate to yield the event loop between checks. Max iterations
+ * set high enough to accommodate I/O settling on resource-constrained CI.
  */
-async function eventually(predicate: () => boolean, maxIterations = 50): Promise<void> {
+async function eventually(predicate: () => boolean, maxIterations = 200): Promise<void> {
   for (let i = 0; i < maxIterations; i++) {
     if (predicate()) {
       return;

@@ -1,5 +1,42 @@
 # Changelog
 
+## [v0.0.27] - 2026-05-18
+### Added
+- IDE Plugin: Display exported YAML in Record Test UX after finishing ([#1073](https://github.com/kaeawc/auto-mobile/issues/1073)) (intellij plugin)
+- epic: detect image/media loading via network and view hierarchy correlation ([#1015](https://github.com/kaeawc/auto-mobile/issues/1015)) (android, research, ai)
+- feat: correlate network requests with media views for loading detection ([#1014](https://github.com/kaeawc/auto-mobile/issues/1014)) (android, ai)
+- Extend focus navigation to handle scroll-then-focus for off-screen elements ([#472](https://github.com/kaeawc/auto-mobile/issues/472)) (android, a11y)
+### Changed
+- refactor: extract sendCommand helper to eliminate WebSocket delegate boilerplate ([#1880](https://github.com/kaeawc/auto-mobile/issues/1880))
+- Chore: Test multi-device execution ([#764](https://github.com/kaeawc/auto-mobile/issues/764))
+### Other
+- PlanMigrator: notification.timeout → awaitTimeout ([#2120](https://github.com/kaeawc/auto-mobile/issues/2120))
+- Plan execution ADB contention: skip screenshots and cancel orphaned jobs ([#2119](https://github.com/kaeawc/auto-mobile/issues/2119))
+- Tap resilience: ghost tap detection and pre-tap stability ([#2118](https://github.com/kaeawc/auto-mobile/issues/2118))
+- No way to configure accessibility service flags at runtime ([#2099](https://github.com/kaeawc/auto-mobile/issues/2099))
+- Reduce ADB overhead during plan execution ([#2098](https://github.com/kaeawc/auto-mobile/issues/2098))
+- Stability failures with remote emulators and long-running tool calls ([#2097](https://github.com/kaeawc/auto-mobile/issues/2097))
+- Tapping notifications inside collapsed Android groups opens app generically instead of deep-linking ([#2096](https://github.com/kaeawc/auto-mobile/issues/2096))
+- Ghost taps - touch events fail to register regardless of input method ([#2081](https://github.com/kaeawc/auto-mobile/issues/2081))
+- ADB pipe congestion from event-driven hierarchy broadcasts causes off-screen bounds ([#2080](https://github.com/kaeawc/auto-mobile/issues/2080))
+- No way to opt into observe step capture from CI without modifying test code ([#1973](https://github.com/kaeawc/auto-mobile/issues/1973))
+- executePlan timeout too short for long UI plans - premature Operation cancelled in CI ([#1972](https://github.com/kaeawc/auto-mobile/issues/1972))
+- No MCP tool for setting Android SCHEDULE_EXACT_ALARM app op ([#1967](https://github.com/kaeawc/auto-mobile/issues/1967))
+- No MCP tool for toggling Android Do Not Disturb policy access ([#1966](https://github.com/kaeawc/auto-mobile/issues/1966))
+- executePlan silently continues past observe waitFor timeout instead of failing the step ([#1963](https://github.com/kaeawc/auto-mobile/issues/1963))
+- tapOn diagnostics lost when surfaced through executePlan - no visibility into tap mechanics ([#1961](https://github.com/kaeawc/auto-mobile/issues/1961))
+- Android screenrecord produces corrupt/truncated video files on stop ([#1960](https://github.com/kaeawc/auto-mobile/issues/1960))
+- Support segmented video recording to chain multiple screenrecord sessions past the 180-second Android cap ([#1959](https://github.com/kaeawc/auto-mobile/issues/1959))
+- No way to capture per-step observe snapshots for CI debugging ([#1958](https://github.com/kaeawc/auto-mobile/issues/1958))
+- No opt-in mechanism for pre-tap element stability verification ([#1950](https://github.com/kaeawc/auto-mobile/issues/1950))
+- Navigation screenshots add constant I/O pressure to CI emulators ([#1947](https://github.com/kaeawc/auto-mobile/issues/1947))
+- Queued MCP forward requests burn timeout budget while waiting in serialization queue ([#1946](https://github.com/kaeawc/auto-mobile/issues/1946))
+- HTTP server requestTimeout kills long plans + id:unknown error responses cause silent hangs ([#1944](https://github.com/kaeawc/auto-mobile/issues/1944))
+- executePlan MCP timeout too short - premature Operation cancelled ([#1943](https://github.com/kaeawc/auto-mobile/issues/1943))
+- Streamable HTTP SSE auto-reconnect triggers 409 session teardown ([#1942](https://github.com/kaeawc/auto-mobile/issues/1942))
+- Concurrent MCP socket forwards corrupt shared HTTP session ([#1939](https://github.com/kaeawc/auto-mobile/issues/1939))
+- Create Homebrew formula for AutoMobile ([#978](https://github.com/kaeawc/auto-mobile/issues/978)) (release engineering, env)
+
 ## [v0.0.26] - 2026-05-06
 ### Other
 - WebSocket timeout cascade causes daemon blindness after slow hierarchy extraction ([#2079](https://github.com/kaeawc/auto-mobile/issues/2079))

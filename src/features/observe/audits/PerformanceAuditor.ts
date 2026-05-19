@@ -4,12 +4,17 @@ import { PerformanceAudit } from "../../performance/PerformanceAudit";
 import { ThresholdManager } from "../../performance/ThresholdManager";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
 import type { BootedDevice, ObserveResult } from "../../../models";
-import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { defaultAdbClientFactory, type AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 
 export interface PerformanceAuditorOptions {
   device: BootedDevice;
-  adb: AdbExecutor;
+  /**
+   * Factory used to construct dependent components (DeviceCapabilitiesDetector,
+   * PerformanceAudit) which require an AdbClientFactory. Defaults to
+   * defaultAdbClientFactory. Tests should pass a FakeAdbClientFactory.
+   */
+  adbFactory?: AdbClientFactory;
   /** Allow tests to stub the config gate */
   isEnabled?: () => boolean;
 }
@@ -22,12 +27,12 @@ export interface PerformanceAuditorOptions {
  */
 export class PerformanceAuditor {
   private readonly device: BootedDevice;
-  private readonly adb: AdbExecutor;
+  private readonly adbFactory: AdbClientFactory;
   private readonly isEnabled: () => boolean;
 
   constructor(opts: PerformanceAuditorOptions) {
     this.device = opts.device;
-    this.adb = opts.adb;
+    this.adbFactory = opts.adbFactory ?? defaultAdbClientFactory;
     this.isEnabled = opts.isEnabled ?? (() => serverConfig.isUiPerfModeEnabled());
   }
 
@@ -55,9 +60,9 @@ export class PerformanceAuditor {
         logger.info(`[PerformanceAudit] Running UI performance audit for ${result.activeWindow?.appId}`);
 
         // Initialize components
-        const capabilitiesDetector = new DeviceCapabilitiesDetector(this.device, this.adb);
+        const capabilitiesDetector = new DeviceCapabilitiesDetector(this.device, this.adbFactory);
         const thresholdManager = new ThresholdManager();
-        const performanceAudit = new PerformanceAudit(this.device, this.adb);
+        const performanceAudit = new PerformanceAudit(this.device, this.adbFactory);
 
         // Get device capabilities
         const capabilities = await capabilitiesDetector.getCapabilities();

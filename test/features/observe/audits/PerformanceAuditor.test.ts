@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { PerformanceAuditor } from "../../../../src/features/observe/audits/PerformanceAuditor";
-import { FakeAdbExecutor } from "../../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../../fakes/FakeAdbClientFactory";
 import { NoOpPerformanceTracker } from "../../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ObserveResult } from "../../../../src/models";
 
@@ -20,7 +20,7 @@ describe("PerformanceAuditor", () => {
   test("does nothing when isEnabled returns false", async () => {
     const auditor = new PerformanceAuditor({
       device: androidDevice,
-      adb: new FakeAdbExecutor(),
+      adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => false,
     });
     const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
@@ -32,7 +32,7 @@ describe("PerformanceAuditor", () => {
   test("skips when device platform is not android", async () => {
     const auditor = new PerformanceAuditor({
       device: iosDevice,
-      adb: new FakeAdbExecutor(),
+      adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => true,
     });
     const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
@@ -44,7 +44,7 @@ describe("PerformanceAuditor", () => {
   test("skips when no activeWindow.appId is set", async () => {
     const auditor = new PerformanceAuditor({
       device: androidDevice,
-      adb: new FakeAdbExecutor(),
+      adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => true,
     });
     const result = makeResult();
@@ -56,13 +56,30 @@ describe("PerformanceAuditor", () => {
   test("audit failures do not pollute result.errors", async () => {
     const auditor = new PerformanceAuditor({
       device: androidDevice,
-      adb: new FakeAdbExecutor(),
+      adbFactory: new FakeAdbClientFactory(),
       isEnabled: () => true,
     });
     const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
-    // FakeAdbExecutor has no responses configured; underlying audit will fail.
-    // We just need to confirm no exception leaks and no errors are appended.
     await auditor.run(result, new NoOpPerformanceTracker());
     expect(result.errors).toBeUndefined();
+  });
+
+  // Regression for https://github.com/kaeawc/auto-mobile/issues/2214.
+  // The internal DeviceCapabilitiesDetector and PerformanceAudit constructors
+  // require an AdbClientFactory and invoke `.create(device)` on it. Passing
+  // anything else surfaces in production as `TypeError: J.create is not a
+  // function` (after bundler minification) and silently breaks the audit.
+  // Asserting the factory is invoked proves the auditor wires the factory
+  // through rather than handing those constructors an AdbExecutor.
+  test("uses the injected AdbClientFactory to construct dependents (regression for #2214)", async () => {
+    const factory = new FakeAdbClientFactory();
+    const auditor = new PerformanceAuditor({
+      device: androidDevice,
+      adbFactory: factory,
+      isEnabled: () => true,
+    });
+    const result = makeResult({ activeWindow: { appId: "com.example", activityName: "Main" } as any });
+    await auditor.run(result, new NoOpPerformanceTracker());
+    expect(factory.wasCalledForDevice(androidDevice.deviceId)).toBe(true);
   });
 });

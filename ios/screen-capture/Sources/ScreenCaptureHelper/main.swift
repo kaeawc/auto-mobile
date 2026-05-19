@@ -142,36 +142,38 @@ case .capture(let deviceID):
 
 // MARK: - Async/sync bridges
 
+// A reference box so the Task closure mutates a captured class instead of a
+// `var`. Swift 5.9 (Xcode 15) rejects `var` capture in `Task { … }` even when
+// the semaphore enforces a happens-before relationship; class capture is fine.
+private final class Box<T> {
+    var value: T
+    init(_ value: T) { self.value = value }
+}
+
 func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> {
     let semaphore = DispatchSemaphore(value: 0)
-    var result: Result<T, Error> = .failure(CancellationError())
+    let box = Box<Result<T, Error>>(.failure(CancellationError()))
     Task {
-        result = await Result { try await body() }
+        do {
+            box.value = .success(try await body())
+        } catch {
+            box.value = .failure(error)
+        }
         semaphore.signal()
     }
     semaphore.wait()
-    return result
+    return box.value
 }
 
 func runBlocking<T>(_ body: @escaping () async -> T) -> T {
     let semaphore = DispatchSemaphore(value: 0)
-    var result: T?
+    let box = Box<T?>(nil)
     Task {
-        result = await body()
+        box.value = await body()
         semaphore.signal()
     }
     semaphore.wait()
-    return result!
-}
-
-extension Result where Failure == Error {
-    init(catching body: () async throws -> Success) async {
-        do {
-            self = .success(try await body())
-        } catch {
-            self = .failure(error)
-        }
-    }
+    return box.value!
 }
 
 // MARK: - Signal handling

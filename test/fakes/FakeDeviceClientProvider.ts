@@ -7,6 +7,7 @@ import { CtrlProxyManager } from "../../src/utils/CtrlProxyManager";
 import { CtrlProxyIosManager } from "../../src/utils/IOSCtrlProxyManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
+import type { Window } from "../../src/features/observe/interfaces/Window";
 import { BootedDevice } from "../../src/models";
 
 export interface FakeDeviceClientProviderOptions {
@@ -14,6 +15,7 @@ export interface FakeDeviceClientProviderOptions {
   ctrlProxyClient?: AndroidCtrlProxy;
   iosCtrlProxyManager?: CtrlProxyIosManager;
   iosCtrlProxyClient?: IOSCtrlProxy;
+  window?: Window;
 }
 
 /**
@@ -69,5 +71,9 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
 
   getIOSCtrlProxyClient(_device: BootedDevice, _port: number): IOSCtrlProxy {
     return this.require(this.options.iosCtrlProxyClient, "iosCtrlProxyClient");
+  }
+
+  getWindow(_device: BootedDevice): Window {
+    return this.require(this.options.window, "window");
   }
 }

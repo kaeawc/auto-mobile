@@ -5,6 +5,8 @@ public struct CommandLineOptions: Equatable {
     public enum Mode: Equatable {
         case listDevices
         case capture(deviceID: String?)
+        case listSimulators
+        case captureSimulator(windowID: UInt32)
         case help
     }
 
@@ -17,6 +19,8 @@ public struct CommandLineOptions: Equatable {
     public enum ParseError: Error, Equatable {
         case missingValue(flag: String)
         case unknownArgument(String)
+        case invalidValue(flag: String, value: String)
+        case conflictingFlags(String)
     }
 
     public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
@@ -25,6 +29,8 @@ public struct CommandLineOptions: Equatable {
 
         var listDevices = false
         var deviceID: String?
+        var listSimulators = false
+        var simulatorWindowID: UInt32?
         var help = false
 
         while let arg = iterator.next() {
@@ -36,6 +42,16 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.missingValue(flag: arg)
                 }
                 deviceID = value
+            case "--list-simulators":
+                listSimulators = true
+            case "--simulator-window":
+                guard let value = iterator.next() else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                guard let parsed = UInt32(value) else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                simulatorWindowID = parsed
             case "-h", "--help":
                 help = true
             default:
@@ -46,24 +62,50 @@ public struct CommandLineOptions: Equatable {
         if help {
             return CommandLineOptions(mode: .help)
         }
+
+        let modeFlagCount = [
+            listDevices,
+            listSimulators,
+            simulatorWindowID != nil,
+            deviceID != nil,
+        ].filter { $0 }.count
+        if modeFlagCount > 1 {
+            throw ParseError.conflictingFlags(
+                "choose one of --list-devices, --device-id, --list-simulators, --simulator-window"
+            )
+        }
+
         if listDevices {
             return CommandLineOptions(mode: .listDevices)
+        }
+        if listSimulators {
+            return CommandLineOptions(mode: .listSimulators)
+        }
+        if let windowID = simulatorWindowID {
+            return CommandLineOptions(mode: .captureSimulator(windowID: windowID))
         }
         return CommandLineOptions(mode: .capture(deviceID: deviceID))
     }
 
     public static let helpText = """
-    screen-capture-helper — AutoMobile iOS device capture helper
+    screen-capture-helper — AutoMobile iOS screen-capture helper
 
     USAGE:
         screen-capture-helper [--device-id <id>]
         screen-capture-helper --list-devices
+        screen-capture-helper --simulator-window <windowID>
+        screen-capture-helper --list-simulators
 
-    OPTIONS:
-        --list-devices       Emit discovered devices as JSON to stdout and exit.
-        --device-id <id>     uniqueID of the device to capture. If omitted, the
-                             first muxed external device is used.
-        -h, --help           Show this help.
+    DEVICE OPTIONS (USB-connected iOS devices via AVFoundation):
+        --list-devices         Emit discovered devices as JSON to stdout and exit.
+        --device-id <id>       uniqueID of the device to capture. If omitted, the
+                               first muxed external device is used.
+
+    SIMULATOR OPTIONS (macOS iOS Simulator windows via ScreenCaptureKit):
+        --list-simulators      Emit discovered simulator windows as JSON and exit.
+        --simulator-window <n> CGWindowID of the simulator window to capture.
+
+        -h, --help             Show this help.
 
     Frames are written to stdout: 16-byte little-endian header
     (width, height, bytesPerRow, timestampMs) followed by

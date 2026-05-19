@@ -9,8 +9,8 @@ import {
   IOS_CTRL_PROXY_IPA_URL,
   IOS_CTRL_PROXY_RELEASE_VERSION,
   IOS_CTRL_PROXY_RUNNER_SHA256,
+  IOS_CTRL_PROXY_SHA256_CHECKSUM,
   LATEST_RELEASE_VERSION,
-  resolveChecksum,
   resolveLatestVersion
 } from "../constants/release";
 import {
@@ -582,7 +582,7 @@ export class IOSCtrlProxyBuilder {
     if (override !== null) {
       return override;
     }
-    return resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
+    return IOS_CTRL_PROXY_SHA256_CHECKSUM;
   }
 
   public getExpectedAppHash(platform: IOSCtrlProxyPlatform): string {

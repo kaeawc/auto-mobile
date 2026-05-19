@@ -610,8 +610,7 @@ export class Daemon {
             name: pooledDevice.name,
             platform: pooledDevice.platform as "android",
           };
-          const adb = defaultAdbClientFactory.create(pooledDevice.id);
-          const client = AndroidCtrlProxyClient.getInstance(bootedDevice, adb);
+          const client = AndroidCtrlProxyClient.getInstance(bootedDevice, defaultAdbClientFactory);
           client.ensureConnected().then(connected => {
             if (connected) {
               logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);

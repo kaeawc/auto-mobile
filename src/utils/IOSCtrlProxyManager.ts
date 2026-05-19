@@ -1,5 +1,6 @@
 import { logger } from "./logger";
 import { BootedDevice } from "../models";
+import { requireBootedDevice } from "./requireBootedDevice";
 import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
@@ -202,6 +203,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * Get singleton instance for a device
    */
   public static getInstance(device: BootedDevice, timer?: Timer): IOSCtrlProxyManager {
+    requireBootedDevice(device, "IOSCtrlProxyManager.getInstance");
     if (!IOSCtrlProxyManager.instances.has(device.deviceId)) {
       IOSCtrlProxyManager.instances.set(
         device.deviceId,

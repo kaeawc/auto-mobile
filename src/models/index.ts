@@ -79,6 +79,7 @@ export * from "./TapOnElementOptions";
 export * from "./TapOnElementResult";
 export * from "./TapOptions";
 export * from "./TapResult";
+export * from "./TelephonyResult";
 export * from "./TerminateAppResult";
 export * from "./TouchIdleResult";
 export * from "./TraversalOrderResult";

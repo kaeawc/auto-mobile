@@ -86,7 +86,7 @@ export class InputText extends BaseVisualChange {
   ): Promise<SendTextResult & { method?: "a11y" }> {
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
     // It also natively supports Unicode without needing virtual keyboard
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
 
     if (a11yResult.success) {

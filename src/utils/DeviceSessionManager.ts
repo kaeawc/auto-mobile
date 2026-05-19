@@ -44,8 +44,8 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
   private _simctl: SimCtlClient | undefined;
   private _androidEmulator: AndroidEmulatorClient | undefined;
   private _deviceUtils: PlatformDeviceManager | undefined;
-  // Per-device Window cache — preserves Window's internal active-window cache
-  // across calls within a session for the same device.
+  // Keyed by device.deviceId so Window's internal active-window cache survives
+  // across calls instead of being thrown away on every resolve.
   private readonly _windows: Map<string, Window> = new Map();
 
   constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {

@@ -28,7 +28,7 @@ function makeReadyWindow(): FakeWindow {
     appId: "com.example.app",
     activityName: "MainActivity",
     layoutSeqSum: 0,
-  } as any);
+  });
   return w;
 }
 

@@ -7,6 +7,9 @@ export {
 } from "./frameProtocol";
 export {
   IOSScreenCaptureHelper,
+  SIMULATOR_FPS_DEFAULT,
+  SIMULATOR_FPS_MAX,
+  SIMULATOR_FPS_MIN,
   type CaptureTarget,
   type HelperSpawner,
   type IosScreenCaptureHelperOptions,

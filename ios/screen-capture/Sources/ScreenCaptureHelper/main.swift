@@ -3,6 +3,10 @@ import Foundation
 import ScreenCaptureKit
 import ScreenCaptureCore
 
+// MARK: - Constants
+
+let simulatorPermissionTimeoutSeconds: TimeInterval = 2.0
+
 // MARK: - Logging
 
 func logError(_ message: String) {
@@ -74,7 +78,7 @@ case .listSimulators:
         exit(1)
     }
 
-case .captureSimulator(let windowID):
+case .captureSimulator(let windowID, let fps):
     let window: SCWindow
     switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
     case .success(.some(let resolved)):
@@ -91,9 +95,25 @@ case .captureSimulator(let windowID):
     let writer = FrameWriter(sink: sink)
     let simSession = SimulatorCaptureSession(writer: writer)
 
-    if case .failure(let error) = runBlocking({ try await simSession.start(window: window) }) {
+    if case .failure(let error) = runBlocking({
+        try await simSession.start(window: window, fps: fps)
+    }) {
         logError("error: failed to start simulator capture: \(error)")
         exit(1)
+    }
+
+    // ScreenCaptureKit silently emits no frames when the host process lacks
+    // Screen Recording permission — there's no error to surface. Emit a hint
+    // on stderr if nothing arrives within the deadline; this leaves stdout
+    // (the frame channel) untouched.
+    DispatchQueue.main.asyncAfter(deadline: .now() + simulatorPermissionTimeoutSeconds) {
+        if !simSession.hasReceivedAnyFrame {
+            logError(
+                "warn: no frames received within \(simulatorPermissionTimeoutSeconds)s. "
+                + "Grant 'Screen Recording' to your terminal/IDE in "
+                + "System Settings → Privacy & Security → Screen Recording."
+            )
+        }
     }
 
     installShutdownHandlers {

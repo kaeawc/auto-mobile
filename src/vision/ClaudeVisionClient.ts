@@ -188,7 +188,14 @@ export class ClaudeVisionClient {
     }
 
     const jsonStr = jsonMatch[1] || jsonMatch[0];
-    const parsed = JSON.parse(jsonStr);
+    let parsed: any;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (err) {
+      throw new Error(
+        `Failed to parse JSON from Claude response: ${(err as Error).message}`
+      );
+    }
 
     return {
       elementFound: parsed.elementFound || false,

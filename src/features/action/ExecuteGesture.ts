@@ -111,7 +111,7 @@ export class ExecuteGesture extends BaseVisualChange {
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<SwipeResult> {
     try {
-      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+      const client = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
       const result = await perf.track("a11ySwipe", async () => {
         return await client.requestSwipe(x1, y1, x2, y2, duration, 5000, perf);

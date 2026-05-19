@@ -136,7 +136,7 @@ export class PinchOn extends BaseVisualChange {
       const duration = options.duration ?? 300;
       const rotationDegrees = options.rotationDegrees ?? 0;
 
-      const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+      const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
       const pinchResult = await this.observedInteraction(
         async () => {

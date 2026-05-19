@@ -5,6 +5,7 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { Window } from "../../src/features/observe/Window";
@@ -12,20 +13,13 @@ import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 
-/**
- * Inline minimal AndroidCtrlProxy stubs are produced by this helper so each
- * test can focus on the specific connection states it cares about without
- * implementing the full surface. Cast through `unknown` to satisfy the
- * structural interface where the test only reads the configured methods.
- */
+// Inline minimal AndroidCtrlProxy where each test sets only the methods it
+// exercises — the Android fake lacks per-call `waitForConnection` /
+// `verifyServiceReady` toggles needed to cover the cache-stale and
+// "connected but not responsive" branches independently.
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
   return overrides as unknown as AndroidCtrlProxy;
-}
-
-function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
-  return overrides as unknown as IOSCtrlProxy;
 }
 
 describe("DeviceSessionManager", () => {
@@ -203,15 +197,7 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should skip accessibility checks when websocket is connected and service is responsive", async () => {
-    let managerTouched = false;
-    const accessibilityManager: any = new Proxy(new FakeCtrlProxyManager(), {
-      get(target, prop, receiver) {
-        if (prop !== "wasMethodCalled" && prop !== "constructor") {
-          managerTouched = true;
-        }
-        return Reflect.get(target, prop, receiver);
-      },
-    });
+    const accessibilityManager = new FakeCtrlProxyManager();
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
       ctrlProxyManager: accessibilityManager,
@@ -223,7 +209,7 @@ describe("DeviceSessionManager", () => {
     const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
-    expect(managerTouched).toBe(false);
+    expect(accessibilityManager.getExecutedOperations()).toEqual([]);
   });
 
   test("should fall through to normal flow when websocket connected but service not responsive", async () => {
@@ -246,9 +232,7 @@ describe("DeviceSessionManager", () => {
     expect(accessibilityManager.wasMethodCalled("isInstalled")).toBe(true);
   });
 
-  test("regression: provider, not static getInstance, supplies CtrlProxy collaborators", async () => {
-    // Wire fakes only via the provider — do NOT monkey-patch any static getInstance.
-    // The DSM must obtain its CtrlProxy manager + client exclusively through the provider.
+  test("CtrlProxy collaborators come from the provider, not static getInstance", async () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
@@ -272,9 +256,7 @@ describe("DeviceSessionManager", () => {
     expect(clientFromProvider).toBeGreaterThan(0);
   });
 
-  test("regression: FakeDeviceClientProvider throws directly when ctrlProxy fakes are missing", () => {
-    // If a test wires a fake provider without ctrlProxy fakes, the provider itself
-    // must fail loudly so the omission can't be silently masked by DSM's catch.
+  test("FakeDeviceClientProvider throws when CtrlProxy fakes are not configured", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils);
     expect(() => provider.getAndroidCtrlProxyClient(device)).toThrow(/ctrlProxyClient fake not configured/);
     expect(() => provider.getAndroidCtrlProxyManager(device)).toThrow(/ctrlProxyManager fake not configured/);
@@ -312,15 +294,15 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
   ): FakeDeviceClientProvider {
     const iosManager = new FakeIOSCtrlProxyManager();
     iosManager.setSetupShouldFail(true); // skip the setup path in these tests
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
     return new FakeDeviceClientProvider(
       fakeAdb,
       fakeDeviceUtils,
       fakeSimctl as any,
       {
         iosCtrlProxyManager: iosManager,
-        iosCtrlProxyClient: stubIOSCtrlProxy({
-          isConnected: () => false,
-        }),
+        iosCtrlProxyClient: iosClient,
       }
     );
   }
@@ -472,6 +454,8 @@ describe("DeviceSessionManager dual-platform resolution", () => {
 
     const fakeIosManager = new FakeIOSCtrlProxyManager();
     fakeIosManager.setSetupShouldFail(true);
+    const fakeIosClient = new FakeIOSCtrlProxy();
+    fakeIosClient.setConnected(false);
 
     return new FakeDeviceClientProvider(
       fakeAdb,
@@ -484,7 +468,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
           verifyServiceReady: () => Promise.resolve(true),
         }),
         iosCtrlProxyManager: fakeIosManager,
-        iosCtrlProxyClient: stubIOSCtrlProxy({ isConnected: () => false }),
+        iosCtrlProxyClient: fakeIosClient,
       }
     );
   }

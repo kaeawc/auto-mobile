@@ -17,38 +17,26 @@ export interface FakeDeviceClientProviderOptions {
 }
 
 /**
- * Fake provider for testing - returns injected fakes instead of real clients.
- *
- * CtrlProxy fakes default to throw-on-use so a test that exercises a code
- * path requiring them must pass an explicit fake. This catches accidental
- * fall-throughs to real singletons in tests.
+ * Fakes default to throw-on-use: tests that exercise a code path requiring
+ * a CtrlProxy must pass an explicit fake. This prevents silent fall-through
+ * to a real singleton when a fake is forgotten.
  */
 export class FakeDeviceClientProvider implements DeviceClientProvider {
-  private readonly options: FakeDeviceClientProviderOptions;
-
   constructor(
     private readonly fakeAdb: AdbExecutor,
     private readonly fakeDeviceUtils: PlatformDeviceManager,
     private readonly fakeSimctl?: SimCtlClient,
-    options: FakeDeviceClientProviderOptions = {}
-  ) {
-    this.options = options;
-  }
+    private readonly options: FakeDeviceClientProviderOptions = {}
+  ) {}
 
-  setCtrlProxyManager(manager: CtrlProxyManager): void {
-    this.options.ctrlProxyManager = manager;
-  }
-
-  setCtrlProxyClient(client: AndroidCtrlProxy): void {
-    this.options.ctrlProxyClient = client;
-  }
-
-  setIOSCtrlProxyManager(manager: CtrlProxyIosManager): void {
-    this.options.iosCtrlProxyManager = manager;
-  }
-
-  setIOSCtrlProxyClient(client: IOSCtrlProxy): void {
-    this.options.iosCtrlProxyClient = client;
+  private require<T>(value: T | undefined, fieldName: string): T {
+    if (!value) {
+      throw new Error(
+        `FakeDeviceClientProvider: ${fieldName} fake not configured. ` +
+        `Pass it via constructor options.`
+      );
+    }
+    return value;
   }
 
   getAdb(): AdbExecutor {
@@ -60,7 +48,6 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
   }
 
   getAndroidEmulator(): AndroidEmulatorClient | undefined {
-    // Tests use fakeDeviceUtils instead
     return undefined;
   }
 
@@ -69,42 +56,18 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
   }
 
   getAndroidCtrlProxyManager(_device: BootedDevice): CtrlProxyManager {
-    if (!this.options.ctrlProxyManager) {
-      throw new Error(
-        "FakeDeviceClientProvider: ctrlProxyManager fake not configured. " +
-        "Pass it via constructor options or setCtrlProxyManager()."
-      );
-    }
-    return this.options.ctrlProxyManager;
+    return this.require(this.options.ctrlProxyManager, "ctrlProxyManager");
   }
 
   getAndroidCtrlProxyClient(_device: BootedDevice): AndroidCtrlProxy {
-    if (!this.options.ctrlProxyClient) {
-      throw new Error(
-        "FakeDeviceClientProvider: ctrlProxyClient fake not configured. " +
-        "Pass it via constructor options or setCtrlProxyClient()."
-      );
-    }
-    return this.options.ctrlProxyClient;
+    return this.require(this.options.ctrlProxyClient, "ctrlProxyClient");
   }
 
   getIOSCtrlProxyManager(_device: BootedDevice): CtrlProxyIosManager {
-    if (!this.options.iosCtrlProxyManager) {
-      throw new Error(
-        "FakeDeviceClientProvider: iosCtrlProxyManager fake not configured. " +
-        "Pass it via constructor options or setIOSCtrlProxyManager()."
-      );
-    }
-    return this.options.iosCtrlProxyManager;
+    return this.require(this.options.iosCtrlProxyManager, "iosCtrlProxyManager");
   }
 
   getIOSCtrlProxyClient(_device: BootedDevice, _port: number): IOSCtrlProxy {
-    if (!this.options.iosCtrlProxyClient) {
-      throw new Error(
-        "FakeDeviceClientProvider: iosCtrlProxyClient fake not configured. " +
-        "Pass it via constructor options or setIOSCtrlProxyClient()."
-      );
-    }
-    return this.options.iosCtrlProxyClient;
+    return this.require(this.options.iosCtrlProxyClient, "iosCtrlProxyClient");
   }
 }

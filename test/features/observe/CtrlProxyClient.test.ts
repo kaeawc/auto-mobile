@@ -289,7 +289,7 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
-    test.skip("should seed navigation graph from hierarchy updates", async function() {
+    test("should seed navigation graph from hierarchy updates", async function() {
       NavigationGraphManager.resetInstance();
       const navManager = NavigationGraphManager.getInstance();
 
@@ -324,8 +324,13 @@ describe("AndroidCtrlProxyClient", function() {
         }));
 
         await resultPromise;
-        // Allow async event handlers to process (navigation graph update is async)
+        // HierarchyNavigationDetector debounces via setTimeout(100ms); in autoAdvance
+        // mode the FakeTimer dispatches that via setImmediate, not as a microtask.
+        // Drain setImmediate so the debounce callback runs, then drain microtasks so
+        // the async setCurrentApp call inside recordHierarchyNavigation reaches its
+        // first synchronous assignment (this.currentAppId = appId).
         for (let i = 0; i < 10; i++) {
+          await new Promise<void>(resolve => setImmediate(resolve));
           await testTimer.advanceTimersByTimeAsync(1);
         }
 

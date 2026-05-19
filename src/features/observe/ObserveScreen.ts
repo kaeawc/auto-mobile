@@ -179,7 +179,7 @@ export class RealObserveScreen implements ObserveScreen {
     });
     this.performanceAuditor = dependencies?.performanceAuditor ?? new PerformanceAuditor({
       device,
-      adb: this.adb,
+      adbFactory: this.adbFactory,
     });
     this.accessibilityAuditor = dependencies?.accessibilityAuditor ?? new AccessibilityAuditor({
       device,

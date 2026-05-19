@@ -1,6 +1,8 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { HandleIntentChooser } from "../../../src/features/action/HandleIntentChooser";
-import { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+
+const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
 import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -63,7 +65,7 @@ describe("HandleIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create HandleIntentChooser instance
-    handleIntentChooser = new HandleIntentChooser("test-device");
+    handleIntentChooser = new HandleIntentChooser(testDevice);
 
     // Replace the internal managers with our fakes
     (handleIntentChooser as any).deepLinkManager = fakeDeepLinkManager;
@@ -74,7 +76,7 @@ describe("HandleIntentChooser", () => {
 
   describe("constructor", () => {
     test("should create HandleIntentChooser with device ID", () => {
-      const instance = new HandleIntentChooser("test-device");
+      const instance = new HandleIntentChooser(testDevice);
       expect(instance).toBeInstanceOf(HandleIntentChooser);
     });
   });

@@ -67,14 +67,14 @@ export class MemoryAudit {
 
     // Get baseline for this app/tool combination
     const baseline = await this.baselineManager.getBaseline(
-      this.device.id,
+      this.device.deviceId,
       packageName,
       toolName
     );
 
     // Get or create thresholds
     const thresholds = await this.thresholdManager.getOrCreateThresholds(
-      this.device.id,
+      this.device.deviceId,
       packageName,
       baseline
     );
@@ -103,7 +103,7 @@ export class MemoryAudit {
     // Update baseline with new metrics (only if passed, to avoid poisoning baseline)
     if (passed) {
       await this.baselineManager.updateBaseline(
-        this.device.id,
+        this.device.deviceId,
         packageName,
         toolName,
         metrics
@@ -112,7 +112,7 @@ export class MemoryAudit {
 
     // Update threshold weights based on result
     await this.thresholdManager.updateThresholdWeight(
-      this.device.id,
+      this.device.deviceId,
       packageName,
       passed
     );
@@ -345,7 +345,7 @@ export class MemoryAudit {
       const sessionId = now.toISOString().split("T")[0]; // YYYY-MM-DD
 
       const auditResult: NewMemoryAuditResult = {
-        device_id: this.device.id,
+        device_id: this.device.deviceId,
         session_id: sessionId,
         package_name: packageName,
         tool_name: toolName,

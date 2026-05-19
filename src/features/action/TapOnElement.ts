@@ -983,11 +983,11 @@ export class TapOnElement extends BaseVisualChange {
           }
 
           const isTalkBackEnabled = this.device.platform === "android"
-            ? (await this.accessibilityDetector.detectMethod(this.device.id, this.adb)) === "talkback"
+            ? (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback"
             : false;
           const isVoiceOverEnabled = this.device.platform === "ios"
             ? await this.iosVoiceOverDetector.isVoiceOverEnabled(
-              this.device.id,
+              this.device.deviceId,
               IOSCtrlProxyClient.getInstance(this.device)
             )
             : false;
@@ -1188,7 +1188,7 @@ export class TapOnElement extends BaseVisualChange {
     // Check if TalkBack is enabled (not just any accessibility service)
     const talkBackEnabled = typeof isTalkBackEnabled === "boolean"
       ? isTalkBackEnabled
-      : (await this.accessibilityDetector.detectMethod(this.device.id, this.adb)) === "talkback";
+      : (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback";
 
     if (talkBackEnabled) {
       // TalkBack mode: Use accessibility actions with coordinate fallback
@@ -1325,7 +1325,7 @@ export class TapOnElement extends BaseVisualChange {
     // Try focus navigation for tap and doubleTap actions
     if (action === "tap" || action === "doubleTap") {
       const result = await this.talkBackStrategy.executeTap(
-        this.device.id,
+        this.device.deviceId,
         element,
         action as "tap" | "doubleTap",
         driver

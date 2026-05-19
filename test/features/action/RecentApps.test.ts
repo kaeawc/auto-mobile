@@ -1,6 +1,8 @@
 import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { RecentApps } from "../../../src/features/action/RecentApps";
 import { BootedDevice, ExecResult, ObserveResult } from "../../../src/models";
+
+const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
@@ -41,7 +43,7 @@ describe("RecentApps", () => {
     });
 
     // Inject the fakes into the feature
-    recentApps = new RecentApps("test-device", fakeAdb, fakeTimer);
+    recentApps = new RecentApps(testDevice, fakeAdb, fakeTimer);
     (recentApps as any).observeScreen = fakeObserveScreen;
     (recentApps as any).window = fakeWindow;
     (recentApps as any).awaitIdle = fakeAwaitIdle;
@@ -348,13 +350,13 @@ describe("RecentApps", () => {
 
   describe("constructor", () => {
     test("should work with null deviceId", () => {
-      const recentAppsInstance = new RecentApps("test-device", fakeAdb, fakeTimer);
+      const recentAppsInstance = new RecentApps(testDevice, fakeAdb, fakeTimer);
       expect(recentAppsInstance).toBeDefined();
     });
 
     test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
-      const recentAppsInstance = new RecentApps("test-device", customAdb, fakeTimer);
+      const recentAppsInstance = new RecentApps(testDevice, customAdb, fakeTimer);
       expect(recentAppsInstance).toBeDefined();
     });
   });

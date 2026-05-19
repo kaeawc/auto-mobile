@@ -1,6 +1,8 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { DetectIntentChooser } from "../../../src/features/observe/DetectIntentChooser";
-import { ObserveResult, ViewHierarchyResult } from "../../../src/models";
+import { BootedDevice, ObserveResult, ViewHierarchyResult } from "../../../src/models";
+
+const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
 import { FakeDeepLinkManager } from "../../fakes/FakeDeepLinkManager";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -61,7 +63,7 @@ describe("DetectIntentChooser", () => {
     fakeDeepLinkManager.setDefaultIntentChooserDetected(true);
 
     // Create DetectIntentChooser instance
-    detectIntentChooser = new DetectIntentChooser("test-device");
+    detectIntentChooser = new DetectIntentChooser(testDevice);
 
     // Replace the internal managers with our fakes
     (detectIntentChooser as any).observeScreen = fakeObserveScreen;
@@ -72,7 +74,7 @@ describe("DetectIntentChooser", () => {
 
   describe("constructor", () => {
     test("should create DetectIntentChooser with device ID", () => {
-      const instance = new DetectIntentChooser("test-device");
+      const instance = new DetectIntentChooser(testDevice);
       expect(instance).toBeInstanceOf(DetectIntentChooser);
     });
   });

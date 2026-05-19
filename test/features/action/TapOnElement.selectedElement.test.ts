@@ -14,7 +14,7 @@ const createTapOnElement = (): TapOnElement => {
     {
       name: "test-device",
       platform: "android",
-      id: "emulator-5554",
+      deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
     {

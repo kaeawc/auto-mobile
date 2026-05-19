@@ -24,7 +24,7 @@ describe("TapOnElement TalkBack mode detection", () => {
       {
         name: "test-device",
         platform: "android",
-        id: "emulator-5554",
+        deviceId: "emulator-5554",
       } as any,
       fakeAdb as any,
       {
@@ -396,7 +396,7 @@ describe("TapOnElement TalkBackTapStrategy delegation", () => {
       {
         name: "test-device",
         platform: "android",
-        id: "emulator-5554",
+        deviceId: "emulator-5554",
       } as any,
       fakeAdb as any,
       {

@@ -19,17 +19,21 @@ import { FakeScreenshotStateStore } from "../../../fakes/FakeScreenshotStateStor
  * `ScreenshotResult` returned by the capture and choose whether the capture
  * reports as the latest job / aborted.
  *
- * The promise returned from the most recent `startTrackedCapture` call is
- * stored on `lastCapturePromise()` so tests can deterministically await
- * completion of fire-and-forget `recorder.start()` invocations without
- * polling.
+ * `lastCapturePromise()` lets tests synchronize deterministically with the
+ * recorder's async chain. Both the fake's internal `.catch` (registered
+ * inside `startTrackedCapture` before it returns) and the recorder's
+ * `.finally(endOperation)` (registered immediately after) are reactions on
+ * the same underlying capture promise, in that order. When it settles, the
+ * fake's `.catch` fires first and resolves `latestPromise`; the recorder's
+ * `.finally` fires next (still ahead of the test's resumption) and runs
+ * `endOperation` before the test's await wakes up.
  */
 class FakeTrackedScreenshotService implements TrackedScreenshotService {
   private nextResult: ScreenshotResult = { success: true, path: "/tmp/default.png" };
   private nextIsLatest: boolean = true;
   private nextAborted: boolean = false;
   private nextThrow: Error | null = null;
-  private lastPromise: Promise<ScreenshotResult> | null = null;
+  private latestPromise: Promise<ScreenshotResult> | null = null;
 
   setNextResult(result: ScreenshotResult): void {
     this.nextResult = result;
@@ -51,13 +55,10 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
    * attached by the recorder run before the awaiter's continuation.
    */
   lastCapturePromise(): Promise<ScreenshotResult> {
-    if (!this.lastPromise) {
-      throw new Error("FakeTrackedScreenshotService: no capture has been started yet");
+    if (!this.latestPromise) {
+      throw new Error("lastCapturePromise() called before startTrackedCapture()");
     }
-    // Swallow rejections so `await svc.lastCapturePromise()` works for
-    // failure-path tests too; the recorder still observes the original
-    // rejection through its own chained handlers.
-    return this.lastPromise.catch(() => ({ success: false } as ScreenshotResult));
+    return this.latestPromise;
   }
 
   async execute(_options?: ScreenshotOptions, _signal?: AbortSignal): Promise<ScreenshotResult> {
@@ -98,8 +99,9 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
       }
       return result;
     })();
-    this.lastPromise = promise;
-
+    // Swallow rejections at the test boundary so awaiting lastCapturePromise()
+    // never throws — failure modes are observed via the store, not exceptions.
+    this.latestPromise = promise.catch(() => result);
     return {
       jobId: "job-1",
       promise,

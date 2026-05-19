@@ -708,10 +708,18 @@ describe("FailureRecorder", () => {
   });
 
   describe("static methods", () => {
-    test("resetInstance clears singleton", () => {
+    test("resetInstance clears singleton so the next getInstance returns a fresh object", () => {
       FailureRecorder.resetInstance();
-      // Should not throw
-      expect(true).toBe(true);
+      const first = FailureRecorder.getInstance();
+      const cached = FailureRecorder.getInstance();
+      expect(cached).toBe(first); // Sanity: getInstance memoizes between resets
+
+      FailureRecorder.resetInstance();
+      const second = FailureRecorder.getInstance();
+      expect(second).toBeInstanceOf(FailureRecorder);
+      expect(second).not.toBe(first);
+
+      FailureRecorder.resetInstance(); // Leave singleton slot empty for other tests
     });
 
     test("createForTesting returns a new instance", () => {

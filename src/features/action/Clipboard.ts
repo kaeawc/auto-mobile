@@ -9,9 +9,11 @@ import { IOSCtrlProxyClient } from "../observe/ios";
 export class Clipboard {
   private device: BootedDevice;
   private adb: AdbExecutor;
+  private adbFactory: AdbClientFactory;
 
   constructor(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory) {
     this.device = device;
+    this.adbFactory = adbFactory;
     this.adb = adbFactory.create(device);
   }
 
@@ -98,7 +100,7 @@ export class Clipboard {
     }
 
     // Try accessibility service first (preferred method)
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
     try {
       const a11yResult = await a11yClient.requestClipboard(action, text);

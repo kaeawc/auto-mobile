@@ -2,7 +2,9 @@ import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Clipboard } from "../../../src/features/action/Clipboard";
 import { BootedDevice } from "../../../src/models";
 import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 describe("Clipboard iOS", () => {
   let clipboard: Clipboard;
@@ -119,5 +121,35 @@ describe("Clipboard iOS", () => {
 
     expect(result.success).toBe(true);
     expect(result.text).toBeUndefined();
+  });
+});
+
+describe("Clipboard Android", () => {
+  // Regression for https://github.com/kaeawc/auto-mobile/issues/2227.
+  // AndroidCtrlProxyClient.getInstance expects an AdbClientFactory and calls
+  // `.create(device)` on it. Passing the resolved AdbExecutor instead
+  // surfaces in production as `TypeError: <minified>.create is not a function`
+  // and silently breaks the a11y clipboard path.
+  test("passes the injected AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance", async () => {
+    const factory = new FakeAdbClientFactory();
+    const getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue({
+      requestClipboard: async () => ({ success: true, action: "copy", totalTimeMs: 1 }),
+    } as unknown as AndroidCtrlProxyClient);
+
+    const device: BootedDevice = {
+      name: "Test Android",
+      platform: "android",
+      deviceId: "test-android",
+    };
+    const clipboard = new Clipboard(device, factory);
+    await clipboard.execute("copy", "hello");
+
+    expect(getInstanceSpy).toHaveBeenCalled();
+    const [, passedFactory] = getInstanceSpy.mock.calls[0] as [BootedDevice, FakeAdbClientFactory];
+    expect(typeof passedFactory.create).toBe("function");
+    expect(passedFactory).toBe(factory);
+    expect(factory.wasCalledForDevice(device.deviceId)).toBe(true);
+
+    getInstanceSpy.mockRestore();
   });
 });

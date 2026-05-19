@@ -9,7 +9,9 @@ import {
   SOCKET_PATH,
   CONNECTION_TIMEOUT_MS,
 } from "./constants";
-import { defaultTimer } from "../utils/SystemTimer";
+import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
+import { McpTimeoutError } from "./McpTimeoutError";
+import { type Timer, defaultTimer } from "../utils/SystemTimer";
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -35,6 +37,7 @@ export class DaemonClient {
   private socket: Socket | null = null;
   private socketPath: string;
   private connectionTimeout: number;
+  private timer: Timer;
   private pendingRequests: Map<string, {
     resolve: (value: DaemonResponse) => void;
     reject: (error: Error) => void;
@@ -45,10 +48,12 @@ export class DaemonClient {
 
   constructor(
     socketPath: string = SOCKET_PATH,
-    connectionTimeout: number = CONNECTION_TIMEOUT_MS
+    connectionTimeout: number = CONNECTION_TIMEOUT_MS,
+    timer: Timer = defaultTimer,
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
+    this.timer = timer;
   }
 
   /**
@@ -111,7 +116,7 @@ export class DaemonClient {
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = defaultTimer.setTimeout(() => {
+      const timeout = this.timer.setTimeout(() => {
         if (this.socket) {
           this.socket.destroy();
         }
@@ -123,7 +128,7 @@ export class DaemonClient {
       }, this.connectionTimeout);
 
       this.socket = createConnection(this.socketPath, () => {
-        clearTimeout(timeout);
+        this.timer.clearTimeout(timeout);
         this.connected = true;
         logger.info(`Connected to daemon at ${this.socketPath}`);
         resolve();
@@ -134,13 +139,13 @@ export class DaemonClient {
       });
 
       this.socket.on("error", error => {
-        clearTimeout(timeout);
+        this.timer.clearTimeout(timeout);
         this.connected = false;
         logger.error(`Daemon socket error: ${error.message}`);
 
         // Reject all pending requests
         for (const [, { reject, timeout }] of this.pendingRequests) {
-          clearTimeout(timeout);
+          this.timer.clearTimeout(timeout);
           reject(error);
         }
         this.pendingRequests.clear();
@@ -187,7 +192,7 @@ export class DaemonClient {
       return;
     }
 
-    clearTimeout(pending.timeout);
+    this.timer.clearTimeout(pending.timeout);
     this.pendingRequests.delete(response.id);
 
     if (response.success) {
@@ -224,7 +229,6 @@ export class DaemonClient {
 
     const requestId = randomUUID();
 
-    // Create request
     const request: DaemonRequest = {
       id: requestId,
       type: "mcp_request",
@@ -232,16 +236,20 @@ export class DaemonClient {
       params,
     };
 
-    // Send request
+    const requestTimeoutMs = Math.max(resolveMcpRequestTimeoutMs(request), this.connectionTimeout);
+    const toolName = method === "tools/call" ? params?.name ?? method : method;
+
     return new Promise((resolve, reject) => {
-      const timeout = defaultTimer.setTimeout(() => {
+      const timeout = this.timer.setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(
-          new DaemonUnavailableError(
-            `Daemon request timeout after ${this.connectionTimeout}ms`
-          )
+          new McpTimeoutError({
+            toolName,
+            timeoutMs: requestTimeoutMs,
+            origin: "DaemonClient.sendRequest",
+          })
         );
-      }, this.connectionTimeout);
+      }, requestTimeoutMs);
 
       this.pendingRequests.set(requestId, {
         resolve: response => {
@@ -252,7 +260,7 @@ export class DaemonClient {
       });
 
       if (!this.socket) {
-        clearTimeout(timeout);
+        this.timer.clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
         reject(
           new DaemonUnavailableError("Socket connection lost")
@@ -285,12 +293,14 @@ export class DaemonClient {
     };
 
     return new Promise((resolve, reject) => {
-      const timeout = defaultTimer.setTimeout(() => {
+      const timeout = this.timer.setTimeout(() => {
         this.pendingRequests.delete(requestId);
         reject(
-          new DaemonUnavailableError(
-            `Daemon request timeout after ${this.connectionTimeout}ms`
-          )
+          new McpTimeoutError({
+            toolName: method,
+            timeoutMs: this.connectionTimeout,
+            origin: "DaemonClient.callDaemonMethod",
+          })
         );
       }, this.connectionTimeout);
 
@@ -303,7 +313,7 @@ export class DaemonClient {
       });
 
       if (!this.socket) {
-        defaultTimer.clearTimeout(timeout);
+        this.timer.clearTimeout(timeout);
         this.pendingRequests.delete(requestId);
         reject(
           new DaemonUnavailableError("Socket connection lost")
@@ -328,7 +338,7 @@ export class DaemonClient {
 
     // Reject all pending requests
     for (const [, { timeout }] of this.pendingRequests) {
-      clearTimeout(timeout);
+      this.timer.clearTimeout(timeout);
     }
     this.pendingRequests.clear();
   }

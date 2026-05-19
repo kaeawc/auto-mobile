@@ -9,6 +9,7 @@ import {
 } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { logger } from "../utils/logger";
 import { resolveMcpRequestTimeoutMs, MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS } from "./mcpRequestTimeout";
+import { McpTimeoutError } from "./McpTimeoutError";
 import {
   DaemonRequest,
   DaemonResponse,
@@ -263,9 +264,13 @@ export class UnixSocketServer {
           );
 
           if (remainingTimeoutMs <= 0) {
-            throw new Error(
-              `MCP forward timeout: spent ${queueWaitMs}ms waiting in queue (budget was ${totalTimeoutMs}ms)`
-            );
+            const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
+            throw new McpTimeoutError({
+              toolName,
+              timeoutMs: totalTimeoutMs,
+              origin: "UnixSocketServer.handleRequest",
+              detail: `spent ${queueWaitMs}ms waiting in queue`,
+            });
           }
 
           const forwardStartMs = this.timer.now();
@@ -283,9 +288,13 @@ export class UnixSocketServer {
                 const freshClient = await this.getMcpClient();
                 const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
                 if (retryRemainingMs <= 0) {
-                  throw new Error(
-                    `MCP forward timeout: no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms of ${remainingTimeoutMs}ms)`
-                  );
+                  const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
+                  throw new McpTimeoutError({
+                    toolName,
+                    timeoutMs: remainingTimeoutMs,
+                    origin: "UnixSocketServer.handleRequest",
+                    detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
+                  });
                 }
                 return await this.handleIdeRequest(freshClient, request, retryRemainingMs);
               }

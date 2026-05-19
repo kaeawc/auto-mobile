@@ -4,16 +4,23 @@ import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
-import { AndroidCtrlProxyManager } from "../../src/utils/CtrlProxyManager";
-import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
-import { AndroidCtrlProxyClient } from "../../src/features/observe/android";
-import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { Window } from "../../src/features/observe/Window";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+
+// Inline minimal AndroidCtrlProxy where each test sets only the methods it
+// exercises — the Android fake lacks per-call `waitForConnection` /
+// `verifyServiceReady` toggles needed to cover the cache-stale and
+// "connected but not responsive" branches independently.
+function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
+  return overrides as unknown as AndroidCtrlProxy;
+}
 
 describe("DeviceSessionManager", () => {
   const device: BootedDevice = {
@@ -25,8 +32,6 @@ describe("DeviceSessionManager", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
   let originalGetActive: typeof Window.prototype.getActive;
-  let originalGetInstance: typeof AndroidCtrlProxyManager.getInstance;
-  let originalAccessibilityClientGetInstance: typeof AndroidCtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -50,15 +55,10 @@ describe("DeviceSessionManager", () => {
         layoutSeqSum: 0
       };
     };
-
-    originalGetInstance = AndroidCtrlProxyManager.getInstance;
-    originalAccessibilityClientGetInstance = AndroidCtrlProxyClient.getInstance;
   });
 
   afterEach(() => {
     Window.prototype.getActive = originalGetActive;
-    AndroidCtrlProxyManager.getInstance = originalGetInstance;
-    AndroidCtrlProxyClient.getInstance = originalAccessibilityClientGetInstance;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
@@ -66,13 +66,12 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({ isConnected: () => false }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(false);
@@ -84,14 +83,15 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(false);
     accessibilityManager.setVersionCompatible(true);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-        waitForConnection: () => Promise.resolve(true)
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("enable")).toBe(true);
@@ -104,14 +104,15 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(true);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-        waitForConnection: () => Promise.resolve(true)
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true });
 
     expect(accessibilityManager.wasMethodCalled("isVersionCompatible")).toBe(true);
@@ -123,14 +124,15 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
     accessibilityManager.setVersionCompatible(false);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-        waitForConnection: () => Promise.resolve(true)
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await expect(
       manager.ensureDeviceReady("android", "device-1", { skipCtrlProxyDownload: true })
     ).rejects.toThrow("Accessibility service version mismatch");
@@ -140,15 +142,16 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(false);
     accessibilityManager.setEnabled(false);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
+
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
         waitForConnection: () => Promise.resolve(true),
-        verifyServiceReady: () => Promise.resolve(true)
-      } as any);
-
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     expect(accessibilityManager.wasMethodCalled("setup")).toBe(true);
@@ -158,14 +161,15 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-        waitForConnection: () => Promise.resolve(true)
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // When installed, enabled, and WebSocket connects - service is working, no need for setup
@@ -176,14 +180,15 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-        waitForConnection: () => Promise.resolve(false)  // WebSocket fails - cache is stale
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(false), // WebSocket fails - cache is stale
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // Cache was stale (claimed installed but WebSocket failed), so setup should run
@@ -192,53 +197,77 @@ describe("DeviceSessionManager", () => {
   });
 
   test("should skip accessibility checks when websocket is connected and service is responsive", async () => {
-    let managerTouched = false;
-    AndroidCtrlProxyManager.getInstance = () => {
-      managerTouched = true;
-      return {
-        isInstalled: async () => false,
-        isEnabled: async () => false,
-        enable: async () => {},
-        setup: async () => ({ success: true, message: "ok" })
-      } as any;
-    };
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => true,
-        verifyServiceReady: () => Promise.resolve(true)
-      } as any);
+    const accessibilityManager = new FakeCtrlProxyManager();
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => true,
+        verifyServiceReady: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
-    expect(managerTouched).toBe(false);
+    expect(accessibilityManager.getExecutedOperations()).toEqual([]);
   });
 
   test("should fall through to normal flow when websocket connected but service not responsive", async () => {
     const accessibilityManager = new FakeCtrlProxyManager();
     accessibilityManager.setInstalled(true);
     accessibilityManager.setEnabled(true);
-    AndroidCtrlProxyManager.getInstance = () => accessibilityManager as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => true,
-        verifyServiceReady: () => Promise.resolve(false),  // Service not responsive
-        waitForConnection: () => Promise.resolve(true)
-      } as any);
 
-    const manager = DeviceSessionManager.createInstance(new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils));
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => true,
+        verifyServiceReady: () => Promise.resolve(false), // Service not responsive
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
     await manager.ensureDeviceReady("android", "device-1");
 
     // Should have fallen through and checked status since service wasn't responsive
     expect(accessibilityManager.wasMethodCalled("isInstalled")).toBe(true);
+  });
+
+  test("CtrlProxy collaborators come from the provider, not static getInstance", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+
+    let clientFromProvider = 0;
+    const stubClient = stubAndroidCtrlProxy({
+      isConnected: () => {
+        clientFromProvider++;
+        return true;
+      },
+      verifyServiceReady: () => Promise.resolve(true),
+    });
+
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubClient,
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    expect(clientFromProvider).toBeGreaterThan(0);
+  });
+
+  test("FakeDeviceClientProvider throws when CtrlProxy fakes are not configured", () => {
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils);
+    expect(() => provider.getAndroidCtrlProxyClient(device)).toThrow(/ctrlProxyClient fake not configured/);
+    expect(() => provider.getAndroidCtrlProxyManager(device)).toThrow(/ctrlProxyManager fake not configured/);
+    expect(() => provider.getIOSCtrlProxyManager(device)).toThrow(/iosCtrlProxyManager fake not configured/);
+    expect(() => provider.getIOSCtrlProxyClient(device, 8080)).toThrow(/iosCtrlProxyClient fake not configured/);
   });
 });
 
 describe("DeviceSessionManager iOS openSimulatorApp", () => {
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
-  let originalIOSCtrlProxyManagerGetInstance: typeof IOSCtrlProxyManager.getInstance;
-  let originalIOSCtrlProxyClientGetInstance: typeof IOSCtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -252,29 +281,31 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
       syncWithHost: false,
       defaultMode: "light"
     });
-
-    originalIOSCtrlProxyManagerGetInstance = IOSCtrlProxyManager.getInstance;
-    originalIOSCtrlProxyClientGetInstance = IOSCtrlProxyClient.getInstance;
-
-    IOSCtrlProxyManager.getInstance = () =>
-      ({
-        getServicePort: () => 8080,
-        isRunning: async () => false,
-        setup: async () => ({ success: false, error: "skipped in test" }),
-        resetSetupState: () => {},
-      } as any);
-
-    IOSCtrlProxyClient.getInstance = () =>
-      ({
-        isConnected: () => false,
-      } as any);
   });
 
   afterEach(() => {
-    IOSCtrlProxyManager.getInstance = originalIOSCtrlProxyManagerGetInstance;
-    IOSCtrlProxyClient.getInstance = originalIOSCtrlProxyClientGetInstance;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
+
+  function buildIosProvider(
+    fakeAdb: FakeAdbExecutor,
+    fakeDeviceUtils: FakeDeviceUtils,
+    fakeSimctl: FakeSimCtlClient
+  ): FakeDeviceClientProvider {
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setSetupShouldFail(true); // skip the setup path in these tests
+    const iosClient = new FakeIOSCtrlProxy();
+    iosClient.setConnected(false);
+    return new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      fakeSimctl as any,
+      {
+        iosCtrlProxyManager: iosManager,
+        iosCtrlProxyClient: iosClient,
+      }
+    );
+  }
 
   test("should call openSimulatorApp once on the first booted iOS device verification", async () => {
     const fakeSimctl = new FakeSimCtlClient();
@@ -286,7 +317,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -304,7 +335,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -324,7 +355,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
     );
 
     await manager.verifyIosDevice("ios-sim-1");
@@ -342,7 +373,7 @@ describe("DeviceSessionManager iOS openSimulatorApp", () => {
     });
 
     const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any)
+      buildIosProvider(fakeAdb, fakeDeviceUtils, fakeSimctl)
     );
 
     // First call: openSimulatorApp throws — flag must NOT be set
@@ -379,10 +410,6 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   let fakeSimctl: FakeSimctl;
   let fakeAdbFactory: AdbClientFactory;
   let originalGetActive: typeof Window.prototype.getActive;
-  let originalAndroidCtrlProxyMgr: typeof AndroidCtrlProxyManager.getInstance;
-  let originalAndroidCtrlProxyClient: typeof AndroidCtrlProxyClient.getInstance;
-  let originalIOSCtrlProxyMgr: typeof IOSCtrlProxyManager.getInstance;
-  let originalIOSCtrlProxyClient: typeof IOSCtrlProxyClient.getInstance;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -412,44 +439,42 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     Window.prototype.getActive = async function() {
       return { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 };
     };
-
-    originalAndroidCtrlProxyMgr = AndroidCtrlProxyManager.getInstance;
-    originalAndroidCtrlProxyClient = AndroidCtrlProxyClient.getInstance;
-    originalIOSCtrlProxyMgr = IOSCtrlProxyManager.getInstance;
-    originalIOSCtrlProxyClient = IOSCtrlProxyClient.getInstance;
-
-    const fakeCtrlProxy = new FakeCtrlProxyManager();
-    fakeCtrlProxy.setInstalled(true);
-    fakeCtrlProxy.setEnabled(true);
-    fakeCtrlProxy.setVersionCompatible(true);
-    AndroidCtrlProxyManager.getInstance = () => fakeCtrlProxy as any;
-    AndroidCtrlProxyClient.getInstance = () =>
-      ({ isConnected: () => true, verifyServiceReady: () => Promise.resolve(true) }) as any;
-
-    IOSCtrlProxyManager.getInstance = () =>
-      ({
-        getServicePort: () => 8080,
-        isRunning: async () => false,
-        setup: async () => ({ success: false, error: "skipped" }),
-        resetSetupState: () => {},
-      }) as any;
-    IOSCtrlProxyClient.getInstance = () => ({ isConnected: () => false }) as any;
   });
 
   afterEach(() => {
     Window.prototype.getActive = originalGetActive;
-    AndroidCtrlProxyManager.getInstance = originalAndroidCtrlProxyMgr;
-    AndroidCtrlProxyClient.getInstance = originalAndroidCtrlProxyClient;
-    IOSCtrlProxyManager.getInstance = originalIOSCtrlProxyMgr;
-    IOSCtrlProxyClient.getInstance = originalIOSCtrlProxyClient;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
-  test("should throw when both platforms connected and no active device or deviceId", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
+  function buildProvider(): FakeDeviceClientProvider {
+    const fakeCtrlProxy = new FakeCtrlProxyManager();
+    fakeCtrlProxy.setInstalled(true);
+    fakeCtrlProxy.setEnabled(true);
+    fakeCtrlProxy.setVersionCompatible(true);
+
+    const fakeIosManager = new FakeIOSCtrlProxyManager();
+    fakeIosManager.setSetupShouldFail(true);
+    const fakeIosClient = new FakeIOSCtrlProxy();
+    fakeIosClient.setConnected(false);
+
+    return new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      fakeSimctl as any,
+      {
+        ctrlProxyManager: fakeCtrlProxy,
+        ctrlProxyClient: stubAndroidCtrlProxy({
+          isConnected: () => true,
+          verifyServiceReady: () => Promise.resolve(true),
+        }),
+        iosCtrlProxyManager: fakeIosManager,
+        iosCtrlProxyClient: fakeIosClient,
+      }
     );
+  }
+
+  test("should throw when both platforms connected and no active device or deviceId", async () => {
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     await expect(
       manager.ensureDeviceReady("either")
@@ -457,10 +482,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve to ios when setActiveDevice was called with ios", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     manager.setCurrentDevice(iosDevice, "ios");
 
@@ -470,10 +492,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve to active platform without deviceId when setActiveDevice was called", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     manager.setCurrentDevice(iosDevice, "ios");
 
@@ -483,10 +502,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve ios device by providedDeviceId when no active device set", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     const result = await manager.ensureDeviceReady("either", "ios-sim-1");
     expect(result.platform).toBe("ios");
@@ -494,10 +510,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should resolve android device by providedDeviceId when no active device set", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     const result = await manager.ensureDeviceReady("either", "emulator-5554");
     expect(result.platform).toBe("android");
@@ -508,10 +521,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // This test ensures that when platform="either" and currentDevice is Android,
     // verifyDevice is called with "android" (resolvedPlatform) instead of "either" (raw platform).
     // Bug fix: previously "either" was passed to verifyDevice which treated it as iOS.
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     // Set current device to Android (simulating a prior setActiveDevice call)
     manager.setCurrentDevice(androidDevice, "android");
@@ -526,10 +536,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   });
 
   test("should return android device when platform is explicitly 'android' even with iOS active", async () => {
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS (simulating a prior setActiveDevice call to iOS)
     manager.setCurrentDevice(iosDevice, "ios");
@@ -548,10 +555,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     // Configure fakeDeviceUtils so findOrStartDevice can find Android devices
     fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
 
-    const manager = DeviceSessionManager.createInstance(
-      new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, fakeSimctl as any),
-      fakeAdbFactory
-    );
+    const manager = DeviceSessionManager.createInstance(buildProvider(), fakeAdbFactory);
 
     // Set current device to iOS first
     manager.setCurrentDevice(iosDevice, "ios");

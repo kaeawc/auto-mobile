@@ -4,13 +4,15 @@ import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-too
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { Window } from "../features/observe/Window";
 import { logger } from "./logger";
-import { AndroidCtrlProxyManager } from "./CtrlProxyManager";
-import { IOSCtrlProxyManager } from "./IOSCtrlProxyManager";
+import { AndroidCtrlProxyManager, CtrlProxyManager } from "./CtrlProxyManager";
+import { IOSCtrlProxyManager, CtrlProxyIosManager } from "./IOSCtrlProxyManager";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { PlatformDeviceManager } from "./interfaces/DeviceUtils";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
+import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlProxyClient";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { createPerformanceTracker, createGlobalPerformanceTracker } from "./PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
@@ -25,6 +27,10 @@ export interface DeviceClientProvider {
   getSimctl(): SimCtlClient | undefined;
   getAndroidEmulator(): AndroidEmulatorClient | undefined;
   getDeviceUtils(): PlatformDeviceManager;
+  getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager;
+  getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
+  getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
+  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy;
 }
 
 /**
@@ -71,6 +77,22 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
       );
     }
     return this._deviceUtils;
+  }
+
+  getAndroidCtrlProxyManager(device: BootedDevice): CtrlProxyManager {
+    return AndroidCtrlProxyManager.getInstance(device);
+  }
+
+  getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy {
+    return AndroidCtrlProxyClient.getInstance(device);
+  }
+
+  getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager {
+    return IOSCtrlProxyManager.getInstance(device);
+  }
+
+  getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy {
+    return IOSCtrlProxyClient.getInstance(device, port);
   }
 }
 
@@ -463,7 +485,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         if (options?.skipAccessibilityDownload !== undefined) { logger.warn("[DeviceSessionManager] skipAccessibilityDownload is deprecated; use skipCtrlProxyDownload instead."); } else { logger.warn("[DeviceSessionManager] skipAccessibilitySetup is deprecated; use skipCtrlProxyDownload instead."); }
       }
 
-      const accessibilityClient = AndroidCtrlProxyClient.getInstance(device);
+      const accessibilityClient = this.provider.getAndroidCtrlProxyClient(device);
       if (accessibilityClient.isConnected()) {
         // WebSocket appears connected, but verify service is actually responsive
         // This catches cases where service crashed but socket wasn't properly closed
@@ -480,7 +502,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
         logger.warn(`[DeviceSessionManager] WebSocket connected but service not responsive for ${deviceId}, checking status`);
       }
 
-      const manager = AndroidCtrlProxyManager.getInstance(device);
+      const manager = this.provider.getAndroidCtrlProxyManager(device);
       const verifyCompatibilityWhenSkipping = async (): Promise<void> => {
         const isCompatible = await manager.isVersionCompatible();
         if (isCompatible) {
@@ -642,8 +664,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       const skipCtrlProxyIOSSetup = options?.skipCtrlProxyDownload ?? options?.skipAccessibilityDownload ?? options?.skipAccessibilitySetup;
 
-      const manager = IOSCtrlProxyManager.getInstance(device);
-      const xcTestClient = IOSCtrlProxyClient.getInstance(device, manager.getServicePort());
+      const manager = this.provider.getIOSCtrlProxyManager(device);
+      const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
 
       // Check if WebSocket is already connected
       if (xcTestClient.isConnected()) {
@@ -884,8 +906,8 @@ export class DeviceSessionManager implements DeviceSessionManager {
     }
 
     try {
-      const manager = IOSCtrlProxyManager.getInstance(device);
-      const xcTestClient = IOSCtrlProxyClient.getInstance(device, manager.getServicePort());
+      const manager = this.provider.getIOSCtrlProxyManager(device);
+      const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
 
       xcTestClient.onPushUpdate(() => {
         logger.info(`[DeviceSessionManager] Received iOS UI change notification for ${deviceId}, clearing ObserveScreen cache`);

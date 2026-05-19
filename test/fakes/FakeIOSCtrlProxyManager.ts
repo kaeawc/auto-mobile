@@ -181,4 +181,8 @@ export class FakeIOSCtrlProxyManager implements CtrlProxyIosManager {
     this.executedOperations.push("forceRestart");
     this.runningState = true;
   }
+
+  resetSetupState(): void {
+    this.executedOperations.push("resetSetupState");
+  }
 }

@@ -46,6 +46,7 @@ export interface CtrlProxyManager {
   enable(): Promise<void>;
   enableForUser(userId: number): Promise<void>;
   cleanupApk(apkPath: string): Promise<void>;
+  resetSetupState(): void;
 }
 
 interface AccessibilityVersionCheckResult {

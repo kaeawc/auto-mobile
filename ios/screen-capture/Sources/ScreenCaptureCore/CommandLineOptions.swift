@@ -6,7 +6,7 @@ public struct CommandLineOptions: Equatable {
         case listDevices
         case capture(deviceID: String?)
         case listSimulators
-        case captureSimulator(windowID: UInt32)
+        case captureSimulator(windowID: UInt32, fps: Int)
         case help
     }
 
@@ -23,6 +23,10 @@ public struct CommandLineOptions: Equatable {
         case conflictingFlags(String)
     }
 
+    public static let defaultSimulatorFPS = 5
+    public static let minSimulatorFPS = 5
+    public static let maxSimulatorFPS = 60
+
     public static func parse(_ arguments: [String]) throws -> CommandLineOptions {
         var iterator = arguments.makeIterator()
         _ = iterator.next()
@@ -31,6 +35,7 @@ public struct CommandLineOptions: Equatable {
         var deviceID: String?
         var listSimulators = false
         var simulatorWindowID: UInt32?
+        var simulatorFPS: Int?
         var help = false
 
         while let arg = iterator.next() {
@@ -52,6 +57,18 @@ public struct CommandLineOptions: Equatable {
                     throw ParseError.invalidValue(flag: arg, value: value)
                 }
                 simulatorWindowID = parsed
+            case "--simulator-fps":
+                guard let value = iterator.next() else {
+                    throw ParseError.missingValue(flag: arg)
+                }
+                guard
+                    let parsed = Int(value),
+                    parsed >= minSimulatorFPS,
+                    parsed <= maxSimulatorFPS
+                else {
+                    throw ParseError.invalidValue(flag: arg, value: value)
+                }
+                simulatorFPS = parsed
             case "-h", "--help":
                 help = true
             default:
@@ -75,6 +92,12 @@ public struct CommandLineOptions: Equatable {
             )
         }
 
+        if simulatorFPS != nil && simulatorWindowID == nil {
+            throw ParseError.conflictingFlags(
+                "--simulator-fps requires --simulator-window"
+            )
+        }
+
         if listDevices {
             return CommandLineOptions(mode: .listDevices)
         }
@@ -82,7 +105,12 @@ public struct CommandLineOptions: Equatable {
             return CommandLineOptions(mode: .listSimulators)
         }
         if let windowID = simulatorWindowID {
-            return CommandLineOptions(mode: .captureSimulator(windowID: windowID))
+            return CommandLineOptions(
+                mode: .captureSimulator(
+                    windowID: windowID,
+                    fps: simulatorFPS ?? defaultSimulatorFPS
+                )
+            )
         }
         return CommandLineOptions(mode: .capture(deviceID: deviceID))
     }
@@ -93,19 +121,21 @@ public struct CommandLineOptions: Equatable {
     USAGE:
         screen-capture-helper [--device-id <id>]
         screen-capture-helper --list-devices
-        screen-capture-helper --simulator-window <windowID>
+        screen-capture-helper --simulator-window <windowID> [--simulator-fps <n>]
         screen-capture-helper --list-simulators
 
     DEVICE OPTIONS (USB-connected iOS devices via AVFoundation):
-        --list-devices         Emit discovered devices as JSON to stdout and exit.
-        --device-id <id>       uniqueID of the device to capture. If omitted, the
-                               first muxed external device is used.
+        --list-devices          Emit discovered devices as JSON to stdout and exit.
+        --device-id <id>        uniqueID of the device to capture. If omitted,
+                                the first muxed external device is used.
 
     SIMULATOR OPTIONS (macOS iOS Simulator windows via ScreenCaptureKit):
-        --list-simulators      Emit discovered simulator windows as JSON and exit.
-        --simulator-window <n> CGWindowID of the simulator window to capture.
+        --list-simulators       Emit discovered simulator windows as JSON.
+        --simulator-window <n>  CGWindowID of the simulator window to capture.
+        --simulator-fps <n>     Target frame rate (5-60, default 5). Higher
+                                values waste CPU for typical MCP workloads.
 
-        -h, --help             Show this help.
+        -h, --help              Show this help.
 
     Frames are written to stdout: 16-byte little-endian header
     (width, height, bytesPerRow, timestampMs) followed by

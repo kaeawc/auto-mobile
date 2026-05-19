@@ -68,6 +68,41 @@ describe("IOSScreenCaptureHelper", () => {
     expect(spawnArgs.args).toEqual(["--simulator-window", "98765"]);
   });
 
+  test("passes --simulator-fps when fps is provided", () => {
+    const { spawnArgs, helper } = withFakeSpawner({
+      kind: "simulator",
+      windowID: 1,
+      fps: 30,
+    });
+    helper.start();
+    expect(spawnArgs.args).toEqual([
+      "--simulator-window",
+      "1",
+      "--simulator-fps",
+      "30",
+    ]);
+  });
+
+  test("rejects simulator fps outside [5, 60]", () => {
+    const fake = new FakeChildProcess();
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "simulator", windowID: 1, fps: 61 },
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+    });
+    expect(() => helper.start()).toThrow(/simulator fps must be an integer in \[5, 60\]/);
+  });
+
+  test("rejects non-integer simulator fps", () => {
+    const fake = new FakeChildProcess();
+    const helper = new IOSScreenCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      target: { kind: "simulator", windowID: 1, fps: 30.5 },
+      spawner: () => fake as unknown as ChildProcessWithoutNullStreams,
+    });
+    expect(() => helper.start()).toThrow(/integer/);
+  });
+
   test("emits frame events for each decoded frame", async () => {
     const { fake, helper } = withFakeSpawner();
     const frames: DecodedFrame[] = [];

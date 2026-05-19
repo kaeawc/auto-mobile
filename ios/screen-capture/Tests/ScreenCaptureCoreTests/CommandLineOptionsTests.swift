@@ -57,11 +57,69 @@ final class CommandLineOptionsTests: XCTestCase {
         XCTAssertEqual(opts.mode, .listSimulators)
     }
 
-    func testParsesSimulatorWindow() throws {
+    func testParsesSimulatorWindowWithDefaultFPS() throws {
         let opts = try CommandLineOptions.parse([
             "screen-capture-helper", "--simulator-window", "98765"
         ])
-        XCTAssertEqual(opts.mode, .captureSimulator(windowID: 98765))
+        XCTAssertEqual(
+            opts.mode,
+            .captureSimulator(
+                windowID: 98765,
+                fps: CommandLineOptions.defaultSimulatorFPS
+            )
+        )
+    }
+
+    func testParsesSimulatorFPSWithinRange() throws {
+        let opts = try CommandLineOptions.parse([
+            "screen-capture-helper",
+            "--simulator-window", "1",
+            "--simulator-fps", "30",
+        ])
+        XCTAssertEqual(opts.mode, .captureSimulator(windowID: 1, fps: 30))
+    }
+
+    func testRejectsSimulatorFPSBelowRange() {
+        XCTAssertThrowsError(try CommandLineOptions.parse([
+            "screen-capture-helper",
+            "--simulator-window", "1",
+            "--simulator-fps", "4",
+        ])) { error in
+            XCTAssertEqual(
+                error as? CommandLineOptions.ParseError,
+                .invalidValue(flag: "--simulator-fps", value: "4")
+            )
+        }
+    }
+
+    func testRejectsSimulatorFPSAboveRange() {
+        XCTAssertThrowsError(try CommandLineOptions.parse([
+            "screen-capture-helper",
+            "--simulator-window", "1",
+            "--simulator-fps", "61",
+        ])) { error in
+            XCTAssertEqual(
+                error as? CommandLineOptions.ParseError,
+                .invalidValue(flag: "--simulator-fps", value: "61")
+            )
+        }
+    }
+
+    func testRejectsSimulatorFPSWithoutWindow() {
+        XCTAssertThrowsError(try CommandLineOptions.parse([
+            "screen-capture-helper", "--simulator-fps", "15",
+        ])) { error in
+            guard case CommandLineOptions.ParseError.conflictingFlags = error else {
+                XCTFail("expected conflictingFlags, got \(error)")
+                return
+            }
+        }
+    }
+
+    func testDefaultSimulatorFPSConstantIs5() {
+        XCTAssertEqual(CommandLineOptions.defaultSimulatorFPS, 5)
+        XCTAssertEqual(CommandLineOptions.minSimulatorFPS, 5)
+        XCTAssertEqual(CommandLineOptions.maxSimulatorFPS, 60)
     }
 
     func testInvalidSimulatorWindowValueThrows() {

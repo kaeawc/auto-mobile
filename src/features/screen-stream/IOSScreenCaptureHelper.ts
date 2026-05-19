@@ -21,7 +21,12 @@ export type HelperSpawner = (
  */
 export type CaptureTarget =
   | { kind: "device"; deviceId?: string }
-  | { kind: "simulator"; windowID: number };
+  | { kind: "simulator"; windowID: number; fps?: number };
+
+/** Valid range for the simulator capture frame rate, mirrors the Swift CLI. */
+export const SIMULATOR_FPS_MIN = 5;
+export const SIMULATOR_FPS_MAX = 60;
+export const SIMULATOR_FPS_DEFAULT = 5;
 
 export interface IosScreenCaptureHelperOptions {
   /** Absolute path to the compiled `screen-capture-helper` binary. */
@@ -167,7 +172,21 @@ function buildArgs(target: CaptureTarget): string[] {
   switch (target.kind) {
     case "device":
       return target.deviceId !== undefined ? ["--device-id", target.deviceId] : [];
-    case "simulator":
-      return ["--simulator-window", String(target.windowID)];
+    case "simulator": {
+      const args = ["--simulator-window", String(target.windowID)];
+      if (target.fps !== undefined) {
+        if (
+          !Number.isInteger(target.fps) ||
+          target.fps < SIMULATOR_FPS_MIN ||
+          target.fps > SIMULATOR_FPS_MAX
+        ) {
+          throw new RangeError(
+            `simulator fps must be an integer in [${SIMULATOR_FPS_MIN}, ${SIMULATOR_FPS_MAX}]; got ${target.fps}`
+          );
+        }
+        args.push("--simulator-fps", String(target.fps));
+      }
+      return args;
+    }
   }
 }

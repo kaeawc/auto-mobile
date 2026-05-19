@@ -282,6 +282,9 @@ Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 - [x] Handle simulator window discovery (`SimulatorWindowDiscovery`, `--list-simulators`)
 - [x] Unified Swift CLI handles both device and simulator targets
 - [x] Node `IOSScreenCaptureHelper` accepts `{ kind: "device" | "simulator" }` targets
+- [x] Configurable frame rate (`--simulator-fps`, default 5, range 5-60)
+- [x] Auto-reconfigure stream on size change (device rotation)
+- [x] Stderr hint when no frames arrive within 2s (silent permission denial)
 - [ ] Unix-socket fan-out (shared with Milestone 1 follow-up)
 
 ### Milestone 3: IDE Plugin Integration

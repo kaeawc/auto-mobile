@@ -1,4 +1,5 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
+import { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
 import { BootedDevice, SelectAllTextResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -8,8 +9,8 @@ import { logger } from "../../utils/logger";
 
 export class SelectAllText extends BaseVisualChange {
 
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
-    super(device, adb);
+  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null) {
+    super(device, adbFactoryOrExecutor);
   }
 
   async execute(progress?: ProgressCallback): Promise<SelectAllTextResult> {
@@ -78,7 +79,7 @@ export class SelectAllText extends BaseVisualChange {
    * Uses ACTION_SET_SELECTION which is significantly faster than ADB double-tap.
    */
   private async executeAndroidSelectAll(): Promise<SelectAllTextResult> {
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestSelectAll();
 
     if (a11yResult.success) {

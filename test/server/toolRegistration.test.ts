@@ -392,9 +392,9 @@ describe("Tool Registration Validation (Unit Tests)", () => {
 
       fakeFs.setFile("schemas/tool-definitions.json", schemaFile);
 
-      // Should not throw
-      await validator.validateSchemaFile("schemas/tool-definitions.json");
-      expect(true).toBe(true); // Test passes if no error thrown
+      await expect(
+        validator.validateSchemaFile("schemas/tool-definitions.json")
+      ).resolves.toBeUndefined();
     });
 
     test("should detect incomplete schema definitions", async () => {

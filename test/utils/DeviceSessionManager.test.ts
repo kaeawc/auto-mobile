@@ -8,7 +8,7 @@ import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
-import { Window } from "../../src/features/observe/Window";
+import { FakeWindow } from "../fakes/FakeWindow";
 import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
@@ -22,6 +22,16 @@ function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrl
   return overrides as unknown as AndroidCtrlProxy;
 }
 
+function makeReadyWindow(): FakeWindow {
+  const w = new FakeWindow();
+  w.configureActiveWindow({
+    appId: "com.example.app",
+    activityName: "MainActivity",
+    layoutSeqSum: 0,
+  });
+  return w;
+}
+
 describe("DeviceSessionManager", () => {
   const device: BootedDevice = {
     name: "device-1",
@@ -31,13 +41,14 @@ describe("DeviceSessionManager", () => {
 
   let fakeAdb: FakeAdbExecutor;
   let fakeDeviceUtils: FakeDeviceUtils;
-  let originalGetActive: typeof Window.prototype.getActive;
+  let fakeWindow: FakeWindow;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeAdb.setDevices([device]);
+    fakeWindow = makeReadyWindow();
 
     originalAppearanceDefaults = serverConfig.getAppearanceDefaults();
     serverConfig.setAppearanceDefaults({
@@ -46,19 +57,9 @@ describe("DeviceSessionManager", () => {
       syncWithHost: false,
       defaultMode: "light"
     });
-
-    originalGetActive = Window.prototype.getActive;
-    Window.prototype.getActive = async function() {
-      return {
-        appId: "com.example.app",
-        activityName: "MainActivity",
-        layoutSeqSum: 0
-      };
-    };
   });
 
   afterEach(() => {
-    Window.prototype.getActive = originalGetActive;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
@@ -68,6 +69,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(false);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({ isConnected: () => false }),
     });
@@ -85,6 +87,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setVersionCompatible(true);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -106,6 +109,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setVersionCompatible(true);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -126,6 +130,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setVersionCompatible(false);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -144,6 +149,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(false);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -163,6 +169,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(true);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -182,6 +189,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(true);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => false,
@@ -200,6 +208,7 @@ describe("DeviceSessionManager", () => {
     const accessibilityManager = new FakeCtrlProxyManager();
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => true,
@@ -218,6 +227,7 @@ describe("DeviceSessionManager", () => {
     accessibilityManager.setEnabled(true);
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubAndroidCtrlProxy({
         isConnected: () => true,
@@ -247,6 +257,7 @@ describe("DeviceSessionManager", () => {
     });
 
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
       ctrlProxyManager: accessibilityManager,
       ctrlProxyClient: stubClient,
     });
@@ -256,12 +267,33 @@ describe("DeviceSessionManager", () => {
     expect(clientFromProvider).toBeGreaterThan(0);
   });
 
-  test("FakeDeviceClientProvider throws when CtrlProxy fakes are not configured", () => {
+  test("FakeDeviceClientProvider throws when collaborator fakes are not configured", () => {
     const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils);
     expect(() => provider.getAndroidCtrlProxyClient(device)).toThrow(/ctrlProxyClient fake not configured/);
     expect(() => provider.getAndroidCtrlProxyManager(device)).toThrow(/ctrlProxyManager fake not configured/);
     expect(() => provider.getIOSCtrlProxyManager(device)).toThrow(/iosCtrlProxyManager fake not configured/);
     expect(() => provider.getIOSCtrlProxyClient(device, 8080)).toThrow(/iosCtrlProxyClient fake not configured/);
+    expect(() => provider.getWindow(device)).toThrow(/window fake not configured/);
+  });
+
+  test("Window comes from the provider, not from `new Window(device)`", async () => {
+    const accessibilityManager = new FakeCtrlProxyManager();
+    accessibilityManager.setInstalled(true);
+    accessibilityManager.setEnabled(true);
+
+    const provider = new FakeDeviceClientProvider(fakeAdb, fakeDeviceUtils, undefined, {
+      window: fakeWindow,
+      ctrlProxyManager: accessibilityManager,
+      ctrlProxyClient: stubAndroidCtrlProxy({
+        isConnected: () => false,
+        waitForConnection: () => Promise.resolve(true),
+      }),
+    });
+    const manager = DeviceSessionManager.createInstance(provider);
+    await manager.ensureDeviceReady("android", "device-1");
+
+    // Window.getActive must have been called exclusively on the injected fake.
+    expect(fakeWindow.wasMethodCalled("getActive")).toBe(true);
   });
 });
 
@@ -409,7 +441,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeSimctl: FakeSimctl;
   let fakeAdbFactory: AdbClientFactory;
-  let originalGetActive: typeof Window.prototype.getActive;
+  let fakeWindow: FakeWindow;
   let originalAppearanceDefaults: AppearanceConfigInput;
 
   beforeEach(() => {
@@ -417,6 +449,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeSimctl = new FakeSimctl();
     fakeAdbFactory = { create: () => fakeAdb };
+    fakeWindow = makeReadyWindow();
 
     fakeAdb.setDevices([androidDevice]);
     fakeSimctl.setBootedSimulators([iosDevice]);
@@ -434,15 +467,9 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       syncWithHost: false,
       defaultMode: "light",
     });
-
-    originalGetActive = Window.prototype.getActive;
-    Window.prototype.getActive = async function() {
-      return { appId: "com.example.app", activityName: "MainActivity", layoutSeqSum: 0 };
-    };
   });
 
   afterEach(() => {
-    Window.prototype.getActive = originalGetActive;
     serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
   });
 
@@ -462,6 +489,7 @@ describe("DeviceSessionManager dual-platform resolution", () => {
       fakeDeviceUtils,
       fakeSimctl as any,
       {
+        window: fakeWindow,
         ctrlProxyManager: fakeCtrlProxy,
         ctrlProxyClient: stubAndroidCtrlProxy({
           isConnected: () => true,

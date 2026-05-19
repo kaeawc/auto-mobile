@@ -2,7 +2,8 @@ import { ActionableError, BootedDevice, Platform, SomePlatform } from "../models
 import { MultiPlatformDeviceManager } from "./deviceUtils";
 import { AdbClientFactory, defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
-import { Window } from "../features/observe/Window";
+import { Window as WindowImpl } from "../features/observe/Window";
+import type { Window } from "../features/observe/interfaces/Window";
 import { logger } from "./logger";
 import { AndroidCtrlProxyManager, CtrlProxyManager } from "./CtrlProxyManager";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "./IOSCtrlProxyManager";
@@ -31,6 +32,7 @@ export interface DeviceClientProvider {
   getAndroidCtrlProxyClient(device: BootedDevice): AndroidCtrlProxy;
   getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
   getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy;
+  getWindow(device: BootedDevice): Window;
 }
 
 /**
@@ -42,6 +44,9 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
   private _simctl: SimCtlClient | undefined;
   private _androidEmulator: AndroidEmulatorClient | undefined;
   private _deviceUtils: PlatformDeviceManager | undefined;
+  // Keyed by device.deviceId so Window's internal active-window cache survives
+  // across calls instead of being thrown away on every resolve.
+  private readonly _windows: Map<string, Window> = new Map();
 
   constructor(adbFactory: AdbClientFactory = defaultAdbClientFactory) {
     this._adbFactory = adbFactory;
@@ -93,6 +98,16 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
 
   getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy {
     return IOSCtrlProxyClient.getInstance(device, port);
+  }
+
+  getWindow(device: BootedDevice): Window {
+    const key = device.deviceId;
+    let window = this._windows.get(key);
+    if (!window) {
+      window = new WindowImpl(device, this._adbFactory);
+      this._windows.set(key, window);
+    }
+    return window;
   }
 }
 
@@ -178,7 +193,6 @@ export class DeviceSessionManager implements DeviceSessionManager {
   private readonly provider: DeviceClientProvider;
   private readonly adbFactory: AdbClientFactory;
   private _adb: AdbExecutor | undefined;
-  private window: Window | undefined;
   private simulatorAppOpened = false;
 
   // Track devices that have push update listeners registered
@@ -247,9 +261,6 @@ export class DeviceSessionManager implements DeviceSessionManager {
       // Update AdbClient with new device ID - need a fresh client for the new device
       this._adb = this.adbFactory.create(device);
     }
-
-    // Reset window when device changes
-    this.window = undefined;
   }
 
   /**
@@ -448,13 +459,11 @@ export class DeviceSessionManager implements DeviceSessionManager {
     try {
       logger.info(`[DeviceSessionManager] Verifying Android device ${deviceId} readiness`);
 
-      if (!this.window || this.window.getDeviceId() !== deviceId) {
-        this.window = new Window(device);
-      }
+      const window = this.provider.getWindow(device);
 
-      let activeWindow = await this.window.getActive();
+      let activeWindow = await window.getActive();
       if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
-        activeWindow = await this.window.getActive(true);
+        activeWindow = await window.getActive(true);
         if (!activeWindow || !activeWindow.appId || !activeWindow.activityName) {
           logger.warn(`[DeviceSessionManager] Android device ${deviceId} is not fully ready`);
           if (activeWindow) {

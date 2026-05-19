@@ -49,6 +49,7 @@ export interface CtrlProxyIosManager {
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
   forceRestart(): Promise<void>;
+  resetSetupState(): void;
 }
 
 interface HostControlCtrlProxyIOSRunner {

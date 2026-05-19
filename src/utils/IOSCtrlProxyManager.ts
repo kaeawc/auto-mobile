@@ -23,33 +23,33 @@ import {
   stopIproxy,
   stopCtrlProxyIOS
 } from "./hostControlClient";
+import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
  * Result of CtrlProxy setup
+ *
+ * Extends the platform-agnostic {@link ProxySetupResult} with the
+ * iOS-specific build result.
  */
-export interface CtrlProxyIosSetupResult {
-  success: boolean;
-  message: string;
-  error?: string;
+export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
-  perfTiming?: ReturnType<PerformanceTracker["getTimings"]>;
 }
 
 /**
  * Interface for iOS CtrlProxy management
+ *
+ * Extends the platform-agnostic {@link ProxyManager} interface with
+ * iOS-specific runner process lifecycle methods.
  */
-export interface CtrlProxyIosManager {
+export interface CtrlProxyIosManager extends ProxyManager {
   setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxyIosSetupResult>;
-  isInstalled(): Promise<boolean>;
   isRunning(): Promise<boolean>;
-  isAvailable(): Promise<boolean>;
   start(): Promise<void>;
   stop(): Promise<void>;
   getServicePort(): number;
   setAutoRestart(enabled: boolean): void;
   isAutoRestartEnabled(): boolean;
   forceRestart(): Promise<void>;
-  resetSetupState(): void;
 }
 
 interface HostControlCtrlProxyIOSRunner {

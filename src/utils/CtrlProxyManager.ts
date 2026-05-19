@@ -18,26 +18,23 @@ import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type Performanc
 import { Timer, defaultTimer } from "./SystemTimer";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
+import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
  * Result of accessibility service setup
  */
-interface AccessibilitySetupResult {
-  success: boolean;
-  message: string;
-  error?: string;
-  perfTiming?: ReturnType<PerformanceTracker["getTimings"]>;
-}
+type AccessibilitySetupResult = ProxySetupResult;
 
 /**
  * Interface for accessibility service management
+ *
+ * Extends the platform-agnostic {@link ProxyManager} interface with
+ * Android-specific accessibility-service lifecycle methods.
  */
-export interface CtrlProxyManager {
+export interface CtrlProxyManager extends ProxyManager {
   setup(force?: boolean, perf?: PerformanceTracker): Promise<AccessibilitySetupResult>;
-  isInstalled(): Promise<boolean>;
   isEnabled(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
-  isAvailable(): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
   isVersionCompatible(): Promise<boolean>;
   ensureCompatibleVersion(): Promise<AccessibilityVersionCheckResult>;
@@ -46,7 +43,6 @@ export interface CtrlProxyManager {
   enable(): Promise<void>;
   enableForUser(userId: number): Promise<void>;
   cleanupApk(apkPath: string): Promise<void>;
-  resetSetupState(): void;
 }
 
 interface AccessibilityVersionCheckResult {

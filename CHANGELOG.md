@@ -1,5 +1,13 @@
 # Changelog
 
+## [v0.0.28] - 2026-05-19
+### Added
+- feat: Android emulator telephony and SMS simulation ([#1579](https://github.com/kaeawc/auto-mobile/issues/1579)) (android)
+- iOS: Implement ScreenCaptureKit simulator window capture ([#1096](https://github.com/kaeawc/auto-mobile/issues/1096)) (ios)
+- iOS: Implement Swift helper for AVFoundation device capture ([#1095](https://github.com/kaeawc/auto-mobile/issues/1095)) (ios)
+### Changed
+- refactor: extract test helper for CommandHandlerTests boilerplate ([#1879](https://github.com/kaeawc/auto-mobile/issues/1879)) (ios, testing)
+
 ## [v0.0.27] - 2026-05-18
 ### Added
 - IDE Plugin: Display exported YAML in Record Test UX after finishing ([#1073](https://github.com/kaeawc/auto-mobile/issues/1073)) (intellij plugin)

@@ -34,6 +34,7 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
   private nextAborted: boolean = false;
   private nextThrow: Error | null = null;
   private latestPromise: Promise<ScreenshotResult> | null = null;
+  public lastTrackerOptions: ScreenshotJobOptions | null = null;
 
   setNextResult(result: ScreenshotResult): void {
     this.nextResult = result;
@@ -77,6 +78,7 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
     _options: ScreenshotOptions = { format: "png" },
     trackerOptions: ScreenshotJobOptions = {}
   ): ScreenshotJobHandle {
+    this.lastTrackerOptions = trackerOptions;
     const abortController = new AbortController();
     const result = this.nextResult;
     const isLatest = this.nextIsLatest;
@@ -267,6 +269,16 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     await svc.lastCapturePromise();
 
     expect(store.getError("test-device")).toBe("boom");
+  });
+
+  test("start() requests coalesceWithPending so rapid polling does not cancel in-flight captures", async () => {
+    svc.setNextResult({ success: true, path: "/tmp/skip.png" });
+    svc.setNextIsLatest(false);
+
+    recorder.start(new NoOpPerformanceTracker());
+    await svc.lastCapturePromise();
+
+    expect(svc.lastTrackerOptions?.coalesceWithPending).toBe(true);
   });
 
   test("start() tracks performance via startOperation/endOperation", async () => {

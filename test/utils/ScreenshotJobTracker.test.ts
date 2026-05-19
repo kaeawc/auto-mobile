@@ -70,6 +70,100 @@ describe("ScreenshotJobTracker", () => {
     expect(result?.path).toBe("done");
   });
 
+  test("coalesceWithPending reuses an in-flight job instead of cancelling it", async () => {
+    let runnerInvocations = 0;
+    const startCoalescedJob = () => ScreenshotJobTracker.startJob(
+      "device-3",
+      signal => {
+        runnerInvocations += 1;
+        return new Promise(resolve => {
+          const timeoutId = fakeTimer.setTimeout(() => {
+            resolve({ success: true, path: "shared" });
+          }, 200);
+
+          signal.addEventListener("abort", () => {
+            fakeTimer.clearTimeout(timeoutId);
+            resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+          }, { once: true });
+        });
+      },
+      { coalesceWithPending: true }
+    );
+
+    const job1 = startCoalescedJob();
+    const job2 = startCoalescedJob();
+    const job3 = startCoalescedJob();
+
+    expect(job2.jobId).toBe(job1.jobId);
+    expect(job3.jobId).toBe(job1.jobId);
+
+    // Flush microtasks so the runner attaches its setTimeout before we advance time.
+    await Promise.resolve();
+    expect(runnerInvocations).toBe(1);
+
+    fakeTimer.advanceTime(200);
+    const [r1, r2, r3] = await Promise.all([job1.promise, job2.promise, job3.promise]);
+    expect(r1.success).toBe(true);
+    expect(r1.path).toBe("shared");
+    expect(r2).toBe(r1);
+    expect(r3).toBe(r1);
+  });
+
+  test("coalesceWithPending starts fresh when previous job has been aborted", async () => {
+    const job1 = ScreenshotJobTracker.startJob("device-4", signal => {
+      return new Promise(resolve => {
+        signal.addEventListener("abort", () => {
+          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        }, { once: true });
+      });
+    });
+    await Promise.resolve();
+
+    ScreenshotJobTracker.cancelJob("device-4");
+    await job1.promise;
+
+    let secondRunnerCalled = false;
+    const job2 = ScreenshotJobTracker.startJob(
+      "device-4",
+      async () => {
+        secondRunnerCalled = true;
+        return { success: true, path: "fresh" };
+      },
+      { coalesceWithPending: true }
+    );
+
+    expect(job2.jobId).not.toBe(job1.jobId);
+    const r2 = await job2.promise;
+    expect(secondRunnerCalled).toBe(true);
+    expect(r2.success).toBe(true);
+    expect(r2.path).toBe("fresh");
+  });
+
+  test("without coalesceWithPending, startJob still cancels the previous job", async () => {
+    let secondRunnerCalled = false;
+    const job1 = ScreenshotJobTracker.startJob("device-5", signal => {
+      return new Promise(resolve => {
+        signal.addEventListener("abort", () => {
+          resolve({ success: false, error: OPERATION_CANCELLED_MESSAGE });
+        }, { once: true });
+      });
+    });
+    await Promise.resolve();
+
+    const job2 = ScreenshotJobTracker.startJob("device-5", async () => {
+      secondRunnerCalled = true;
+      return { success: true, path: "replacement" };
+    });
+
+    const [r1, r2] = await Promise.all([job1.promise, job2.promise]);
+    expect(secondRunnerCalled).toBe(true);
+    expect(r1.success).toBe(false);
+    expect(r1.error).toContain(OPERATION_CANCELLED_MESSAGE);
+    expect(r2.success).toBe(true);
+    expect(r2.path).toBe("replacement");
+    expect(job2.jobId).not.toBe(job1.jobId);
+  });
+
   test("waitForCompletion returns null when the job times out", async () => {
     ScreenshotJobTracker.startJob("device-2", async signal => {
       return new Promise(resolve => {

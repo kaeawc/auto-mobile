@@ -64,7 +64,7 @@ export class ClearText extends BaseVisualChange {
    */
   private async executeAndroidClearText(observeResult: ObserveResult): Promise<ClearTextResult> {
     // Use accessibility service (fastest method, ~50-80ms vs ~200-500ms for ADB deletes)
-    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestClearText();
 
     if (a11yResult.success) {

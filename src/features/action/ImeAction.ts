@@ -87,7 +87,7 @@ export class ImeAction extends BaseVisualChange {
     _observeResult: ObserveResult
   ): Promise<ImeActionResult> {
     // Use provided a11y service or get default instance
-    const a11yClient = this.a11yService || AndroidCtrlProxyClient.getInstance(this.device, this.adb);
+    const a11yClient = this.a11yService || AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const a11yResult = await a11yClient.requestImeAction(action);
 
     if (a11yResult.success) {

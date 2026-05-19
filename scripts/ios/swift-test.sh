@@ -70,6 +70,7 @@ TESTABLE_PACKAGES=(
     "XcodeExtension"
     "control-proxy"
     "XCTestRunner"
+    "screen-capture"
 )
 
 # iOS-only packages (tests require iOS simulator - skip in basic test run)

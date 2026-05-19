@@ -271,8 +271,10 @@ Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 ## Implementation Plan
 
 ### Milestone 1: Physical Device Capture
-- [ ] Create Swift helper for AVFoundation capture
-- [ ] Implement Unix socket frame streaming
+- [x] Create Swift helper for AVFoundation capture (`ios/screen-capture/`)
+- [x] Implement frame protocol + stdout streaming
+- [x] Node-side spawn manager (`src/features/screen-stream/IOSDeviceCaptureHelper.ts`)
+- [ ] Unix socket fan-out (`video-stream.sock`)
 - [ ] Test with MCP server integration
 
 ### Milestone 2: Simulator Capture

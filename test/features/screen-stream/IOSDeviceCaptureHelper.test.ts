@@ -1,0 +1,184 @@
+import { describe, expect, test } from "bun:test";
+import type { ChildProcessWithoutNullStreams } from "node:child_process";
+import { FakeChildProcess } from "../../fakes/FakeChildProcess";
+import {
+  FRAME_HEADER_SIZE,
+  IOSDeviceCaptureHelper,
+  type DecodedFrame,
+  type MalformedFrameError,
+} from "../../../src/features/screen-stream";
+
+function encodeFrame(
+  width: number,
+  height: number,
+  bytesPerRow: number,
+  timestampMs: number,
+  fill: number
+): Buffer {
+  const header = Buffer.alloc(FRAME_HEADER_SIZE);
+  header.writeUInt32LE(width, 0);
+  header.writeUInt32LE(height, 4);
+  header.writeUInt32LE(bytesPerRow, 8);
+  header.writeUInt32LE(timestampMs, 12);
+  return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
+}
+
+function withFakeSpawner(): { fake: FakeChildProcess; spawnArgs: { command: string; args: string[] }; helper: IOSDeviceCaptureHelper } {
+  const fake = new FakeChildProcess();
+  const spawnArgs = { command: "", args: [] as string[] };
+  const helper = new IOSDeviceCaptureHelper({
+    binaryPath: "/fake/screen-capture-helper",
+    deviceId: "00008140-001A2B3C0AE2401E",
+    spawner: (command, args) => {
+      spawnArgs.command = command;
+      spawnArgs.args = args;
+      return fake as unknown as ChildProcessWithoutNullStreams;
+    },
+  });
+  return { fake, spawnArgs, helper };
+}
+
+function flush(): Promise<void> {
+  return new Promise(resolve => setImmediate(resolve));
+}
+
+describe("IOSDeviceCaptureHelper", () => {
+  test("passes --device-id when constructed with one", () => {
+    const { spawnArgs, helper } = withFakeSpawner();
+    helper.start();
+    expect(spawnArgs.command).toBe("/fake/screen-capture-helper");
+    expect(spawnArgs.args).toEqual([
+      "--device-id",
+      "00008140-001A2B3C0AE2401E",
+    ]);
+  });
+
+  test("omits --device-id when no deviceId is provided", () => {
+    const fake = new FakeChildProcess();
+    const spawnArgs: string[] = [];
+    const helper = new IOSDeviceCaptureHelper({
+      binaryPath: "/fake/screen-capture-helper",
+      spawner: (_command, args) => {
+        spawnArgs.push(...args);
+        return fake as unknown as ChildProcessWithoutNullStreams;
+      },
+    });
+    helper.start();
+    expect(spawnArgs).toEqual([]);
+  });
+
+  test("emits frame events for each decoded frame", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const frames: DecodedFrame[] = [];
+    helper.on("frame", f => frames.push(f));
+    helper.start();
+
+    const buf = Buffer.concat([
+      encodeFrame(1, 1, 4, 10, 0x11),
+      encodeFrame(1, 1, 4, 20, 0x22),
+    ]);
+    fake.stdout.push(buf);
+    await flush();
+
+    expect(frames).toHaveLength(2);
+    expect(frames[0].header.timestampMs).toBe(10);
+    expect(frames[1].header.timestampMs).toBe(20);
+    expect(frames[0].pixels[0]).toBe(0x11);
+    expect(frames[1].pixels[0]).toBe(0x22);
+  });
+
+  test("emits malformed events for invalid headers", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const malformed: MalformedFrameError[] = [];
+    helper.on("malformed", e => malformed.push(e));
+    helper.start();
+
+    const badHeader = Buffer.alloc(FRAME_HEADER_SIZE);
+    badHeader.writeUInt32LE(0, 0); // width
+    badHeader.writeUInt32LE(1, 4);
+    badHeader.writeUInt32LE(4, 8);
+    badHeader.writeUInt32LE(0, 12);
+    fake.stdout.push(badHeader);
+    await flush();
+
+    expect(malformed).toHaveLength(1);
+    expect(malformed[0].reason).toBe("header_width_zero");
+  });
+
+  test("emits stderr lines and flushes a trailing partial line on exit", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const lines: string[] = [];
+    helper.on("stderr", l => lines.push(l));
+    helper.start();
+
+    fake.stderr.push(Buffer.from("warn: device warming up\nerror: incomplete"));
+    await flush();
+    fake.stdout.push(null);
+    fake.stderr.push(null);
+    fake.emit("exit", 0, null);
+    await flush();
+
+    expect(lines).toEqual([
+      "warn: device warming up",
+      "error: incomplete",
+    ]);
+  });
+
+  test("isRunning reflects process lifecycle", async () => {
+    const { fake, helper } = withFakeSpawner();
+    expect(helper.isRunning).toBe(false);
+    helper.start();
+    expect(helper.isRunning).toBe(true);
+    fake.exitCode = 0;
+    fake.emit("exit", 0, null);
+    await flush();
+    expect(helper.isRunning).toBe(false);
+  });
+
+  test("start() throws when already running", () => {
+    const { helper } = withFakeSpawner();
+    helper.start();
+    expect(() => helper.start()).toThrow("IOSDeviceCaptureHelper already started");
+  });
+
+  test("stop() sends SIGTERM and resolves with exit info", async () => {
+    const { fake, helper } = withFakeSpawner();
+    helper.start();
+
+    const result = await helper.stop();
+
+    expect(fake.killed).toBe(true);
+    expect(result?.signal).toBe("SIGTERM");
+  });
+
+  test("stop() is a no-op when never started", async () => {
+    const { helper } = withFakeSpawner();
+    const result = await helper.stop();
+    expect(result).toBeNull();
+  });
+
+  test("emits error event when underlying process emits error", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const errors: Error[] = [];
+    helper.on("error", e => errors.push(e));
+    helper.start();
+    fake.emit("error", new Error("spawn failed"));
+    await flush();
+    expect(errors).toHaveLength(1);
+    expect(errors[0].message).toBe("spawn failed");
+  });
+
+  test("flushes stderr buffer when it grows past the cap without a newline", async () => {
+    const { fake, helper } = withFakeSpawner();
+    const lines: string[] = [];
+    helper.on("stderr", l => lines.push(l));
+    helper.start();
+
+    const giant = "x".repeat(64 * 1024 + 10);
+    fake.stderr.push(Buffer.from(giant));
+    await flush();
+
+    expect(lines).toHaveLength(1);
+    expect(lines[0].length).toBeGreaterThan(64 * 1024);
+  });
+});

@@ -69,7 +69,7 @@ export class VoiceOverSwipeExecutor implements VoiceOverSwipeRunner {
     }
 
     const isVoiceOverEnabled = await this.iosVoiceOverDetector.isVoiceOverEnabled(
-      this.device.id,
+      this.device.deviceId,
       this.iosClient
     );
 

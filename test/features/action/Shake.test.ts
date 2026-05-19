@@ -1,6 +1,8 @@
 import { expect, describe, test, beforeEach } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
-import { ObserveResult } from "../../../src/models";
+import { BootedDevice, ObserveResult } from "../../../src/models";
+
+const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
@@ -40,7 +42,7 @@ describe("Shake", () => {
     const defaultObserveResult = createObserveResult();
     fakeObserveScreen.setObserveResult(defaultObserveResult);
 
-    shake = new Shake("test-device", fakeAdb, fakeTimer);
+    shake = new Shake(testDevice, fakeAdb, fakeTimer);
     (shake as any).observeScreen = fakeObserveScreen;
     (shake as any).window = fakeWindow;
     (shake as any).awaitIdle = fakeAwaitIdle;
@@ -218,18 +220,18 @@ describe("Shake", () => {
 
   describe("constructor", () => {
     test("should work with null deviceId", () => {
-      const shakeInstance = new Shake("test-device", fakeAdb, fakeTimer);
+      const shakeInstance = new Shake(testDevice, fakeAdb, fakeTimer);
       expect(shakeInstance).toBeDefined();
     });
 
     test("should work with custom AdbClient", () => {
       const customAdb = new FakeAdbExecutor();
-      const shakeInstance = new Shake("test-device", customAdb, fakeTimer);
+      const shakeInstance = new Shake(testDevice, customAdb, fakeTimer);
       expect(shakeInstance).toBeDefined();
     });
 
     test("should work with default timer when not provided", () => {
-      const shakeInstance = new Shake("test-device", fakeAdb);
+      const shakeInstance = new Shake(testDevice, fakeAdb);
       expect(shakeInstance).toBeDefined();
     });
   });

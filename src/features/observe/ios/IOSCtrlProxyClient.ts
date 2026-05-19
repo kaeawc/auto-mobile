@@ -24,6 +24,7 @@ import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOpt
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
 import { PortManager } from "../../../utils/PortManager";
+import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostControlClient";
 import { isRunningInDocker } from "../../../utils/dockerEnv";
 import { IOSCtrlProxyManager, CtrlProxyIosManager } from "../../../utils/IOSCtrlProxyManager";
@@ -322,6 +323,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     device: BootedDevice,
     port?: number
   ): IOSCtrlProxyClient {
+    requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const resolvedPort = port ?? (
       device.platform === "ios" ? PortManager.allocate(device.deviceId) : IOSCtrlProxyClient.DEFAULT_PORT
     );

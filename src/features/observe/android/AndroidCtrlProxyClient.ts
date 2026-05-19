@@ -38,6 +38,7 @@ import { HierarchyNavigationDetector } from "../../navigation/HierarchyNavigatio
 import { InstalledAppsRepository, InstalledAppsStore } from "../../../db/installedAppsRepository";
 import { DefaultWorkProfileMonitor, WorkProfileMonitor } from "../../../utils/WorkProfileMonitor";
 import { PortManager } from "../../../utils/PortManager";
+import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { getDeviceDataStreamServer } from "../../../daemon/deviceDataStreamSocketServer";
 import {
   ScreenshotBackoffScheduler,
@@ -815,6 +816,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
    * Get singleton instance for a device
    */
   public static getInstance(device: BootedDevice, adbFactory: AdbClientFactory = defaultAdbClientFactory): AndroidCtrlProxyClient {
+    requireBootedDevice(device, "AndroidCtrlProxyClient.getInstance");
     const deviceId = device.deviceId;
     if (!AndroidCtrlProxyClient.instances.has(deviceId)) {
       logger.debug(`[CTRL_PROXY] Creating singleton for device: ${deviceId}`);

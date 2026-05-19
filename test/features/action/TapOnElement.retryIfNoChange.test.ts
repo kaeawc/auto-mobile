@@ -25,7 +25,7 @@ function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
     {
       name: "test-device",
       platform: "android",
-      id: "emulator-5554",
+      deviceId: "emulator-5554",
     } as any,
     new FakeAdbClient() as any,
     { timer }

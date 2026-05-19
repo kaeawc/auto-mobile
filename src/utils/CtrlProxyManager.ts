@@ -4,6 +4,7 @@ import { logger } from "./logger";
 import * as fs from "fs/promises";
 import * as path from "path";
 import { BootedDevice } from "../models";
+import { requireBootedDevice } from "./requireBootedDevice";
 import {
   APK_SHA256_CHECKSUM,
   APK_URL,
@@ -130,6 +131,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   }
 
   public static getInstance(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory): AndroidCtrlProxyManager {
+    requireBootedDevice(device, "AndroidCtrlProxyManager.getInstance");
     if (!AndroidCtrlProxyManager.instances.has(device.deviceId)) {
       let adb: AdbExecutor;
       let factory: AdbClientFactory;

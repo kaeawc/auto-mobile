@@ -70,6 +70,11 @@ export class DefaultObserveScreenshotRecorder implements ObserveScreenshotRecord
       { format: "png" },
       {
         parentSignal: signal,
+        // Fire-and-forget: if a screencap is already in flight (e.g. mid-poll
+        // during observe waitFor), reuse it. Cancelling and restarting every
+        // ~100ms causes a self-inflicted cancel loop because screencap takes
+        // ~200-300ms — no screenshot ever completes.
+        coalesceWithPending: true,
         onComplete: async completion => {
           if (!completion.isLatest) {
             return;

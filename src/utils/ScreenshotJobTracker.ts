@@ -19,6 +19,15 @@ interface ScreenshotJobCompletion {
 export interface ScreenshotJobOptions {
   parentSignal?: AbortSignal;
   onComplete?: (completion: ScreenshotJobCompletion) => void | Promise<void>;
+  /**
+   * If a job is already in flight for this device and has not been aborted,
+   * return its handle instead of cancelling and starting a new one.
+   *
+   * Used by fire-and-forget callers during rapid polling (observe waitFor)
+   * to avoid a self-inflicted cancel loop where each ~100ms poll aborts the
+   * previous in-flight screencap before it can complete.
+   */
+  coalesceWithPending?: boolean;
 }
 
 interface ScreenshotJobEntry {
@@ -46,6 +55,17 @@ export class ScreenshotJobTracker {
     runner: (signal: AbortSignal) => Promise<ScreenshotResult>,
     options: ScreenshotJobOptions = {}
   ): ScreenshotJobHandle {
+    if (options.coalesceWithPending) {
+      const existing = ScreenshotJobTracker.jobs.get(deviceId);
+      if (existing && !existing.abortController.signal.aborted) {
+        return {
+          jobId: existing.jobId,
+          promise: existing.promise,
+          signal: existing.abortController.signal
+        };
+      }
+    }
+
     ScreenshotJobTracker.cancelJob(deviceId);
 
     const abortController = new AbortController();

@@ -8,6 +8,8 @@ import { CtrlProxyIosManager } from "../../src/utils/IOSCtrlProxyManager";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
 import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 import type { Window } from "../../src/features/observe/interfaces/Window";
+import type { ObserveScreenCache } from "../../src/features/observe/interfaces/ObserveScreenCache";
+import { FakeObserveScreenCache } from "./FakeObserveScreenCache";
 import { BootedDevice } from "../../src/models";
 
 export interface FakeDeviceClientProviderOptions {
@@ -16,6 +18,7 @@ export interface FakeDeviceClientProviderOptions {
   iosCtrlProxyManager?: CtrlProxyIosManager;
   iosCtrlProxyClient?: IOSCtrlProxy;
   window?: Window;
+  observeScreenCache?: ObserveScreenCache;
 }
 
 /**
@@ -24,6 +27,8 @@ export interface FakeDeviceClientProviderOptions {
  * to a real singleton when a fake is forgotten.
  */
 export class FakeDeviceClientProvider implements DeviceClientProvider {
+  private vendedObserveScreenCache: ObserveScreenCache | undefined;
+
   constructor(
     private readonly fakeAdb: AdbExecutor,
     private readonly fakeDeviceUtils: PlatformDeviceManager,
@@ -75,5 +80,18 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
 
   getWindow(_device: BootedDevice): Window {
     return this.require(this.options.window, "window");
+  }
+
+  getObserveScreenCache(): ObserveScreenCache {
+    // Cache is a sink — default to a recording fake so tests that don't care
+    // about invalidation don't have to wire one; tests that DO care pass their
+    // own to assert which deviceIds were cleared.
+    if (this.options.observeScreenCache) {
+      return this.options.observeScreenCache;
+    }
+    if (!this.vendedObserveScreenCache) {
+      this.vendedObserveScreenCache = new FakeObserveScreenCache();
+    }
+    return this.vendedObserveScreenCache;
   }
 }

@@ -101,6 +101,16 @@ export class RealObserveScreen implements ObserveScreen {
     }
   }
 
+  /**
+   * Adapter that exposes the static `clearCache` as an `ObserveScreenCache`
+   * for dependency injection.
+   */
+  static readonly defaultObserveScreenCache: import("./interfaces/ObserveScreenCache").ObserveScreenCache = {
+    clearForDevice(deviceId: string): void {
+      RealObserveScreen.clearCache(deviceId);
+    },
+  };
+
   // ---------- Constructor ----------
 
   constructor(

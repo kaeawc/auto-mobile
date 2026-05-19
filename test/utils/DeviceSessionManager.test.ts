@@ -6,6 +6,7 @@ import { FakeDeviceClientProvider } from "../fakes/FakeDeviceClientProvider";
 import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
 import { FakeIOSCtrlProxy } from "../fakes/FakeIOSCtrlProxy";
+import { FakeObserveScreenCache } from "../fakes/FakeObserveScreenCache";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
 import { FakeSimctl } from "../fakes/FakeSimctl";
 import { FakeWindow } from "../fakes/FakeWindow";
@@ -13,6 +14,7 @@ import { BootedDevice, AppearanceConfigInput } from "../../src/models";
 import { serverConfig } from "../../src/utils/ServerConfig";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 import type { AndroidCtrlProxy } from "../../src/features/observe/android/AndroidCtrlProxyClient";
+import type { IOSCtrlProxy } from "../../src/features/observe/ios/IOSCtrlProxyClient";
 
 // Inline minimal AndroidCtrlProxy where each test sets only the methods it
 // exercises — the Android fake lacks per-call `waitForConnection` /
@@ -20,6 +22,10 @@ import type { AndroidCtrlProxy } from "../../src/features/observe/android/Androi
 // "connected but not responsive" branches independently.
 function stubAndroidCtrlProxy(overrides: Partial<AndroidCtrlProxy>): AndroidCtrlProxy {
   return overrides as unknown as AndroidCtrlProxy;
+}
+
+function stubIOSCtrlProxy(overrides: Partial<IOSCtrlProxy>): IOSCtrlProxy {
+  return overrides as unknown as IOSCtrlProxy;
 }
 
 function makeReadyWindow(): FakeWindow {
@@ -294,6 +300,77 @@ describe("DeviceSessionManager", () => {
 
     // Window.getActive must have been called exclusively on the injected fake.
     expect(fakeWindow.wasMethodCalled("getActive")).toBe(true);
+  });
+});
+
+describe("DeviceSessionManager iOS push-update cache invalidation", () => {
+  let fakeAdb: FakeAdbExecutor;
+  let fakeDeviceUtils: FakeDeviceUtils;
+  let originalAppearanceDefaults: AppearanceConfigInput;
+
+  beforeEach(() => {
+    fakeAdb = new FakeAdbExecutor();
+    fakeDeviceUtils = new FakeDeviceUtils();
+    originalAppearanceDefaults = serverConfig.getAppearanceDefaults();
+    serverConfig.setAppearanceDefaults({
+      ...originalAppearanceDefaults,
+      applyOnConnect: false,
+      syncWithHost: false,
+      defaultMode: "light",
+    });
+  });
+
+  afterEach(() => {
+    serverConfig.setAppearanceDefaults(originalAppearanceDefaults);
+  });
+
+  test("push update fires clearForDevice on the injected ObserveScreenCache", async () => {
+    const fakeSimctl = new FakeSimCtlClient();
+    fakeSimctl.setDeviceInfo("ios-push-1", {
+      udid: "ios-push-1",
+      name: "iPhone 15",
+      state: "Booted",
+      isAvailable: true,
+    });
+
+    const iosManager = new FakeIOSCtrlProxyManager();
+    iosManager.setRunning(true);
+
+    // Capture the push-update callback so the test can fire it on demand.
+    let captured: (() => void) | null = null;
+    const iosClient = stubIOSCtrlProxy({
+      isConnected: () => true,
+      verifyServiceReady: () => Promise.resolve(true),
+      onPushUpdate: (cb: () => void) => {
+        captured = cb;
+        return () => { captured = null; };
+      },
+    });
+
+    const observeCache = new FakeObserveScreenCache();
+
+    const provider = new FakeDeviceClientProvider(
+      fakeAdb,
+      fakeDeviceUtils,
+      fakeSimctl as any,
+      {
+        iosCtrlProxyManager: iosManager,
+        iosCtrlProxyClient: iosClient,
+        observeScreenCache: observeCache,
+      }
+    );
+
+    const manager = DeviceSessionManager.createInstance(provider);
+    await manager.verifyIosDevice("ios-push-1");
+
+    // Listener registered; cache untouched until update fires.
+    if (!captured) {throw new Error("onPushUpdate listener never registered");}
+    expect(observeCache.wasClearedFor("ios-push-1")).toBe(false);
+
+    captured();
+
+    expect(observeCache.wasClearedFor("ios-push-1")).toBe(true);
+    expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);
   });
 });
 

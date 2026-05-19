@@ -15,6 +15,7 @@ import type { AndroidCtrlProxy } from "../features/observe/android/AndroidCtrlPr
 import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { IOSCtrlProxy } from "../features/observe/ios/IOSCtrlProxyClient";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
+import type { ObserveScreenCache } from "../features/observe/interfaces/ObserveScreenCache";
 import { createPerformanceTracker, createGlobalPerformanceTracker } from "./PerformanceTracker";
 import { storeSetupTiming } from "../server/ToolExecutionContext";
 import { applyAppearanceOnConnect } from "./appearance/applyAppearanceOnConnect";
@@ -33,6 +34,7 @@ export interface DeviceClientProvider {
   getIOSCtrlProxyManager(device: BootedDevice): CtrlProxyIosManager;
   getIOSCtrlProxyClient(device: BootedDevice, port: number): IOSCtrlProxy;
   getWindow(device: BootedDevice): Window;
+  getObserveScreenCache(): ObserveScreenCache;
 }
 
 /**
@@ -108,6 +110,10 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
       this._windows.set(key, window);
     }
     return window;
+  }
+
+  getObserveScreenCache(): ObserveScreenCache {
+    return RealObserveScreen.defaultObserveScreenCache;
   }
 }
 
@@ -918,9 +924,10 @@ export class DeviceSessionManager implements DeviceSessionManager {
       const manager = this.provider.getIOSCtrlProxyManager(device);
       const xcTestClient = this.provider.getIOSCtrlProxyClient(device, manager.getServicePort());
 
+      const observeCache = this.provider.getObserveScreenCache();
       xcTestClient.onPushUpdate(() => {
         logger.info(`[DeviceSessionManager] Received iOS UI change notification for ${deviceId}, clearing ObserveScreen cache`);
-        RealObserveScreen.clearCache(deviceId);
+        observeCache.clearForDevice(deviceId);
       });
 
       DeviceSessionManager.pushUpdateListenersRegistered.add(deviceId);

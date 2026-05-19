@@ -27,6 +27,8 @@ export interface FakeDeviceClientProviderOptions {
  * to a real singleton when a fake is forgotten.
  */
 export class FakeDeviceClientProvider implements DeviceClientProvider {
+  private vendedObserveScreenCache: ObserveScreenCache | undefined;
+
   constructor(
     private readonly fakeAdb: AdbExecutor,
     private readonly fakeDeviceUtils: PlatformDeviceManager,
@@ -81,11 +83,15 @@ export class FakeDeviceClientProvider implements DeviceClientProvider {
   }
 
   getObserveScreenCache(): ObserveScreenCache {
-    // Cache is a sink — default to a no-op fake so tests that don't care about
-    // invalidation don't have to wire one; tests that DO care pass their own.
-    if (!this.options.observeScreenCache) {
-      this.options.observeScreenCache = new FakeObserveScreenCache();
+    // Cache is a sink — default to a recording fake so tests that don't care
+    // about invalidation don't have to wire one; tests that DO care pass their
+    // own to assert which deviceIds were cleared.
+    if (this.options.observeScreenCache) {
+      return this.options.observeScreenCache;
     }
-    return this.options.observeScreenCache;
+    if (!this.vendedObserveScreenCache) {
+      this.vendedObserveScreenCache = new FakeObserveScreenCache();
+    }
+    return this.vendedObserveScreenCache;
   }
 }

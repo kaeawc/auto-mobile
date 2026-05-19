@@ -364,10 +364,10 @@ describe("DeviceSessionManager iOS push-update cache invalidation", () => {
     await manager.verifyIosDevice("ios-push-1");
 
     // Listener registered; cache untouched until update fires.
-    expect(captured).not.toBeNull();
+    if (!captured) {throw new Error("onPushUpdate listener never registered");}
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(false);
 
-    (captured as unknown as () => void)();
+    captured();
 
     expect(observeCache.wasClearedFor("ios-push-1")).toBe(true);
     expect(observeCache.getClearedDevices()).toEqual(["ios-push-1"]);

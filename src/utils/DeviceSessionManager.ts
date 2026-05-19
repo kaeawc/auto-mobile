@@ -113,15 +113,9 @@ class DefaultDeviceClientProvider implements DeviceClientProvider {
   }
 
   getObserveScreenCache(): ObserveScreenCache {
-    return realObserveScreenCache;
+    return RealObserveScreen.defaultObserveScreenCache;
   }
 }
-
-const realObserveScreenCache: ObserveScreenCache = {
-  clearForDevice(deviceId: string): void {
-    RealObserveScreen.clearCache(deviceId);
-  },
-};
 
 /**
  * Interface for device session management

@@ -27,6 +27,20 @@ final class CommandHandlerTests: XCTestCase {
         super.tearDown()
     }
 
+    private func handleRequest<T>(
+        _ request: WebSocketRequest,
+        as _: T.Type = T.self,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) -> T? {
+        let response = commandHandler.handle(request)
+        guard let typed = response as? T else {
+            XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
+            return nil
+        }
+        return typed
+    }
+
     // MARK: - Hierarchy Request Tests
 
     func testRequestHierarchyIncludesPerfTiming() {
@@ -51,14 +65,8 @@ final class CommandHandlerTests: XCTestCase {
         // Simulate time passing during extraction
         fakeTimeProvider.setTime(1000)
 
-        // Handle request
-        let response = commandHandler.handle(request)
-
-        // Verify response includes perf timing
-        guard let hierarchyResponse = response as? HierarchyUpdateResponse else {
-            XCTFail("Expected HierarchyUpdateResponse, got \(type(of: response))")
-            return
-        }
+        // Handle request and verify response includes perf timing
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
         XCTAssertEqual(hierarchyResponse.requestId, "test-123")
         XCTAssertNotNil(hierarchyResponse.data)
@@ -90,12 +98,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "test-456"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let hierarchyResponse = response as? HierarchyUpdateResponse else {
-            XCTFail("Expected HierarchyUpdateResponse")
-            return
-        }
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
 
         // Verify perf timing structure includes extraction child
         let perfTiming = hierarchyResponse.perfTiming
@@ -116,12 +119,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "test-error"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse error")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(errorResponse.success ?? true)
         XCTAssertNotNil(errorResponse.error)
@@ -138,12 +136,7 @@ final class CommandHandlerTests: XCTestCase {
             y: 200
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let tapResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let tapResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(tapResponse.success, true)
         XCTAssertEqual(tapResponse.type, "tap_coordinates_result")
@@ -162,12 +155,7 @@ final class CommandHandlerTests: XCTestCase {
             // Missing x, y
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(errorResponse.success ?? true)
         XCTAssertNotNil(errorResponse.error)
@@ -187,12 +175,7 @@ final class CommandHandlerTests: XCTestCase {
             y2: 500
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let swipeResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let swipeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(swipeResponse.success, true)
 
@@ -212,12 +195,7 @@ final class CommandHandlerTests: XCTestCase {
             text: "Hello World"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let textResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let textResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(textResponse.success, true)
 
@@ -235,12 +213,7 @@ final class CommandHandlerTests: XCTestCase {
             resourceId: "input_field"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let textResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let textResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(textResponse.success, true)
 
@@ -257,12 +230,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "text-err-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertTrue(errorResponse.error?.contains("text") == true)
     }
@@ -279,12 +247,7 @@ final class CommandHandlerTests: XCTestCase {
             text: "Hello"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -301,12 +264,7 @@ final class CommandHandlerTests: XCTestCase {
             resourceId: "missing_field"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -317,12 +275,7 @@ final class CommandHandlerTests: XCTestCase {
             action: "done"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let imeResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let imeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(imeResponse.success, true)
         XCTAssertEqual(imeResponse.type, "ime_action_result")
         XCTAssertEqual(fakeGesturePerformer.getImeActionHistory(), ["done"])
@@ -334,12 +287,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "ime-err-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertTrue(errorResponse.error?.contains("action") == true)
     }
@@ -356,12 +304,7 @@ final class CommandHandlerTests: XCTestCase {
             action: "previous"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -371,12 +314,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "sel-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let selResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let selResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(selResponse.success, true)
         XCTAssertEqual(selResponse.type, "select_all_result")
         XCTAssertEqual(fakeGesturePerformer.getSelectAllCallCount(), 1)
@@ -393,12 +331,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "sel-fail-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -408,12 +341,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "clear-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let clearResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let clearResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clearResponse.success, true)
         XCTAssertEqual(clearResponse.type, "clear_text_result")
 
@@ -429,12 +357,7 @@ final class CommandHandlerTests: XCTestCase {
             resourceId: "text_input"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let clearResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let clearResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clearResponse.success, true)
 
         let clearHistory = fakeGesturePerformer.getClearTextHistory()
@@ -453,12 +376,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "clear-fail-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -471,12 +389,7 @@ final class CommandHandlerTests: XCTestCase {
             action: "get"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let clipResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let clipResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clipResponse.success, true)
         XCTAssertEqual(clipResponse.type, "clipboard_result")
         XCTAssertEqual(clipResponse.text, "Copied text")
@@ -490,12 +403,7 @@ final class CommandHandlerTests: XCTestCase {
             action: "copy"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let clipResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let clipResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(clipResponse.success, true)
 
         let history = fakeGesturePerformer.getClipboardHistory()
@@ -510,12 +418,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "clip-err-1"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertTrue(errorResponse.error?.contains("action") == true)
     }
@@ -532,12 +435,7 @@ final class CommandHandlerTests: XCTestCase {
             action: "get"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
         XCTAssertEqual(errorResponse.success, false)
     }
 
@@ -549,12 +447,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "home-123"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let homeResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let homeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(homeResponse.success, true)
         XCTAssertEqual(homeResponse.type, "press_home_result")
@@ -580,12 +473,7 @@ final class CommandHandlerTests: XCTestCase {
             bundleId: "com.apple.Preferences"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let launchResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let launchResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(launchResponse.success, true)
         XCTAssertEqual(launchResponse.type, "launch_app_result")
@@ -610,12 +498,7 @@ final class CommandHandlerTests: XCTestCase {
             bundleId: "com.example.app"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let launchResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let launchResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(launchResponse.success, true)
         // Should activate, not launch
@@ -767,12 +650,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "recents-123"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let recentsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let recentsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(recentsResponse.success, true)
         XCTAssertEqual(recentsResponse.type, "recent_apps_result")
@@ -810,12 +688,7 @@ final class CommandHandlerTests: XCTestCase {
             orientation: "landscape"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let rotateResponse = response as? RotateResponse else {
-            XCTFail("Expected RotateResponse, got \(type(of: response))")
-            return
-        }
+        guard let rotateResponse = handleRequest(request, as: RotateResponse.self) else { return }
 
         XCTAssertTrue(rotateResponse.success)
         XCTAssertEqual(rotateResponse.type, "rotate_result")
@@ -832,12 +705,7 @@ final class CommandHandlerTests: XCTestCase {
             orientation: "portrait"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let rotateResponse = response as? RotateResponse else {
-            XCTFail("Expected RotateResponse, got \(type(of: response))")
-            return
-        }
+        guard let rotateResponse = handleRequest(request, as: RotateResponse.self) else { return }
 
         XCTAssertTrue(rotateResponse.success)
         XCTAssertEqual(rotateResponse.previousOrientation, "portrait")
@@ -852,12 +720,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "rotate-missing"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertEqual(errorResponse.type, "rotate_result")
@@ -880,12 +743,7 @@ final class CommandHandlerTests: XCTestCase {
             y: 200
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertNotNil(errorResponse.error)
@@ -909,12 +767,7 @@ final class CommandHandlerTests: XCTestCase {
             y2: 500
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertTrue(errorResponse.error?.contains("NSInternalInconsistencyException") ?? false)
@@ -931,12 +784,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "hier-objc-err"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse error")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(errorResponse.success ?? true)
         XCTAssertTrue(errorResponse.error?.contains("NSGenericException") ?? false)
@@ -956,12 +804,7 @@ final class CommandHandlerTests: XCTestCase {
             bundleId: "com.missing.app"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertEqual(errorResponse.success, false)
         XCTAssertTrue(errorResponse.error?.contains("NSInvalidArgumentException") ?? false)
@@ -976,12 +819,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "unknown-123"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let errorResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(errorResponse.success ?? true)
         XCTAssertTrue(errorResponse.error?.contains("Unknown command") ?? false)
@@ -995,12 +833,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "voiceover-123"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let voResponse = response as? VoiceOverStateResponse else {
-            XCTFail("Expected VoiceOverStateResponse, got \(type(of: response))")
-            return
-        }
+        guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
         XCTAssertEqual(voResponse.requestId, "voiceover-123")
         XCTAssertEqual(voResponse.type, "voiceover_state_result")
@@ -1015,12 +848,7 @@ final class CommandHandlerTests: XCTestCase {
             type: "get_voiceover_state"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let voResponse = response as? VoiceOverStateResponse else {
-            XCTFail("Expected VoiceOverStateResponse")
-            return
-        }
+        guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
         XCTAssertNil(voResponse.requestId)
         XCTAssertEqual(voResponse.type, "voiceover_state_result")
@@ -1033,12 +861,7 @@ final class CommandHandlerTests: XCTestCase {
             requestId: "encode-test"
         )
 
-        let response = commandHandler.handle(request)
-
-        guard let voResponse = response as? VoiceOverStateResponse else {
-            XCTFail("Expected VoiceOverStateResponse")
-            return
-        }
+        guard let voResponse = handleRequest(request, as: VoiceOverStateResponse.self) else { return }
 
         // Verify the response can be JSON encoded (required for WebSocket serialization)
         let encoder = JSONEncoder()
@@ -1084,6 +907,30 @@ final class StorageCommandHandlerTests: XCTestCase {
         super.tearDown()
     }
 
+    private func handleRequest<T>(
+        _ request: WebSocketRequest,
+        as _: T.Type = T.self,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) -> T? {
+        handleRequest(commandHandler, request, as: T.self, file: file, line: line)
+    }
+
+    private func handleRequest<T>(
+        _ handler: CommandHandler,
+        _ request: WebSocketRequest,
+        as _: T.Type = T.self,
+        file: StaticString = #file,
+        line: UInt = #line
+    ) -> T? {
+        let response = handler.handle(request)
+        guard let typed = response as? T else {
+            XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
+            return nil
+        }
+        return typed
+    }
+
     // MARK: - List Preference Files
 
     func testListPreferenceFilesReturnsSuites() throws {
@@ -1093,12 +940,7 @@ final class StorageCommandHandlerTests: XCTestCase {
         ])
 
         let request = WebSocketRequest(type: "list_preference_files", requestId: "list-1")
-        let response = commandHandler.handle(request)
-
-        guard let filesResponse = response as? StorageFilesResponse else {
-            XCTFail("Expected StorageFilesResponse, got \(type(of: response))")
-            return
-        }
+        guard let filesResponse = handleRequest(request, as: StorageFilesResponse.self) else { return }
 
         XCTAssertEqual(filesResponse.requestId, "list-1")
         XCTAssertTrue(filesResponse.success)
@@ -1120,12 +962,7 @@ final class StorageCommandHandlerTests: XCTestCase {
         ])
 
         let request = WebSocketRequest(type: "get_preferences", requestId: "get-all-1")
-        let response = commandHandler.handle(request)
-
-        guard let entriesResponse = response as? StorageEntriesResponse else {
-            XCTFail("Expected StorageEntriesResponse, got \(type(of: response))")
-            return
-        }
+        guard let entriesResponse = handleRequest(request, as: StorageEntriesResponse.self) else { return }
 
         XCTAssertTrue(entriesResponse.success)
         XCTAssertEqual(entriesResponse.entries?.count, 2)
@@ -1144,12 +981,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "get-all-2",
             fileName: "com.example.settings"
         )
-        let response = commandHandler.handle(request)
-
-        guard let entriesResponse = response as? StorageEntriesResponse else {
-            XCTFail("Expected StorageEntriesResponse")
-            return
-        }
+        guard let entriesResponse = handleRequest(request, as: StorageEntriesResponse.self) else { return }
 
         XCTAssertTrue(entriesResponse.success)
         XCTAssertEqual(entriesResponse.entries?.count, 1)
@@ -1178,12 +1010,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "get-1",
             key: "name"
         )
-        let response = commandHandler.handle(request)
-
-        guard let entryResponse = response as? StorageEntryResponse else {
-            XCTFail("Expected StorageEntryResponse, got \(type(of: response))")
-            return
-        }
+        guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertTrue(entryResponse.success)
         XCTAssertTrue(entryResponse.found)
@@ -1198,12 +1025,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "get-2",
             key: "nonexistent"
         )
-        let response = commandHandler.handle(request)
-
-        guard let entryResponse = response as? StorageEntryResponse else {
-            XCTFail("Expected StorageEntryResponse")
-            return
-        }
+        guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertTrue(entryResponse.success)
         XCTAssertFalse(entryResponse.found)
@@ -1215,12 +1037,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             type: "get_preference",
             requestId: "get-3"
         )
-        let response = commandHandler.handle(request)
-
-        guard let entryResponse = response as? StorageEntryResponse else {
-            XCTFail("Expected StorageEntryResponse")
-            return
-        }
+        guard let entryResponse = handleRequest(request, as: StorageEntryResponse.self) else { return }
 
         XCTAssertFalse(entryResponse.success)
         XCTAssertTrue(entryResponse.error?.contains("key") ?? false)
@@ -1236,12 +1053,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             value: "dark",
             valueType: "STRING"
         )
-        let response = commandHandler.handle(request)
-
-        guard let wsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse, got \(type(of: response))")
-            return
-        }
+        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
         XCTAssertEqual(wsResponse.type, "set_preference_result")
@@ -1258,12 +1070,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             value: "dark",
             valueType: "STRING"
         )
-        let response = commandHandler.handle(request)
-
-        guard let wsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(wsResponse.success ?? true)
         XCTAssertTrue(wsResponse.error?.contains("key") ?? false)
@@ -1277,12 +1084,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "rm-1",
             key: "theme"
         )
-        let response = commandHandler.handle(request)
-
-        guard let wsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
         XCTAssertEqual(wsResponse.type, "remove_preference_result")
@@ -1298,12 +1100,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "clear-1",
             fileName: "com.example.settings"
         )
-        let response = commandHandler.handle(request)
-
-        guard let wsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertTrue(wsResponse.success ?? false)
         XCTAssertEqual(wsResponse.type, "clear_preferences_result")
@@ -1322,12 +1119,7 @@ final class StorageCommandHandlerTests: XCTestCase {
         )
 
         let request = WebSocketRequest(type: "list_preference_files", requestId: "nil-1")
-        let response = handlerNoStorage.handle(request)
-
-        guard let filesResponse = response as? StorageFilesResponse else {
-            XCTFail("Expected StorageFilesResponse, got \(type(of: response))")
-            return
-        }
+        guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self) else { return }
 
         XCTAssertFalse(filesResponse.success)
         XCTAssertTrue(filesResponse.error?.contains("not available") ?? false)
@@ -1345,12 +1137,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             value: "bad",
             valueType: "INT"
         )
-        let response = commandHandler.handle(request)
-
-        guard let wsResponse = response as? WebSocketResponse else {
-            XCTFail("Expected WebSocketResponse")
-            return
-        }
+        guard let wsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
 
         XCTAssertFalse(wsResponse.success ?? true)
         XCTAssertTrue(wsResponse.error?.contains("parse") ?? false)

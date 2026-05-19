@@ -5,6 +5,7 @@ import * as fs from "fs/promises";
 import * as path from "path";
 import { BootedDevice } from "../models";
 import {
+  APK_SHA256_CHECKSUM,
   APK_URL,
   RELEASE_VERSION,
   resolveChecksum

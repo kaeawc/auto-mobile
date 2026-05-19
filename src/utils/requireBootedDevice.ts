@@ -18,9 +18,17 @@ export function requireBootedDevice(device: unknown, fn: string): asserts device
     d.deviceId.length === 0 ||
     (d.platform !== "android" && d.platform !== "ios")
   ) {
-    const description = typeof device === "string"
-      ? `string "${device}"`
-      : JSON.stringify(device);
-    throw new Error(`${fn}: expected BootedDevice, got ${description}`);
+    throw new Error(`${fn}: expected BootedDevice, got ${describeInvalidDevice(device)}`);
+  }
+}
+
+function describeInvalidDevice(device: unknown): string {
+  if (typeof device === "string") {
+    return `string "${device}"`;
+  }
+  try {
+    return JSON.stringify(device) ?? String(device);
+  } catch {
+    return Object.prototype.toString.call(device);
   }
 }

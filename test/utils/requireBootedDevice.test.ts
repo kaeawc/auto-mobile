@@ -57,6 +57,18 @@ describe("requireBootedDevice", () => {
     expect(() => requireBootedDevice({ foo: "bar" }, "MyFactory.getInstance"))
       .toThrow('MyFactory.getInstance: expected BootedDevice, got {"foo":"bar"}');
   });
+
+  test("still throws the guard error when input has a cyclic reference", () => {
+    const cyclic: Record<string, unknown> = { foo: "bar" };
+    cyclic.self = cyclic;
+    expect(() => requireBootedDevice(cyclic, FN))
+      .toThrow(new RegExp(`^${FN}: expected BootedDevice, got `));
+  });
+
+  test("still throws the guard error when input contains a BigInt", () => {
+    expect(() => requireBootedDevice({ deviceId: 5n, platform: "android" }, FN))
+      .toThrow(new RegExp(`^${FN}: expected BootedDevice, got `));
+  });
 });
 
 describe("requireBootedDevice integration with factories", () => {

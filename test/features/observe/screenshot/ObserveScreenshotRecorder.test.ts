@@ -15,29 +15,21 @@ import {
 import { FakeScreenshotStateStore } from "../../../fakes/FakeScreenshotStateStore";
 
 /**
- * Poll until `predicate()` returns true or the iteration limit is reached.
- * Uses setImmediate to yield the event loop between checks. Max iterations
- * set high enough to accommodate I/O settling on resource-constrained CI.
- */
-async function eventually(predicate: () => boolean, maxIterations = 200): Promise<void> {
-  for (let i = 0; i < maxIterations; i++) {
-    if (predicate()) {
-      return;
-    }
-    await new Promise(resolve => setImmediate(resolve));
-  }
-}
-
-/**
  * Minimal fake `TrackedScreenshotService` that lets each test script the
  * `ScreenshotResult` returned by the capture and choose whether the capture
  * reports as the latest job / aborted.
+ *
+ * The promise returned from the most recent `startTrackedCapture` call is
+ * stored on `lastCapturePromise()` so tests can deterministically await
+ * completion of fire-and-forget `recorder.start()` invocations without
+ * polling.
  */
 class FakeTrackedScreenshotService implements TrackedScreenshotService {
   private nextResult: ScreenshotResult = { success: true, path: "/tmp/default.png" };
   private nextIsLatest: boolean = true;
   private nextAborted: boolean = false;
   private nextThrow: Error | null = null;
+  private lastPromise: Promise<ScreenshotResult> | null = null;
 
   setNextResult(result: ScreenshotResult): void {
     this.nextResult = result;
@@ -50,6 +42,22 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
   }
   setNextThrow(err: Error): void {
     this.nextThrow = err;
+  }
+
+  /**
+   * Returns the promise tracked by the most recent `startTrackedCapture` call.
+   * Throws if no capture has been started. The promise has the same identity
+   * as the one returned to `recorder.start()`, so any `.finally()` handlers
+   * attached by the recorder run before the awaiter's continuation.
+   */
+  lastCapturePromise(): Promise<ScreenshotResult> {
+    if (!this.lastPromise) {
+      throw new Error("FakeTrackedScreenshotService: no capture has been started yet");
+    }
+    // Swallow rejections so `await svc.lastCapturePromise()` works for
+    // failure-path tests too; the recorder still observes the original
+    // rejection through its own chained handlers.
+    return this.lastPromise.catch(() => ({ success: false } as ScreenshotResult));
   }
 
   async execute(_options?: ScreenshotOptions, _signal?: AbortSignal): Promise<ScreenshotResult> {
@@ -90,6 +98,7 @@ class FakeTrackedScreenshotService implements TrackedScreenshotService {
       }
       return result;
     })();
+    this.lastPromise = promise;
 
     return {
       jobId: "job-1",
@@ -221,7 +230,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     expect(returnValue).toBeUndefined();
     expect(store.getUpdateCount()).toBe(0); // nothing yet — runs async
 
-    await eventually(() => store.getPath("test-device") === file);
+    await svc.lastCapturePromise();
 
     expect(store.getPath("test-device")).toBe(file);
   });
@@ -232,8 +241,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
 
     recorder.start(new NoOpPerformanceTracker());
 
-    // Drain the microtask queue; non-latest completion should NOT write.
-    await eventually(() => false, 10);
+    await svc.lastCapturePromise();
 
     expect(store.getUpdateCount()).toBe(0);
   });
@@ -244,7 +252,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
 
     recorder.start(new NoOpPerformanceTracker());
 
-    await eventually(() => false, 10);
+    await svc.lastCapturePromise();
 
     expect(store.getUpdateCount()).toBe(0);
   });
@@ -254,7 +262,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
 
     recorder.start(new NoOpPerformanceTracker());
 
-    await eventually(() => store.getError("test-device") === "boom");
+    await svc.lastCapturePromise();
 
     expect(store.getError("test-device")).toBe("boom");
   });
@@ -281,7 +289,7 @@ describe("DefaultObserveScreenshotRecorder.start", () => {
     svc.setNextResult({ success: true, path: "/tmp/no-exist.png" });
     recorder.start(fakeTracker);
 
-    await eventually(() => calls.includes("end:screenshot"));
+    await svc.lastCapturePromise();
 
     expect(calls).toContain("start:screenshot");
     expect(calls).toContain("end:screenshot");

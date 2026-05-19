@@ -425,7 +425,7 @@ export class DeviceSessionManager implements DeviceSessionManager {
     this.setCurrentDevice(selectedDevice, resolvedPlatform);
     if (deviceSource !== "current") {
       await applyAppearanceOnConnect(selectedDevice);
-      await disableStylusHandwriting(selectedDevice);
+      await disableStylusHandwriting(selectedDevice, this.adbFactory);
     }
     logger.info(`[DeviceSessionManager] Using ${deviceSource} device: ${selectedDevice.deviceId}`);
     return selectedDevice;

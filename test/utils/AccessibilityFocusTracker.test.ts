@@ -100,6 +100,18 @@ describe("AccessibilityFocusTracker", () => {
       expect(requestCurrentFocusSpy).toHaveBeenCalledTimes(1);
     });
 
+    test("passes a fully-populated BootedDevice to AndroidCtrlProxyClient.getInstance", async () => {
+      requestCurrentFocusSpy!.mockResolvedValue(createFocusResult(null));
+
+      await tracker.getCurrentFocus(deviceId, false);
+
+      expect(getInstanceSpy).toHaveBeenCalled();
+      const passed = getInstanceSpy!.mock.calls[0][0] as { deviceId?: string; platform?: string };
+      expect(typeof passed).toBe("object");
+      expect(passed.deviceId).toBe(deviceId);
+      expect(passed.platform).toBe("android");
+    });
+
     test("bypasses cache when useCache is false", async () => {
       const focusedElement = createElement({ resourceId: "com.test:id/primary" });
       requestCurrentFocusSpy!.mockResolvedValue(createFocusResult(focusedElement));

@@ -173,7 +173,7 @@ async function ensureAccessibilityServiceReady(
       logger.info(`[A11yRetry] Setup succeeded on attempt ${attempt}/${MAX_ATTEMPTS}`);
     }
 
-    const accessibilityClient = AndroidCtrlProxyClient.getInstance(deviceId);
+    const accessibilityClient = AndroidCtrlProxyClient.getInstance(device);
     const connected = await perf.track("waitForConnection", () => accessibilityClient.waitForConnection());
 
     perf.end();

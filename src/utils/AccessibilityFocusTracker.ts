@@ -1,8 +1,14 @@
 import { AndroidCtrlProxyClient } from "../features/observe/android";
-import { Element, CurrentFocusResult, TraversalOrderResult } from "../models/index";
+import { BootedDevice, Element, CurrentFocusResult, TraversalOrderResult } from "../models/index";
 import { PerformanceTracker, NoOpPerformanceTracker } from "./PerformanceTracker";
 import { logger } from "./logger";
 import { Timer, defaultTimer } from "./SystemTimer";
+
+const toAndroidDevice = (deviceId: string): BootedDevice => ({
+  name: deviceId,
+  deviceId,
+  platform: "android"
+});
 
 /**
  * Interface for accessibility focus tracking operations.
@@ -190,7 +196,7 @@ export class AccessibilityFocusTracker implements AccessibilityFocusService {
       }
 
       // Query accessibility service for current focus
-      const client = AndroidCtrlProxyClient.getInstance(deviceId);
+      const client = AndroidCtrlProxyClient.getInstance(toAndroidDevice(deviceId));
       const result: CurrentFocusResult = await client.requestCurrentFocus(5000, perf);
 
       if (result.error) {
@@ -242,7 +248,7 @@ export class AccessibilityFocusTracker implements AccessibilityFocusService {
       }
 
       // Query accessibility service for traversal order
-      const client = AndroidCtrlProxyClient.getInstance(deviceId);
+      const client = AndroidCtrlProxyClient.getInstance(toAndroidDevice(deviceId));
       const result: TraversalOrderResult = await client.requestTraversalOrder(5000, perf);
 
       if (result.error) {

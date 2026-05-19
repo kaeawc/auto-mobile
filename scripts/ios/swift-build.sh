@@ -57,6 +57,7 @@ echo ""
 MACOS_PACKAGES=(
     "XcodeCompanion"
     "XcodeExtension"
+    "screen-capture"
 )
 
 # iOS + macOS packages (have both platform support)

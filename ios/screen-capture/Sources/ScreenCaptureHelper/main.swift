@@ -1,11 +1,25 @@
 import AVFoundation
 import Foundation
+import ScreenCaptureKit
 import ScreenCaptureCore
 
 // MARK: - Logging
 
 func logError(_ message: String) {
     FileHandle.standardError.write(Data("\(message)\n".utf8))
+}
+
+func writeJSON<T: Encodable>(_ value: T) {
+    let encoder = JSONEncoder()
+    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+    do {
+        let data = try encoder.encode(value)
+        FileHandle.standardOutput.write(data)
+        FileHandle.standardOutput.write(Data("\n".utf8))
+    } catch {
+        logError("error: failed to encode JSON: \(error)")
+        exit(1)
+    }
 }
 
 // MARK: - Argument parsing
@@ -19,6 +33,14 @@ do {
     exit(2)
 } catch let CommandLineOptions.ParseError.unknownArgument(arg) {
     logError("error: unknown argument \(arg)")
+    logError(CommandLineOptions.helpText)
+    exit(2)
+} catch let CommandLineOptions.ParseError.invalidValue(flag, value) {
+    logError("error: invalid value '\(value)' for \(flag)")
+    logError(CommandLineOptions.helpText)
+    exit(2)
+} catch let CommandLineOptions.ParseError.conflictingFlags(message) {
+    logError("error: conflicting flags — \(message)")
     logError(CommandLineOptions.helpText)
     exit(2)
 } catch {
@@ -38,18 +60,47 @@ case .listDevices:
     // Allow a brief moment for the system to register USB devices.
     Thread.sleep(forTimeInterval: 0.5)
     let infos = DeviceDiscovery.discover().map(DeviceDiscovery.toInfo)
-    let response = DeviceListResponse(devices: infos)
-    let encoder = JSONEncoder()
-    encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-    do {
-        let data = try encoder.encode(response)
-        FileHandle.standardOutput.write(data)
-        FileHandle.standardOutput.write(Data("\n".utf8))
-    } catch {
-        logError("error: failed to encode device list: \(error)")
+    writeJSON(DeviceListResponse(devices: infos))
+    exit(0)
+
+case .listSimulators:
+    switch runBlocking({ try await SimulatorWindowDiscovery.discover() }) {
+    case .success(let windows):
+        writeJSON(SimulatorWindowListResponse(windows: windows))
+        exit(0)
+    case .failure(let error):
+        logError("error: failed to query simulator windows: \(error)")
+        logError("hint: grant Screen Recording permission to your terminal/IDE.")
         exit(1)
     }
-    exit(0)
+
+case .captureSimulator(let windowID):
+    let window: SCWindow
+    switch runBlocking({ try await SimulatorWindowDiscovery.find(windowID: windowID) }) {
+    case .success(.some(let resolved)):
+        window = resolved
+    case .success(.none):
+        logError("error: no window with CGWindowID \(windowID)")
+        exit(1)
+    case .failure(let error):
+        logError("error: failed to query simulator windows: \(error)")
+        exit(1)
+    }
+
+    let sink = FileHandleFrameSink(handle: .standardOutput)
+    let writer = FrameWriter(sink: sink)
+    let simSession = SimulatorCaptureSession(writer: writer)
+
+    if case .failure(let error) = runBlocking({ try await simSession.start(window: window) }) {
+        logError("error: failed to start simulator capture: \(error)")
+        exit(1)
+    }
+
+    installShutdownHandlers {
+        runBlocking { await simSession.stop() }
+        exit(0)
+    }
+    RunLoop.main.run()
 
 case .capture(let deviceID):
     CMIOSystem.enableScreenCaptureDevices()
@@ -82,19 +133,63 @@ case .capture(let deviceID):
         exit(1)
     }
 
-    // Graceful shutdown on SIGTERM/SIGINT.
-    let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
-    let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
-    signal(SIGTERM, SIG_IGN)
-    signal(SIGINT, SIG_IGN)
-    let shutdown = {
+    installShutdownHandlers {
         captureSession.stop()
         exit(0)
     }
-    termSource.setEventHandler(handler: shutdown)
-    intSource.setEventHandler(handler: shutdown)
+    RunLoop.main.run()
+}
+
+// MARK: - Async/sync bridges
+
+func runBlocking<T>(_ body: @escaping () async throws -> T) -> Result<T, Error> {
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: Result<T, Error> = .failure(CancellationError())
+    Task {
+        result = await Result { try await body() }
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return result
+}
+
+func runBlocking<T>(_ body: @escaping () async -> T) -> T {
+    let semaphore = DispatchSemaphore(value: 0)
+    var result: T?
+    Task {
+        result = await body()
+        semaphore.signal()
+    }
+    semaphore.wait()
+    return result!
+}
+
+extension Result where Failure == Error {
+    init(catching body: () async throws -> Success) async {
+        do {
+            self = .success(try await body())
+        } catch {
+            self = .failure(error)
+        }
+    }
+}
+
+// MARK: - Signal handling
+
+// Retain signal sources beyond `installShutdownHandlers` to keep them alive
+// for the duration of the run loop.
+private var retainedSignalSources: [DispatchSourceSignal] = []
+
+func installShutdownHandlers(_ handler: @escaping () -> Void) {
+    let termSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+    let intSource = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
+    // Ignore the default disposition so the DispatchSources are the only
+    // handlers that run.
+    signal(SIGTERM, SIG_IGN)
+    signal(SIGINT, SIG_IGN)
+    termSource.setEventHandler(handler: handler)
+    intSource.setEventHandler(handler: handler)
     termSource.resume()
     intSource.resume()
-
-    RunLoop.main.run()
+    retainedSignalSources = [termSource, intSource]
 }

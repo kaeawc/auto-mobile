@@ -278,9 +278,11 @@ Followed by `height * bytesPerRow` bytes of BGRA pixel data.
 - [ ] Test with MCP server integration
 
 ### Milestone 2: Simulator Capture
-- [ ] Create ScreenCaptureKit-based capture for simulator windows
-- [ ] Handle simulator window discovery
-- [ ] Integrate with same Unix socket protocol
+- [x] Create ScreenCaptureKit-based capture for simulator windows (`SimulatorCaptureSession`)
+- [x] Handle simulator window discovery (`SimulatorWindowDiscovery`, `--list-simulators`)
+- [x] Unified Swift CLI handles both device and simulator targets
+- [x] Node `IOSScreenCaptureHelper` accepts `{ kind: "device" | "simulator" }` targets
+- [ ] Unix-socket fan-out (shared with Milestone 1 follow-up)
 
 ### Milestone 3: IDE Plugin Integration
 - [ ] Add raw frame receiver (simpler than Klarity H.264 path)

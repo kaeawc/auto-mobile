@@ -10,25 +10,28 @@ import {
   type MalformedFrameError,
 } from "./frameProtocol";
 
-/**
- * Minimal abstraction over `child_process.spawn` so tests can inject
- * `FakeChildProcess`. Production code uses the Node built-in.
- */
 export type HelperSpawner = (
   command: string,
   args: string[]
 ) => ChildProcessWithoutNullStreams;
 
-export interface IosDeviceCaptureHelperOptions {
+/**
+ * What the helper should capture. Either a USB-connected iOS device (via
+ * AVFoundation) or a macOS iOS Simulator window (via ScreenCaptureKit).
+ */
+export type CaptureTarget =
+  | { kind: "device"; deviceId?: string }
+  | { kind: "simulator"; windowID: number };
+
+export interface IosScreenCaptureHelperOptions {
   /** Absolute path to the compiled `screen-capture-helper` binary. */
   binaryPath: string;
-  /** Optional iOS device uniqueID. Omit to capture the first available device. */
-  deviceId?: string;
+  target: CaptureTarget;
   /** Override the spawner for tests. Defaults to `child_process.spawn`. */
   spawner?: HelperSpawner;
 }
 
-export interface IosDeviceCaptureHelperEvents {
+export interface IosScreenCaptureHelperEvents {
   frame: (frame: DecodedFrame) => void;
   malformed: (error: MalformedFrameError) => void;
   stderr: (line: string) => void;
@@ -38,42 +41,43 @@ export interface IosDeviceCaptureHelperEvents {
 
 /**
  * Spawns and supervises the Swift `screen-capture-helper` binary, forwarding
- * decoded BGRA frames to listeners. Lifecycle:
+ * decoded BGRA frames to listeners.
  *
- *     const helper = new IOSDeviceCaptureHelper({ binaryPath, deviceId });
+ *     const helper = new IOSScreenCaptureHelper({
+ *       binaryPath,
+ *       target: { kind: "simulator", windowID: 12345 },
+ *     });
  *     helper.on("frame", frame => …);
  *     helper.start();
  *     …
  *     await helper.stop();
  */
-export class IOSDeviceCaptureHelper extends EventEmitter {
+export class IOSScreenCaptureHelper extends EventEmitter {
   private readonly binaryPath: string;
-  private readonly deviceId?: string;
+  private readonly target: CaptureTarget;
   private readonly spawner: HelperSpawner;
   private readonly decoder = new FrameDecoder();
   private process: ChildProcessWithoutNullStreams | null = null;
   private stderrBuffer = "";
   private exitPromise: Promise<{ code: number | null; signal: NodeJS.Signals | null }> | null = null;
 
-  constructor(options: IosDeviceCaptureHelperOptions) {
+  constructor(options: IosScreenCaptureHelperOptions) {
     super();
     this.binaryPath = options.binaryPath;
-    this.deviceId = options.deviceId;
+    this.target = options.target;
     this.spawner = options.spawner ?? (nodeSpawn as HelperSpawner);
   }
 
-
-  override on<E extends keyof IosDeviceCaptureHelperEvents>(
+  override on<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    listener: IosDeviceCaptureHelperEvents[E]
+    listener: IosScreenCaptureHelperEvents[E]
   ): this {
     return super.on(event, listener as (...args: any[]) => void);
   }
 
-
-  override emit<E extends keyof IosDeviceCaptureHelperEvents>(
+  override emit<E extends keyof IosScreenCaptureHelperEvents>(
     event: E,
-    ...args: Parameters<IosDeviceCaptureHelperEvents[E]>
+    ...args: Parameters<IosScreenCaptureHelperEvents[E]>
   ): boolean {
     return super.emit(event, ...(args as any[]));
   }
@@ -85,14 +89,10 @@ export class IOSDeviceCaptureHelper extends EventEmitter {
   /** Throws if already started — instances are single-shot. */
   start(): void {
     if (this.process !== null) {
-      throw new Error("IOSDeviceCaptureHelper already started");
+      throw new Error("IOSScreenCaptureHelper already started");
     }
 
-    const args: string[] = [];
-    if (this.deviceId !== undefined) {
-      args.push("--device-id", this.deviceId);
-    }
-
+    const args = buildArgs(this.target);
     const proc = this.spawner(this.binaryPath, args);
     this.process = proc;
 
@@ -126,7 +126,7 @@ export class IOSDeviceCaptureHelper extends EventEmitter {
     });
 
     logger.debug(
-      `[IOSDeviceCaptureHelper] spawned ${this.binaryPath} pid=${proc.pid ?? "?"}`
+      `[IOSScreenCaptureHelper] spawned ${this.binaryPath} pid=${proc.pid ?? "?"}`
     );
   }
 
@@ -147,7 +147,7 @@ export class IOSDeviceCaptureHelper extends EventEmitter {
 
   private appendStderr(text: string): void {
     this.stderrBuffer += text;
-    if (this.stderrBuffer.length > IOSDeviceCaptureHelper.STDERR_BUFFER_MAX) {
+    if (this.stderrBuffer.length > IOSScreenCaptureHelper.STDERR_BUFFER_MAX) {
       // Helper sent a long line with no newline; flush to avoid unbounded growth.
       this.emit("stderr", this.stderrBuffer);
       this.stderrBuffer = "";
@@ -161,4 +161,13 @@ export class IOSDeviceCaptureHelper extends EventEmitter {
   }
 
   private static readonly STDERR_BUFFER_MAX = 64 * 1024;
+}
+
+function buildArgs(target: CaptureTarget): string[] {
+  switch (target.kind) {
+    case "device":
+      return target.deviceId !== undefined ? ["--device-id", target.deviceId] : [];
+    case "simulator":
+      return ["--simulator-window", String(target.windowID)];
+  }
 }

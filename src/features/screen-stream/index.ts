@@ -6,8 +6,9 @@ export {
   type MalformedFrameError,
 } from "./frameProtocol";
 export {
-  IOSDeviceCaptureHelper,
+  IOSScreenCaptureHelper,
+  type CaptureTarget,
   type HelperSpawner,
-  type IosDeviceCaptureHelperOptions,
-  type IosDeviceCaptureHelperEvents,
-} from "./IOSDeviceCaptureHelper";
+  type IosScreenCaptureHelperOptions,
+  type IosScreenCaptureHelperEvents,
+} from "./IOSScreenCaptureHelper";

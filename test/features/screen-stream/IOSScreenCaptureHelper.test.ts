@@ -3,7 +3,8 @@ import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { FakeChildProcess } from "../../fakes/FakeChildProcess";
 import {
   FRAME_HEADER_SIZE,
-  IOSDeviceCaptureHelper,
+  IOSScreenCaptureHelper,
+  type CaptureTarget,
   type DecodedFrame,
   type MalformedFrameError,
 } from "../../../src/features/screen-stream";
@@ -23,12 +24,14 @@ function encodeFrame(
   return Buffer.concat([header, Buffer.alloc(height * bytesPerRow, fill)]);
 }
 
-function withFakeSpawner(): { fake: FakeChildProcess; spawnArgs: { command: string; args: string[] }; helper: IOSDeviceCaptureHelper } {
+function withFakeSpawner(
+  target: CaptureTarget = { kind: "device", deviceId: "00008140-001A2B3C0AE2401E" }
+): { fake: FakeChildProcess; spawnArgs: { command: string; args: string[] }; helper: IOSScreenCaptureHelper } {
   const fake = new FakeChildProcess();
   const spawnArgs = { command: "", args: [] as string[] };
-  const helper = new IOSDeviceCaptureHelper({
+  const helper = new IOSScreenCaptureHelper({
     binaryPath: "/fake/screen-capture-helper",
-    deviceId: "00008140-001A2B3C0AE2401E",
+    target,
     spawner: (command, args) => {
       spawnArgs.command = command;
       spawnArgs.args = args;
@@ -42,8 +45,8 @@ function flush(): Promise<void> {
   return new Promise(resolve => setImmediate(resolve));
 }
 
-describe("IOSDeviceCaptureHelper", () => {
-  test("passes --device-id when constructed with one", () => {
+describe("IOSScreenCaptureHelper", () => {
+  test("passes --device-id for device target with deviceId", () => {
     const { spawnArgs, helper } = withFakeSpawner();
     helper.start();
     expect(spawnArgs.command).toBe("/fake/screen-capture-helper");
@@ -53,18 +56,16 @@ describe("IOSDeviceCaptureHelper", () => {
     ]);
   });
 
-  test("omits --device-id when no deviceId is provided", () => {
-    const fake = new FakeChildProcess();
-    const spawnArgs: string[] = [];
-    const helper = new IOSDeviceCaptureHelper({
-      binaryPath: "/fake/screen-capture-helper",
-      spawner: (_command, args) => {
-        spawnArgs.push(...args);
-        return fake as unknown as ChildProcessWithoutNullStreams;
-      },
-    });
+  test("omits --device-id when device target has no deviceId", () => {
+    const { spawnArgs, helper } = withFakeSpawner({ kind: "device" });
     helper.start();
-    expect(spawnArgs).toEqual([]);
+    expect(spawnArgs.args).toEqual([]);
+  });
+
+  test("passes --simulator-window for simulator target", () => {
+    const { spawnArgs, helper } = withFakeSpawner({ kind: "simulator", windowID: 98765 });
+    helper.start();
+    expect(spawnArgs.args).toEqual(["--simulator-window", "98765"]);
   });
 
   test("emits frame events for each decoded frame", async () => {
@@ -87,6 +88,17 @@ describe("IOSDeviceCaptureHelper", () => {
     expect(frames[1].pixels[0]).toBe(0x22);
   });
 
+  test("simulator target also emits frame events", async () => {
+    const { fake, helper } = withFakeSpawner({ kind: "simulator", windowID: 1 });
+    const frames: DecodedFrame[] = [];
+    helper.on("frame", f => frames.push(f));
+    helper.start();
+    fake.stdout.push(encodeFrame(2, 2, 8, 33, 0xfa));
+    await flush();
+    expect(frames).toHaveLength(1);
+    expect(frames[0].header.width).toBe(2);
+  });
+
   test("emits malformed events for invalid headers", async () => {
     const { fake, helper } = withFakeSpawner();
     const malformed: MalformedFrameError[] = [];
@@ -94,7 +106,7 @@ describe("IOSDeviceCaptureHelper", () => {
     helper.start();
 
     const badHeader = Buffer.alloc(FRAME_HEADER_SIZE);
-    badHeader.writeUInt32LE(0, 0); // width
+    badHeader.writeUInt32LE(0, 0);
     badHeader.writeUInt32LE(1, 4);
     badHeader.writeUInt32LE(4, 8);
     badHeader.writeUInt32LE(0, 12);
@@ -138,7 +150,7 @@ describe("IOSDeviceCaptureHelper", () => {
   test("start() throws when already running", () => {
     const { helper } = withFakeSpawner();
     helper.start();
-    expect(() => helper.start()).toThrow("IOSDeviceCaptureHelper already started");
+    expect(() => helper.start()).toThrow("IOSScreenCaptureHelper already started");
   });
 
   test("stop() sends SIGTERM and resolves with exit info", async () => {

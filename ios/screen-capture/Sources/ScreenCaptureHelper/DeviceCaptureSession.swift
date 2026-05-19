@@ -43,16 +43,6 @@ final class DeviceCaptureSession: NSObject, AVCaptureVideoDataOutputSampleBuffer
         didOutput sampleBuffer: CMSampleBuffer,
         from connection: AVCaptureConnection
     ) {
-        guard let pixelBuffer = CMSampleBufferGetImageBuffer(sampleBuffer) else { return }
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-        guard let base = CVPixelBufferGetBaseAddress(pixelBuffer) else { return }
-
-        writer.write(
-            width: CVPixelBufferGetWidth(pixelBuffer),
-            height: CVPixelBufferGetHeight(pixelBuffer),
-            bytesPerRow: CVPixelBufferGetBytesPerRow(pixelBuffer),
-            baseAddress: base
-        )
+        writer.write(sampleBuffer: sampleBuffer)
     }
 }

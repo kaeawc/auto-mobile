@@ -3968,6 +3968,59 @@
     }
   },
   {
+    "name": "phoneCall",
+    "description": "Simulate an incoming phone call on an Android emulator via the emulator console (gsm call/accept/cancel/busy/hold). Emulator-only: physical devices return an unsupported error.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "type": "string",
+          "enum": [
+            "call",
+            "accept",
+            "cancel",
+            "busy",
+            "hold"
+          ],
+          "description": "Phone call action: 'call' simulates an incoming call; 'accept' answers a ringing or waiting call; 'cancel' ends the call from the network side; 'busy' rejects a waiting call with a busy signal; 'hold' puts the active call on hold (no phoneNumber required)."
+        },
+        "phoneNumber": {
+          "description": "Phone number for the call action. Required for all actions except 'hold'. Digits with optional leading '+', max 20 digits.",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session UUID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "pinchOn",
     "description": "Pinch to zoom",
     "inputSchema": {
@@ -4409,6 +4462,53 @@
       },
       "required": [
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "sendSms",
+    "description": "Send a simulated incoming SMS to an Android emulator via the emulator console (sms send). Emulator-only: physical devices return an unsupported error.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "phoneNumber": {
+          "type": "string",
+          "description": "Sender phone number for the simulated incoming SMS. Digits with optional leading '+', max 20 digits."
+        },
+        "message": {
+          "type": "string",
+          "description": "SMS message body. Max 1024 characters. Must not contain newlines, carriage returns, or NUL bytes."
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session UUID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phoneNumber",
+        "message"
       ],
       "additionalProperties": false
     }

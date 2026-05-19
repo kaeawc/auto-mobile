@@ -33,6 +33,7 @@ import { registerCriticalSectionTools } from "./criticalSectionTools";
 import { registerVideoRecordingTools } from "./videoRecordingTools";
 import { registerSnapshotTools } from "./snapshotTools";
 import { registerBiometricTools } from "./biometricTools";
+import { registerTelephonyTools } from "./telephonyTools";
 import { registerHighlightTools } from "./highlightTools";
 import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
@@ -152,6 +153,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerVideoRecordingTools();
   registerSnapshotTools();
   registerBiometricTools();
+  registerTelephonyTools();
   registerHighlightTools();
   registerDatabaseTools();
   registerStorageTools();

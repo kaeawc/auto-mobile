@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from "bun:test";
-import { FakeProxyManager } from "../../fakes/FakeProxyManager";
-import { FakeCtrlProxyManager } from "../../fakes/FakeCtrlProxyManager";
-import { FakeIOSCtrlProxyManager } from "../../fakes/FakeIOSCtrlProxyManager";
-import type { ProxyManager } from "../../../src/utils/interfaces/ProxyManager";
+import { FakeProxyManager } from "../fakes/FakeProxyManager";
+import { FakeCtrlProxyManager } from "../fakes/FakeCtrlProxyManager";
+import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
+import type { ProxyManager } from "../../src/utils/interfaces/ProxyManager";
 
 /**
  * Sanity-check the platform-agnostic ProxyManager contract.
@@ -14,7 +14,7 @@ import type { ProxyManager } from "../../../src/utils/interfaces/ProxyManager";
  */
 describe("ProxyManager interface", () => {
   describe("FakeProxyManager", () => {
-    let manager: ProxyManager & FakeProxyManager;
+    let manager: FakeProxyManager;
 
     beforeEach(() => {
       manager = new FakeProxyManager();
@@ -60,45 +60,37 @@ describe("ProxyManager interface", () => {
     });
   });
 
-  describe("Android FakeCtrlProxyManager satisfies ProxyManager", () => {
-    it("can be assigned to ProxyManager and exposes shared methods", async () => {
+  // Both platform-specific fakes implement richer sub-interfaces but
+  // must still satisfy ProxyManager. Assigning them to the abstract
+  // type proves it at compile-time; the assertions cover behavior.
+  const platformFakes: ReadonlyArray<[string, () => ProxyManager]> = [
+    ["Android FakeCtrlProxyManager", () => {
       const fake = new FakeCtrlProxyManager();
       fake.setInstalled(true);
       fake.setAvailable(true);
-
-      // Compile-time check: assigning a richer fake to the abstract type
-      // proves that FakeCtrlProxyManager (and therefore the Android
-      // manager interface it implements) satisfies ProxyManager.
-      const asProxy: ProxyManager = fake;
-
-      expect(await asProxy.isInstalled()).toBe(true);
-      expect(await asProxy.isAvailable()).toBe(true);
-
-      const result = await asProxy.setup();
-      expect(result.success).toBe(true);
-
-      asProxy.resetSetupState();
-    });
-  });
-
-  describe("iOS FakeIOSCtrlProxyManager satisfies ProxyManager", () => {
-    it("can be assigned to ProxyManager and exposes shared methods", async () => {
+      return fake;
+    }],
+    ["iOS FakeIOSCtrlProxyManager", () => {
       const fake = new FakeIOSCtrlProxyManager();
       fake.setInstalled(true);
       fake.setAvailable(true);
+      return fake;
+    }]
+  ];
 
-      // Compile-time check: assigning a richer fake to the abstract type
-      // proves that FakeIOSCtrlProxyManager (and therefore the iOS
-      // manager interface it implements) satisfies ProxyManager.
-      const asProxy: ProxyManager = fake;
+  for (const [name, build] of platformFakes) {
+    describe(`${name} satisfies ProxyManager`, () => {
+      it("exposes the shared lifecycle methods via the abstract type", async () => {
+        const asProxy: ProxyManager = build();
 
-      expect(await asProxy.isInstalled()).toBe(true);
-      expect(await asProxy.isAvailable()).toBe(true);
+        expect(await asProxy.isInstalled()).toBe(true);
+        expect(await asProxy.isAvailable()).toBe(true);
 
-      const result = await asProxy.setup();
-      expect(result.success).toBe(true);
+        const result = await asProxy.setup();
+        expect(result.success).toBe(true);
 
-      asProxy.resetSetupState();
+        asProxy.resetSetupState();
+      });
     });
-  });
+  }
 });

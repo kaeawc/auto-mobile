@@ -26,20 +26,16 @@ import {
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
- * Result of CtrlProxy setup
- *
- * Extends the platform-agnostic {@link ProxySetupResult} with the
- * iOS-specific build result.
+ * iOS-specific setup result; carries the build result alongside the
+ * platform-agnostic fields.
  */
 export interface CtrlProxyIosSetupResult extends ProxySetupResult {
   buildResult?: CtrlProxyIosBuildResult;
 }
 
 /**
- * Interface for iOS CtrlProxy management
- *
- * Extends the platform-agnostic {@link ProxyManager} interface with
- * iOS-specific runner process lifecycle methods.
+ * iOS-specific runner process lifecycle, extending the platform-agnostic
+ * {@link ProxyManager}.
  */
 export interface CtrlProxyIosManager extends ProxyManager {
   setup(force?: boolean, perf?: PerformanceTracker): Promise<CtrlProxyIosSetupResult>;

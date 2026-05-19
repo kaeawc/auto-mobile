@@ -21,18 +21,11 @@ import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCa
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
 
 /**
- * Result of accessibility service setup
- */
-type AccessibilitySetupResult = ProxySetupResult;
-
-/**
- * Interface for accessibility service management
- *
- * Extends the platform-agnostic {@link ProxyManager} interface with
- * Android-specific accessibility-service lifecycle methods.
+ * Android-specific accessibility-service lifecycle, extending the
+ * platform-agnostic {@link ProxyManager}.
  */
 export interface CtrlProxyManager extends ProxyManager {
-  setup(force?: boolean, perf?: PerformanceTracker): Promise<AccessibilitySetupResult>;
+  setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
   isEnabled(): Promise<boolean>;
   isEnabledForUser(userId: number): Promise<boolean>;
   getInstalledApkSha256(): Promise<string | null>;
@@ -1038,7 +1031,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
   /**
    * Complete setup process for Accessibility Service
    */
-  async setup(force: boolean = false, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<AccessibilitySetupResult> {
+  async setup(force: boolean = false, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<ProxySetupResult> {
     perf.serial("a11yServiceSetup");
     let apkPath: string | null = null;
 

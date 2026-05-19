@@ -29,27 +29,20 @@ export interface ProxySetupResult {
  */
 export interface ProxyManager {
   /**
-   * Whether the proxy/control service is installed on the target device.
-   * For Android this checks the accessibility service APK; for iOS it
-   * checks the CtrlProxy test bundle/app.
+   * On Android, whether the accessibility service APK is installed;
+   * on iOS, whether the CtrlProxy test bundle/app is installed.
    */
   isInstalled(): Promise<boolean>;
 
   /**
-   * Whether the service is fully available for use (installed AND
-   * active — `enabled` on Android, `running` on iOS).
+   * Whether the service is fully available: installed AND active
+   * (`enabled` on Android, `running` on iOS).
    */
   isAvailable(): Promise<boolean>;
 
-  /**
-   * Run the full setup flow (download/install/enable or build/start)
-   * idempotently. Returns a result object describing what happened.
-   */
+  /** Idempotent — repeat calls short-circuit unless `force` or {@link resetSetupState} intervenes. */
   setup(force?: boolean, perf?: PerformanceTracker): Promise<ProxySetupResult>;
 
-  /**
-   * Reset internal setup-state caches so the next `setup()` call performs
-   * a fresh attempt instead of short-circuiting on prior results.
-   */
+  /** Drop internal setup-state caches so the next {@link setup} call performs a fresh attempt. */
   resetSetupState(): void;
 }

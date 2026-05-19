@@ -56,16 +56,24 @@ describe("ToolExecutionContext", () => {
         }
       } as any);
 
-    // Mock AndroidCtrlProxyClient to use fake WebSocket (no real connection)
-    AndroidCtrlProxyClient.getInstance = ((deviceId: string) => ({
-      waitForConnection: async () => true,
-      close: async () => {}
-    })) as any;
+    const clientCallArgs: unknown[] = [];
+    AndroidCtrlProxyClient.getInstance = ((device: unknown) => {
+      clientCallArgs.push(device);
+      return {
+        waitForConnection: async () => true,
+        close: async () => {}
+      };
+    }) as any;
 
     const context = await createToolExecutionContext("session-1", sessionManager, devicePool, sessionOptions);
 
     expect(context.deviceId).toBe("device-1");
     expect(setupCalls).toBe(1);
+    expect(clientCallArgs.length).toBeGreaterThan(0);
+    const passed = clientCallArgs[0] as BootedDevice;
+    expect(typeof passed).toBe("object");
+    expect(passed.deviceId).toBe("device-1");
+    expect(passed.platform).toBe("android");
   });
 
   test("should not run accessibility setup for existing sessions", async () => {

@@ -1,12 +1,14 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { ImeAction } from "../../../src/features/action/ImeAction";
 import { ExecResult, ObserveResult, BootedDevice } from "../../../src/models";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
+import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeCtrlProxy } from "../../fakes/FakeCtrlProxy";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
 
 describe("ImeAction", () => {
   let imeAction: ImeAction;
@@ -252,6 +254,46 @@ describe("ImeAction", () => {
       const executedCommands = fakeAdb.getExecutedCommands();
       expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_SHIFT_LEFT"))).toBe(true);
       expect(executedCommands.some(cmd => cmd.includes("shell input keyevent KEYCODE_TAB"))).toBe(true);
+    });
+  });
+
+  describe("AdbClientFactory wiring (regression for #2230)", () => {
+    let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
+
+    afterEach(() => {
+      getInstanceSpy?.mockRestore();
+      getInstanceSpy = null;
+    });
+
+    // Regression for https://github.com/kaeawc/auto-mobile/issues/2230.
+    // executeAndroidImeAction called AndroidCtrlProxyClient.getInstance(device, this.adb),
+    // but getInstance expects an AdbClientFactory and immediately invokes
+    // `.create(device)`. After bundler minification this surfaced as
+    // `TypeError: <minified>.create is not a function` and crashed any
+    // imeAction call on a fresh device with no injected a11yService.
+    test("passes the AdbClientFactory (not AdbExecutor) to AndroidCtrlProxyClient.getInstance", async () => {
+      const factory = new FakeAdbClientFactory();
+      const fakeClient = {
+        requestImeAction: async () => ({
+          success: true,
+          totalTimeMs: 1
+        })
+      } as unknown as AndroidCtrlProxyClient;
+
+      getInstanceSpy = spyOn(AndroidCtrlProxyClient, "getInstance").mockReturnValue(fakeClient);
+
+      const ime = new ImeAction(testDevice, factory as any, null, fakeTimer);
+      (ime as any).observeScreen = fakeObserveScreen;
+      (ime as any).window = fakeWindow;
+      (ime as any).awaitIdle = fakeAwaitIdle;
+
+      const result = await ime.execute("done");
+
+      expect(result.success).toBe(true);
+      expect(getInstanceSpy).toHaveBeenCalled();
+      const passed = getInstanceSpy!.mock.calls[0][1] as { create?: unknown };
+      expect(typeof passed).toBe("object");
+      expect(typeof passed.create).toBe("function");
     });
   });
 

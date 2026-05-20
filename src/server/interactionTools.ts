@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { ToolRegistry, ProgressCallback } from "./toolRegistry";
 import { TapOnElement } from "../features/action/TapOnElement";
+import { TapAnyElement } from "../features/action/TapAnyElement";
 import { InputText } from "../features/action/InputText";
 import { ClearText } from "../features/action/ClearText";
 import { SelectAllText } from "../features/action/SelectAllText";
@@ -29,9 +30,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import {
   createElementIdTextSelectorSchema,
   elementContainerSchema,
-  elementIdTextFieldsSchema,
   elementSelectionStrategySchema,
-  validateElementIdTextSelector
 } from "./elementSelectorSchemas";
 import {
   elementSchema,
@@ -50,6 +49,7 @@ import type {
   InputTextArgs,
   OpenLinkArgs,
   TapOnArgs,
+  TapAnyArgs,
   DragAndDropArgs,
   SwipeOnArgs,
   PinchOnArgs,
@@ -94,6 +94,7 @@ export type {
   InputTextArgs,
   OpenLinkArgs,
   TapOnArgs,
+  TapAnyArgs,
   DragAndDropArgs,
   SwipeOnArgs,
   PinchOnArgs,
@@ -133,7 +134,17 @@ export const keyboardSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }));
 
-const tapOnBaseSchema = z.object({
+const tapOnSelectorSchema = z.union([
+  z.object({ elementId: z.string().min(1).describe("Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values.") }).strict(),
+  z.object({ text: z.string().min(1).describe("Element text, content-desc, or placeholder value from observe output.") }).strict()
+]).describe("Element to tap. Provide exactly one of elementId or text.");
+
+export const tapOnSchema = addDeviceTargetingToSchema(z.object({
+  selector: tapOnSelectorSchema,
+  sibling: z.boolean().optional().describe(
+    "When true, tap a clickable sibling of the matched element instead of the element itself. " +
+    "Useful for tapping checkboxes, icons, or buttons adjacent to a text label."
+  ),
   container: elementContainerSchema.optional().describe(
     "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
   ),
@@ -161,56 +172,27 @@ const tapOnBaseSchema = z.object({
     "and ghost-tap detection after."
   ),
   platform: platformSchema
-}).strict();
+}).strict());
 
-const tapOnSelectorSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend(elementIdTextFieldsSchema.shape).strict()
-);
-
-const tapOnByIdSchema = tapOnSelectorSchema.superRefine((value, ctx) => {
-  validateElementIdTextSelector(value, ctx);
-});
-
-const tapOnByTextSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend({
-    text: z.string().min(1).describe("Element text"),
-    tapClickableParent: z.boolean().optional().describe(
-      "Tap the nearest clickable parent that contains the text element. " +
-      "Useful for list items where the clickable row doesn't have a resource-id " +
-      "but contains children with text."
-    )
-  }).strict()
-);
-
-const tapOnByClickableSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend({
-    clickable: z.literal(true).describe(
-      "Select clickable elements. Use with selectionStrategy: 'first' to tap " +
-      "the first clickable item in a list without knowing its text or ID."
-    ),
-    scrollableContainer: z.boolean().optional().describe(
-      "Only search within scrollable containers (lists/RecyclerViews). " +
-      "Use this to avoid tapping search bars or other clickable UI elements " +
-      "when you want the first list item."
-    )
-  }).strict()
-);
-
-const tapOnBySiblingOfTextSchema = addDeviceTargetingToSchema(
-  tapOnBaseSchema.extend({
-    siblingOfText: z.string().min(1).describe(
-      "Find a clickable element that is a sibling of an element containing this text. " +
-      "Useful for tapping checkboxes, icons, or buttons next to a specific text label."
-    )
-  }).strict()
-);
-
-export const tapOnSchema = z.union([
-  tapOnByIdSchema,
-  tapOnByTextSchema,
-  tapOnByClickableSchema,
-  tapOnBySiblingOfTextSchema
-]);
+export const tapAnySchema = addDeviceTargetingToSchema(z.object({
+  container: elementContainerSchema.optional().describe(
+    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+  ),
+  selectionStrategy: elementSelectionStrategySchema.optional().describe(
+    "Element selection strategy: 'first' (default) or 'random'"
+  ),
+  scrollableContainer: z.boolean().optional().describe(
+    "Only search within scrollable containers (lists/RecyclerViews). " +
+    "Use this to avoid tapping search bars or other clickable UI elements " +
+    "when you want the first list item."
+  ),
+  action: z.enum(["tap", "doubleTap", "longPress"]).default("tap").describe("Action type (default: tap)"),
+  duration: z.number().optional().describe("Long press duration (ms)"),
+  searchUntil: z.object({
+    duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
+  }).optional().describe("Poll for clickable element before tapping"),
+  platform: platformSchema
+}).strict());
 
 const tapOnResultSchema = z.object({
   success: z.boolean(),
@@ -435,16 +417,13 @@ export function registerInteractionTools() {
     const tapOnTextCommand = new TapOnElement(device);
     const result = await tapOnTextCommand.execute({
       container: args.container,
-      text: args.text,
-      elementId: args.elementId,
+      text: args.selector.text,
+      elementId: args.selector.elementId,
+      sibling: args.sibling,
       selectionStrategy: args.selectionStrategy,
       action: args.action,
       duration: args.duration,
       searchUntil: args.searchUntil,
-      tapClickableParent: args.tapClickableParent,
-      clickable: args.clickable,
-      scrollableContainer: args.scrollableContainer,
-      siblingOfText: args.siblingOfText,
       preTapStability: args.preTapStability,
       retryIfNoChange: args.retryIfNoChange,
       ensureTap: args.ensureTap,
@@ -468,6 +447,32 @@ export function registerInteractionTools() {
 
     return createStructuredToolResponse({
       message: searchSummary ? `Tapped on element (${searchSummary})` : "Tapped on element",
+      observation: result.observation,
+      ...result
+    });
+  };
+
+  // TapAny handler
+  const tapAnyHandler = async (device: BootedDevice, args: TapAnyArgs, progress?: ProgressCallback) => {
+    RecompositionTracker.getInstance().recordInteraction();
+    const tapAnyCommand = new TapAnyElement(device);
+    const result = await tapAnyCommand.execute({
+      container: args.container,
+      selectionStrategy: args.selectionStrategy,
+      scrollableContainer: args.scrollableContainer,
+      action: args.action,
+      duration: args.duration,
+      searchUntil: args.searchUntil,
+    }, progress);
+
+    const searchStats = result.searchUntil;
+    const shouldIncludeSearchSummary = Boolean(searchStats) && (searchStats!.requestCount > 0 || searchStats!.changeCount > 0);
+    const searchSummary = shouldIncludeSearchSummary && searchStats
+      ? `${searchStats.changeCount} view hierarchy changes over ${searchStats.requestCount} requests within ${searchStats.durationMs}ms`
+      : undefined;
+
+    return createStructuredToolResponse({
+      message: searchSummary ? `Tapped clickable element (${searchSummary})` : "Tapped clickable element",
       observation: result.observation,
       ...result
     });
@@ -1005,10 +1010,26 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "tapOn",
-    "Tap UI elements by text or ID (returns selectedElement metadata)",
+    "Tap a specific UI element identified by text or resource-id.\n" +
+    "Provide a selector: { \"text\": \"Login\" } or { \"elementId\": \"com.app:id/btn\" }.\n" +
+    "Set sibling: true to tap a clickable sibling adjacent to the matched element (e.g., a checkbox next to a label).\n" +
+    "content-desc values from observe should be passed as text, not elementId.",
     tapOnSchema,
     tapOnHandler,
-    true, // Supports progress notifications
+    true,
+    false,
+    { outputSchema: tapOnResultSchema }
+  );
+
+  ToolRegistry.registerDeviceAware(
+    "tapAny",
+    "Tap any clickable element without knowing its text or ID. " +
+    "Good for tapping the first list item. Use container to scope, " +
+    "selectionStrategy to pick 'first' (default) or 'random', and " +
+    "scrollableContainer: true to limit to list/RecyclerView items.",
+    tapAnySchema,
+    tapAnyHandler,
+    true,
     false,
     { outputSchema: tapOnResultSchema }
   );

@@ -172,7 +172,7 @@ describe("MCP Tools Schema", () => {
           name: "tapOn",
           arguments: {
             platform: "android",
-            text: "Duluth",
+            selector: { text: "Duluth" },
             container: "MN"
           }
         }
@@ -185,7 +185,7 @@ describe("MCP Tools Schema", () => {
 
   test("tapOn should default action to 'tap' when omitted", async () => {
     const { tapOnSchema } = await import("../../../src/server/interactionTools");
-    const result = tapOnSchema.parse({ platform: "android", text: "Online" });
+    const result = tapOnSchema.parse({ platform: "android", selector: { text: "Online" } });
     expect(result.action).toBe("tap");
   });
 

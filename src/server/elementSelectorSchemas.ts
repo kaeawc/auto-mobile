@@ -23,8 +23,8 @@ export const elementContainerSchema = createElementIdTextSelectorSchema({
 
 
 export const elementIdTextFieldsSchema = z.object({
-  elementId: z.string().describe("Element resource ID / accessibility identifier").optional(),
-  text: z.string().describe("Element text").optional()
+  elementId: z.string().describe("Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values.").optional(),
+  text: z.string().describe("Element text, content-desc, or placeholder value from observe output.").optional()
 }).strict();
 
 export const elementSelectionStrategySchema = z.enum(["first", "random"]);

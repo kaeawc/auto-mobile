@@ -75,6 +75,7 @@ export * from "./SwipeResult";
 export * from "./SwipeOnOptions";
 export * from "./SwipeOnResult";
 export * from "./SystemInsets";
+export * from "./TapAnyElementOptions";
 export * from "./TapOnElementOptions";
 export * from "./TapOnElementResult";
 export * from "./TapOptions";

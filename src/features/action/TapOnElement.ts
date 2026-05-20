@@ -147,6 +147,7 @@ export class TapOnElement extends BaseVisualChange {
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
     this.strategy = options.tapStrategy ?? createTapStrategy(
       device,
+      this.adb,
       this.accessibilityDetector,
       this.iosVoiceOverDetector
     );
@@ -957,7 +958,7 @@ export class TapOnElement extends BaseVisualChange {
           const selectedElementMetadata = this.buildSelectedElementMetadata(selection);
           const initialTapPoint = this.geometry.getElementCenter(element);
           let action = options.action;
-          const longPressDuration = this.getLongPressDuration(options, this.device.platform);
+          const longPressDuration = this.getLongPressDuration(options);
 
           if (action === "focus") {
             // Check if element is already focused
@@ -984,23 +985,17 @@ export class TapOnElement extends BaseVisualChange {
             options.action = "tap";
           }
 
-          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
-            this.device,
-            this.adb,
-            IOSCtrlProxyClient.getInstance(this.device)
-          );
-          // On Android the strategy returns TalkBack state; on iOS it returns
-          // VoiceOver state. Each platform's executeTap consumes only the
-          // boolean meaningful to its own a11y service.
-          const isTalkBackEnabled = isAccessibilityServiceEnabled;
-          const isVoiceOverEnabled = isAccessibilityServiceEnabled;
+          // Strategy returns the platform-relevant boolean: TalkBack on
+          // Android, VoiceOver on iOS. Downstream call paths are split by
+          // the platform switch below, so a single flag suffices.
+          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled();
           let tapElement: Element;
           let usedParent: boolean;
           const initialTapTarget = this.resolveTapTargetElement(
             element,
             viewHierarchy,
             action,
-            isTalkBackEnabled
+            isAccessibilityServiceEnabled
           );
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
@@ -1010,7 +1005,7 @@ export class TapOnElement extends BaseVisualChange {
               options,
               observeResult,
               action,
-              isTalkBackEnabled,
+              isAccessibilityServiceEnabled,
               signal
             );
             if (!stable.ok) {
@@ -1057,18 +1052,18 @@ export class TapOnElement extends BaseVisualChange {
                   tapElement,
                   signal,
                   options,
-                  isTalkBackEnabled
+                  isAccessibilityServiceEnabled
                 );
                 break;
               case "ios":
-                await this.executeiOSTap(action, tapPoint.x, tapPoint.y, longPressDuration, tapElement, isVoiceOverEnabled);
+                await this.executeiOSTap(action, tapPoint.x, tapPoint.y, longPressDuration, tapElement, isAccessibilityServiceEnabled);
                 break;
               default:
                 throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
             }
           });
 
-          if (preTapHash && this.strategy.shouldRetryTapIfNoChange()) {
+          if (preTapHash && this.strategy.retryTapIfNoChange) {
             await this.retryTapIfNoChange(
               preTapHash,
               tapPoint,
@@ -1466,11 +1461,11 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
-  private getLongPressDuration(options: TapOnElementOptions, _platform: "android" | "ios"): number {
+  private getLongPressDuration(options: TapOnElementOptions): number {
     if (typeof options.duration === "number" && options.duration > 0) {
       return options.duration;
     }
-    return this.strategy.getLongPressDurationMs();
+    return this.strategy.longPressDurationMs;
   }
 
 

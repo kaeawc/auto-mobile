@@ -1,12 +1,9 @@
 import type { TapStrategy } from "../../src/utils/interfaces/TapStrategy";
 import type {
-  BootedDevice,
   ObserveResult,
   ViewHierarchyResult,
 } from "../../src/models";
 import type { TapOnElementOptions } from "../../src/models/TapOnElementOptions";
-import type { AdbExecutor } from "../../src/utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { IOSCtrlProxy } from "../../src/features/observe/ios";
 import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
 
 /**
@@ -14,12 +11,16 @@ import type { ViewHierarchy } from "../../src/features/observe/ViewHierarchy";
  * `executedOperations` / `wasMethodCalled` / `getCallCount` /
  * `clearHistory` pattern used by `FakeProxyManager` and
  * `FakeSnapshotProvider`.
+ *
+ * The interface's `readonly` fields are exposed as mutable on the fake
+ * so tests can twiddle them between assertions.
  */
 export class FakeTapStrategy implements TapStrategy {
+  longPressDurationMs: number = 500;
+  retryTapIfNoChange: boolean = false;
+
   private accessibilityEnabled: boolean = false;
   private preTapStabilityGate: boolean = false;
-  private retryIfNoChangeGate: boolean = false;
-  private longPressMs: number = 500;
   private filterReturnsRaw: boolean = false;
   private readonly executedOperations: string[] = [];
 
@@ -29,14 +30,6 @@ export class FakeTapStrategy implements TapStrategy {
 
   setShouldRunPreTapStability(enabled: boolean): void {
     this.preTapStabilityGate = enabled;
-  }
-
-  setShouldRetryTapIfNoChange(enabled: boolean): void {
-    this.retryIfNoChangeGate = enabled;
-  }
-
-  setLongPressDurationMs(ms: number): void {
-    this.longPressMs = ms;
   }
 
   /** When `true`, `prepareViewHierarchyForResponse` returns `null` (caller uses raw). */
@@ -69,11 +62,7 @@ export class FakeTapStrategy implements TapStrategy {
     return this.filterReturnsRaw ? null : rawHierarchy;
   }
 
-  async isAccessibilityServiceEnabled(
-    _device: BootedDevice,
-    _adb: AdbExecutor,
-    _iosCtrlProxy: IOSCtrlProxy
-  ): Promise<boolean> {
+  async isAccessibilityServiceEnabled(): Promise<boolean> {
     this.executedOperations.push("isAccessibilityServiceEnabled");
     return this.accessibilityEnabled;
   }
@@ -81,15 +70,5 @@ export class FakeTapStrategy implements TapStrategy {
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {
     this.executedOperations.push("shouldRunPreTapStability");
     return this.preTapStabilityGate;
-  }
-
-  shouldRetryTapIfNoChange(): boolean {
-    this.executedOperations.push("shouldRetryTapIfNoChange");
-    return this.retryIfNoChangeGate;
-  }
-
-  getLongPressDurationMs(): number {
-    this.executedOperations.push("getLongPressDurationMs");
-    return this.longPressMs;
   }
 }

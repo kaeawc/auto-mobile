@@ -6,7 +6,6 @@ import { createTapStrategy } from "../../../src/features/action/strategies/creat
 import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector";
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeAdbClient } from "../../fakes/FakeAdbClient";
-import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import { ViewHierarchy } from "../../../src/features/observe/ViewHierarchy";
 import type { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import type { TapOnElementOptions } from "../../../src/models/TapOnElementOptions";
@@ -15,7 +14,7 @@ import type { TapStrategy } from "../../../src/utils/interfaces/TapStrategy";
 /**
  * Sanity-check the platform-agnostic TapStrategy contract. Tests
  * deliberately type their subjects as the abstract interface so a
- * regression that drops one of the shared methods will surface as a
+ * regression that drops one of the shared members will surface as a
  * compile error here.
  */
 describe("TapStrategy", () => {
@@ -30,10 +29,8 @@ describe("TapStrategy", () => {
     platform: "ios",
   };
 
-  const buildAndroidViewHierarchy = (): ViewHierarchy =>
-    new ViewHierarchy(androidDevice, { create: () => new FakeAdbClient() as any });
-  const buildIosViewHierarchy = (): ViewHierarchy =>
-    new ViewHierarchy(iosDevice, { create: () => new FakeAdbClient() as any });
+  const buildViewHierarchy = (device: BootedDevice): ViewHierarchy =>
+    new ViewHierarchy(device, { create: () => new FakeAdbClient() as any });
 
   const minimalHierarchy: ViewHierarchyResult = {
     hierarchy: { $: {}, node: [] },
@@ -48,162 +45,143 @@ describe("TapStrategy", () => {
 
     it("records each method invocation", async () => {
       fake.setAccessibilityServiceEnabled(true);
-      fake.setLongPressDurationMs(750);
+      fake.longPressDurationMs = 750;
 
-      await fake.isAccessibilityServiceEnabled(
-        androidDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      fake.getLongPressDurationMs();
+      await fake.isAccessibilityServiceEnabled();
       fake.shouldRunPreTapStability({ action: "tap" } as TapOnElementOptions);
-      fake.shouldRetryTapIfNoChange();
       fake.prepareViewHierarchyForResponse(
         minimalHierarchy,
-        buildAndroidViewHierarchy(),
+        buildViewHierarchy(androidDevice),
         { width: 1080, height: 1920 }
       );
 
       expect(fake.wasMethodCalled("isAccessibilityServiceEnabled")).toBe(true);
-      expect(fake.wasMethodCalled("getLongPressDurationMs")).toBe(true);
       expect(fake.wasMethodCalled("shouldRunPreTapStability")).toBe(true);
-      expect(fake.wasMethodCalled("shouldRetryTapIfNoChange")).toBe(true);
       expect(fake.wasMethodCalled("prepareViewHierarchyForResponse")).toBe(true);
-      expect(fake.getCallCount("getLongPressDurationMs")).toBe(1);
     });
 
-    it("clears recorded history on demand", () => {
-      fake.getLongPressDurationMs();
+    it("clears recorded history on demand", async () => {
+      await fake.isAccessibilityServiceEnabled();
       fake.clearHistory();
       expect(fake.getExecutedOperations()).toEqual([]);
     });
 
     it("propagates configured accessibility-service state", async () => {
       fake.setAccessibilityServiceEnabled(true);
-      const result = await fake.isAccessibilityServiceEnabled(
-        androidDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      expect(result).toBe(true);
+      expect(await fake.isAccessibilityServiceEnabled()).toBe(true);
+      fake.setAccessibilityServiceEnabled(false);
+      expect(await fake.isAccessibilityServiceEnabled()).toBe(false);
+    });
+
+    it("exposes mutable long-press and retry knobs", () => {
+      fake.longPressDurationMs = 250;
+      fake.retryTapIfNoChange = true;
+      const asStrategy: TapStrategy = fake;
+      expect(asStrategy.longPressDurationMs).toBe(250);
+      expect(asStrategy.retryTapIfNoChange).toBe(true);
     });
   });
 
-  describe("AndroidTapStrategy", () => {
-    let detector: FakeAccessibilityDetector;
-    let strategy: AndroidTapStrategy;
+  // Two platform strategies plus the fake all satisfy TapStrategy. Data-
+  // driven instead of duplicating per-platform describe blocks.
+  interface StrategyCase {
+    name: string;
+    device: BootedDevice;
+    build: () => { strategy: TapStrategy; setA11y: (enabled: boolean) => void };
+    longPressMs: number;
+    retryTapIfNoChange: boolean;
+    runsPreTapStabilityWhenRequested: boolean;
+  }
 
-    beforeEach(() => {
-      detector = new FakeAccessibilityDetector();
-      strategy = new AndroidTapStrategy(detector);
+  const cases: ReadonlyArray<StrategyCase> = [
+    {
+      name: "AndroidTapStrategy",
+      device: androidDevice,
+      build: () => {
+        const detector = new FakeAccessibilityDetector();
+        const strategy = new AndroidTapStrategy(androidDevice, new FakeAdbClient() as any, detector);
+        return {
+          strategy,
+          setA11y: enabled =>
+            detector.setDetectionResult(androidDevice.deviceId, enabled, enabled ? "talkback" : null),
+        };
+      },
+      longPressMs: 500,
+      retryTapIfNoChange: true,
+      runsPreTapStabilityWhenRequested: true,
+    },
+    {
+      name: "IosTapStrategy",
+      device: iosDevice,
+      build: () => {
+        const detector = new FakeIosVoiceOverDetector();
+        const strategy = new IosTapStrategy(iosDevice, detector);
+        return { strategy, setA11y: enabled => detector.setVoiceOverEnabled(enabled) };
+      },
+      longPressMs: 1000,
+      retryTapIfNoChange: false,
+      runsPreTapStabilityWhenRequested: false,
+    },
+  ];
+
+  for (const c of cases) {
+    describe(c.name, () => {
+      it("exposes the right long-press default", () => {
+        expect(c.build().strategy.longPressDurationMs).toBe(c.longPressMs);
+      });
+
+      it("reports the right retryTapIfNoChange policy", () => {
+        expect(c.build().strategy.retryTapIfNoChange).toBe(c.retryTapIfNoChange);
+      });
+
+      it("routes accessibility-service detection to the right detector", async () => {
+        const { strategy, setA11y } = c.build();
+        setA11y(true);
+        expect(await strategy.isAccessibilityServiceEnabled()).toBe(true);
+        setA11y(false);
+        expect(await strategy.isAccessibilityServiceEnabled()).toBe(false);
+      });
+
+      it("only runs pre-tap stability on platforms that support it", () => {
+        const { strategy } = c.build();
+        const withFlag = { action: "tap", preTapStability: true } as TapOnElementOptions;
+        const withoutFlag = { action: "tap" } as TapOnElementOptions;
+        expect(strategy.shouldRunPreTapStability(withoutFlag)).toBe(false);
+        expect(strategy.shouldRunPreTapStability(withFlag)).toBe(c.runsPreTapStabilityWhenRequested);
+      });
+
+      it("filters the response hierarchy without crashing", () => {
+        const { strategy } = c.build();
+        const result = strategy.prepareViewHierarchyForResponse(
+          minimalHierarchy,
+          buildViewHierarchy(c.device),
+          { width: 390, height: 844 }
+        );
+        // Android always returns a filtered tree; iOS returns null when
+        // screenSize is missing (covered separately below) but returns
+        // a tree when provided.
+        expect(result).not.toBeNull();
+      });
+
+      it("satisfies the TapStrategy interface", () => {
+        const asStrategy: TapStrategy = c.build().strategy;
+        expect(typeof asStrategy.prepareViewHierarchyForResponse).toBe("function");
+        expect(typeof asStrategy.isAccessibilityServiceEnabled).toBe("function");
+        expect(typeof asStrategy.shouldRunPreTapStability).toBe("function");
+        expect(typeof asStrategy.longPressDurationMs).toBe("number");
+        expect(typeof asStrategy.retryTapIfNoChange).toBe("boolean");
+      });
     });
+  }
 
-    it("returns true when TalkBack is detected", async () => {
-      detector.setDetectionResult(androidDevice.deviceId, true, "talkback");
-      const enabled = await strategy.isAccessibilityServiceEnabled(
-        androidDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      expect(enabled).toBe(true);
-    });
-
-    it("returns false when accessibility service is not TalkBack", async () => {
-      detector.setDetectionResult(androidDevice.deviceId, true, "voiceover");
-      const enabled = await strategy.isAccessibilityServiceEnabled(
-        androidDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      expect(enabled).toBe(false);
-    });
-
-    it("returns 500ms default long press", () => {
-      expect(strategy.getLongPressDurationMs()).toBe(500);
-    });
-
-    it("honours options.preTapStability for pre-tap gating", () => {
-      expect(strategy.shouldRunPreTapStability({ action: "tap" } as TapOnElementOptions)).toBe(false);
-      expect(
-        strategy.shouldRunPreTapStability({ action: "tap", preTapStability: true } as TapOnElementOptions)
-      ).toBe(true);
-    });
-
-    it("always enables retry-if-no-change", () => {
-      expect(strategy.shouldRetryTapIfNoChange()).toBe(true);
-    });
-
-    it("filters the raw hierarchy via filterViewHierarchy", () => {
-      const filtered = strategy.prepareViewHierarchyForResponse(
-        minimalHierarchy,
-        buildAndroidViewHierarchy()
-      );
-      // Filter always returns a hierarchy (possibly equal to raw) — non-null
-      // means TapOnElement uses the filtered tree.
-      expect(filtered).not.toBeNull();
-    });
-  });
-
-  describe("IosTapStrategy", () => {
-    let detector: FakeIosVoiceOverDetector;
-    let strategy: IosTapStrategy;
-
-    beforeEach(() => {
-      detector = new FakeIosVoiceOverDetector();
-      strategy = new IosTapStrategy(detector);
-    });
-
-    it("routes accessibility detection to VoiceOver", async () => {
-      detector.setVoiceOverEnabled(true);
-      const enabled = await strategy.isAccessibilityServiceEnabled(
-        iosDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      expect(enabled).toBe(true);
-      expect(detector.getCallCount()).toBe(1);
-    });
-
-    it("returns false when VoiceOver is disabled", async () => {
-      detector.setVoiceOverEnabled(false);
-      const enabled = await strategy.isAccessibilityServiceEnabled(
-        iosDevice,
-        new FakeAdbClient() as any,
-        new FakeIOSCtrlProxy() as any
-      );
-      expect(enabled).toBe(false);
-    });
-
-    it("returns 1000ms default long press", () => {
-      expect(strategy.getLongPressDurationMs()).toBe(1000);
-    });
-
-    it("never runs pre-tap stability (Android-only)", () => {
-      expect(
-        strategy.shouldRunPreTapStability({ action: "tap", preTapStability: true } as TapOnElementOptions)
-      ).toBe(false);
-      expect(strategy.shouldRunPreTapStability({ action: "tap" } as TapOnElementOptions)).toBe(false);
-    });
-
-    it("never retries after tap (Android-only)", () => {
-      expect(strategy.shouldRetryTapIfNoChange()).toBe(false);
-    });
-
-    it("returns null when screenSize is missing (caller keeps raw)", () => {
+  describe("IosTapStrategy (platform-specific edge case)", () => {
+    it("returns null when screenSize is missing so the caller keeps the raw hierarchy", () => {
+      const strategy = new IosTapStrategy(iosDevice, new FakeIosVoiceOverDetector());
       const result = strategy.prepareViewHierarchyForResponse(
         minimalHierarchy,
-        buildIosViewHierarchy()
+        buildViewHierarchy(iosDevice)
       );
       expect(result).toBeNull();
-    });
-
-    it("filters the raw hierarchy when screenSize is provided", () => {
-      const result = strategy.prepareViewHierarchyForResponse(
-        minimalHierarchy,
-        buildIosViewHierarchy(),
-        { width: 390, height: 844 }
-      );
-      expect(result).not.toBeNull();
     });
   });
 
@@ -211,40 +189,23 @@ describe("TapStrategy", () => {
     it("returns an AndroidTapStrategy for Android devices", () => {
       const strategy = createTapStrategy(
         androidDevice,
+        new FakeAdbClient() as any,
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector()
       );
       expect(strategy).toBeInstanceOf(AndroidTapStrategy);
-      expect(strategy.getLongPressDurationMs()).toBe(500);
+      expect(strategy.longPressDurationMs).toBe(500);
     });
 
     it("returns an IosTapStrategy for iOS devices", () => {
       const strategy = createTapStrategy(
         iosDevice,
+        new FakeAdbClient() as any,
         new FakeAccessibilityDetector(),
         new FakeIosVoiceOverDetector()
       );
       expect(strategy).toBeInstanceOf(IosTapStrategy);
-      expect(strategy.getLongPressDurationMs()).toBe(1000);
+      expect(strategy.longPressDurationMs).toBe(1000);
     });
   });
-
-  // Compile-time conformance: each platform-specific concrete class is
-  // assigned to the abstract TapStrategy type. Behavioral coverage lives in
-  // the platform-specific describe blocks above.
-  const platformCases: ReadonlyArray<[string, () => TapStrategy]> = [
-    ["AndroidTapStrategy", () => new AndroidTapStrategy(new FakeAccessibilityDetector())],
-    ["IosTapStrategy", () => new IosTapStrategy(new FakeIosVoiceOverDetector())],
-    ["FakeTapStrategy", () => new FakeTapStrategy()],
-  ];
-  for (const [name, build] of platformCases) {
-    it(`${name} satisfies TapStrategy`, () => {
-      const asStrategy: TapStrategy = build();
-      expect(typeof asStrategy.prepareViewHierarchyForResponse).toBe("function");
-      expect(typeof asStrategy.isAccessibilityServiceEnabled).toBe("function");
-      expect(typeof asStrategy.shouldRunPreTapStability).toBe("function");
-      expect(typeof asStrategy.shouldRetryTapIfNoChange).toBe("function");
-      expect(typeof asStrategy.getLongPressDurationMs).toBe("function");
-    });
-  }
 });

@@ -4,27 +4,25 @@ import type {
   ViewHierarchyResult,
 } from "../../../models";
 import type { TapOnElementOptions } from "../../../models/TapOnElementOptions";
-import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import type { IOSCtrlProxy } from "../../observe/ios";
 import type { ViewHierarchy } from "../../observe/ViewHierarchy";
 import type { IosVoiceOverDetector } from "../../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../../utils/IosVoiceOverDetector";
+import { IOSCtrlProxyClient } from "../../observe/ios";
 import { attachRawViewHierarchy } from "../../../utils/viewHierarchySearch";
 import type { TapStrategy } from "../../../utils/interfaces/TapStrategy";
 
 /**
- * iOS implementation of {@link TapStrategy}.
- *
- * Hierarchy filtering uses {@link ViewHierarchy.filterOffscreenNodes}
- * (which needs `screenSize`); accessibility detection consults the
- * shared {@link IosVoiceOverDetector} for VoiceOver state. Android-only
- * recovery hooks (pre-tap stability, retry-if-no-change) are no-ops
- * on iOS.
+ * iOS implementation of {@link TapStrategy}. Filters the response
+ * hierarchy via {@link ViewHierarchy.filterOffscreenNodes} (skipped
+ * when `screenSize` is missing); reports accessibility state from
+ * {@link IosVoiceOverDetector}.
  */
 export class IosTapStrategy implements TapStrategy {
-  private static readonly LONG_PRESS_DURATION_MS = 1000;
+  readonly longPressDurationMs = 1000;
+  readonly retryTapIfNoChange = false;
 
   constructor(
+    private readonly device: BootedDevice,
     private readonly iosVoiceOverDetector: IosVoiceOverDetector = defaultIosVoiceOverDetector
   ) {}
 
@@ -45,23 +43,13 @@ export class IosTapStrategy implements TapStrategy {
     return filtered;
   }
 
-  async isAccessibilityServiceEnabled(
-    device: BootedDevice,
-    _adb: AdbExecutor,
-    iosCtrlProxy: IOSCtrlProxy
-  ): Promise<boolean> {
-    return this.iosVoiceOverDetector.isVoiceOverEnabled(device.deviceId, iosCtrlProxy);
+  async isAccessibilityServiceEnabled(): Promise<boolean> {
+    // Resolve lazily so Android paths never touch the iOS singleton.
+    const ctrlProxy = IOSCtrlProxyClient.getInstance(this.device);
+    return this.iosVoiceOverDetector.isVoiceOverEnabled(this.device.deviceId, ctrlProxy);
   }
 
   shouldRunPreTapStability(_options: TapOnElementOptions): boolean {
     return false;
-  }
-
-  shouldRetryTapIfNoChange(): boolean {
-    return false;
-  }
-
-  getLongPressDurationMs(): number {
-    return IosTapStrategy.LONG_PRESS_DURATION_MS;
   }
 }

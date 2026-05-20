@@ -33,7 +33,6 @@ import type { Timer } from "../../utils/SystemTimer";
 import { NodeCryptoService } from "../../utils/crypto";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { serverConfig } from "../../utils/ServerConfig";
-import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
@@ -46,6 +45,8 @@ import {
 } from "../talkback/TalkBackNavigationDriver";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
 import { iosVoiceOverDetector as defaultIosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
+import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
+import { createTapStrategy } from "./strategies/createTapStrategy";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
@@ -63,6 +64,12 @@ interface TapOnElementDependencies {
   talkBackStrategy?: TalkBackTapStrategy;
   talkBackDriverFactory?: TalkBackNavigationDriverFactory;
   iosVoiceOverDetector?: IosVoiceOverDetector;
+  /**
+   * Override the platform-specific {@link TapStrategy}. Tests use this
+   * to inject a fake; production code leaves it unset so the constructor
+   * picks the right strategy based on `device.platform`.
+   */
+  tapStrategy?: TapStrategy;
 }
 
 /**
@@ -83,6 +90,7 @@ export class TapOnElement extends BaseVisualChange {
   private talkBackStrategy: TalkBackTapStrategy;
   private talkBackDriverFactory: TalkBackNavigationDriverFactory;
   private iosVoiceOverDetector: IosVoiceOverDetector;
+  private strategy: TapStrategy;
   private static readonly SEARCH_UNTIL_DEFAULT_MS = 1500;
   private static readonly SEARCH_UNTIL_MIN_MS = 100;
   private static readonly SEARCH_UNTIL_MAX_MS = 12000;
@@ -137,6 +145,11 @@ export class TapOnElement extends BaseVisualChange {
     this.talkBackStrategy = options.talkBackStrategy ?? new TalkBackTapStrategy({ timer: this.timer });
     this.talkBackDriverFactory = options.talkBackDriverFactory ?? new DefaultTalkBackNavigationDriverFactory(this.adbFactory);
     this.iosVoiceOverDetector = options.iosVoiceOverDetector ?? defaultIosVoiceOverDetector;
+    this.strategy = options.tapStrategy ?? createTapStrategy(
+      device,
+      this.accessibilityDetector,
+      this.iosVoiceOverDetector
+    );
   }
 
   /**
@@ -310,23 +323,12 @@ export class TapOnElement extends BaseVisualChange {
       return rawHierarchy;
     }
 
-    if (this.device.platform === "android") {
-      const filtered = this.viewHierarchy.filterViewHierarchy(rawHierarchy);
-      attachRawViewHierarchy(filtered, rawHierarchy);
-      return filtered;
-    }
-
-    if (this.device.platform === "ios" && screenSize?.width && screenSize?.height) {
-      const filtered = this.viewHierarchy.filterOffscreenNodes(
-        rawHierarchy,
-        screenSize.width,
-        screenSize.height
-      );
-      attachRawViewHierarchy(filtered, rawHierarchy);
-      return filtered;
-    }
-
-    return rawHierarchy;
+    const filtered = this.strategy.prepareViewHierarchyForResponse(
+      rawHierarchy,
+      this.viewHierarchy,
+      screenSize
+    );
+    return filtered ?? rawHierarchy;
   }
 
   private async refreshViewHierarchy(
@@ -982,15 +984,16 @@ export class TapOnElement extends BaseVisualChange {
             options.action = "tap";
           }
 
-          const isTalkBackEnabled = this.device.platform === "android"
-            ? (await this.accessibilityDetector.detectMethod(this.device.deviceId, this.adb)) === "talkback"
-            : false;
-          const isVoiceOverEnabled = this.device.platform === "ios"
-            ? await this.iosVoiceOverDetector.isVoiceOverEnabled(
-              this.device.deviceId,
-              IOSCtrlProxyClient.getInstance(this.device)
-            )
-            : false;
+          const isAccessibilityServiceEnabled = await this.strategy.isAccessibilityServiceEnabled(
+            this.device,
+            this.adb,
+            IOSCtrlProxyClient.getInstance(this.device)
+          );
+          // On Android the strategy returns TalkBack state; on iOS it returns
+          // VoiceOver state. Each platform's executeTap consumes only the
+          // boolean meaningful to its own a11y service.
+          const isTalkBackEnabled = isAccessibilityServiceEnabled;
+          const isVoiceOverEnabled = isAccessibilityServiceEnabled;
           let tapElement: Element;
           let usedParent: boolean;
           const initialTapTarget = this.resolveTapTargetElement(
@@ -1002,7 +1005,7 @@ export class TapOnElement extends BaseVisualChange {
           tapElement = initialTapTarget.element;
           usedParent = initialTapTarget.usedParent;
 
-          if (this.device.platform === "android" && options.preTapStability) {
+          if (this.strategy.shouldRunPreTapStability(options)) {
             const stable = await this.resolveAndroidStableTapTargetAfterRefreshes(
               options,
               observeResult,
@@ -1065,7 +1068,7 @@ export class TapOnElement extends BaseVisualChange {
             }
           });
 
-          if (preTapHash && this.device.platform === "android") {
+          if (preTapHash && this.strategy.shouldRetryTapIfNoChange()) {
             await this.retryTapIfNoChange(
               preTapHash,
               tapPoint,
@@ -1463,11 +1466,11 @@ export class TapOnElement extends BaseVisualChange {
     }
   }
 
-  private getLongPressDuration(options: TapOnElementOptions, platform: "android" | "ios"): number {
+  private getLongPressDuration(options: TapOnElementOptions, _platform: "android" | "ios"): number {
     if (typeof options.duration === "number" && options.duration > 0) {
       return options.duration;
     }
-    return platform === "android" ? 500 : 1000;
+    return this.strategy.getLongPressDurationMs();
   }
 
 

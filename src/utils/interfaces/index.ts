@@ -14,6 +14,7 @@ export type {
   BroadcastOptions,
   SystemConfigurationAdapter,
 } from "./SystemConfigurationAdapter";
+export type { NotificationUIDetector } from "./NotificationUIDetector";
 // Screenshot utilities - split into focused classes (Phase 3.1)
 export { ScreenshotComparator } from "../screenshot/ScreenshotComparator";
 export { PerceptualHasher } from "../screenshot/PerceptualHasher";

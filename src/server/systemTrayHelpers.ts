@@ -21,6 +21,13 @@ import { DefaultElementFinder } from "../features/utility/ElementFinder";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import type { NotificationUIDetector } from "../utils/interfaces/NotificationUIDetector";
 import { createNotificationUIDetector } from "./system-tray/createNotificationUIDetector";
+import {
+  SYSTEM_TRAY_PACKAGE,
+  SYSTEM_TRAY_RESOURCE_ID_HINTS,
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS as SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS,
+  getHierarchyRoots,
+  getNodeProperties,
+} from "./system-tray/notificationHints";
 import type { ProgressCallback } from "./toolRegistry";
 import type { SystemTrayNotificationArgs } from "./interactionToolTypes";
 import { boundsArea } from "../utils/bounds";
@@ -112,21 +119,6 @@ export const resetSystemTrayDependencies = (): void => {
 // Constants
 // ============================================================================
 
-const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
-const SYSTEM_TRAY_RESOURCE_ID_HINTS = [
-  "notification_panel",
-  "notification_stack",
-  "notification_stack_scroller",
-  "status_bar_expanded",
-  "quick_settings",
-  "quick_settings_panel",
-  "quick_settings_container",
-  "qs_panel",
-  "qs_frame",
-  "qs_header",
-  "shade_header",
-  "expanded_status_bar"
-];
 const NOTIFICATION_ROW_RESOURCE_ID_HINTS = [
   "notification_row",
   "expandablenotificationrow",
@@ -153,7 +145,8 @@ const NOTIFICATION_ROW_RESOURCE_ID_EXCLUDES = [
 const DEFAULT_SYSTEM_TRAY_AWAIT_TIMEOUT_MS = 5000;
 const SYSTEM_TRAY_POLL_INTERVAL_MS = 250;
 export const SYSTEM_TRAY_CLEAR_MAX_ITERATIONS = 25;
-export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
+// Re-export shared constant so existing callers (interactionTools.ts) keep working.
+export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS_FROM_HINTS;
 export const EXPAND_GROUP_SETTLE_MS = 500;
 
 // ============================================================================
@@ -199,36 +192,6 @@ interface SystemTrayElementMatch {
 }
 
 type NormalizedSearchText = { text: string; normalized: string };
-
-// ============================================================================
-// Node Utility Functions
-// ============================================================================
-
-const getNodeProperties = (node: any): Record<string, any> | null => {
-  if (!node || typeof node !== "object") {
-    return null;
-  }
-  if ("$" in node && node.$) {
-    return node.$ as Record<string, any>;
-  }
-  return node as Record<string, any>;
-};
-
-const getHierarchyRoots = (viewHierarchy: ViewHierarchyResult): any[] => {
-  if (!viewHierarchy?.hierarchy || viewHierarchy.hierarchy.error) {
-    return [];
-  }
-
-  const hierarchy: any = viewHierarchy.hierarchy;
-  if (hierarchy.node) {
-    return Array.isArray(hierarchy.node) ? hierarchy.node : [hierarchy.node];
-  }
-  if (hierarchy.hierarchy) {
-    return [hierarchy.hierarchy];
-  }
-
-  return [hierarchy];
-};
 
 const getDetector = (device: BootedDevice): NotificationUIDetector => {
   return createNotificationUIDetector(device, getSystemTrayDependencies);

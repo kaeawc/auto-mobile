@@ -10,6 +10,14 @@ import type { ViewHierarchyResult } from "../../models";
 
 export const SYSTEM_TRAY_PACKAGE = "com.android.systemui";
 
+/**
+ * Duration in milliseconds for swipes that expand or collapse the
+ * notification shade / NotificationCenter. Shared between adapters and
+ * re-exported from `systemTrayHelpers` for downstream callers (e.g.
+ * interactionTools settle-wait calculations).
+ */
+export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
+
 export const IOS_NOTIFICATION_CENTER_CLASS_HINTS = [
   "NotificationCenter",
   "NCNotification",

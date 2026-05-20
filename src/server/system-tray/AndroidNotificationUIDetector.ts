@@ -1,14 +1,17 @@
 import { ActionableError, BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "../../models";
 import { DefaultElementGeometry } from "../../features/utility/ElementGeometry";
 import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
-import { getHierarchyRoots, nodeHasSystemTrayHint, traverseForHint } from "./notificationHints";
+import {
+  getHierarchyRoots,
+  nodeHasSystemTrayHint,
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
+  traverseForHint,
+} from "./notificationHints";
 
 export interface AndroidNotificationUIDetectorDeps {
   executeAdbCommand(command: string): Promise<{ stdout: string; stderr: string }>;
   getDeviceTimestampMs(): Promise<number>;
 }
-
-export const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
 
 /**
  * Android implementation of {@link NotificationUIDetector}. Matches

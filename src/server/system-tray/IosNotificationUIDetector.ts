@@ -4,6 +4,7 @@ import type { NotificationUIDetector } from "../../utils/interfaces/Notification
 import {
   getHierarchyRoots,
   nodeHasIosNotificationCenterHint,
+  SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS,
   traverseForHint
 } from "./notificationHints";
 
@@ -14,9 +15,8 @@ export interface IosNotificationUIDetectorDeps {
   now(): number;
 }
 
-const IOS_OPEN_SWIPE_DURATION_MS = 300;
-const IOS_CLOSE_SWIPE_DURATION_MS = 300;
-const SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS = 300;
+const IOS_OPEN_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
+const IOS_CLOSE_SWIPE_DURATION_MS = SYSTEM_TRAY_NOTIFICATION_SWIPE_DURATION_MS;
 
 /**
  * iOS implementation of {@link NotificationUIDetector}. NotificationCenter

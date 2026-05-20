@@ -4,28 +4,9 @@ import type { BootedDevice, Element, ObserveResult, ViewHierarchyResult } from "
  * Platform-specific surface used by `systemTrayHelpers.ts` so its
  * helper functions are free of `device.platform === ...` branches.
  *
- * Implemented by `AndroidNotificationUIDetector` and
- * `IosNotificationUIDetector`; selected per call site via
- * `createNotificationUIDetector`. Each detector captures its
- * {@link BootedDevice} at construction and reads side-effect
- * dependencies (ADB client, iOS CtrlProxy client, timer) lazily from
- * `getSystemTrayDependencies()` so callers can swap them in tests.
- *
- * Method shape rationale:
- *
- * - `isTrayOpen` is a pure predicate over a view hierarchy snapshot.
- *   Android matches systemui resource-ids / class hints; iOS matches
- *   NotificationCenter class hints rooted under SpringBoard.
- * - `expandTray` / `collapseTray` issue the platform-native gesture
- *   or shell command to toggle the shade / NotificationCenter. iOS
- *   needs the observation to read `screenSize` for its swipe path;
- *   Android ignores the argument.
- * - `getObservationTimestamp` returns the `minTimestamp` used to gate
- *   the next `observeScreen.execute(...)` call. Android uses an ADB
- *   `date +%s%3N`-style query so freshness is judged against the
- *   device's monotonic clock; iOS falls back to the local timer.
- * - `tapElement` / `swipeElement` issue a single tap / left-swipe on a
- *   specific notification row.
+ * Each implementation captures its {@link BootedDevice} at construction.
+ * See `AndroidNotificationUIDetector` / `IosNotificationUIDetector` for
+ * per-platform notes on the underlying mechanism.
  */
 export interface NotificationUIDetector {
   /** The device this detector is bound to. */
@@ -39,24 +20,19 @@ export interface NotificationUIDetector {
   isTrayOpen(viewHierarchy?: ViewHierarchyResult): boolean;
 
   /**
-   * Open the notification shade / NotificationCenter. iOS requires
-   * the observation for screen dimensions; Android ignores it.
-   * Throws an `ActionableError` if a required prerequisite is missing.
+   * Open the notification shade / NotificationCenter. The observation
+   * is optional because not every implementation needs screen
+   * dimensions — iOS does; Android does not.
    */
   expandTray(observation?: ObserveResult): Promise<void>;
 
-  /**
-   * Close the notification shade / NotificationCenter. iOS requires
-   * the observation for screen dimensions; Android ignores it.
-   * Throws an `ActionableError` if a required prerequisite is missing.
-   */
+  /** Close the notification shade / NotificationCenter. See {@link expandTray} on `observation`. */
   collapseTray(observation?: ObserveResult): Promise<void>;
 
   /**
-   * Resolve a `minTimestamp` to feed into the next observation
-   * request. Android queries the device clock via ADB so freshness
-   * is measured against the device's monotonic time; iOS falls back
-   * to the host timer.
+   * Resolve a `minTimestamp` for the next observation request so
+   * polling can gate on a clock that's monotonic relative to the
+   * platform doing the gesture.
    */
   getObservationTimestamp(): Promise<number>;
 

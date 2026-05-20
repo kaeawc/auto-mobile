@@ -117,6 +117,25 @@ export class DefaultElementSelector implements ElementSelector {
     return this.pickMatch(matches, strategy);
   }
 
+  selectClickableSiblingOfResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      partialMatch?: boolean;
+      strategy?: ElementSelectionStrategy;
+    }
+  ): ElementSelectionResult {
+    const strategy = options?.strategy ?? "first";
+    const matches = this.finder.findClickableSiblingsOfResourceId(
+      viewHierarchy,
+      resourceId,
+      options?.container ?? null,
+      options?.partialMatch ?? false
+    );
+    return this.pickMatch(matches, strategy);
+  }
+
   private pickMatch(matches: Element[], strategy: ElementSelectionStrategy): ElementSelectionResult {
     const totalMatches = matches.length;
     if (totalMatches === 0) {

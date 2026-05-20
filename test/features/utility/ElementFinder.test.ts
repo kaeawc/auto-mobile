@@ -290,4 +290,73 @@ describe("DefaultElementFinder", () => {
       expect(finder.validateElementText(found, "Login")).toBe(false);
     });
   });
+
+  describe("findClickableSiblingsOfResourceId", () => {
+    test("returns empty for null hierarchy", () => {
+      expect(finder.findClickableSiblingsOfResourceId(null as any, "com.app:id/label")).toEqual([]);
+    });
+
+    test("returns empty for empty resourceId", () => {
+      const hierarchy = makeHierarchy([]);
+      expect(finder.findClickableSiblingsOfResourceId(hierarchy, "")).toEqual([]);
+    });
+
+    test("finds clickable sibling of node with matching resource-id", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: { bounds: "[0,0][1080,200]" },
+          node: [
+            { $: { "resource-id": "com.app:id/label", "bounds": "[0,0][500,100]" } },
+            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+          ],
+        },
+      ]);
+      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "com.app:id/label");
+      expect(results.length).toBe(1);
+      expect(results[0].bounds).toEqual({ left: 500, top: 0, right: 1080, bottom: 100 });
+    });
+
+    test("does not return the resource-id node itself even if clickable", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: { bounds: "[0,0][1080,200]" },
+          node: [
+            { $: { "resource-id": "com.app:id/label", "clickable": "true", "bounds": "[0,0][500,100]" } },
+            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+          ],
+        },
+      ]);
+      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "com.app:id/label");
+      expect(results.length).toBe(1);
+      expect(results[0].bounds).toEqual({ left: 500, top: 0, right: 1080, bottom: 100 });
+    });
+
+    test("supports partial match", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: { bounds: "[0,0][1080,200]" },
+          node: [
+            { $: { "resource-id": "com.app:id/label_title", "bounds": "[0,0][500,100]" } },
+            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+          ],
+        },
+      ]);
+      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "label_title", null, true);
+      expect(results.length).toBe(1);
+    });
+
+    test("returns empty when no sibling has the resource-id", () => {
+      const hierarchy = makeHierarchy([
+        {
+          $: { bounds: "[0,0][1080,200]" },
+          node: [
+            { $: { "resource-id": "com.app:id/other", "bounds": "[0,0][500,100]" } },
+            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+          ],
+        },
+      ]);
+      const results = finder.findClickableSiblingsOfResourceId(hierarchy, "com.app:id/label");
+      expect(results).toEqual([]);
+    });
+  });
 });

@@ -128,7 +128,7 @@ describe("TapOnElement extended selectors", () => {
       expect(selector.lastText).toBe("Accept Terms");
     });
 
-    test("elementId + sibling delegates to selectClickableSiblingOfText", () => {
+    test("elementId + sibling delegates to selectClickableSiblingOfResourceId", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
@@ -138,7 +138,7 @@ describe("TapOnElement extended selectors", () => {
       );
 
       expect(result.selection.element).not.toBeNull();
-      expect(selector.lastText).toBe("com.app:id/label");
+      expect(selector.lastResourceId).toBe("com.app:id/label");
     });
 
     test("sibling respects selectionStrategy", () => {

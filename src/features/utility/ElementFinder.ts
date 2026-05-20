@@ -929,6 +929,106 @@ export class DefaultElementFinder implements ElementFinder {
     return [];
   }
 
+  findClickableSiblingsOfResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    container: { elementId?: string; text?: string } | null = null,
+    partialMatch: boolean = false
+  ): Element[] {
+    if (!viewHierarchy || !resourceId) {
+      return [];
+    }
+
+    const matchesId = (input?: string): boolean => {
+      if (!input) {return false;}
+      return partialMatch
+        ? input.toLowerCase().includes(resourceId.toLowerCase())
+        : input === resourceId;
+    };
+
+    const containerNode = container
+      ? this.findContainerNodeInternal(viewHierarchy, container)
+      : null;
+
+    if (container && !containerNode) {
+      return [];
+    }
+
+    const searchRoots = containerNode
+      ? [containerNode]
+      : this.parser.extractRootNodes(viewHierarchy);
+
+    const siblings = this.collectClickableSiblingsWithResourceIdInRoots(searchRoots, matchesId);
+
+    if (siblings.length > 0) {
+      return siblings;
+    }
+
+    if (!containerNode) {
+      const windowRootGroups = this.parser.extractWindowRootGroups(viewHierarchy, "topmost-first");
+      for (const windowRoots of windowRootGroups) {
+        const windowMatches = this.collectClickableSiblingsWithResourceIdInRoots(windowRoots, matchesId);
+        if (windowMatches.length > 0) {
+          return windowMatches;
+        }
+      }
+    }
+
+    return [];
+  }
+
+  private collectClickableSiblingsWithResourceIdInRoots(
+    rootNodes: ViewHierarchyNode[],
+    matchesId: (input?: string) => boolean
+  ): Element[] {
+    const results: Element[] = [];
+    for (const rootNode of rootNodes) {
+      this.findClickableSiblingsOfResourceIdInNode(rootNode, matchesId, results);
+    }
+    return results;
+  }
+
+  private findClickableSiblingsOfResourceIdInNode(
+    node: ViewHierarchyNode,
+    matchesId: (input?: string) => boolean,
+    results: Element[]
+  ): void {
+    const children = node.node;
+    if (!children) {
+      return;
+    }
+
+    const childArray: ViewHierarchyNode[] = Array.isArray(children)
+      ? children
+      : [children];
+
+    const hasIdMatch = childArray.some(child => {
+      const props = this.parser.extractNodeProperties(child);
+      const rid = props["resource-id"];
+      return typeof rid === "string" && matchesId(rid);
+    });
+
+    if (hasIdMatch) {
+      for (const child of childArray) {
+        const childProps = this.parser.extractNodeProperties(child);
+        const isClickable = childProps.clickable === "true" || childProps.clickable === true;
+        const childRid = childProps["resource-id"];
+        const isIdMatch = typeof childRid === "string" && matchesId(childRid);
+
+        if (isClickable && !isIdMatch) {
+          const parsedNode = this.parser.parseNodeBounds(child);
+          if (parsedNode) {
+            results.push(parsedNode);
+          }
+        }
+      }
+    }
+
+    for (const child of childArray) {
+      this.findClickableSiblingsOfResourceIdInNode(child, matchesId, results);
+    }
+  }
+
   /**
    * Internal method to find clickable siblings of text-matching elements.
    */

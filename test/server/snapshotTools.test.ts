@@ -40,8 +40,8 @@ describe("snapshot tool", () => {
       snapshotStore: store as any,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
-      createCaptureAction: () => ({
-        execute: async args => {
+      createCaptureProvider: () => ({
+        capture: async args => {
           captureCalls.push({ ...args });
           const timestamp = new Date(fakeTimer.now()).toISOString();
           const manifest: DeviceSnapshotManifest = {
@@ -62,8 +62,8 @@ describe("snapshot tool", () => {
           };
         },
       }),
-      createRestoreAction: () => ({
-        execute: async args => {
+      createRestoreProvider: () => ({
+        restore: async args => {
           restoreCalls.push({ ...args });
           return {
             snapshotType: args.manifest.snapshotType,

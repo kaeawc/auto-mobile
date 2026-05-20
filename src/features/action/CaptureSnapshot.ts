@@ -1,4 +1,5 @@
 import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
+import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotProvider";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -38,7 +39,7 @@ export interface CaptureSnapshotResult {
  * Capture device state snapshot
  * Supports VM snapshots for emulators and ADB-based capture for all devices
  */
-export class CaptureSnapshot {
+export class CaptureSnapshot implements SnapshotCaptureProvider {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
@@ -61,6 +62,14 @@ export class CaptureSnapshot {
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
     this.timer = timer;
+  }
+
+  /**
+   * Platform-agnostic capture entry point — satisfies
+   * {@link SnapshotCaptureProvider}. Delegates to {@link execute}.
+   */
+  async capture(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {
+    return this.execute(args);
   }
 
   /**

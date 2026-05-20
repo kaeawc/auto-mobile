@@ -1,4 +1,5 @@
 import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../models";
+import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
 import type { RestoreSnapshotArgs, RestoreSnapshotResult } from "./RestoreSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -8,7 +9,7 @@ import * as path from "path";
 
 const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
-export class RestoreSnapshotIos {
+export class RestoreSnapshotIos implements SnapshotRestoreProvider {
   private device: BootedDevice;
   private simctl: SimCtlClient;
   private store: DeviceSnapshotStore;
@@ -25,6 +26,14 @@ export class RestoreSnapshotIos {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
     this.store = store;
+  }
+
+  /**
+   * Platform-agnostic restore entry point — satisfies
+   * {@link SnapshotRestoreProvider}. Delegates to {@link execute}.
+   */
+  async restore(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
+    return this.execute(args);
   }
 
   async execute(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {

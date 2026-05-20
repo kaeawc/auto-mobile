@@ -5,6 +5,10 @@ export { DeviceSessionManager } from "../DeviceSessionManager";
 export { DeepLinkManager } from "../DeepLinkManager";
 export { CtrlProxyManager } from "../CtrlProxyManager";
 export type { ProxyManager, ProxySetupResult } from "./ProxyManager";
+export type {
+  SnapshotCaptureProvider,
+  SnapshotRestoreProvider,
+} from "./SnapshotProvider";
 // Screenshot utilities - split into focused classes (Phase 3.1)
 export { ScreenshotComparator } from "../screenshot/ScreenshotComparator";
 export { PerceptualHasher } from "../screenshot/PerceptualHasher";

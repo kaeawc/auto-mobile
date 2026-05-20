@@ -9,10 +9,14 @@ import { parseDeviceSnapshotConfig } from "../features/snapshot";
 import { serverConfig } from "../utils/ServerConfig";
 import { ResourceRegistry } from "./resourceRegistry";
 import { DEVICE_SNAPSHOT_RESOURCE_URIS } from "./deviceSnapshotResourceUris";
-import { CaptureSnapshot, type CaptureSnapshotArgs, type CaptureSnapshotResult } from "../features/action/CaptureSnapshot";
-import { RestoreSnapshot, type RestoreSnapshotArgs, type RestoreSnapshotResult } from "../features/action/RestoreSnapshot";
+import { CaptureSnapshot, type CaptureSnapshotResult } from "../features/action/CaptureSnapshot";
+import { RestoreSnapshot, type RestoreSnapshotResult } from "../features/action/RestoreSnapshot";
 import { CaptureSnapshotIos } from "../features/action/CaptureSnapshotIos";
 import { RestoreSnapshotIos } from "../features/action/RestoreSnapshotIos";
+import type {
+  SnapshotCaptureProvider,
+  SnapshotRestoreProvider,
+} from "../utils/interfaces/SnapshotProvider";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 
@@ -45,14 +49,6 @@ interface SnapshotArchiveEvictionResult {
   maxSizeBytes: number;
 }
 
-interface SnapshotCaptureAction {
-  execute(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult>;
-}
-
-interface SnapshotRestoreAction {
-  execute(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult>;
-}
-
 interface DeviceSnapshotManagerDependencies {
   snapshotRepository: DeviceSnapshotRepository;
   configRepository: DeviceSnapshotConfigRepository;
@@ -63,12 +59,12 @@ interface DeviceSnapshotManagerDependencies {
     device: BootedDevice,
     timer: Timer,
     store: DeviceSnapshotStore
-  ) => SnapshotCaptureAction;
+  ) => SnapshotCaptureProvider;
   createRestoreAction: (
     device: BootedDevice,
     timer: Timer,
     store: DeviceSnapshotStore
-  ) => SnapshotRestoreAction;
+  ) => SnapshotRestoreProvider;
 }
 
 let moduleDependencies: DeviceSnapshotManagerDependencies | null = null;
@@ -502,7 +498,7 @@ export async function captureDeviceSnapshot(
   };
 
   const captureAction = createCaptureAction(device, timer, snapshotStore);
-  const result = await captureAction.execute({
+  const result = await captureAction.capture({
     snapshotName,
     includeAppData: mergedConfig.includeAppData,
     includeSettings: mergedConfig.includeSettings,
@@ -565,7 +561,7 @@ export async function restoreDeviceSnapshot(
   const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
   const restoreAction = createRestoreAction(device, timer, snapshotStore);
-  const result = await restoreAction.execute({
+  const result = await restoreAction.restore({
     snapshotName: record.snapshotName,
     manifest: record.manifest,
     useVmSnapshot,

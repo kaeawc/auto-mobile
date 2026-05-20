@@ -1,4 +1,5 @@
 import { ActionableError, BootedDevice, DeviceSnapshotManifest } from "../../models";
+import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotProvider";
 import type { CaptureSnapshotArgs, CaptureSnapshotResult } from "./CaptureSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -8,7 +9,7 @@ import * as path from "path";
 
 const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
-export class CaptureSnapshotIos {
+export class CaptureSnapshotIos implements SnapshotCaptureProvider {
   private device: BootedDevice;
   private simctl: SimCtlClient;
   private store: DeviceSnapshotStore;
@@ -25,6 +26,14 @@ export class CaptureSnapshotIos {
     this.device = device;
     this.simctl = simctl || new SimCtlClient(device);
     this.store = store;
+  }
+
+  /**
+   * Platform-agnostic capture entry point — satisfies
+   * {@link SnapshotCaptureProvider}. Delegates to {@link execute}.
+   */
+  async capture(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {
+    return this.execute(args);
   }
 
   async execute(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {

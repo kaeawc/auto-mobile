@@ -1,4 +1,5 @@
 import { BootedDevice, ActionableError, DeviceSnapshotManifest, DeviceSnapshotType } from "../../models";
+import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotProvider";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { AndroidEmulatorClient } from "../../utils/android-cmdline-tools/AndroidEmulatorClient";
@@ -31,7 +32,7 @@ export interface RestoreSnapshotResult {
  * Restore device state from snapshot
  * Supports VM snapshot restoration for emulators and ADB-based restore for all devices
  */
-export class RestoreSnapshot {
+export class RestoreSnapshot implements SnapshotRestoreProvider {
   private device: BootedDevice;
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
@@ -54,6 +55,14 @@ export class RestoreSnapshot {
     this.emulator = emulator || new AndroidEmulatorClient();
     this.store = store;
     this.timer = timer;
+  }
+
+  /**
+   * Platform-agnostic restore entry point — satisfies
+   * {@link SnapshotRestoreProvider}. Delegates to {@link execute}.
+   */
+  async restore(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
+    return this.execute(args);
   }
 
   /**

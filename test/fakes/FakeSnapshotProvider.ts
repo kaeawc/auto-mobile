@@ -1,6 +1,5 @@
 import type {
   SnapshotCaptureProvider,
-  SnapshotProvider,
   SnapshotRestoreProvider,
 } from "../../src/utils/interfaces/SnapshotProvider";
 import type {
@@ -14,13 +13,11 @@ import type {
 import type { DeviceSnapshotManifest } from "../../src/models";
 
 /**
- * Minimal fake implementation of {@link SnapshotProvider} for testing
- * the platform-agnostic contract. Records every invocation in
- * `executedOperations` and lets tests toggle failure mode.
- *
- * Mirrors the recording pattern from `FakeProxyManager`.
+ * Minimal fake covering both halves of the snapshot contract. Records
+ * invocations in `executedOperations` and lets tests toggle per-half
+ * failure modes. Mirrors the recording pattern from `FakeProxyManager`.
  */
-export class FakeSnapshotProvider implements SnapshotProvider {
+export class FakeSnapshotProvider implements SnapshotCaptureProvider, SnapshotRestoreProvider {
   private shouldCaptureFail: boolean = false;
   private shouldRestoreFail: boolean = false;
   private readonly executedOperations: string[] = [];
@@ -87,45 +84,5 @@ export class FakeSnapshotProvider implements SnapshotProvider {
       snapshotType: args.manifest.snapshotType,
       restoredAt: "1970-01-01T00:00:00.000Z",
     };
-  }
-}
-
-/**
- * Capture-only variant for cases where the test exercises only the
- * capture half of the interface.
- */
-export class FakeSnapshotCaptureProvider implements SnapshotCaptureProvider {
-  private readonly delegate = new FakeSnapshotProvider();
-
-  setShouldFail(shouldFail: boolean): void {
-    this.delegate.setCaptureShouldFail(shouldFail);
-  }
-
-  getExecutedOperations(): string[] {
-    return this.delegate.getExecutedOperations();
-  }
-
-  capture(args: CaptureSnapshotArgs): Promise<CaptureSnapshotResult> {
-    return this.delegate.capture(args);
-  }
-}
-
-/**
- * Restore-only variant for cases where the test exercises only the
- * restore half of the interface.
- */
-export class FakeSnapshotRestoreProvider implements SnapshotRestoreProvider {
-  private readonly delegate = new FakeSnapshotProvider();
-
-  setShouldFail(shouldFail: boolean): void {
-    this.delegate.setRestoreShouldFail(shouldFail);
-  }
-
-  getExecutedOperations(): string[] {
-    return this.delegate.getExecutedOperations();
-  }
-
-  restore(args: RestoreSnapshotArgs): Promise<RestoreSnapshotResult> {
-    return this.delegate.restore(args);
   }
 }

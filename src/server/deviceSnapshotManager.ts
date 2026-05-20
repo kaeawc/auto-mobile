@@ -55,12 +55,12 @@ interface DeviceSnapshotManagerDependencies {
   snapshotStore: DeviceSnapshotStore;
   timer: Timer;
   now: () => Date;
-  createCaptureAction: (
+  createCaptureProvider: (
     device: BootedDevice,
     timer: Timer,
     store: DeviceSnapshotStore
   ) => SnapshotCaptureProvider;
-  createRestoreAction: (
+  createRestoreProvider: (
     device: BootedDevice,
     timer: Timer,
     store: DeviceSnapshotStore
@@ -87,13 +87,13 @@ async function getDeviceSnapshotDependencies(): Promise<DeviceSnapshotManagerDep
       snapshotStore: new DeviceSnapshotStore(),
       timer: defaultTimer,
       now: () => new Date(),
-      createCaptureAction: (device, timer, store) => {
+      createCaptureProvider: (device, timer, store) => {
         if (device.platform === "ios") {
           return new CaptureSnapshotIos(device, undefined, store);
         }
         return new CaptureSnapshot(device, undefined, undefined, timer, store);
       },
-      createRestoreAction: (device, timer, store) => {
+      createRestoreProvider: (device, timer, store) => {
         if (device.platform === "ios") {
           return new RestoreSnapshotIos(device, undefined, store);
         }
@@ -115,8 +115,8 @@ export async function setDeviceSnapshotManagerDependencies(
     snapshotStore: deps.snapshotStore ?? current.snapshotStore,
     timer: deps.timer ?? current.timer,
     now: deps.now ?? current.now,
-    createCaptureAction: deps.createCaptureAction ?? current.createCaptureAction,
-    createRestoreAction: deps.createRestoreAction ?? current.createRestoreAction,
+    createCaptureProvider: deps.createCaptureProvider ?? current.createCaptureProvider,
+    createRestoreProvider: deps.createRestoreProvider ?? current.createRestoreProvider,
   };
 }
 
@@ -477,7 +477,7 @@ export async function captureDeviceSnapshot(
   result: CaptureSnapshotResult;
   evictedSnapshotNames: string[];
 }> {
-  const { snapshotRepository, snapshotStore, timer, createCaptureAction } =
+  const { snapshotRepository, snapshotStore, timer, createCaptureProvider } =
     await getDeviceSnapshotDependencies();
 
   const baseConfig = await getDeviceSnapshotConfig();
@@ -497,8 +497,8 @@ export async function captureDeviceSnapshot(
     vmSnapshotTimeoutMs: args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs,
   };
 
-  const captureAction = createCaptureAction(device, timer, snapshotStore);
-  const result = await captureAction.capture({
+  const captureProvider = createCaptureProvider(device, timer, snapshotStore);
+  const result = await captureProvider.capture({
     snapshotName,
     includeAppData: mergedConfig.includeAppData,
     includeSettings: mergedConfig.includeSettings,
@@ -540,7 +540,7 @@ export async function restoreDeviceSnapshot(
   result: RestoreSnapshotResult;
   manifest: DeviceSnapshotManifest;
 }> {
-  const { snapshotRepository, snapshotStore, timer, now, createRestoreAction } =
+  const { snapshotRepository, snapshotStore, timer, now, createRestoreProvider } =
     await getDeviceSnapshotDependencies();
 
   let record = await snapshotRepository.getSnapshot(args.snapshotName);
@@ -560,8 +560,8 @@ export async function restoreDeviceSnapshot(
   const useVmSnapshot = args.useVmSnapshot ?? baseConfig.useVmSnapshot;
   const vmSnapshotTimeoutMs = args.vmSnapshotTimeoutMs ?? baseConfig.vmSnapshotTimeoutMs;
 
-  const restoreAction = createRestoreAction(device, timer, snapshotStore);
-  const result = await restoreAction.restore({
+  const restoreProvider = createRestoreProvider(device, timer, snapshotStore);
+  const result = await restoreProvider.restore({
     snapshotName: record.snapshotName,
     manifest: record.manifest,
     useVmSnapshot,

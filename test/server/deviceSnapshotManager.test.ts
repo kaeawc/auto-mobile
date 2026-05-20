@@ -44,7 +44,7 @@ describe("deviceSnapshotManager", () => {
       snapshotStore: store as any,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
-      createCaptureAction: () => ({
+      createCaptureProvider: () => ({
         capture: async args => {
           captureCalls.push({ ...args });
           const timestamp = new Date(fakeTimer.now()).toISOString();
@@ -66,7 +66,7 @@ describe("deviceSnapshotManager", () => {
           };
         },
       }),
-      createRestoreAction: () => ({
+      createRestoreProvider: () => ({
         restore: async args => {
           restoreCalls.push({ ...args });
           return {

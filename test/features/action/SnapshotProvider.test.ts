@@ -12,19 +12,16 @@ import type { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/
 import type { BootedDevice, DeviceSnapshotManifest } from "../../../src/models";
 import type {
   SnapshotCaptureProvider,
-  SnapshotProvider,
   SnapshotRestoreProvider,
 } from "../../../src/utils/interfaces/SnapshotProvider";
 
 /**
- * Sanity-check the platform-agnostic SnapshotProvider contract.
- *
- * Mirrors the structure of ProxyManager.test.ts: tests deliberately
- * type their subjects as the abstract interface so a regression that
- * drops one of the shared methods from a concrete class will surface
- * as a compile error here before tests even run.
+ * Sanity-check the platform-agnostic SnapshotCaptureProvider /
+ * SnapshotRestoreProvider contracts. Tests deliberately type their
+ * subjects as the abstract interfaces so a regression that drops one of
+ * the shared methods will surface as a compile error here.
  */
-describe("SnapshotProvider interface", () => {
+describe("SnapshotProvider interfaces", () => {
   describe("FakeSnapshotProvider", () => {
     let provider: FakeSnapshotProvider;
 
@@ -82,85 +79,35 @@ describe("SnapshotProvider interface", () => {
     });
   });
 
-  // Both platform-specific capture classes implement SnapshotCaptureProvider;
-  // both restore classes implement SnapshotRestoreProvider. Assigning them to
-  // the abstract type proves it at compile time. Behavioral assertions are
-  // covered in the existing CaptureSnapshot{,Ios}/RestoreSnapshot{,Ios} tests.
-  describe("Android CaptureSnapshot satisfies SnapshotCaptureProvider", () => {
-    it("exposes the shared capture method via the abstract type", () => {
-      const device: BootedDevice = {
-        deviceId: "emulator-5554",
-        name: "Pixel_5",
-        platform: "android",
-      };
-      const factory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
-      const asProvider: SnapshotCaptureProvider = new CaptureSnapshot(
-        device,
-        factory,
-        undefined,
-        new FakeTimer(),
-        new DeviceSnapshotStore("/tmp/no-op")
-      );
+  // Compile-time conformance: each platform-specific concrete class is
+  // assigned to the abstract provider type. Behavioral coverage lives in
+  // the existing CaptureSnapshot{,Ios}/RestoreSnapshot{,Ios} test files.
+  const androidDevice: BootedDevice = { deviceId: "emulator-5554", name: "Pixel_5", platform: "android" };
+  const iosDevice: BootedDevice = { deviceId: "ios-device-1", name: "iPhone 15", platform: "ios" };
+  const fakeAdbFactory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
+  const store = () => new DeviceSnapshotStore("/tmp/no-op");
+
+  const captureCases: ReadonlyArray<[string, () => SnapshotCaptureProvider]> = [
+    ["Android CaptureSnapshot", () => new CaptureSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
+    ["iOS CaptureSnapshotIos", () => new CaptureSnapshotIos(iosDevice, new FakeSimCtlClient(), store())],
+  ];
+  for (const [name, build] of captureCases) {
+    it(`${name} satisfies SnapshotCaptureProvider`, () => {
+      const asProvider: SnapshotCaptureProvider = build();
       expect(typeof asProvider.capture).toBe("function");
     });
-  });
+  }
 
-  describe("iOS CaptureSnapshotIos satisfies SnapshotCaptureProvider", () => {
-    it("exposes the shared capture method via the abstract type", () => {
-      const device: BootedDevice = {
-        deviceId: "ios-device-1",
-        name: "iPhone 15",
-        platform: "ios",
-      };
-      const asProvider: SnapshotCaptureProvider = new CaptureSnapshotIos(
-        device,
-        new FakeSimCtlClient(),
-        new DeviceSnapshotStore("/tmp/no-op")
-      );
-      expect(typeof asProvider.capture).toBe("function");
-    });
-  });
-
-  describe("Android RestoreSnapshot satisfies SnapshotRestoreProvider", () => {
-    it("exposes the shared restore method via the abstract type", () => {
-      const device: BootedDevice = {
-        deviceId: "emulator-5554",
-        name: "Pixel_5",
-        platform: "android",
-      };
-      const factory: AdbClientFactory = { create: () => new FakeAdbClient() as any };
-      const asProvider: SnapshotRestoreProvider = new RestoreSnapshot(
-        device,
-        factory,
-        undefined,
-        new FakeTimer(),
-        new DeviceSnapshotStore("/tmp/no-op")
-      );
+  const restoreCases: ReadonlyArray<[string, () => SnapshotRestoreProvider]> = [
+    ["Android RestoreSnapshot", () => new RestoreSnapshot(androidDevice, fakeAdbFactory, undefined, new FakeTimer(), store())],
+    ["iOS RestoreSnapshotIos", () => new RestoreSnapshotIos(iosDevice, new FakeSimCtlClient(), store())],
+  ];
+  for (const [name, build] of restoreCases) {
+    it(`${name} satisfies SnapshotRestoreProvider`, () => {
+      const asProvider: SnapshotRestoreProvider = build();
       expect(typeof asProvider.restore).toBe("function");
     });
-  });
-
-  describe("iOS RestoreSnapshotIos satisfies SnapshotRestoreProvider", () => {
-    it("exposes the shared restore method via the abstract type", () => {
-      const device: BootedDevice = {
-        deviceId: "ios-device-1",
-        name: "iPhone 15",
-        platform: "ios",
-      };
-      const asProvider: SnapshotRestoreProvider = new RestoreSnapshotIos(
-        device,
-        new FakeSimCtlClient(),
-        new DeviceSnapshotStore("/tmp/no-op")
-      );
-      expect(typeof asProvider.restore).toBe("function");
-    });
-  });
-
-  it("FakeSnapshotProvider satisfies the combined SnapshotProvider type", () => {
-    const asProvider: SnapshotProvider = new FakeSnapshotProvider();
-    expect(typeof asProvider.capture).toBe("function");
-    expect(typeof asProvider.restore).toBe("function");
-  });
+  }
 });
 
 function makeManifest(snapshotName: string): DeviceSnapshotManifest {

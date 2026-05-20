@@ -40,7 +40,7 @@ describe("snapshot tool", () => {
       snapshotStore: store as any,
       timer: fakeTimer,
       now: () => new Date(fakeTimer.now()),
-      createCaptureAction: () => ({
+      createCaptureProvider: () => ({
         capture: async args => {
           captureCalls.push({ ...args });
           const timestamp = new Date(fakeTimer.now()).toISOString();
@@ -62,7 +62,7 @@ describe("snapshot tool", () => {
           };
         },
       }),
-      createRestoreAction: () => ({
+      createRestoreProvider: () => ({
         restore: async args => {
           restoreCalls.push({ ...args });
           return {

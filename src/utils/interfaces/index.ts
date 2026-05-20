@@ -10,6 +10,10 @@ export type {
   SnapshotRestoreProvider,
 } from "./SnapshotProvider";
 export type { TapStrategy } from "./TapStrategy";
+export type {
+  BroadcastOptions,
+  SystemConfigurationAdapter,
+} from "./SystemConfigurationAdapter";
 // Screenshot utilities - split into focused classes (Phase 3.1)
 export { ScreenshotComparator } from "../screenshot/ScreenshotComparator";
 export { PerceptualHasher } from "../screenshot/PerceptualHasher";

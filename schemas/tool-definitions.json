@@ -1623,11 +1623,11 @@
         },
         "elementId": {
           "type": "string",
-          "description": "Element resource ID / accessibility identifier"
+          "description": "Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values."
         },
         "text": {
           "type": "string",
-          "description": "Element text"
+          "description": "Element text, content-desc, or placeholder value from observe output."
         },
         "container": {
           "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
@@ -5962,12 +5962,1132 @@
     }
   },
   {
-    "name": "tapOn",
-    "description": "Tap UI elements by text or ID (returns selectedElement metadata)",
+    "name": "tapAny",
+    "description": "Tap any clickable element without knowing its text or ID. Good for tapping the first list item. Use container to scope, selectionStrategy to pick 'first' (default) or 'random', and scrollableContainer: true to limit to list/RecyclerView items.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
+        "container": {
+          "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "description": "Container resource ID"
+                }
+              },
+              "required": [
+                "elementId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "description": "Container text"
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          ]
+        },
+        "selectionStrategy": {
+          "description": "Element selection strategy: 'first' (default) or 'random'",
+          "type": "string",
+          "enum": [
+            "first",
+            "random"
+          ]
+        },
+        "scrollableContainer": {
+          "description": "Only search within scrollable containers (lists/RecyclerViews). Use this to avoid tapping search bars or other clickable UI elements when you want the first list item.",
+          "type": "boolean"
+        },
+        "action": {
+          "default": "tap",
+          "description": "Action type (default: tap)",
+          "type": "string",
+          "enum": [
+            "tap",
+            "doubleTap",
+            "longPress"
+          ]
+        },
+        "duration": {
+          "description": "Long press duration (ms)",
+          "type": "number"
+        },
+        "searchUntil": {
+          "description": "Poll for clickable element before tapping",
+          "type": "object",
+          "properties": {
+            "duration": {
+              "description": "Polling duration (ms, default: 500)",
+              "type": "number",
+              "minimum": 100,
+              "maximum": 12000
+            }
+          },
+          "additionalProperties": false
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session UUID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "platform"
+      ],
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "action": {
+          "type": "string",
+          "enum": [
+            "tap",
+            "doubleTap",
+            "longPress",
+            "focus"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "element": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerX": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerY": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "checkable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "clickable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focusable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "accessibility-focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "scrollable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "selected": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bounds"
+          ],
+          "additionalProperties": {}
+        },
+        "observation": {
+          "type": "object",
+          "properties": {
+            "selectedElements": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  },
+                  "resourceId": {
+                    "type": "string"
+                  },
+                  "contentDesc": {
+                    "type": "string"
+                  },
+                  "bounds": {
+                    "type": "object",
+                    "properties": {
+                      "left": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "top": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "right": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "bottom": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerX": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      },
+                      "centerY": {
+                        "type": "integer",
+                        "minimum": -9007199254740991,
+                        "maximum": 9007199254740991
+                      }
+                    },
+                    "required": [
+                      "left",
+                      "top",
+                      "right",
+                      "bottom"
+                    ],
+                    "additionalProperties": false
+                  },
+                  "indexInMatches": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "totalMatches": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "selectionStrategy": {
+                    "type": "string"
+                  },
+                  "selectedState": {
+                    "type": "object",
+                    "properties": {
+                      "method": {
+                        "type": "string",
+                        "enum": [
+                          "accessibility",
+                          "visual"
+                        ]
+                      },
+                      "confidence": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "method",
+                      "confidence"
+                    ],
+                    "additionalProperties": false
+                  }
+                },
+                "additionalProperties": {}
+              }
+            },
+            "focusedElement": {
+              "type": "object",
+              "properties": {
+                "bounds": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "top": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "right": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "bottom": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerX": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerY": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
+                },
+                "text": {
+                  "type": "string"
+                },
+                "resource-id": {
+                  "type": "string"
+                },
+                "content-desc": {
+                  "type": "string"
+                },
+                "class": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "checkable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "checked": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "clickable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "enabled": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "focusable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "focused": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "accessibility-focused": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "scrollable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "selected": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "bounds"
+              ],
+              "additionalProperties": {}
+            },
+            "accessibilityFocusedElement": {
+              "type": "object",
+              "properties": {
+                "bounds": {
+                  "type": "object",
+                  "properties": {
+                    "left": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "top": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "right": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "bottom": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerX": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    },
+                    "centerY": {
+                      "type": "integer",
+                      "minimum": -9007199254740991,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": [
+                    "left",
+                    "top",
+                    "right",
+                    "bottom"
+                  ],
+                  "additionalProperties": false
+                },
+                "text": {
+                  "type": "string"
+                },
+                "resource-id": {
+                  "type": "string"
+                },
+                "content-desc": {
+                  "type": "string"
+                },
+                "class": {
+                  "type": "string"
+                },
+                "package": {
+                  "type": "string"
+                },
+                "checkable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "checked": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "clickable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "enabled": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "focusable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "focused": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "accessibility-focused": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "scrollable": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                },
+                "selected": {
+                  "anyOf": [
+                    {
+                      "type": "boolean"
+                    },
+                    {
+                      "type": "string",
+                      "const": "true"
+                    },
+                    {
+                      "type": "string",
+                      "const": "false"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "bounds"
+              ],
+              "additionalProperties": {}
+            },
+            "activeWindow": {
+              "type": "object",
+              "properties": {
+                "appId": {
+                  "type": "string"
+                },
+                "activityName": {
+                  "type": "string"
+                },
+                "layoutSeqSum": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "type": {
+                  "type": "string"
+                }
+              },
+              "additionalProperties": {}
+            }
+          },
+          "additionalProperties": {}
+        },
+        "selectedElement": {
+          "type": "object",
+          "properties": {
+            "text": {
+              "type": "string"
+            },
+            "resourceId": {
+              "type": "string"
+            },
+            "contentDesc": {
+              "type": "string"
+            },
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerX": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerY": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "indexInMatches": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "totalMatches": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "selectionStrategy": {
+              "type": "string"
+            },
+            "selectedState": {
+              "type": "object",
+              "properties": {
+                "method": {
+                  "type": "string",
+                  "enum": [
+                    "accessibility",
+                    "visual"
+                  ]
+                },
+                "confidence": {
+                  "type": "number"
+                },
+                "reason": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "method",
+                "confidence"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": {}
+        },
+        "selectedElements": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "text": {
+                "type": "string"
+              },
+              "resourceId": {
+                "type": "string"
+              },
+              "contentDesc": {
+                "type": "string"
+              },
+              "bounds": {
+                "type": "object",
+                "properties": {
+                  "left": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "top": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "right": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "bottom": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "centerX": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  },
+                  "centerY": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "left",
+                  "top",
+                  "right",
+                  "bottom"
+                ],
+                "additionalProperties": false
+              },
+              "indexInMatches": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "totalMatches": {
+                "type": "integer",
+                "minimum": -9007199254740991,
+                "maximum": 9007199254740991
+              },
+              "selectionStrategy": {
+                "type": "string"
+              },
+              "selectedState": {
+                "type": "object",
+                "properties": {
+                  "method": {
+                    "type": "string",
+                    "enum": [
+                      "accessibility",
+                      "visual"
+                    ]
+                  },
+                  "confidence": {
+                    "type": "number"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "method",
+                  "confidence"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "additionalProperties": {}
+          }
+        },
+        "error": {
+          "type": "string"
+        },
+        "pressRecognized": {
+          "type": "boolean"
+        },
+        "contextMenuOpened": {
+          "type": "boolean"
+        },
+        "selectionStarted": {
+          "type": "boolean"
+        },
+        "searchUntil": {
+          "type": "object",
+          "properties": {
+            "durationMs": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "requestCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            },
+            "changeCount": {
+              "type": "integer",
+              "minimum": -9007199254740991,
+              "maximum": 9007199254740991
+            }
+          },
+          "additionalProperties": false
+        },
+        "debug": {}
+      },
+      "required": [
+        "success",
+        "action"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
+    "name": "tapOn",
+    "description": "Tap a specific UI element identified by text or resource-id.\nProvide a selector: { \"text\": \"Login\" } or { \"elementId\": \"com.app:id/btn\" }.\nSet sibling: true to tap a clickable sibling adjacent to the matched element (e.g., a checkbox next to a label).\ncontent-desc values from observe should be passed as text, not elementId.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "selector": {
+          "anyOf": [
+            {
+              "type": "object",
+              "properties": {
+                "elementId": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values."
+                }
+              },
+              "required": [
+                "elementId"
+              ],
+              "additionalProperties": false
+            },
+            {
+              "type": "object",
+              "properties": {
+                "text": {
+                  "type": "string",
+                  "minLength": 1,
+                  "description": "Element text, content-desc, or placeholder value from observe output."
+                }
+              },
+              "required": [
+                "text"
+              ],
+              "additionalProperties": false
+            }
+          ],
+          "description": "Element to tap. Provide exactly one of elementId or text."
+        },
+        "sibling": {
+          "description": "When true, tap a clickable sibling of the matched element instead of the element itself. Useful for tapping checkboxes, icons, or buttons adjacent to a text label.",
+          "type": "boolean"
+        },
         "container": {
           "description": "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }.",
           "anyOf": [
@@ -6055,14 +7175,6 @@
           ],
           "description": "Target platform"
         },
-        "elementId": {
-          "type": "string",
-          "description": "Element resource ID / accessibility identifier"
-        },
-        "text": {
-          "type": "string",
-          "description": "Element text"
-        },
         "sessionUuid": {
           "description": "Session UUID",
           "type": "string"
@@ -6078,26 +7190,13 @@
         "deviceId": {
           "description": "Device ID",
           "type": "string"
-        },
-        "tapClickableParent": {
-          "description": "Tap the nearest clickable parent that contains the text element. Useful for list items where the clickable row doesn't have a resource-id but contains children with text.",
-          "type": "boolean"
-        },
-        "clickable": {
-          "type": "boolean",
-          "const": true,
-          "description": "Select clickable elements. Use with selectionStrategy: 'first' to tap the first clickable item in a list without knowing its text or ID."
-        },
-        "scrollableContainer": {
-          "description": "Only search within scrollable containers (lists/RecyclerViews). Use this to avoid tapping search bars or other clickable UI elements when you want the first list item.",
-          "type": "boolean"
-        },
-        "siblingOfText": {
-          "type": "string",
-          "minLength": 1,
-          "description": "Find a clickable element that is a sibling of an element containing this text. Useful for tapping checkboxes, icons, or buttons next to a specific text label."
         }
       },
+      "required": [
+        "selector",
+        "action",
+        "platform"
+      ],
       "additionalProperties": false
     },
     "outputSchema": {

@@ -100,7 +100,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     ]);
 
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
-      { text: "Row", tapClickableParent: true, action: "tap" },
+      { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
       false
@@ -139,7 +139,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     stubStabilityDeps(tap, sequence);
 
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
-      { text: "Row", tapClickableParent: true, action: "tap" },
+      { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
       false
@@ -225,7 +225,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     stubStabilityDeps(tap, sequence);
 
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
-      { text: "Contact Name", tapClickableParent: true, action: "tap" },
+      { text: "Contact Name", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
       false
@@ -278,7 +278,7 @@ describe("resolveAndroidStableTapTargetAfterRefreshes", () => {
     ]);
 
     const result = await (tap as any).resolveAndroidStableTapTargetAfterRefreshes(
-      { text: "Row", tapClickableParent: true, action: "tap" },
+      { text: "Row", sibling: true, action: "tap" },
       { screenSize: { width: 1080, height: 1920 } },
       "tap",
       false

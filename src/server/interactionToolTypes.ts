@@ -48,12 +48,15 @@ export interface OpenLinkArgs {
 }
 
 export interface TapOnArgs {
+  selector: {
+    elementId?: string;
+    text?: string;
+  };
+  sibling?: boolean;
   container?: {
     elementId?: string;
     text?: string;
   };
-  elementId?: string;
-  text?: string;
   selectionStrategy?: ElementSelectionStrategy;
   action: "tap" | "doubleTap" | "longPress" | "focus";
   duration?: number;
@@ -61,13 +64,24 @@ export interface TapOnArgs {
     duration?: number;
   };
   platform: Platform;
-  tapClickableParent?: boolean;
-  clickable?: boolean;
-  scrollableContainer?: boolean;
-  siblingOfText?: string;
   preTapStability?: boolean;
   retryIfNoChange?: boolean;
   ensureTap?: boolean;
+}
+
+export interface TapAnyArgs {
+  container?: {
+    elementId?: string;
+    text?: string;
+  };
+  selectionStrategy?: ElementSelectionStrategy;
+  action: "tap" | "doubleTap" | "longPress";
+  duration?: number;
+  searchUntil?: {
+    duration?: number;
+  };
+  scrollableContainer?: boolean;
+  platform: Platform;
 }
 
 export interface DragAndDropArgs {

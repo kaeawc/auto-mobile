@@ -34,83 +34,119 @@ describe("TapOnElement extended selectors", () => {
       expect(error).toContain("requires exactly one");
     });
 
-    test("rejects when multiple selectors provided", () => {
+    test("rejects when both selectors provided", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
       const error = (tapOn as any).validateOptions({
         action: "tap",
         text: "Login",
-        clickable: true,
+        elementId: "com.app:id/btn",
       });
       expect(error).toContain("requires exactly one");
     });
 
-    test("accepts clickable as sole selector", () => {
+    test("accepts text as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
       const error = (tapOn as any).validateOptions({
         action: "tap",
-        clickable: true,
+        text: "Login",
       });
       expect(error).toBeNull();
     });
 
-    test("accepts siblingOfText as sole selector", () => {
+    test("accepts elementId as sole selector", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
       const error = (tapOn as any).validateOptions({
         action: "tap",
-        siblingOfText: "Label",
+        elementId: "com.app:id/btn",
+      });
+      expect(error).toBeNull();
+    });
+
+    test("accepts text with sibling flag", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const error = (tapOn as any).validateOptions({
+        action: "tap",
+        text: "Accept Terms",
+        sibling: true,
+      });
+      expect(error).toBeNull();
+    });
+
+    test("accepts elementId with sibling flag", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+      const error = (tapOn as any).validateOptions({
+        action: "tap",
+        elementId: "com.app:id/label",
+        sibling: true,
       });
       expect(error).toBeNull();
     });
   });
 
   describe("findElementInHierarchy", () => {
-    test("delegates siblingOfText to selectClickableSiblingOfText", () => {
+    test("delegates text to selectByText", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
       const result = (tapOn as any).findElementInHierarchy(
-        { siblingOfText: "Email", action: "tap" },
+        { text: "Login", action: "tap" },
         { hierarchy: { node: {} } }
       );
 
       expect(result.selection.element).not.toBeNull();
-      expect(selector.lastText).toBe("Email");
+      expect(selector.lastText).toBe("Login");
     });
 
-    test("delegates tapClickableParent to selectClickableParentByText", () => {
+    test("delegates elementId to selectByResourceId", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
       const result = (tapOn as any).findElementInHierarchy(
-        { text: "John Smith", tapClickableParent: true, action: "tap" },
+        { elementId: "com.app:id/btn", action: "tap" },
         { hierarchy: { node: {} } }
       );
 
       expect(result.selection.element).not.toBeNull();
-      expect(selector.lastText).toBe("John Smith");
+      expect(selector.lastResourceId).toBe("com.app:id/btn");
     });
 
-    test("delegates clickable to selectClickable", () => {
+    test("text + sibling delegates to selectClickableSiblingOfText", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
       const result = (tapOn as any).findElementInHierarchy(
-        { clickable: true, action: "tap" },
+        { text: "Accept Terms", sibling: true, action: "tap" },
         { hierarchy: { node: {} } }
       );
 
       expect(result.selection.element).not.toBeNull();
+      expect(selector.lastText).toBe("Accept Terms");
     });
 
-    test("clickable respects selectionStrategy", () => {
+    test("elementId + sibling delegates to selectClickableSiblingOfText", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapOn = createTapOnElement(selector);
+
+      const result = (tapOn as any).findElementInHierarchy(
+        { elementId: "com.app:id/label", sibling: true, action: "tap" },
+        { hierarchy: { node: {} } }
+      );
+
+      expect(result.selection.element).not.toBeNull();
+      expect(selector.lastText).toBe("com.app:id/label");
+    });
+
+    test("sibling respects selectionStrategy", () => {
       const selector = new FakeElementSelector(makeElement());
       const tapOn = createTapOnElement(selector);
 
       (tapOn as any).findElementInHierarchy(
-        { clickable: true, action: "tap", selectionStrategy: "random" },
+        { text: "Email", sibling: true, action: "tap", selectionStrategy: "random" },
         { hierarchy: { node: {} } }
       );
 

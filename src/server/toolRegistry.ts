@@ -48,6 +48,7 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
 
   const mergedProperties: Record<string, unknown> = {};
   const seenAdditionalProperties = new Set<boolean | undefined>();
+  const requiredSets: Set<string>[] = [];
 
   for (const branch of branches) {
     const props = branch.properties as Record<string, unknown> | undefined;
@@ -61,13 +62,23 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     if (typeof branch.additionalProperties === "boolean") {
       seenAdditionalProperties.add(branch.additionalProperties);
     }
+    const req = branch.required as string[] | undefined;
+    requiredSets.push(new Set(req ?? []));
   }
+
+  const commonRequired = requiredSets.length > 0
+    ? [...requiredSets[0]].filter(key => requiredSets.every(s => s.has(key)))
+    : [];
 
   const result: Record<string, unknown> = {
     ...(schema.$schema ? { $schema: schema.$schema } : {}),
     type: "object",
     properties: mergedProperties,
   };
+
+  if (commonRequired.length > 0) {
+    result.required = commonRequired;
+  }
 
   if (seenAdditionalProperties.size === 1) {
     result.additionalProperties = [...seenAdditionalProperties][0];

@@ -157,14 +157,9 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private validateOptions(options: TapOnElementOptions): string | null {
-    const selectorCount = [
-      options.text,
-      options.elementId,
-      options.clickable,
-      options.siblingOfText
-    ].filter(Boolean).length;
+    const selectorCount = [options.text, options.elementId].filter(Boolean).length;
     if (selectorCount !== 1) {
-      return "tapOn requires exactly one of text, elementId, clickable, or siblingOfText";
+      return "tapOn requires exactly one of text or elementId";
     }
 
     if (options.container) {
@@ -230,23 +225,10 @@ export class TapOnElement extends BaseVisualChange {
   ): { selection: ElementSelectionResult; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
 
-    if (options.siblingOfText) {
-      return {
-        selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.siblingOfText, {
-          container: options.container,
-          fuzzyMatch: true,
-          caseSensitive: false,
-          strategy: options.selectionStrategy
-        }),
-        containerFound
-      };
-    }
-
     if (options.text) {
-      // If tapClickableParent is true, find the clickable parent containing the text
-      if (options.tapClickableParent) {
+      if (options.sibling) {
         return {
-          selection: this.elementSelector.selectClickableParentByText(viewHierarchy, options.text, {
+          selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.text, {
             container: options.container,
             fuzzyMatch: true,
             caseSensitive: false,
@@ -256,7 +238,6 @@ export class TapOnElement extends BaseVisualChange {
         };
       }
 
-      // Standard text selection
       return {
         selection: this.elementSelector.selectByText(viewHierarchy, options.text, {
           container: options.container,
@@ -269,6 +250,18 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     if (options.elementId) {
+      if (options.sibling) {
+        return {
+          selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.elementId, {
+            container: options.container,
+            fuzzyMatch: false,
+            caseSensitive: true,
+            strategy: options.selectionStrategy
+          }),
+          containerFound
+        };
+      }
+
       return {
         selection: this.elementSelector.selectByResourceId(viewHierarchy, options.elementId, {
           container: options.container,
@@ -279,18 +272,7 @@ export class TapOnElement extends BaseVisualChange {
       };
     }
 
-    if (options.clickable) {
-      return {
-        selection: this.elementSelector.selectClickable(viewHierarchy, {
-          container: options.container,
-          strategy: options.selectionStrategy,
-          scrollableContainer: options.scrollableContainer
-        }),
-        containerFound
-      };
-    }
-
-    throw new ActionableError("tapOn requires non-blank text, elementId, clickable, or siblingOfText to interact with");
+    throw new ActionableError("tapOn requires non-blank text or elementId to interact with");
   }
 
   private prepareViewHierarchyForResponse(
@@ -327,38 +309,6 @@ export class TapOnElement extends BaseVisualChange {
     }
 
     return rawHierarchy;
-  }
-
-  private async refreshViewHierarchy(
-    timeoutMs: number,
-    screenSize?: ObserveResult["screenSize"],
-    signal?: AbortSignal
-  ): Promise<ViewHierarchyResult | null> {
-    const effectiveTimeoutMs = Math.max(0, timeoutMs);
-    switch (this.device.platform) {
-      case "android": {
-        const rawHierarchy = await refreshAndroidViewHierarchy(
-          this.accessibilityService,
-          this.viewHierarchy,
-          effectiveTimeoutMs,
-          signal
-        );
-
-        return rawHierarchy
-          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
-          : null;
-      }
-      case "ios":
-      {
-        const xcTestClient = IOSCtrlProxyClient.getInstance(this.device);
-        const rawHierarchy = await xcTestClient.getAccessibilityHierarchy();
-        return rawHierarchy
-          ? this.prepareViewHierarchyForResponse(rawHierarchy, screenSize)
-          : null;
-      }
-      default:
-        throw new ActionableError(`Unsupported platform: ${this.device.platform}`);
-    }
   }
 
   private async refreshViewHierarchy(
@@ -682,12 +632,12 @@ export class TapOnElement extends BaseVisualChange {
       : "";
 
     let baseError: string;
-    if (options.siblingOfText) {
-      baseError = `No clickable sibling found next to element with text '${options.siblingOfText}'${containerHint}`;
+    if (options.sibling && options.text) {
+      baseError = `No clickable sibling found next to element with text '${options.text}'${containerHint}`;
+    } else if (options.sibling && options.elementId) {
+      baseError = `No clickable sibling found next to element with elementId '${options.elementId}'${containerHint}`;
     } else if (options.text) {
       baseError = `Element not found with provided text '${options.text}'${containerHint}`;
-    } else if (options.clickable) {
-      baseError = `No clickable element found${containerHint}`;
     } else {
       baseError = `Element not found with provided elementId '${options.elementId}'${containerHint}`;
     }

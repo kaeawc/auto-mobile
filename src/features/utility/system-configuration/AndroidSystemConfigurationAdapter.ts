@@ -1,4 +1,5 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
@@ -48,7 +49,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
     const previousLanguageTag = await this.getCurrentLocaleTag();
-    const apiLevel = await this.getAndroidApiLevel();
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
 
     const commandAttempts: CommandAttempt[] = [];
     const cmdLocaleAttempt = {
@@ -291,20 +292,6 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to broadcast localization change: ${error}`);
       return false;
-    }
-  }
-
-  private async getAndroidApiLevel(): Promise<number | null> {
-    try {
-      const result = await this.adb.executeCommand("shell getprop ro.build.version.sdk", undefined, undefined, true);
-      const parsed = Number.parseInt(result.stdout.trim(), 10);
-      if (Number.isNaN(parsed)) {
-        return null;
-      }
-      return parsed;
-    } catch (error) {
-      logger.warn(`[SystemConfigurationManager] Failed to read API level: ${error}`);
-      return null;
     }
   }
 

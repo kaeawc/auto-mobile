@@ -18,10 +18,15 @@ import {
   normalizeSettingValue,
   normalizeTimeFormat,
 } from "./parsing";
+import {
+  buildAppleLanguages,
+  iosSpawnCommand,
+  isIosSimulator,
+  parseAppleTimeFormatRaw,
+} from "./iosHelpers";
 
 const IOS_PHYSICAL_DEVICE_ERROR = "Localization changes are only supported on iOS Simulator.";
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
-const SIMULATOR_UDID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
 /**
  * iOS implementation of {@link SystemConfigurationAdapter}. Routes
@@ -49,7 +54,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       const languages = this.buildAppleLanguages(languageTag);
       const arrayArgs = languages.map(l => `"${l}"`).join(" ");
       await this.processExecutor.exec(
-        this.iosSpawnCommand(`defaults write .GlobalPreferences AppleLanguages -array ${arrayArgs}`)
+        iosSpawnCommand(this.device.deviceId, `defaults write .GlobalPreferences AppleLanguages -array ${arrayArgs}`)
       );
 
       const readBack = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
@@ -136,9 +141,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
     try {
       const previousRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
-      const previousFormat = normalizeTimeFormat(
-        previousRaw === "1" ? "24" : previousRaw === "0" ? "12" : previousRaw
-      );
+      const previousFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(previousRaw));
 
       const boolValue = enabled ? "-bool YES" : "-bool NO";
       await this.iosDefaultsWrite(".GlobalPreferences", "AppleICUForce24HourTime", boolValue);
@@ -250,9 +253,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     const languages = await this.iosDefaultsRead(".GlobalPreferences", "AppleLanguages");
     const timeZone = await this.iosDefaultsRead(".GlobalPreferences", "AppleTimeZone");
     const timeFormatRaw = await this.iosDefaultsRead(".GlobalPreferences", "AppleICUForce24HourTime");
-    const timeFormat = normalizeTimeFormat(
-      timeFormatRaw === "1" ? "24" : timeFormatRaw === "0" ? "12" : timeFormatRaw
-    );
+    const timeFormat = normalizeTimeFormat(parseAppleTimeFormatRaw(timeFormatRaw));
     const calendarResult = await this.getCalendarSystem();
 
     return {
@@ -273,29 +274,17 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
   }
 
   buildAppleLanguages(languageTag: string): string[] {
-    const languages: string[] = [languageTag];
-    const parts = languageTag.split("-");
-    for (let i = parts.length - 1; i >= 1; i--) {
-      const shorter = parts.slice(0, i).join("-");
-      if (!languages.includes(shorter)) {
-        languages.push(shorter);
-      }
-    }
-    return languages;
+    return buildAppleLanguages(languageTag);
   }
 
   private isSimulator(): boolean {
-    return SIMULATOR_UDID_PATTERN.test(this.device.deviceId);
-  }
-
-  private iosSpawnCommand(command: string): string {
-    return `xcrun simctl spawn ${this.device.deviceId} ${command}`;
+    return isIosSimulator(this.device.deviceId);
   }
 
   private async iosDefaultsRead(domain: string, key: string): Promise<string | null> {
     try {
       const result = await this.processExecutor.exec(
-        this.iosSpawnCommand(`defaults read ${domain} ${key}`)
+        iosSpawnCommand(this.device.deviceId, `defaults read ${domain} ${key}`)
       );
       return normalizeSettingValue(result.stdout);
     } catch {
@@ -305,7 +294,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   private async iosDefaultsWrite(domain: string, key: string, value: string): Promise<void> {
     await this.processExecutor.exec(
-      this.iosSpawnCommand(`defaults write ${domain} ${key} ${value}`)
+      iosSpawnCommand(this.device.deviceId, `defaults write ${domain} ${key} ${value}`)
     );
   }
 

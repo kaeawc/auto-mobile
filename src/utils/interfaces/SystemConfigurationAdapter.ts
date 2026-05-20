@@ -18,19 +18,11 @@ export interface BroadcastOptions {
 
 /**
  * Platform-specific surface used by {@link SystemConfigurationManager}
- * to keep its public methods free of `device.platform === ...`
- * branches.
+ * so its public methods are free of `device.platform === ...` branches.
  *
- * Implemented by `AndroidSystemConfigurationAdapter` and
- * `IosSystemConfigurationAdapter`; selected once in the manager's
- * constructor via `createSystemConfigurationAdapter`. Each adapter
- * captures its platform dependencies (device, adb / process executor,
- * timer, …) at construction so call sites never need to thread them
- * through.
- *
- * Method signatures and return shapes mirror the manager's public API
- * one-to-one. Input validation (e.g. rejecting empty strings) stays in
- * the manager so error wording is identical across platforms.
+ * The manager keeps input validation (e.g. rejecting empty strings) so
+ * error wording is identical across platforms; the adapter handles the
+ * platform-specific I/O.
  */
 export interface SystemConfigurationAdapter {
   /** Set the system locale to the given BCP-47 language tag. */

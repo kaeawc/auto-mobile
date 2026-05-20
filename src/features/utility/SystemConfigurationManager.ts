@@ -6,6 +6,7 @@ import type { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
+import { buildAppleLanguages, iosSpawnCommand, isIosSimulator } from "./system-configuration/iosHelpers";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -107,36 +108,19 @@ export class SystemConfigurationManager {
 
   // --- iOS Simulator-only public methods ---
 
-  private isSimulator(): boolean {
-    return /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(
-      this.device.deviceId
-    );
-  }
-
-  private iosSpawnCommand(command: string): string {
-    return `xcrun simctl spawn ${this.device.deviceId} ${command}`;
-  }
-
+  /** Build Apple's fallback language chain for the AppleLanguages defaults key. */
   buildAppleLanguages(languageTag: string): string[] {
-    const languages: string[] = [languageTag];
-    const parts = languageTag.split("-");
-    for (let i = parts.length - 1; i >= 1; i--) {
-      const shorter = parts.slice(0, i).join("-");
-      if (!languages.includes(shorter)) {
-        languages.push(shorter);
-      }
-    }
-    return languages;
+    return buildAppleLanguages(languageTag);
   }
 
   async restartSpringBoard(): Promise<boolean> {
-    if (!this.isSimulator()) {
+    if (!isIosSimulator(this.device.deviceId)) {
       return false;
     }
 
     try {
       await this.processExecutor.exec(
-        this.iosSpawnCommand("launchctl stop com.apple.SpringBoard")
+        iosSpawnCommand(this.device.deviceId, "launchctl stop com.apple.SpringBoard")
       );
     } catch (error) {
       logger.warn(`[SystemConfigurationManager] Failed to stop SpringBoard: ${error}`);
@@ -147,7 +131,7 @@ export class SystemConfigurationManager {
       await this.timer.sleep(SPRINGBOARD_POLL_INTERVAL_MS);
       try {
         const result = await this.processExecutor.exec(
-          this.iosSpawnCommand("launchctl list com.apple.SpringBoard")
+          iosSpawnCommand(this.device.deviceId, "launchctl list com.apple.SpringBoard")
         );
         if (result.stdout && result.stdout.includes("SpringBoard")) {
           return true;
@@ -162,13 +146,13 @@ export class SystemConfigurationManager {
   }
 
   async postLocaleChangeNotification(): Promise<boolean> {
-    if (!this.isSimulator()) {
+    if (!isIosSimulator(this.device.deviceId)) {
       return false;
     }
 
     try {
       await this.processExecutor.exec(
-        this.iosSpawnCommand("notifyutil -p com.apple.language.changed")
+        iosSpawnCommand(this.device.deviceId, "notifyutil -p com.apple.language.changed")
       );
       return true;
     } catch (error) {

@@ -13,6 +13,9 @@ import { FakeAccessibilityDetector } from "../../fakes/FakeAccessibilityDetector
 import { FakeIosVoiceOverDetector } from "../../fakes/FakeIosVoiceOverDetector";
 import { FakeProcessExecutor } from "../../fakes/FakeProcessExecutor";
 import { FakePlatformClient } from "../../fakes/FakePlatformClient";
+import { FakeTapStrategy } from "../../fakes/FakeTapStrategy";
+import { FakeSystemConfigurationAdapter } from "../../fakes/FakeSystemConfigurationAdapter";
+import { FakeNotificationUIDetector } from "../../fakes/FakeNotificationUIDetector";
 import type { BootedDevice } from "../../../src/models";
 import type { PlatformClient } from "../../../src/utils/interfaces/PlatformClient";
 
@@ -118,7 +121,7 @@ describe("PlatformClient", () => {
     });
   }
 
-  describe("createPlatformClient ctrlProxy override", () => {
+  describe("createPlatformClient overrides", () => {
     it("uses the injected ctrlProxy without constructing a platform client", () => {
       const sentinel = { sentinel: true } as any;
       const client = createPlatformClient(androidDevice, {
@@ -126,6 +129,23 @@ describe("PlatformClient", () => {
         ctrlProxy: sentinel,
       });
       expect(client.ctrlProxy).toBe(sentinel);
+    });
+
+    it("honors per-handle overrides for tapStrategy, systemConfiguration, and notificationUI", () => {
+      const tapStrategy = new FakeTapStrategy();
+      const systemConfiguration = new FakeSystemConfigurationAdapter();
+      const notificationUI = new FakeNotificationUIDetector(androidDevice);
+
+      const client = createPlatformClient(androidDevice, {
+        ...buildOptions(),
+        tapStrategy,
+        systemConfiguration,
+        notificationUI,
+      });
+
+      expect(client.tapStrategy).toBe(tapStrategy);
+      expect(client.systemConfiguration).toBe(systemConfiguration);
+      expect(client.notificationUI).toBe(notificationUI);
     });
   });
 
@@ -158,6 +178,12 @@ describe("PlatformClient", () => {
       const fake = new FakePlatformClient(iosDevice, { tapStrategy: tap });
       expect(fake.tapStrategy.longPressDurationMs).toBe(12345);
       expect(fake.device).toBe(iosDevice);
+    });
+
+    it("default ctrlProxy throws on access with a pointed message", () => {
+      const fake = new FakePlatformClient(androidDevice);
+      expect(() => (fake.ctrlProxy as any).getAccessibilityHierarchy())
+        .toThrow(/FakePlatformClient\.ctrlProxy/);
     });
   });
 });

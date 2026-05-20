@@ -2,7 +2,10 @@ import type { BootedDevice } from "../../models";
 import type { CtrlProxyClient } from "../../features/observe/interfaces/CtrlProxyClient";
 import type { AccessibilityDetector } from "../../utils/interfaces/AccessibilityDetector";
 import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDetector";
+import type { NotificationUIDetector } from "../../utils/interfaces/NotificationUIDetector";
 import type { PlatformClient } from "../../utils/interfaces/PlatformClient";
+import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
+import type { TapStrategy } from "../../utils/interfaces/TapStrategy";
 import type { ProcessExecutor } from "../../utils/ProcessExecutor";
 import type {
   AdbClientFactory,
@@ -31,8 +34,12 @@ export interface CreatePlatformClientOptions {
   accessibilityDetector?: AccessibilityDetector;
   iosVoiceOverDetector?: IosVoiceOverDetector;
   processExecutor?: ProcessExecutor;
-  /** Override the CtrlProxy client (e.g. inject a fake during tests). */
+  // Per-handle overrides for tests. Pass a fake instead of letting the
+  // factory build the default platform-specific implementation.
   ctrlProxy?: CtrlProxyClient;
+  tapStrategy?: TapStrategy;
+  systemConfiguration?: SystemConfigurationAdapter;
+  notificationUI?: NotificationUIDetector;
 }
 
 /**
@@ -64,27 +71,21 @@ export function createPlatformClient(
 
   const adb = adbFactory.create(device);
 
-  const tapStrategy = createTapStrategy(
-    device,
-    adb,
-    accessibilityDetector,
-    iosVoiceOverDetector
-  );
+  const tapStrategy =
+    options.tapStrategy ??
+    createTapStrategy(device, adb, accessibilityDetector, iosVoiceOverDetector);
 
-  const systemConfiguration = createSystemConfigurationAdapter(
-    device,
-    adb,
-    processExecutor
-  );
+  const systemConfiguration =
+    options.systemConfiguration ??
+    createSystemConfigurationAdapter(device, adb, processExecutor);
 
   // createNotificationUIDetector reads its dependencies lazily through
   // the supplied getter so callers that swap fakes via
   // setSystemTrayDependencies between invocations still see the latest
   // overrides — same shape as systemTrayHelpers.handleSystemTrayLookFor.
-  const notificationUI = createNotificationUIDetector(
-    device,
-    getSystemTrayDependencies
-  );
+  const notificationUI =
+    options.notificationUI ??
+    createNotificationUIDetector(device, getSystemTrayDependencies);
 
   return {
     device,

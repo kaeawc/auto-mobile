@@ -124,4 +124,19 @@ export class FakeElementSelector implements ElementSelector {
     this.lastText = text;
     return this.buildSelectionResult(options?.strategy);
   }
+
+  selectClickableSiblingOfResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    options?: {
+      container?: { elementId?: string; text?: string } | null;
+      partialMatch?: boolean;
+      strategy?: ElementSelectionStrategy;
+    }
+  ): ElementSelectionResult {
+    void viewHierarchy;
+    this.lastStrategy = options?.strategy;
+    this.lastResourceId = resourceId;
+    return this.buildSelectionResult(options?.strategy);
+  }
 }

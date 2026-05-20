@@ -266,10 +266,9 @@ export class TapOnElement extends BaseVisualChange {
     if (options.elementId) {
       if (options.sibling) {
         return {
-          selection: this.elementSelector.selectClickableSiblingOfText(viewHierarchy, options.elementId, {
+          selection: this.elementSelector.selectClickableSiblingOfResourceId(viewHierarchy, options.elementId, {
             container: options.container,
-            fuzzyMatch: false,
-            caseSensitive: true,
+            partialMatch: false,
             strategy: options.selectionStrategy
           }),
           containerFound

@@ -114,5 +114,48 @@ describe("TapAnyElement", () => {
 
       expect(result.element).toBeNull();
     });
+
+    test("filters out element whose center is off-screen", () => {
+      const offScreenElement = {
+        bounds: { left: -200, top: -200, right: -100, bottom: -100 },
+        text: "Hidden",
+        clickable: "true",
+      } as any;
+      const selector = new FakeElementSelector(offScreenElement);
+      const tapAny = createTapAnyElement(selector);
+
+      const result = (tapAny as any).findClickableElement(
+        { action: "tap" },
+        { hierarchy: { node: {} } },
+        { width: 1080, height: 1920 }
+      );
+
+      expect(result.element).toBeNull();
+    });
+
+    test("keeps element whose center is on-screen", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapAny = createTapAnyElement(selector);
+
+      const result = (tapAny as any).findClickableElement(
+        { action: "tap" },
+        { hierarchy: { node: {} } },
+        { width: 1080, height: 1920 }
+      );
+
+      expect(result.element).not.toBeNull();
+    });
+
+    test("keeps element when screenSize is not provided", () => {
+      const selector = new FakeElementSelector(makeElement());
+      const tapAny = createTapAnyElement(selector);
+
+      const result = (tapAny as any).findClickableElement(
+        { action: "tap" },
+        { hierarchy: { node: {} } }
+      );
+
+      expect(result.element).not.toBeNull();
+    });
   });
 });

@@ -100,9 +100,23 @@ export class TapAnyElement extends BaseVisualChange {
     return this.finder.hasContainerElement(viewHierarchy, container);
   }
 
+  private isElementCenterOffScreen(
+    element: Element,
+    screenSize?: ObserveResult["screenSize"]
+  ): boolean {
+    if (!screenSize?.width || !screenSize?.height || !element.bounds) {
+      return false;
+    }
+    const centerX = (element.bounds.left + element.bounds.right) / 2;
+    const centerY = (element.bounds.top + element.bounds.bottom) / 2;
+    return centerX < 0 || centerX > screenSize.width ||
+           centerY < 0 || centerY > screenSize.height;
+  }
+
   private findClickableElement(
     options: TapAnyElementOptions,
-    viewHierarchy: ViewHierarchyResult
+    viewHierarchy: ViewHierarchyResult,
+    screenSize?: ObserveResult["screenSize"]
   ): { element: Element | null; containerFound: boolean } {
     const containerFound = this.isContainerAvailable(viewHierarchy, options.container);
     const selection = this.elementSelector.selectClickable(viewHierarchy, {
@@ -110,6 +124,9 @@ export class TapAnyElement extends BaseVisualChange {
       strategy: options.selectionStrategy,
       scrollableContainer: options.scrollableContainer
     });
+    if (selection.element && this.isElementCenterOffScreen(selection.element, screenSize)) {
+      return { element: null, containerFound };
+    }
     return { element: selection.element, containerFound };
   }
 
@@ -225,9 +242,8 @@ export class TapAnyElement extends BaseVisualChange {
           let requestCount = 0;
           let changeCount = 0;
           let lastHash = this.hashViewHierarchy(viewHierarchy);
-          let latestHierarchy = viewHierarchy;
 
-          let found = this.findClickableElement(options, latestHierarchy);
+          let found = this.findClickableElement(options, viewHierarchy, observeResult.screenSize);
           let element = found.element;
           let containerFoundEver = found.containerFound;
 
@@ -246,14 +262,13 @@ export class TapAnyElement extends BaseVisualChange {
               requestCount += 1;
               if (!refreshed) {continue;}
 
-              latestHierarchy = refreshed;
               const hash = this.hashViewHierarchy(refreshed);
               if (hash && hash !== lastHash) {
                 changeCount += 1;
                 lastHash = hash;
               }
 
-              found = this.findClickableElement(options, refreshed);
+              found = this.findClickableElement(options, refreshed, observeResult.screenSize);
               element = found.element;
               containerFoundEver = containerFoundEver || found.containerFound;
               if (element) {break;}

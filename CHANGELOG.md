@@ -1,5 +1,20 @@
 # Changelog
 
+## [v0.0.29] - 2026-05-20
+### Other
+- SelectAllText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2231](https://github.com/kaeawc/auto-mobile/issues/2231))
+- InputText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2229](https://github.com/kaeawc/auto-mobile/issues/2229))
+- ImeAction accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2230](https://github.com/kaeawc/auto-mobile/issues/2230))
+- PinchOn accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2228](https://github.com/kaeawc/auto-mobile/issues/2228))
+- Daemon WebSocket observation-stream setup crashes: AdbExecutor passed to AdbClientFactory consumer ([#2224](https://github.com/kaeawc/auto-mobile/issues/2224))
+- ClearText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2226](https://github.com/kaeawc/auto-mobile/issues/2226))
+- ExecuteGesture accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2225](https://github.com/kaeawc/auto-mobile/issues/2225))
+- Clipboard accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2227](https://github.com/kaeawc/auto-mobile/issues/2227))
+- Add runtime shape guard to *CtrlProxyClient.getInstance() factories ([#2223](https://github.com/kaeawc/auto-mobile/issues/2223))
+- observe waitFor screenshot loop: Operation cancelled every ~130ms until session heartbeat timeout ([#2216](https://github.com/kaeawc/auto-mobile/issues/2216))
+- Navigation screenshot path passes undefined platform causing 'Unsupported platform' error ([#2215](https://github.com/kaeawc/auto-mobile/issues/2215))
+- PerformanceAudit crashes with 'J.create is not a function' in 0.0.28 build ([#2214](https://github.com/kaeawc/auto-mobile/issues/2214))
+
 ## [v0.0.28] - 2026-05-19
 ### Added
 - feat: Android emulator telephony and SMS simulation ([#1579](https://github.com/kaeawc/auto-mobile/issues/1579)) (android)

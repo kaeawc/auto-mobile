@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.30] - 2026-05-20
+### Other
+- Remove tapClickableParent from tapOn schema — redundant with auto-escalation ([#2248](https://github.com/kaeawc/auto-mobile/issues/2248))
+
 ## [v0.0.29] - 2026-05-20
 ### Other
 - SelectAllText accessibility-service path crashes: AdbExecutor passed to AdbClientFactory consumer ([#2231](https://github.com/kaeawc/auto-mobile/issues/2231))

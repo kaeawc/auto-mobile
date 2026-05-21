@@ -28,6 +28,14 @@ import { generateSecureId } from "./types";
  *  a cascade where every hierarchy request returns stale data. */
 const WEBSOCKET_TIMEOUT_COOLDOWN_MS = 500;
 
+/** Default wait window for a fresh WebSocket-pushed hierarchy.
+ *  Aligned with the 1s cache-freshness TTL so a contended ADB pipe
+ *  (concurrent screenshots, dumpsys, emulator transitions) has the same
+ *  headroom that the cache considers acceptable for "fresh" data.
+ *  100ms was too aggressive: under contention pushes routinely exceeded
+ *  it, silently degrading results to stale cache. See issue #2285. */
+const DEFAULT_FRESH_WAIT_MS = 1000;
+
 /**
  * Delegate class for handling hierarchy retrieval and caching.
  *
@@ -79,7 +87,7 @@ export class CtrlProxyHierarchy {
    */
   async getLatestHierarchy(
     waitForFresh: boolean = false,
-    timeout: number = 100,
+    timeout: number = DEFAULT_FRESH_WAIT_MS,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
@@ -248,7 +256,7 @@ export class CtrlProxyHierarchy {
       // Get hierarchy from WebSocket service
       const waitForFresh = !skipWaitForFresh && (cachedHierarchy === null || !cachedHierarchy.fresh);
       const response = await perf.track("getHierarchy", () =>
-        this.getLatestHierarchy(waitForFresh, 100, perf, skipWaitForFresh, minTimestamp, signal)
+        this.getLatestHierarchy(waitForFresh, DEFAULT_FRESH_WAIT_MS, perf, skipWaitForFresh, minTimestamp, signal)
       );
 
       let hierarchyData = response.hierarchy;

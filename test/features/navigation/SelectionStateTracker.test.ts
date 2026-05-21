@@ -106,6 +106,51 @@ describe("SelectionStateTracker", () => {
     expect(contexts[0].afterScreenshotPath).toBe("after.png");
   });
 
+  test("skips capture when ui-perf-mode is disabled", async () => {
+    const detector = new FakeSelectionStateDetector();
+    const capturer = new FakeScreenshotCapturer();
+    const tracker = new SelectionStateTracker({
+      detector,
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => false
+    });
+
+    const observation = createObservation(
+      createHierarchy({
+        text: "Tab1",
+        selected: "false",
+        bounds: "[0,0][10,10]"
+      })
+    );
+
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      text: "Tab1",
+      clickable: true
+    };
+
+    const state = await tracker.prepare({
+      action: "tap",
+      observation,
+      element
+    });
+
+    expect(state).toBeNull();
+    expect(capturer.getCallCount()).toBe(0);
+
+    const selected = await tracker.finalize({
+      action: "tap",
+      selectionState: state,
+      currentObservation: observation,
+      previousObservation: observation,
+      element
+    });
+
+    expect(selected).toHaveLength(0);
+    expect(capturer.getCallCount()).toBe(0);
+    expect(detector.getContexts()).toHaveLength(0);
+  });
+
   test("skips capture when element is not selectable", async () => {
     const detector = new FakeSelectionStateDetector();
     const capturer = new FakeScreenshotCapturer();

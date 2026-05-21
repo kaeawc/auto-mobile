@@ -1,6 +1,7 @@
 import { BootedDevice, Element, ObserveResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
+import { serverConfig } from "../../utils/ServerConfig";
 import { SelectedElement } from "../../utils/interfaces/NavigationGraph";
 import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { SelectionDetectionContext, SelectionStateDetector, SelectionStateDetectorLike } from "./SelectionStateDetector";
@@ -53,20 +54,28 @@ interface SelectionFinalizeRequest {
 interface SelectionStateTrackerOptions {
   detector?: SelectionStateDetectorLike;
   screenshotCapturer: ScreenshotCapturer;
+  isUiPerfModeEnabled?: () => boolean;
 }
 
 export class SelectionStateTracker {
   private detector: SelectionStateDetectorLike;
   private screenshotCapturer: ScreenshotCapturer;
+  private isUiPerfModeEnabled: () => boolean;
 
   constructor(options: SelectionStateTrackerOptions) {
     this.detector = options.detector ?? new SelectionStateDetector();
     this.screenshotCapturer = options.screenshotCapturer;
+    this.isUiPerfModeEnabled = options.isUiPerfModeEnabled ?? (() => serverConfig.isUiPerfModeEnabled());
   }
 
   async prepare(request: SelectionCaptureRequest): Promise<SelectionCaptureState | null> {
     const { observation, element, action, signal } = request;
     if (!observation?.viewHierarchy || !element) {
+      return null;
+    }
+
+    if (!this.isUiPerfModeEnabled()) {
+      logger.debug(`[SELECTION_STATE] Skip selection capture (${action}): ui-perf-mode disabled`);
       return null;
     }
 

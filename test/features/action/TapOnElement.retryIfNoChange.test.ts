@@ -142,6 +142,40 @@ describe("retryTapIfNoChange", () => {
   });
 });
 
+describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () => {
+  for (const talkBackEnabled of [true, false]) {
+    test(`passes isTalkBackEnabled=${talkBackEnabled} through to retry tap`, async () => {
+      const { tap } = createTapOnElement();
+      const hierarchy = makeHierarchy("same-state");
+
+      (tap as any).refreshViewHierarchy = async () => hierarchy;
+
+      let capturedIsTalkBackEnabled: boolean | undefined;
+      (tap as any).executeAndroidTap = async (
+        _action: string, _x: number, _y: number, _dur: number,
+        _el: Element, _signal: unknown, _opts: unknown, isTalkBack: boolean
+      ) => {
+        capturedIsTalkBackEnabled = isTalkBack;
+      };
+
+      const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
+
+      await (tap as any).retryTapIfNoChange(
+        preTapHash,
+        { x: 60, y: 45 },
+        "tap",
+        0,
+        makeElement(),
+        {},
+        talkBackEnabled,
+        { width: 1080, height: 1920 },
+      );
+
+      expect(capturedIsTalkBackEnabled).toBe(talkBackEnabled);
+    });
+  }
+});
+
 describe("ensureTap flag expansion", () => {
   test("ensureTap enables both preTapStability and retryIfNoChange", async () => {
     const { tap } = createTapOnElement();

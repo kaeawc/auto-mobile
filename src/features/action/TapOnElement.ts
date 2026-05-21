@@ -1020,7 +1020,7 @@ export class TapOnElement extends BaseVisualChange {
               longPressDuration,
               tapElement,
               options,
-              isTalkBackEnabled,
+              isAccessibilityServiceEnabled,
               observeResult.screenSize,
               signal,
             );

@@ -11,7 +11,7 @@ import {
   IOS_CTRL_PROXY_RUNNER_SHA256,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   LATEST_RELEASE_VERSION,
-  resolveLatestVersion
+  resolveAssetVersion
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -624,6 +624,11 @@ export class IOSCtrlProxyBuilder {
       const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
 
       if (!bundleReady) {
+        // Cached-bundle fallback is gated on the "latest" channel intentionally:
+        // when the user explicitly pins a version via AUTOMOBILE_CTRL_PROXY_VERSION,
+        // silently substituting a different cached artifact would violate the
+        // contract. On the default channel we accept running an older-but-
+        // working CtrlProxy if the network is briefly unhappy.
         const isLatest = IOS_CTRL_PROXY_RELEASE_VERSION.trim().toLowerCase() === LATEST_RELEASE_VERSION;
         const cachedBundleExists = await this.isBundleValid(bundlePath, "");
         try {
@@ -691,7 +696,7 @@ export class IOSCtrlProxyBuilder {
     const appHashes = await this.computeAppHashes();
     const metadata: IOSCtrlProxyBundleMetadata = {
       checksum: this.getExpectedChecksum() || null,
-      version: resolveLatestVersion(),
+      version: resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION),
       extractedAt: new Date().toISOString(),
       appHashes
     };

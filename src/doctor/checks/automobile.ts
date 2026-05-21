@@ -6,7 +6,8 @@
 import { CheckResult } from "../types";
 import { DaemonManager } from "../../daemon/manager";
 import { getDaemonHealthReport } from "../../daemon/debugTools";
-import { RELEASE_VERSION } from "../../constants/release";
+import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
@@ -15,14 +16,35 @@ import { logger } from "../../utils/logger";
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
 
 /**
- * Check AutoMobile version
+ * Report the daemon JS package version. This is the version of the
+ * @kaeawc/auto-mobile module currently running, sourced from package.json.
  */
-export function checkVersion(): CheckResult {
+export function checkDaemonVersion(): CheckResult {
+  const version = getMcpServerVersion();
   return {
-    name: "AutoMobile Version",
+    name: "AutoMobile Daemon Version",
     status: "pass",
-    message: `Version ${RELEASE_VERSION}`,
-    value: RELEASE_VERSION,
+    message: `Version ${version}`,
+    value: version,
+  };
+}
+
+/**
+ * Report the on-device CtrlProxy release version. Distinct from the daemon
+ * version: the daemon ships its own JS via npm, but the on-device APK/IPA
+ * comes from the release registry and can be pinned independently via
+ * AUTOMOBILE_CTRL_PROXY_VERSION.
+ */
+export function checkCtrlProxyVersion(): CheckResult {
+  const resolved = resolveAssetVersion(RELEASE_VERSION);
+  const pinned = RELEASE_VERSION !== LATEST_RELEASE_VERSION;
+  return {
+    name: "CtrlProxy Release Version",
+    status: "pass",
+    message: pinned
+      ? `Version ${resolved} (pinned via AUTOMOBILE_CTRL_PROXY_VERSION)`
+      : `Version ${resolved} (latest)`,
+    value: resolved,
   };
 }
 
@@ -304,7 +326,8 @@ export async function checkWorkProfileAccessibility(
 export async function runAutoMobileChecks(): Promise<CheckResult[]> {
   const results: CheckResult[] = [];
 
-  results.push(checkVersion());
+  results.push(checkDaemonVersion());
+  results.push(checkCtrlProxyVersion());
   results.push(await checkDaemonStatus());
   results.push(await checkDaemonConnectivity());
   results.push(await checkCtrlProxy());

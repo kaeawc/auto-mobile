@@ -25,7 +25,7 @@ import type { VideoRecordingConfigInput } from "./models";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { AndroidCtrlProxyManager } from "./utils/CtrlProxyManager";
 import { IOSCtrlProxyBuilder } from "./utils/IOSCtrlProxyBuilder";
-import { LATEST_RELEASE_VERSION, RELEASE_VERSION } from "./constants/release";
+import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "./constants/release";
 
 startupBenchmark.mark("processEntry");
 
@@ -459,8 +459,11 @@ async function main() {
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
 
-    if (RELEASE_VERSION !== LATEST_RELEASE_VERSION) {
-      logger.info(`CtrlProxy pinned to version ${RELEASE_VERSION} (AUTOMOBILE_CTRL_PROXY_VERSION)`);
+    const resolvedRelease = resolveAssetVersion(RELEASE_VERSION);
+    if (RELEASE_VERSION === LATEST_RELEASE_VERSION) {
+      logger.info(`CtrlProxy release: ${resolvedRelease} (default, latest in registry)`);
+    } else {
+      logger.info(`CtrlProxy release: ${resolvedRelease} (pinned via AUTOMOBILE_CTRL_PROXY_VERSION)`);
     }
 
     if (daemonMode) {

@@ -130,7 +130,7 @@ export function resolveConfiguredVersion(
   registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
 ): string {
   const trimmed = envValue?.trim();
-  if (!trimmed || trimmed.length === 0) {
+  if (!trimmed) {
     return LATEST_RELEASE_VERSION;
   }
   if (trimmed.toLowerCase() === LATEST_RELEASE_VERSION) {
@@ -154,10 +154,14 @@ export const RELEASE_VERSION: string = resolveConfiguredVersion(
 );
 
 /**
- * Resolve the version string that should appear in download URLs.
- * "latest" expands to registry[0].version so URLs are always concrete.
+ * Resolve a version string to its concrete equivalent.
+ *
+ * Most module-level constants (URLs, on-disk metadata, doctor checks) want a
+ * concrete version like "0.0.30", never the placeholder "latest". This helper
+ * does the registry lookup once so callers don't have to remember whether
+ * RELEASE_VERSION might still be the literal "latest" string.
  */
-function resolveAssetVersion(version: string): string {
+export function resolveAssetVersion(version: string): string {
   if (version === LATEST_RELEASE_VERSION) {
     return resolveLatestVersion();
   }

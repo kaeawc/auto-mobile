@@ -658,6 +658,17 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
    * Download APK
    */
   async downloadApk(): Promise<string> {
+    // TODO: persistent on-disk APK cache for Android, symmetric with iOS's
+    //   bundleCacheDir in IOSCtrlProxyBuilder. Today each daemon run downloads
+    //   into a fresh `mkdtemp` and there is no cross-run reuse and no
+    //   download-failure fallback (iOS gets both). Sketch:
+    //   1. Cache dir under OS-appropriate location (XDG_CACHE_HOME / Library/Caches),
+    //      keyed by version + checksum so 0.0.28 and 0.0.30 coexist cleanly.
+    //   2. Cache-hit path in doPrefetch() (skip network when checksum matches).
+    //   3. Download-failure fallback in downloadApk() to the cached APK matching
+    //      the expected checksum.
+    //   4. Eviction policy (cap at ~10 versions / registry size).
+    //   Estimated ~half a day to a full day. See review feedback on #2294.
     const perf = createGlobalPerformanceTracker();
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");

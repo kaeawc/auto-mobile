@@ -34,6 +34,10 @@ function createTapOnElement(): { tap: TapOnElement; timer: FakeTimer } {
 }
 
 
+function preStateFor(tap: TapOnElement, hierarchy: ViewHierarchyResult): any {
+  return (tap as any).capturePreTapState(hierarchy);
+}
+
 describe("retryTapIfNoChange", () => {
   test("does not retry when hierarchy changed after tap", async () => {
     const { tap } = createTapOnElement();
@@ -45,10 +49,8 @@ describe("retryTapIfNoChange", () => {
     let tapCallCount = 0;
     (tap as any).executeAndroidTap = async () => { tapCallCount++; };
 
-    const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
-
     await (tap as any).retryTapIfNoChange(
-      preTapHash,
+      preStateFor(tap, preHierarchy),
       { x: 60, y: 45 },
       "tap",
       0,
@@ -70,10 +72,8 @@ describe("retryTapIfNoChange", () => {
     let tapCallCount = 0;
     (tap as any).executeAndroidTap = async () => { tapCallCount++; };
 
-    const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
-
     await (tap as any).retryTapIfNoChange(
-      preTapHash,
+      preStateFor(tap, hierarchy),
       { x: 60, y: 45 },
       "tap",
       0,
@@ -95,10 +95,8 @@ describe("retryTapIfNoChange", () => {
     let tapCallCount = 0;
     (tap as any).executeAndroidTap = async () => { tapCallCount++; };
 
-    const preTapHash = (tap as any).hashViewHierarchy(preHierarchy);
-
     await (tap as any).retryTapIfNoChange(
-      preTapHash,
+      preStateFor(tap, preHierarchy),
       { x: 60, y: 45 },
       "tap",
       0,
@@ -125,10 +123,8 @@ describe("retryTapIfNoChange", () => {
       return origSleep(ms);
     };
 
-    const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
-
     await (tap as any).retryTapIfNoChange(
-      preTapHash,
+      preStateFor(tap, hierarchy),
       { x: 60, y: 45 },
       "tap",
       0,
@@ -139,6 +135,178 @@ describe("retryTapIfNoChange", () => {
     );
 
     expect(sleepDurations).toEqual([150, 100]);
+  });
+
+  test("does not retry when foregroundActivity changed even if hash matches", async () => {
+    const { tap } = createTapOnElement();
+    const preHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      packageName: "com.app",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    const postHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.DestActivity",
+      packageName: "com.app",
+      updatedAt: 2000,
+    } as unknown as ViewHierarchyResult;
+
+    (tap as any).refreshViewHierarchy = async () => postHierarchy;
+
+    let tapCallCount = 0;
+    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+
+    await (tap as any).retryTapIfNoChange(
+      preStateFor(tap, preHierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      0,
+      makeElement(),
+      {},
+      false,
+      { width: 1080, height: 1920 },
+    );
+
+    expect(tapCallCount).toBe(0);
+  });
+
+  test("does not retry when packageName changed even if hash matches", async () => {
+    const { tap } = createTapOnElement();
+    const preHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      packageName: "com.app.source",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    const postHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      packageName: "com.app.dest",
+      updatedAt: 2000,
+    } as unknown as ViewHierarchyResult;
+
+    (tap as any).refreshViewHierarchy = async () => postHierarchy;
+
+    let tapCallCount = 0;
+    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+
+    await (tap as any).retryTapIfNoChange(
+      preStateFor(tap, preHierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      0,
+      makeElement(),
+      {},
+      false,
+      { width: 1080, height: 1920 },
+    );
+
+    expect(tapCallCount).toBe(0);
+  });
+
+  test("refetches once when post-tap snapshot is stale, then honors transition signal", async () => {
+    const { tap } = createTapOnElement();
+    const preHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    // First push: stale (updatedAt <= pre). Second push: fresh, transition seen.
+    const stale = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    const fresh = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.DestActivity",
+      updatedAt: 2500,
+    } as unknown as ViewHierarchyResult;
+
+    const calls: ViewHierarchyResult[] = [stale, fresh];
+    let refreshCallCount = 0;
+    (tap as any).refreshViewHierarchy = async () => {
+      refreshCallCount++;
+      return calls.shift() ?? fresh;
+    };
+
+    let tapCallCount = 0;
+    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+
+    await (tap as any).retryTapIfNoChange(
+      preStateFor(tap, preHierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      0,
+      makeElement(),
+      {},
+      false,
+      { width: 1080, height: 1920 },
+    );
+
+    expect(refreshCallCount).toBe(2);
+    expect(tapCallCount).toBe(0);
+  });
+
+  test("retries when fresh refetch still shows no transition and matching hash", async () => {
+    const { tap } = createTapOnElement();
+    const preHierarchy = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    const stale = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      updatedAt: 1000,
+    } as unknown as ViewHierarchyResult;
+    const freshUnchanged = {
+      hierarchy: { node: { marker: "shared" } },
+      foregroundActivity: "com.app/.SourceActivity",
+      updatedAt: 2500,
+    } as unknown as ViewHierarchyResult;
+
+    const calls: ViewHierarchyResult[] = [stale, freshUnchanged];
+    (tap as any).refreshViewHierarchy = async () => calls.shift() ?? freshUnchanged;
+
+    let tapCallCount = 0;
+    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+
+    await (tap as any).retryTapIfNoChange(
+      preStateFor(tap, preHierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      0,
+      makeElement(),
+      {},
+      false,
+      { width: 1080, height: 1920 },
+    );
+
+    expect(tapCallCount).toBe(1);
+  });
+
+  test("falls back to hash-only behavior when transition signals absent", async () => {
+    // iOS / older accessibility runners may not populate foregroundActivity.
+    const { tap } = createTapOnElement();
+    const hierarchy = makeHierarchy("same-state");
+
+    (tap as any).refreshViewHierarchy = async () => hierarchy;
+
+    let tapCallCount = 0;
+    (tap as any).executeAndroidTap = async () => { tapCallCount++; };
+
+    await (tap as any).retryTapIfNoChange(
+      preStateFor(tap, hierarchy),
+      { x: 60, y: 45 },
+      "tap",
+      0,
+      makeElement(),
+      {},
+      false,
+      { width: 1080, height: 1920 },
+    );
+
+    expect(tapCallCount).toBe(1);
   });
 });
 
@@ -158,10 +326,8 @@ describe("retryTapIfNoChange passes isTalkBackEnabled to executeAndroidTap", () 
         capturedIsTalkBackEnabled = isTalkBack;
       };
 
-      const preTapHash = (tap as any).hashViewHierarchy(hierarchy);
-
       await (tap as any).retryTapIfNoChange(
-        preTapHash,
+        preStateFor(tap, hierarchy),
         { x: 60, y: 45 },
         "tap",
         0,

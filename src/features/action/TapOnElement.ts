@@ -50,6 +50,13 @@ import { createTapStrategy } from "./strategies/createTapStrategy";
 
 type SearchUntilStats = NonNullable<TapOnElementResult["searchUntil"]>;
 
+interface PreTapState {
+  hash: string;
+  foregroundActivity?: string;
+  packageName?: string;
+  updatedAt?: number;
+}
+
 /**
  * Dependencies for TapOnElement that can be injected for testing.
  */
@@ -218,6 +225,19 @@ export class TapOnElement extends BaseVisualChange {
       logger.debug(`[TapOnElement] Failed to hash view hierarchy: ${error}`);
       return null;
     }
+  }
+
+  private capturePreTapState(viewHierarchy: ViewHierarchyResult | null): PreTapState | null {
+    const hash = this.hashViewHierarchy(viewHierarchy);
+    if (!hash || !viewHierarchy) {
+      return null;
+    }
+    return {
+      hash,
+      foregroundActivity: viewHierarchy.foregroundActivity,
+      packageName: viewHierarchy.packageName,
+      updatedAt: viewHierarchy.updatedAt,
+    };
   }
 
   private isElementCenterOffScreen(
@@ -985,8 +1005,8 @@ export class TapOnElement extends BaseVisualChange {
             signal
           });
 
-          const preTapHash = options.retryIfNoChange
-            ? this.hashViewHierarchy(viewHierarchy)
+          const preTapState = options.retryIfNoChange
+            ? this.capturePreTapState(viewHierarchy)
             : null;
 
           // Platform-specific tap execution
@@ -1012,9 +1032,9 @@ export class TapOnElement extends BaseVisualChange {
             }
           });
 
-          if (preTapHash && this.strategy.retryTapIfNoChange) {
+          if (preTapState && this.strategy.retryTapIfNoChange) {
             await this.retryTapIfNoChange(
-              preTapHash,
+              preTapState,
               tapPoint,
               action,
               longPressDuration,
@@ -1188,7 +1208,7 @@ export class TapOnElement extends BaseVisualChange {
    * Only called when retryIfNoChange is true.
    */
   private async retryTapIfNoChange(
-    preTapHash: string,
+    preTapState: PreTapState,
     tapPoint: { x: number; y: number },
     action: string,
     longPressDuration: number,
@@ -1200,14 +1220,61 @@ export class TapOnElement extends BaseVisualChange {
   ): Promise<void> {
     await this.timer.sleep(150);
 
-    const postTapHierarchy = await this.refreshViewHierarchy(
+    let postTapHierarchy = await this.refreshViewHierarchy(
       500,
       screenSize,
       signal
     );
+
+    // The CtrlProxy push pipeline can deliver a hierarchy captured *before* the
+    // tap-triggered transition completed (debouncer + throttler windows). If the
+    // post-tap snapshot is not newer than the pre-tap one, give the device one
+    // more chance to push a fresh one before deciding it's a ghost tap.
+    if (
+      postTapHierarchy &&
+      preTapState.updatedAt !== undefined &&
+      postTapHierarchy.updatedAt !== undefined &&
+      postTapHierarchy.updatedAt <= preTapState.updatedAt
+    ) {
+      logger.info(
+        `[TapOnElement][retryIfNoChange] Post-tap snapshot stale ` +
+        `(updatedAt=${postTapHierarchy.updatedAt} <= pre=${preTapState.updatedAt}), refetching`
+      );
+      await this.timer.sleep(200);
+      postTapHierarchy = await this.refreshViewHierarchy(500, screenSize, signal);
+    }
+
+    if (postTapHierarchy) {
+      const postActivity = postTapHierarchy.foregroundActivity;
+      if (
+        preTapState.foregroundActivity &&
+        postActivity &&
+        postActivity !== preTapState.foregroundActivity
+      ) {
+        logger.info(
+          `[TapOnElement][retryIfNoChange] foregroundActivity changed ` +
+          `(${preTapState.foregroundActivity} -> ${postActivity}) — tap registered`
+        );
+        return;
+      }
+
+      const postPackage = postTapHierarchy.packageName;
+      if (
+        preTapState.packageName &&
+        postPackage &&
+        postPackage !== preTapState.packageName
+      ) {
+        logger.info(
+          `[TapOnElement][retryIfNoChange] packageName changed ` +
+          `(${preTapState.packageName} -> ${postPackage}) — tap registered`
+        );
+        return;
+      }
+    }
+
     const postTapHash = this.hashViewHierarchy(postTapHierarchy);
 
-    if (postTapHash && postTapHash !== preTapHash) {
+    if (postTapHash && postTapHash !== preTapState.hash) {
       logger.info(
         `[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`
       );

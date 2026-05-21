@@ -8,6 +8,7 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import { createMcpServer } from "./server";
 import { createProxyMcpServer } from "./server/proxyServer";
 import { logger } from "./utils/logger";
+import { logCiTuningFlags } from "./cli/logCiTuningFlags";
 import { runCliCommand } from "./cli";
 import { runDaemonCommand } from "./daemon/manager";
 import { startDaemon } from "./daemon/daemon";
@@ -457,6 +458,17 @@ async function main() {
       serverConfig.setWaitForPollingOverheadEnabled(false);
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
+
+    logCiTuningFlags(
+      {
+        uiPerfMode,
+        networkMockable,
+        dismissKeyboardAfterInput,
+        noA11yIncludeNotImportantViews,
+        noA11yReportViewIds,
+      },
+      logger
+    );
 
     if (daemonMode) {
       await startDaemon({

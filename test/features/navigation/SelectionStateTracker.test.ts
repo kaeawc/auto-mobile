@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { SelectionStateTracker } from "../../../src/features/navigation/SelectionStateTracker";
-import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeSelectionStateDetector } from "../../fakes/FakeSelectionStateDetector";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -19,19 +18,14 @@ const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult =>
 });
 
 describe("SelectionStateTracker", () => {
-  afterEach(() => {
-    serverConfig.setUiPerfMode(true);
-  });
-
   test("skips capture entirely when ui perf mode is disabled (--no-ui-perf-mode)", async () => {
     const detector = new FakeSelectionStateDetector();
     const capturer = new FakeScreenshotCapturer();
     const tracker = new SelectionStateTracker({
       detector,
-      screenshotCapturer: capturer
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => false,
     });
-
-    serverConfig.setUiPerfMode(false);
 
     const observation = createObservation(
       createHierarchy({

@@ -73,7 +73,8 @@ interface TapOnElementDependencies {
 }
 
 /**
- * Budgets used by retryTapIfNoChange to decide whether a tap registered.
+ * Post-tap observation budgets used by retryTapIfNoChange to decide whether
+ * a tap registered.
  *
  * Activity transitions commonly take 1-2s on contended emulators (emulator.wtf),
  * and the CtrlProxy WebSocket push for the new hierarchy doesn't arrive until
@@ -84,6 +85,9 @@ interface TapOnElementDependencies {
  */
 const POST_TAP_SETTLE_MS = 300;
 const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
+
+/** Brief debounce between the original tap and the retry tap when a ghost tap
+ *  was detected. Just enough to let any inflight gesture queue drain. */
 const PRE_RETRY_DELAY_MS = 100;
 
 /**

@@ -279,6 +279,24 @@ describe("PlanMigrator", () => {
         expect(selector.text).toBe("Already wrapped");
       });
 
+      test("wraps both elementId and text together into selector", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "tapOn",
+            params: { elementId: "submit_btn", text: "Submit" },
+          }],
+        });
+
+        const selector = plan.steps[0].params.selector as { elementId?: string; text?: string };
+        expect(selector.elementId).toBe("submit_btn");
+        expect(selector.text).toBe("Submit");
+        expect(plan.steps[0].params.elementId).toBeUndefined();
+        expect(plan.steps[0].params.text).toBeUndefined();
+      });
+
 
       test("renames inputText.value to text", () => {
         const { plan } = migratePlan({

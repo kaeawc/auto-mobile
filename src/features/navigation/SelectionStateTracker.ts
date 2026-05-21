@@ -54,15 +54,19 @@ interface SelectionFinalizeRequest {
 interface SelectionStateTrackerOptions {
   detector?: SelectionStateDetectorLike;
   screenshotCapturer: ScreenshotCapturer;
+  isUiPerfModeEnabled?: () => boolean;
 }
 
 export class SelectionStateTracker {
   private detector: SelectionStateDetectorLike;
   private screenshotCapturer: ScreenshotCapturer;
+  private isUiPerfModeEnabled: () => boolean;
 
   constructor(options: SelectionStateTrackerOptions) {
     this.detector = options.detector ?? new SelectionStateDetector();
     this.screenshotCapturer = options.screenshotCapturer;
+    this.isUiPerfModeEnabled = options.isUiPerfModeEnabled
+      ?? (() => serverConfig.isUiPerfModeEnabled());
   }
 
   async prepare(request: SelectionCaptureRequest): Promise<SelectionCaptureState | null> {
@@ -75,9 +79,10 @@ export class SelectionStateTracker {
     // a correctness mechanism. In CI / perf-constrained environments it's the
     // single largest source of ADB pipe pressure because it takes two screenshots
     // per tap (before + after) at p90 ~1.7s each, which also stalls CtrlProxy
-    // WebSocket pushes long enough to false-positive ghost-tap detection. Honor
-    // --no-ui-perf-mode by skipping the whole feature.
-    if (!serverConfig.isUiPerfModeEnabled()) {
+    // WebSocket pushes long enough to false-positive ghost-tap detection
+    // (see TapOnElement.retryTapIfNoChange). Honor --no-ui-perf-mode by
+    // skipping the whole feature.
+    if (!this.isUiPerfModeEnabled()) {
       logger.debug(`[SELECTION_STATE] Skip selection capture (${action}): ui-perf-mode disabled`);
       return null;
     }

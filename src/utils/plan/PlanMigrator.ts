@@ -267,6 +267,19 @@ const migrateStepFields = (
         changed = true;
       }
     }
+    // Back-compat: tapClickableParent was removed in v0.0.30 (#2248) — the daemon
+    // now auto-escalates to the nearest clickable ancestor when the matched
+    // element is not itself clickable, making this flag redundant. Strip it so
+    // legacy plans don't fail strict schema validation.
+    if (mergedParams.tapClickableParent !== undefined) {
+      delete mergedParams.tapClickableParent;
+      recordWarning(
+        warnings,
+        "Removed tapClickableParent (redundant with auto-escalation in v0.0.30+).",
+        stepIndex
+      );
+      changed = true;
+    }
   }
 
   if (normalizedTool === "inputText") {

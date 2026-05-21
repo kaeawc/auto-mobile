@@ -279,6 +279,25 @@ describe("PlanMigrator", () => {
         expect(selector.text).toBe("Already wrapped");
       });
 
+      test("strips tapClickableParent (removed in 0.0.30, redundant with auto-escalation)", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "tapOn",
+            params: { text: "Mindy Corkery RTT", tapClickableParent: true }
+          }],
+        });
+
+        expect(plan.steps[0].params.tapClickableParent).toBeUndefined();
+        const selector = plan.steps[0].params.selector as { text?: string };
+        expect(selector.text).toBe("Mindy Corkery RTT");
+        expect(
+          report.warnings.some(w => w.message.includes("tapClickableParent"))
+        ).toBe(true);
+      });
+
       test("renames inputText.value to text", () => {
         const { plan } = migratePlan({
           name: "Plan",

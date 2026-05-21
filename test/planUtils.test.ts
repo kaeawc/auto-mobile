@@ -196,7 +196,9 @@ metadata:
       expect(plan.steps[0].tool).toBe("launchApp");
       expect(plan.steps[0].params.appId).toBe("com.example.app");
       expect(plan.steps[1].tool).toBe("tapOn");
-      expect(plan.steps[1].params.text).toBe("Login");
+      // Migration wraps legacy top-level `text` under `selector` for the
+      // v0.0.30 tapOn schema (PR #2255).
+      expect(plan.steps[1].params.selector).toEqual({ text: "Login" });
       expect(plan.steps[1].params.action).toBe("tap");
     });
 

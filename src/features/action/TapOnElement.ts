@@ -73,6 +73,20 @@ interface TapOnElementDependencies {
 }
 
 /**
+ * Budgets used by retryTapIfNoChange to decide whether a tap registered.
+ *
+ * Activity transitions commonly take 1-2s on contended emulators (emulator.wtf),
+ * and the CtrlProxy WebSocket push for the new hierarchy doesn't arrive until
+ * after the destination renders. With tighter budgets the post-tap refresh
+ * races the push and returns null/stale data during normal activity
+ * transitions, which gets misread as a ghost tap and causes a stray retry on
+ * the new screen.
+ */
+const POST_TAP_SETTLE_MS = 300;
+const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
+const PRE_RETRY_DELAY_MS = 100;
+
+/**
  * Command to tap on UI element containing specified text
  */
 export class TapOnElement extends BaseVisualChange {
@@ -1198,17 +1212,10 @@ export class TapOnElement extends BaseVisualChange {
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<void> {
-    // Activity transitions commonly take 1-2s and the CtrlProxy WebSocket push
-    // doesn't arrive until after the destination renders, so we need both a
-    // longer settle delay and a more generous refresh budget than the original
-    // 150ms/500ms. With the old budgets the post-tap refresh races the push
-    // and returns null/stale data during normal activity transitions, which
-    // gets misread as a ghost tap and causes a stray retry on the new screen.
-    await this.timer.sleep(300);
+    await this.timer.sleep(POST_TAP_SETTLE_MS);
 
-    const refreshTimeoutMs = 1500;
     const postTapHierarchy = await this.refreshViewHierarchy(
-      refreshTimeoutMs,
+      POST_TAP_REFRESH_TIMEOUT_MS,
       screenSize,
       signal
     );
@@ -1220,7 +1227,7 @@ export class TapOnElement extends BaseVisualChange {
       // step's waitFor/observe surface a real failure.
       logger.warn(
         `[TapOnElement][retryIfNoChange] Post-tap refresh returned no hierarchy ` +
-        `within ${refreshTimeoutMs}ms — skipping retry (likely activity transition in progress)`
+        `within ${POST_TAP_REFRESH_TIMEOUT_MS}ms — skipping retry (likely activity transition in progress)`
       );
       return;
     }
@@ -1239,7 +1246,7 @@ export class TapOnElement extends BaseVisualChange {
       `(${tapPoint.x}, ${tapPoint.y}) — ghost tap detected, retrying`
     );
 
-    await this.timer.sleep(100);
+    await this.timer.sleep(PRE_RETRY_DELAY_MS);
 
     await this.executeAndroidTap(
       action,

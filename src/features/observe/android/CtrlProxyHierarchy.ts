@@ -125,8 +125,8 @@ export class CtrlProxyHierarchy {
           } else {
             const isFresh = cacheAge < 1000;
             const duration = this.context.timer.now() - startTime;
-            logger.info(
-              `[CTRL_PROXY][DEBUG] Cache accepted (with minTimestamp) in ${duration}ms: ` +
+            logger.debug(
+              `[CTRL_PROXY] Cache accepted in ${duration}ms: ` +
               `receivedAt=${cachedHierarchy.receivedAt}, ` +
               `updatedAt=${updatedAt}, age=${cacheAge}ms, fresh=${isFresh}`
             );
@@ -142,7 +142,7 @@ export class CtrlProxyHierarchy {
           // No minTimestamp check, return cache
           const isFresh = cacheAge < 1000;
           const duration = this.context.timer.now() - startTime;
-          logger.info(`[CTRL_PROXY][DEBUG] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
+          logger.debug(`[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
 
           return {
             hierarchy: cachedHierarchy.hierarchy,
@@ -172,7 +172,7 @@ export class CtrlProxyHierarchy {
           if (freshData.hierarchy.packageName) {
             this.lastKnownPackageName = freshData.hierarchy.packageName;
           }
-          logger.info(`[CTRL_PROXY][DEBUG] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
+          logger.debug(`[CTRL_PROXY] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
           return {
             hierarchy: freshData.hierarchy,
             fresh: true,
@@ -195,7 +195,7 @@ export class CtrlProxyHierarchy {
               this.lastKnownPackageName = currentCache.hierarchy.packageName;
             }
             currentCache.fresh = false;
-            logger.info(`[CTRL_PROXY][DEBUG] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
+            logger.debug(`[CTRL_PROXY] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
             return {
               hierarchy: currentCache.hierarchy,
               fresh: false,

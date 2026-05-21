@@ -458,6 +458,26 @@ async function main() {
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
 
+    if (!uiPerfMode) {
+      logger.info("UI perf mode disabled (--no-ui-perf-mode): skipping selection-state visual capture on taps and UI perf auditing");
+    }
+
+    if (dismissKeyboardAfterInput) {
+      logger.info("Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)");
+    }
+
+    if (noA11yIncludeNotImportantViews) {
+      logger.info("Accessibility includeNotImportantViews disabled (--no-include-not-important-views)");
+    }
+
+    if (noA11yReportViewIds) {
+      logger.info("Accessibility reportViewIds disabled (--no-report-view-ids)");
+    }
+
+    if (noA11yRetrieveInteractiveWindows) {
+      logger.info("Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)");
+    }
+
     if (daemonMode) {
       await startDaemon({
         port: daemonPort,

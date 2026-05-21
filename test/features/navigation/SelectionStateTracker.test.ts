@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
 import { SelectionStateTracker } from "../../../src/features/navigation/SelectionStateTracker";
+import { serverConfig } from "../../../src/utils/ServerConfig";
 import { FakeSelectionStateDetector } from "../../fakes/FakeSelectionStateDetector";
 import { FakeScreenshotCapturer } from "../../fakes/FakeScreenshotCapturer";
 import { Element, ObserveResult, ViewHierarchyResult } from "../../../src/models";
@@ -18,6 +19,45 @@ const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult =>
 });
 
 describe("SelectionStateTracker", () => {
+  afterEach(() => {
+    serverConfig.setUiPerfMode(true);
+  });
+
+  test("skips capture entirely when ui perf mode is disabled (--no-ui-perf-mode)", async () => {
+    const detector = new FakeSelectionStateDetector();
+    const capturer = new FakeScreenshotCapturer();
+    const tracker = new SelectionStateTracker({
+      detector,
+      screenshotCapturer: capturer
+    });
+
+    serverConfig.setUiPerfMode(false);
+
+    const observation = createObservation(
+      createHierarchy({
+        text: "Tab1",
+        selected: "false",
+        bounds: "[0,0][10,10]"
+      })
+    );
+
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      text: "Tab1",
+      clickable: true
+    };
+
+    const state = await tracker.prepare({
+      action: "tap",
+      observation,
+      element
+    });
+
+    expect(state).toBeNull();
+    expect(capturer.getCallCount()).toBe(0);
+    expect(detector.getContexts()).toHaveLength(0);
+  });
+
   test("skips capture when accessibility selected state is present", async () => {
     const detector = new FakeSelectionStateDetector();
     const capturer = new FakeScreenshotCapturer();

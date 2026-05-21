@@ -1198,13 +1198,33 @@ export class TapOnElement extends BaseVisualChange {
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.timer.sleep(150);
+    // Activity transitions commonly take 1-2s and the CtrlProxy WebSocket push
+    // doesn't arrive until after the destination renders, so we need both a
+    // longer settle delay and a more generous refresh budget than the original
+    // 150ms/500ms. With the old budgets the post-tap refresh races the push
+    // and returns null/stale data during normal activity transitions, which
+    // gets misread as a ghost tap and causes a stray retry on the new screen.
+    await this.timer.sleep(300);
 
+    const refreshTimeoutMs = 1500;
     const postTapHierarchy = await this.refreshViewHierarchy(
-      500,
+      refreshTimeoutMs,
       screenSize,
       signal
     );
+
+    if (!postTapHierarchy) {
+      // Refresh timed out — we can't tell whether the tap registered. A retry
+      // here is more likely to land on a transitioning screen and bounce us
+      // off-path than to recover a real ghost tap. Bail and let the next
+      // step's waitFor/observe surface a real failure.
+      logger.warn(
+        `[TapOnElement][retryIfNoChange] Post-tap refresh returned no hierarchy ` +
+        `within ${refreshTimeoutMs}ms — skipping retry (likely activity transition in progress)`
+      );
+      return;
+    }
+
     const postTapHash = this.hashViewHierarchy(postTapHierarchy);
 
     if (postTapHash && postTapHash !== preTapHash) {

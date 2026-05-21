@@ -38,6 +38,7 @@ import { IOSCtrlProxyClient } from "../features/observe/ios";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
+import { logCiTuningFlags } from "../cli/logCiTuningFlags";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../utils/appearance/AppearanceSyncScheduler";
@@ -140,6 +141,17 @@ export class Daemon {
     if (options.noA11yRetrieveInteractiveWindows) {
       serverConfig.setA11yRetrieveInteractiveWindows(false);
     }
+
+    logCiTuningFlags(
+      {
+        uiPerfMode: !options.noUiPerfMode,
+        networkMockable: options.networkMockable === true,
+        dismissKeyboardAfterInput: options.dismissKeyboardAfterInput === true,
+        noA11yIncludeNotImportantViews: options.noA11yIncludeNotImportantViews === true,
+        noA11yReportViewIds: options.noA11yReportViewIds === true,
+      },
+      logger
+    );
   }
 
   /**

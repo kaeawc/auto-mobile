@@ -459,16 +459,21 @@ async function main() {
       logger.info("WaitFor polling overhead disabled (--no-waitfor-polling-overhead): screenshots and back stack skipped during observe waitFor polling");
     }
 
-    logCiTuningFlags(
-      {
-        uiPerfMode,
-        networkMockable,
-        dismissKeyboardAfterInput,
-        noA11yIncludeNotImportantViews,
-        noA11yReportViewIds,
-      },
-      logger
-    );
+    // Only log here in direct/no-proxy mode — in proxy mode the spawned daemon
+    // process logs the flags it actually applies (see daemon.ts), avoiding
+    // false-positive logs when the proxy reuses an existing daemon.
+    if (noProxy) {
+      logCiTuningFlags(
+        {
+          uiPerfMode,
+          networkMockable,
+          dismissKeyboardAfterInput,
+          noA11yIncludeNotImportantViews,
+          noA11yReportViewIds,
+        },
+        logger
+      );
+    }
 
     if (daemonMode) {
       await startDaemon({

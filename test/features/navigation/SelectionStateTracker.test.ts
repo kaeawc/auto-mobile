@@ -56,7 +56,8 @@ describe("SelectionStateTracker", () => {
     const capturer = new FakeScreenshotCapturer();
     const tracker = new SelectionStateTracker({
       detector,
-      screenshotCapturer: capturer
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => true
     });
 
     capturer.setPaths(["before.png", "after.png"]);

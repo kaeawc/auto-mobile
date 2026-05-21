@@ -107,23 +107,78 @@ export function resolveLatestVersion(): string {
   return RELEASE_CHECKSUM_REGISTRY[0].version;
 }
 
-// --- Backward-compatible exports derived from registry[0] ---
-
-export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
-
-function buildReleaseAssetUrl(filename: string): string {
-  const version = resolveLatestVersion();
-  if (version === LATEST_RELEASE_VERSION) {
-    return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
+/**
+ * Resolve the effective CtrlProxy release version, honoring an optional
+ * env-var override.
+ *
+ * Without the env var set, the daemon uses the newest validated version from
+ * RELEASE_CHECKSUM_REGISTRY (equivalent to "latest"). Setting the env var
+ * pins both the on-device APK download URL and the expected checksum to a
+ * specific historical release — useful when:
+ *
+ *  - the latest CtrlProxy has a regression you want to dodge, or
+ *  - you want CI to behave deterministically across daemon upgrades.
+ *
+ * Unknown versions throw at module load rather than silently falling back
+ * to latest; CI configs should be explicit, and a typo should fail fast
+ * rather than quietly downgrade.
+ *
+ * Exported for testing — pass the env value and registry explicitly.
+ */
+export function resolveConfiguredVersion(
+  envValue: string | undefined,
+  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
+): string {
+  const trimmed = envValue?.trim();
+  if (!trimmed || trimmed.length === 0) {
+    return LATEST_RELEASE_VERSION;
   }
-  return `https://github.com/kaeawc/auto-mobile/releases/download/${version}/${filename}`;
+  if (trimmed.toLowerCase() === LATEST_RELEASE_VERSION) {
+    return LATEST_RELEASE_VERSION;
+  }
+  const hit = registry.find(e => e.version === trimmed);
+  if (!hit) {
+    const known = registry.map(e => e.version).join(", ") || "<empty registry>";
+    throw new Error(
+      `AUTOMOBILE_CTRL_PROXY_VERSION=${trimmed} not found in release registry. ` +
+      `Known versions: ${known}.`
+    );
+  }
+  return trimmed;
 }
 
-export const APK_URL: string = buildReleaseAssetUrl("control-proxy-debug.apk");
-export const APK_SHA256_CHECKSUM: string = resolveChecksum(LATEST_RELEASE_VERSION, "android");
+// --- Backward-compatible exports derived from RELEASE_VERSION ---
 
-export const IOS_CTRL_PROXY_RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
-export const IOS_CTRL_PROXY_IPA_URL: string = buildReleaseAssetUrl("control-proxy.ipa");
-export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveChecksum(LATEST_RELEASE_VERSION, "ios");
+export const RELEASE_VERSION: string = resolveConfiguredVersion(
+  process.env.AUTOMOBILE_CTRL_PROXY_VERSION
+);
+
+/**
+ * Resolve the version string that should appear in download URLs.
+ * "latest" expands to registry[0].version so URLs are always concrete.
+ */
+function resolveAssetVersion(version: string): string {
+  if (version === LATEST_RELEASE_VERSION) {
+    return resolveLatestVersion();
+  }
+  return version;
+}
+
+function buildReleaseAssetUrl(filename: string, version: string): string {
+  const assetVersion = resolveAssetVersion(version);
+  if (assetVersion === LATEST_RELEASE_VERSION) {
+    // Degenerate case: registry is empty AND nothing pinned. Fall back to
+    // GitHub's redirecting /latest/download/ endpoint.
+    return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
+  }
+  return `https://github.com/kaeawc/auto-mobile/releases/download/${assetVersion}/${filename}`;
+}
+
+export const APK_URL: string = buildReleaseAssetUrl("control-proxy-debug.apk", RELEASE_VERSION);
+export const APK_SHA256_CHECKSUM: string = resolveChecksum(RELEASE_VERSION, "android");
+
+export const IOS_CTRL_PROXY_RELEASE_VERSION: string = RELEASE_VERSION;
+export const IOS_CTRL_PROXY_IPA_URL: string = buildReleaseAssetUrl("control-proxy.ipa", IOS_CTRL_PROXY_RELEASE_VERSION);
+export const IOS_CTRL_PROXY_SHA256_CHECKSUM: string = resolveChecksum(IOS_CTRL_PROXY_RELEASE_VERSION, "ios");
 export const IOS_CTRL_PROXY_APP_HASH: string = ""; // Hash of CtrlProxyApp.app (device build), empty = skip verification
 export const IOS_CTRL_PROXY_RUNNER_SHA256: string = ""; // SHA256 of runner binary (CtrlProxyUITests-Runner), empty = skip verification

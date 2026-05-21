@@ -1,8 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import {
-  resolveChecksum,
-  resolveLatestVersion,
+  APK_SHA256_CHECKSUM,
+  APK_URL,
+  IOS_CTRL_PROXY_IPA_URL,
+  IOS_CTRL_PROXY_SHA256_CHECKSUM,
+  LATEST_RELEASE_VERSION,
   RELEASE_CHECKSUM_REGISTRY,
+  RELEASE_VERSION,
+  resolveChecksum,
+  resolveConfiguredVersion,
+  resolveLatestVersion,
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
 
@@ -65,5 +72,84 @@ describe("resolveChecksum", function() {
 describe("resolveLatestVersion", function() {
   test("returns first registry entry version", function() {
     expect(resolveLatestVersion()).toBe(RELEASE_CHECKSUM_REGISTRY[0].version);
+  });
+});
+
+describe("resolveConfiguredVersion", function() {
+  const registry: ReleaseChecksumEntry[] = [
+    { version: "0.0.30", apkSha256: "apk30", ipaSha256: "ipa30" },
+    { version: "0.0.28", apkSha256: "apk28", ipaSha256: "ipa28" },
+  ];
+
+  test("undefined env returns LATEST_RELEASE_VERSION", function() {
+    expect(resolveConfiguredVersion(undefined, registry)).toBe(LATEST_RELEASE_VERSION);
+  });
+
+  test("empty string returns LATEST_RELEASE_VERSION", function() {
+    expect(resolveConfiguredVersion("", registry)).toBe(LATEST_RELEASE_VERSION);
+  });
+
+  test("whitespace-only returns LATEST_RELEASE_VERSION", function() {
+    expect(resolveConfiguredVersion("   ", registry)).toBe(LATEST_RELEASE_VERSION);
+  });
+
+  test("explicit 'latest' returns LATEST_RELEASE_VERSION (case-insensitive, trimmed)", function() {
+    expect(resolveConfiguredVersion("latest", registry)).toBe(LATEST_RELEASE_VERSION);
+    expect(resolveConfiguredVersion("LATEST", registry)).toBe(LATEST_RELEASE_VERSION);
+    expect(resolveConfiguredVersion(" latest ", registry)).toBe(LATEST_RELEASE_VERSION);
+  });
+
+  test("known pinned version returns the version verbatim", function() {
+    expect(resolveConfiguredVersion("0.0.28", registry)).toBe("0.0.28");
+  });
+
+  test("trims whitespace from pinned version", function() {
+    expect(resolveConfiguredVersion("  0.0.30  ", registry)).toBe("0.0.30");
+  });
+
+  test("unknown pinned version throws with list of known versions", function() {
+    expect(() => resolveConfiguredVersion("99.99.99", registry)).toThrow(
+      /AUTOMOBILE_CTRL_PROXY_VERSION=99\.99\.99.*Known versions: 0\.0\.30, 0\.0\.28/
+    );
+  });
+
+  test("empty registry with unknown pinned version throws", function() {
+    expect(() => resolveConfiguredVersion("0.0.28", [])).toThrow(/Known versions: <empty registry>/);
+  });
+
+  test("resolves against the default registry when none is passed", function() {
+    expect(resolveConfiguredVersion(undefined)).toBe(LATEST_RELEASE_VERSION);
+    expect(resolveConfiguredVersion(RELEASE_CHECKSUM_REGISTRY[0].version)).toBe(
+      RELEASE_CHECKSUM_REGISTRY[0].version
+    );
+  });
+});
+
+describe("module exports under default (no env var) configuration", function() {
+  // bun-test does not set AUTOMOBILE_CTRL_PROXY_VERSION, so RELEASE_VERSION
+  // should resolve to "latest". These assertions guard against regressions
+  // in the wiring between RELEASE_VERSION, the URL builder, and the
+  // checksum resolver.
+  const newest = RELEASE_CHECKSUM_REGISTRY[0];
+
+  test("RELEASE_VERSION defaults to LATEST_RELEASE_VERSION when env var is unset", function() {
+    if (process.env.AUTOMOBILE_CTRL_PROXY_VERSION) {
+      // Test irrelevant when env var is set externally; bail rather than
+      // false-fail.
+      return;
+    }
+    expect(RELEASE_VERSION).toBe(LATEST_RELEASE_VERSION);
+  });
+
+  test("APK_URL and IPA_URL reference the newest registered version", function() {
+    if (process.env.AUTOMOBILE_CTRL_PROXY_VERSION) {return;}
+    expect(APK_URL).toContain(`/releases/download/${newest.version}/control-proxy-debug.apk`);
+    expect(IOS_CTRL_PROXY_IPA_URL).toContain(`/releases/download/${newest.version}/control-proxy.ipa`);
+  });
+
+  test("APK_SHA256_CHECKSUM and IPA checksum match the newest registered entry", function() {
+    if (process.env.AUTOMOBILE_CTRL_PROXY_VERSION) {return;}
+    expect(APK_SHA256_CHECKSUM).toBe(newest.apkSha256);
+    expect(IOS_CTRL_PROXY_SHA256_CHECKSUM).toBe(newest.ipaSha256);
   });
 });

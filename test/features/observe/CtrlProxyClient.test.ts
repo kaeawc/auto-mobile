@@ -267,6 +267,53 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("should return fresh data when WebSocket push arrives after 100ms under contention (regression #2285)", async function() {
+      // Pre-bug: default timeout was 100ms. When ADB pipe is busy (concurrent
+      // screenshots, dumpsys, etc.), the WebSocket push routinely lands after
+      // 100ms and getLatestHierarchy fell back to stale cache (~31% stale rate
+      // in CI). Default is now 1000ms, matching the cache freshness TTL.
+      const testTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+
+      try {
+        // Call without specifying a timeout so we exercise the default.
+        const resultPromise = testClient.getLatestHierarchy(true);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        // Simulate contended push delivery: advance 300ms of virtual time
+        // before the push arrives. Past the old 100ms default — with the old
+        // code the polling loop would already have cleared the interval and
+        // resolved null, returning stale cache (here: no cache → null).
+        await testTimer.advanceTimersByTimeAsync(300);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: testTimer.now(),
+            packageName: "com.example.app",
+            hierarchy: { text: "Contended push" }
+          }
+        }));
+
+        const result = await testTimer.resolvePromise(resultPromise);
+
+        expect(result.fresh).toBe(true);
+        expect(result.hierarchy).not.toBeNull();
+        expect(result.hierarchy!.hierarchy.text).toBe("Contended push");
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("should handle WebSocket connection failure gracefully", async function() {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)

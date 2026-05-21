@@ -1113,13 +1113,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   async getLatestHierarchy(
     waitForFresh: boolean = false,
-    timeout: number = 100,
+    timeout?: number,
     perf: PerformanceTracker = new NoOpPerformanceTracker(),
     skipWaitForFresh: boolean = false,
     minTimestamp: number = 0,
     signal?: AbortSignal
   ): Promise<AccessibilityHierarchyResponse> {
-    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout, perf, skipWaitForFresh, minTimestamp, signal);
+    return this.hierarchy.getLatestHierarchy(waitForFresh, timeout!, perf, skipWaitForFresh, minTimestamp, signal);
   }
 
   async requestHierarchySync(

@@ -17,6 +17,8 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
+import { RealHierarchyPlatformValidator } from "./hierarchyPlatformValidator";
+import type { HierarchyPlatformValidator } from "./hierarchyPlatformValidator";
 import { serverConfig } from "../utils/ServerConfig";
 import {
   accessibilityStateSchema,
@@ -265,7 +267,9 @@ const waitForObservation = async (
 };
 
 // Register tools (this will be called when this file is imported)
-export function registerObserveTools() {
+export function registerObserveTools(
+  platformValidator: HierarchyPlatformValidator = new RealHierarchyPlatformValidator()
+) {
   // Observe handler
   const observeHandler = async (device: BootedDevice, args: ObserveArgs, _progress?: unknown, signal?: AbortSignal) => {
     try {
@@ -278,33 +282,15 @@ export function registerObserveTools() {
         ? waitOutcome.observation
         : await observeScreen.execute({ perf: createGlobalPerformanceTracker(), skipWaitForFresh: true, signal });
 
-      // Validate that the returned hierarchy matches the expected platform.
-      // This guards against cross-platform data contamination where an iOS
-      // hierarchy could be returned for an Android device (or vice versa).
       if (result.viewHierarchy?.hierarchy) {
-        const hierarchy = result.viewHierarchy.hierarchy;
-        const isIosHierarchy = hierarchy.type === "XCUIElementTypeApplication"
-          || hierarchy.elementType === "application"
-          || (typeof hierarchy.bundleId === "string" && !hierarchy.node);
-        const isAndroidHierarchy = hierarchy.node !== undefined
-          || (hierarchy.$ && hierarchy.$.class);
-
-        if (device.platform === "android" && isIosHierarchy && !isAndroidHierarchy) {
+        const validation = platformValidator.validate(device.platform, result.viewHierarchy);
+        if (!validation.valid) {
           logger.error(
-            `[observe] Platform mismatch: device ${device.deviceId} is Android but received iOS hierarchy. ` +
-            `Discarding stale iOS data to prevent cross-platform contamination.`
+            `[observe] Platform mismatch: device ${device.deviceId} is ${device.platform} but received hierarchy from other platform. ` +
+            `Discarding stale data to prevent cross-platform contamination.`
           );
           result.viewHierarchy = undefined;
-          result.error = "Platform mismatch detected: received iOS hierarchy for Android device. " +
-            "This may indicate a stale connection. Try calling observe again.";
-        } else if (device.platform === "ios" && isAndroidHierarchy && !isIosHierarchy) {
-          logger.error(
-            `[observe] Platform mismatch: device ${device.deviceId} is iOS but received Android hierarchy. ` +
-            `Discarding stale Android data to prevent cross-platform contamination.`
-          );
-          result.viewHierarchy = undefined;
-          result.error = "Platform mismatch detected: received Android hierarchy for iOS device. " +
-            "This may indicate a stale connection. Try calling observe again.";
+          result.error = validation.error;
         }
       }
 

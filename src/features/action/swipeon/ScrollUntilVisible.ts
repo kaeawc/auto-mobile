@@ -124,6 +124,7 @@ export class ScrollUntilVisible {
       ? `text "${options.lookFor!.text}"`
       : `element with id "${options.lookFor!.elementId}"`;
     logger.info(`[SwipeOn] Looking for ${target} with maxTime=${maxTime}ms`);
+    logger.info(`[SwipeOn][DEBUG] ${this.summarizeFingerprint("initial", lastFingerprint)}`);
 
     // Check if TalkBack is enabled (not just any accessibility service)
     const isTalkBackEnabled = await perf.track("checkTalkBack", async () => {
@@ -251,6 +252,18 @@ export class ScrollUntilVisible {
         throw new Error("Lost observation after swipe during scroll until visible.");
       }
 
+      const postSwipeFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
+      logger.info(
+        `[SwipeOn][DEBUG] iter=${scrollIteration} ` +
+        this.summarizeFingerprint("post-swipe", postSwipeFingerprint)
+      );
+      if (postSwipeFingerprint === lastFingerprint) {
+        logger.info(
+          `[SwipeOn][DEBUG] iter=${scrollIteration} WARNING post-swipe fingerprint matches pre-swipe — ` +
+          `observation may be stale (cache hit?) or swipe had no visible effect.`
+        );
+      }
+
       // Wait for scroll animation to fully settle before inspecting the hierarchy.
       // The post-swipe observation may reflect a mid-scroll position (the accessibility service
       // can return a cached hierarchy captured before the fling decelerates to rest). Polling
@@ -258,6 +271,7 @@ export class ScrollUntilVisible {
       // idle state rather than a transient mid-scroll frame.
       const elapsedMs = this.deps.timer.now() - startTime;
       const idleCheckMaxMs = Math.min(1500, Math.max(0, maxTime - elapsedMs - 300));
+      const idleCheckStart = this.deps.timer.now();
       if (idleCheckMaxMs > 100) {
         lastObservation = await this.waitForScrollIdle(lastObservation, idleCheckMaxMs);
       }
@@ -265,6 +279,10 @@ export class ScrollUntilVisible {
       // Check if hierarchy changed (detect scroll end)
       const currentFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
       const fingerprintChanged = currentFingerprint !== lastFingerprint;
+      logger.info(
+        `[SwipeOn][DEBUG] iter=${scrollIteration} idleCheck took ${this.deps.timer.now() - idleCheckStart}ms ` +
+        `(budget=${idleCheckMaxMs}ms); ` + this.summarizeFingerprint("post-idle", currentFingerprint)
+      );
       logger.info(`[SwipeOn] Iteration ${scrollIteration}: hierarchy ${fingerprintChanged ? "changed" : "UNCHANGED"} (fingerprint[0:40]="${currentFingerprint.slice(0, 40)}")`);
 
       if (!fingerprintChanged) {
@@ -496,6 +514,34 @@ export class ScrollUntilVisible {
     return JSON.stringify(viewHierarchy.hierarchy);
   }
 
+  /**
+   * DEBUG: structured summary of a fingerprint for diagnosing scroll-end-detection failures.
+   * Logs length, a stable short hash, head/tail snippets, a node-count approximation, and a few
+   * bounds samples so consecutive iterations can be compared at a glance to tell whether the
+   * post-swipe observation reflects the new scroll position or returned stale-cached data.
+   */
+  private summarizeFingerprint(label: string, fingerprint: string): string {
+    if (!fingerprint) {
+      return `${label}: <empty>`;
+    }
+    let hash = 0;
+    for (let i = 0; i < fingerprint.length; i++) {
+      hash = (Math.imul(31, hash) + fingerprint.charCodeAt(i)) | 0;
+    }
+    const hashHex = (hash >>> 0).toString(16).padStart(8, "0");
+    const nodeCount = (fingerprint.match(/"node":/g) ?? []).length;
+    const boundsMatches = fingerprint.match(/"bounds":"\[[^"]+\]"/g) ?? [];
+    const firstBounds = boundsMatches.slice(0, 2).join(", ");
+    const lastBounds = boundsMatches.slice(-2).join(", ");
+    const head = fingerprint.slice(0, 80).replace(/\s+/g, " ");
+    const tail = fingerprint.slice(-80).replace(/\s+/g, " ");
+    return (
+      `${label}: len=${fingerprint.length} hash=${hashHex} nodes=${nodeCount} ` +
+      `boundsCount=${boundsMatches.length} firstBounds=[${firstBounds}] lastBounds=[${lastBounds}] ` +
+      `head="${head}" tail="${tail}"`
+    );
+  }
+
   private async setAccessibilityFocusOnElement(
     element: Element,
     perf: PerformanceTracker
@@ -560,12 +606,26 @@ export class ScrollUntilVisible {
     const pollIntervalMs = 150;
     let previousFingerprint = this.computeHierarchyFingerprint(currentObservation.viewHierarchy);
     let latestObservation = currentObservation;
+    logger.info(`[SwipeOn][DEBUG] waitForScrollIdle: ${this.summarizeFingerprint("entry", previousFingerprint)}`);
+    let pollIteration = 0;
 
     while (this.deps.timer.now() - startTime < maxWaitMs) {
+      pollIteration++;
+      const pollStart = this.deps.timer.now();
       const newObservation = await this.deps.observeScreen.execute();
-      if (!newObservation.viewHierarchy) {break;}
+      const pollObserveMs = this.deps.timer.now() - pollStart;
+      if (!newObservation.viewHierarchy) {
+        logger.info(`[SwipeOn][DEBUG] waitForScrollIdle poll=${pollIteration}: observeScreen returned no viewHierarchy (took ${pollObserveMs}ms), breaking`);
+        break;
+      }
       const newFingerprint = this.computeHierarchyFingerprint(newObservation.viewHierarchy);
-      if (newFingerprint === previousFingerprint) {
+      const matchedPrev = newFingerprint === previousFingerprint;
+      logger.info(
+        `[SwipeOn][DEBUG] waitForScrollIdle poll=${pollIteration} elapsed=${this.deps.timer.now() - startTime}ms ` +
+        `observeMs=${pollObserveMs} matchedPrev=${matchedPrev}; ` +
+        this.summarizeFingerprint(`poll${pollIteration}`, newFingerprint)
+      );
+      if (matchedPrev) {
         logger.info(`[SwipeOn] Scroll settled after ${this.deps.timer.now() - startTime}ms idle check`);
         return newObservation;
       }
@@ -575,7 +635,7 @@ export class ScrollUntilVisible {
       await this.deps.timer.sleep(pollIntervalMs);
     }
 
-    logger.info(`[SwipeOn] Scroll idle check reached ${maxWaitMs}ms limit, proceeding`);
+    logger.info(`[SwipeOn] Scroll idle check reached ${maxWaitMs}ms limit, proceeding (polls=${pollIteration})`);
     return latestObservation;
   }
 

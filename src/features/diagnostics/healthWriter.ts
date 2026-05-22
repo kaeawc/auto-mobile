@@ -83,6 +83,10 @@ function defaultRandomSuffix(): string {
 
 
 const defaultHealthWriterFs: HealthWriterFs = {
-  mkdirSync: (p, options) => fs.mkdirSync(p, options),
-  writeFileSync: (p, contents, encoding) => fs.writeFileSync(p, contents, encoding),
+  mkdirSync: (p, options) => fs.mkdirSync(p, { ...options, mode: 0o700 }),
+  writeFileSync: (p, contents, encoding) => fs.writeFileSync(p, contents, {
+    encoding,
+    flag: "wx",
+    mode: 0o600,
+  }),
 };

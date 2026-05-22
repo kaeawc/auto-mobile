@@ -663,7 +663,6 @@ jobs:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
           - macos-latest
           - windows-latest
     steps:
@@ -783,23 +782,72 @@ jobs:
   # =============================================================================
 
   ts-code-coverage:
-    name: "TypeScript Code Coverage"
+    name: "Node TypeScript Build and Test (ubuntu-latest)"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Cache Bun dependencies"
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-ubuntu-latest-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-ubuntu-latest-
+
+      - name: "Cache Turborepo"
+        uses: actions/cache@v5
+        with:
+          path: .turbo
+          key: turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
+            turbo-ubuntu-latest-
+
+      - name: "Setup Auto Mobile"
+        uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Run Lint"
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          TURBO_NO_UPDATE_NOTIFIER: "1"
+          DO_NOT_TRACK: "1"
+          NO_COLOR: "1"
+        run: turbo run lint --output-logs=errors-only --log-order=grouped
+
+      - name: "Run Build"
+        shell: bash
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          TURBO_NO_UPDATE_NOTIFIER: "1"
+          DO_NOT_TRACK: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-ubuntu-latest.log"
 
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh
 
       - name: "Verify Coverage Output"
         run: bash scripts/ci/verify-ts-coverage-output.sh
+
+      - name: "Upload Build/Test Logs"
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-build-test-logs-ubuntu-latest
+          path: ci-logs/*.log
+          retention-days: 7
 
       - name: "Upload Coverage"
         uses: actions/upload-artifact@v6

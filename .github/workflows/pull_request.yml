@@ -924,8 +924,8 @@ jobs:
   # iOS Build and Test Jobs (Skip for docs-only changes)
   # =============================================================================
 
-  ios-swift-build:
-    name: "Build Swift Packages (${{ matrix.config.name }})"
+  ios-swift-packages:
+    name: "Swift Packages (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -978,17 +978,19 @@ jobs:
           IOS_SIGNING_STRICT: ${{ env.IOS_SIGNING_ENABLED }}
         run: ./scripts/ios/swift-build.sh
 
-  ios-swift-test:
-    name: "Test Swift Packages (${{ matrix.config.name }})"
+      - name: "Test Swift Packages"
+        run: ./scripts/ios/swift-test.sh
+
+  ios-xcode-build:
+    name: "Build Xcode Projects (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
-    needs: [detect-changes, ios-swift-build]
+    needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
           - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
@@ -1000,20 +1002,6 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
-
-      - name: "Test Swift Packages"
-        run: ./scripts/ios/swift-test.sh
-
-  ios-xcodegen:
-    name: "Generate Xcode Projects"
-    runs-on: macos-26
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
 
       - name: "Install XcodeGen"
         run: brew install xcodegen
@@ -1021,39 +1009,18 @@ jobs:
       - name: "Generate Xcode Projects"
         run: ./scripts/ios/xcodegen-generate.sh
 
-  ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
-    needs: [detect-changes, ios-xcodegen]
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.config.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.config.xcode }}
-
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Build Xcode Projects"
         run: ./scripts/ios/xcode-build.sh
 
-  ios-ctrl-proxy-build:
-    name: "Build CtrlProxy iOS for Testing"
+  ios-xctest-runner-simulator-tests:
+    name: "XCTestRunner Simulator Tests"
     runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
+    timeout-minutes: 45
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1074,52 +1041,12 @@ jobs:
       - name: "Build CtrlProxy iOS for Testing"
         run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
 
-      - name: "Upload CtrlProxy iOS Artifacts"
-        uses: actions/upload-artifact@v6
-        with:
-          name: ctrl-proxy-simulator-xcode26
-          path: /tmp/automobile-ctrl-proxy/Build/Products
-          retention-days: 1
-
-  ios-xctest-runner-simulator-tests:
-    name: "XCTestRunner Simulator Tests (Xcode ${{ matrix.xcode }})"
-    runs-on: macos-26
-    needs: [detect-changes, ios-ctrl-proxy-build]
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        xcode: ["26.2", "26.3"]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.xcode }}
-
-      - name: "Download CtrlProxy iOS Artifacts"
-        uses: actions/download-artifact@v7
-        with:
-          name: ctrl-proxy-simulator-xcode26
-          path: /tmp/automobile-ctrl-proxy/Build/Products
-
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.9
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Ensure iOS Simulator runtime"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Boot iOS Simulator"
-        run: ./scripts/ios/boot-simulator.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |
@@ -1129,7 +1056,41 @@ jobs:
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
 
-      - name: "Run Reminders integration tests"
+      - name: "Select Xcode 26.2"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.2"
+
+      - name: "Ensure iOS Simulator runtime (Xcode 26.2)"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Boot iOS Simulator (Xcode 26.2)"
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run Reminders integration tests (Xcode 26.2)"
+        timeout-minutes: 10
+        env:
+          AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
+        run: |
+          cd ios/XCTestRunner
+          swift test --filter RemindersLaunchPlanTests 2>&1
+
+      - name: "Shutdown iOS Simulators"
+        if: always()
+        run: xcrun simctl shutdown all || true
+
+      - name: "Select Xcode 26.3"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.3"
+
+      - name: "Ensure iOS Simulator runtime (Xcode 26.3)"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Boot iOS Simulator (Xcode 26.3)"
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
@@ -1927,11 +1888,8 @@ jobs:
     name: "iOS"
     if: always()
     needs:
-      - ios-swift-build
-      - ios-swift-test
-      - ios-xcodegen
+      - ios-swift-packages
       - ios-xcode-build
-      - ios-ctrl-proxy-build
       - ios-xctest-runner-simulator-tests
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
@@ -1939,11 +1897,8 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
-            "${{ needs.ios-swift-build.result }}" \
-            "${{ needs.ios-swift-test.result }}" \
-            "${{ needs.ios-xcodegen.result }}" \
+            "${{ needs.ios-swift-packages.result }}" \
             "${{ needs.ios-xcode-build.result }}" \
-            "${{ needs.ios-ctrl-proxy-build.result }}" \
             "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
             "${{ needs.ios-spm-root-package-build.result }}" \
           )

@@ -73,6 +73,24 @@ interface TapOnElementDependencies {
 }
 
 /**
+ * Post-tap observation budgets used by retryTapIfNoChange to decide whether
+ * a tap registered.
+ *
+ * Activity transitions commonly take 1-2s on contended emulators (emulator.wtf),
+ * and the CtrlProxy WebSocket push for the new hierarchy doesn't arrive until
+ * after the destination renders. With tighter budgets the post-tap refresh
+ * races the push and returns null/stale data during normal activity
+ * transitions, which gets misread as a ghost tap and causes a stray retry on
+ * the new screen.
+ */
+const POST_TAP_SETTLE_MS = 300;
+const POST_TAP_REFRESH_TIMEOUT_MS = 1500;
+
+/** Brief debounce between the original tap and the retry tap when a ghost tap
+ *  was detected. Just enough to let any inflight gesture queue drain. */
+const PRE_RETRY_DELAY_MS = 100;
+
+/**
  * Command to tap on UI element containing specified text
  */
 export class TapOnElement extends BaseVisualChange {
@@ -1198,13 +1216,26 @@ export class TapOnElement extends BaseVisualChange {
     screenSize: ObserveResult["screenSize"],
     signal?: AbortSignal,
   ): Promise<void> {
-    await this.timer.sleep(150);
+    await this.timer.sleep(POST_TAP_SETTLE_MS);
 
     const postTapHierarchy = await this.refreshViewHierarchy(
-      500,
+      POST_TAP_REFRESH_TIMEOUT_MS,
       screenSize,
       signal
     );
+
+    if (!postTapHierarchy) {
+      // Refresh timed out — we can't tell whether the tap registered. A retry
+      // here is more likely to land on a transitioning screen and bounce us
+      // off-path than to recover a real ghost tap. Bail and let the next
+      // step's waitFor/observe surface a real failure.
+      logger.warn(
+        `[TapOnElement][retryIfNoChange] Post-tap refresh returned no hierarchy ` +
+        `within ${POST_TAP_REFRESH_TIMEOUT_MS}ms — skipping retry (likely activity transition in progress)`
+      );
+      return;
+    }
+
     const postTapHash = this.hashViewHierarchy(postTapHierarchy);
 
     if (postTapHash && postTapHash !== preTapHash) {
@@ -1219,7 +1250,7 @@ export class TapOnElement extends BaseVisualChange {
       `(${tapPoint.x}, ${tapPoint.y}) — ghost tap detected, retrying`
     );
 
-    await this.timer.sleep(100);
+    await this.timer.sleep(PRE_RETRY_DELAY_MS);
 
     await this.executeAndroidTap(
       action,

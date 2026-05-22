@@ -34,10 +34,11 @@ describe("YamlPlanSerializer", () => {
       expect(plan.description).toBe("A test plan");
       expect(plan.steps).toHaveLength(2);
       expect(plan.steps[0].tool).toBe("tapOn");
-      expect(plan.steps[0].params).toEqual({ text: "Hello", action: "tap" });
+      // Migration adds action: "tap" to tapOn steps and wraps legacy top-level
+      // `text` under `selector` for the v0.0.30 tapOn schema.
+      expect(plan.steps[0].params).toEqual({ selector: { text: "Hello" }, action: "tap" });
       expect(plan.steps[1].tool).toBe("inputText");
       expect(plan.steps[1].params).toEqual({ text: "World" });
-      // Note: migration adds action: "tap" to tapOn steps
     });
 
     test("imports a minimal valid plan", () => {
@@ -93,7 +94,9 @@ describe("YamlPlanSerializer", () => {
 
       const plan = serializer.importPlanFromYaml(yamlContent);
 
-      expect(plan.steps[0].params.text).toBe("Button");
+      // Migration wraps legacy top-level `text` under `selector` for the
+      // v0.0.30 tapOn schema.
+      expect(plan.steps[0].params).toEqual({ selector: { text: "Button" }, action: "tap" });
     });
 
     test("sets default description when not provided", () => {
@@ -176,7 +179,10 @@ describe("YamlPlanSerializer", () => {
           version: "1.0.0",
         },
         steps: [
-          { tool: "tapOn", params: { text: "Login", action: "tap" } },
+          // Use v0.0.30 selector shape so the round-trip is meaningful — the
+          // importer auto-migrates legacy { text: "..." } to { selector: { text: "..." } },
+          // which would otherwise make the round-trip non-identity.
+          { tool: "tapOn", params: { selector: { text: "Login" }, action: "tap" } },
           { tool: "inputText", params: { text: "user@example.com" } },
           { tool: "pressButton", params: { button: "enter" } },
         ],

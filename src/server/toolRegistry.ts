@@ -8,6 +8,7 @@ import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import { serverConfig } from "../utils/ServerConfig";
 import { MemoryAudit } from "../features/memory/MemoryAudit";
 import { TelemetryRecorder } from "../features/telemetry/TelemetryRecorder";
+import { getActiveRecorder } from "../features/diagnostics/RunHealthRecorder";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -312,6 +313,10 @@ class ToolRegistryClass {
         }
       }
 
+      // Sentinel so the catch block doesn't double-count a tool call as a
+      // failure when post-success bookkeeping (mcpRecorder, session cache,
+      // navigation graph) throws after the success-path recordToolCall fires.
+      let recordedToolCall = false;
       try {
         // Record tool call for navigation graph correlation
         // Only record UI interaction tools that may cause navigation
@@ -423,6 +428,8 @@ class ToolRegistryClass {
           error: toolError,
           args: typeof args === "object" ? args : null,
         });
+        getActiveRecorder()?.recordToolCall(name, toolDurationMs, toolSuccess);
+        recordedToolCall = true;
 
         // Record successful tool call for MCP recording (test plan generation)
         if (toolSuccess) {
@@ -465,6 +472,12 @@ class ToolRegistryClass {
 
         return response;
       } catch (error) {
+        // Record the failure before rethrowing so per-tool stats include
+        // exception failures, not just returned `{ success: false }` results.
+        // Sentinel guards against double-counting when post-success bookkeeping throws.
+        if (!recordedToolCall) {
+          getActiveRecorder()?.recordToolCall(name, this.timer.now() - toolStartMs, false);
+        }
         if (error instanceof ActionableError) {
           throw error;
         }

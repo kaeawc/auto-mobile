@@ -15,6 +15,7 @@ import type { ScreenshotService } from "./interfaces/ScreenshotService";
 import { IOSCtrlProxyClient } from "./ios";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { getActiveRecorder } from "../diagnostics/RunHealthRecorder";
 
 /** Secure file mode: owner read/write only */
 const SECURE_FILE_MODE = 0o600;
@@ -361,6 +362,9 @@ export class TakeScreenshot implements ScreenshotService {
     const result = await this.adb.executeCommand(command, undefined, maxBuffer, undefined, signal);
     const cmdDuration = this.timer.now() - cmdStartTime;
     logger.info(`[SCREENSHOT] Combined ADB command took ${cmdDuration}ms`);
+    // Health hook is Android-only: TakeScreenshot routes through Android's ADB path here,
+    // while iOS captures via IOSCtrlProxyClient. See RunHealthSummary platform-coverage note.
+    getActiveRecorder()?.recordScreenshot(cmdDuration);
 
     if (!result.stdout || result.stdout.trim().length === 0) {
       throw new Error("No base64 data received from screencap command");

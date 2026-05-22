@@ -19,6 +19,7 @@ import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { DefaultElementSelector } from "../utility/DefaultElementSelector";
 import { logger } from "../../utils/logger";
+import { getActiveRecorder } from "../diagnostics/RunHealthRecorder";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -1211,12 +1212,16 @@ export class TapOnElement extends BaseVisualChange {
       logger.info(
         `[TapOnElement][retryIfNoChange] Hierarchy changed after tap — tap registered`
       );
+      getActiveRecorder()?.recordGhostTapRetry("tap-registered");
       return;
     }
 
     logger.warn(
       `[TapOnElement][retryIfNoChange] Hierarchy unchanged after tap at ` +
       `(${tapPoint.x}, ${tapPoint.y}) — ghost tap detected, retrying`
+    );
+    getActiveRecorder()?.recordGhostTapRetry(
+      postTapHash ? "false-positive" : "bailed-null-hierarchy"
     );
 
     await this.timer.sleep(100);

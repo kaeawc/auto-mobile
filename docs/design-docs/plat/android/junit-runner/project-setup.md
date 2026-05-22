@@ -246,6 +246,37 @@ app/scratch/test-logs/
 Each log file is named `<timestamp>_<TestClass>_<testMethod>.log` and contains the full daemon
 response, performance metrics, stdout, and stderr for the test run.
 
+### Run health summaries
+
+After every plan execution the daemon writes a JSON run-health summary that captures aggregated
+counts and latency percentiles for tool calls, screenshots, hierarchy syncs, await-idle outcomes,
+and ghost-tap retries. The file is intended for post-run triage in CI (and Slack-thread sharing)
+when a test was flaky or slow without an obvious failure.
+
+`hierarchy.syncRequests` counts WebSocket-path `getLatestHierarchy()` outcomes only (cache hit,
+fresh, stale, timeout, failed). ADB `requestHierarchySync` fallbacks inside
+`getAccessibilityHierarchy()` are not included in that total.
+
+Where the file lands:
+
+1. `$AUTOMOBILE_HEALTH_DIR` — explicit override (recommended for CI: set it to the artifact
+   directory the runner uploads, e.g. `$CI_PROJECT_DIR/health`).
+2. `~/.auto-mobile/health/` — default for local devs and ad-hoc `bunx … --daemon start` users.
+
+Filenames are `health-<ISO-timestamp>-<sessionId>.json` when called from JUnit (the sessionId is
+the JUnit session UUID), or `health-<ISO-timestamp>-adhoc-<random>.json` for ad-hoc CLI runs.
+Both formats sort lexicographically by start time, so `ls -t` (or alpha sort) gives you the
+newest run first.
+
+To pretty-print a summary on the command line:
+
+```
+bunx @kaeawc/auto-mobile@latest --cli health --path ~/.auto-mobile/health/health-2026-05-21T*.json
+```
+
+Add `--json` to emit the raw JSON instead (useful for piping into `jq` or attaching to a Slack
+upload). The CLI subcommand is purely local — it does not require a running daemon.
+
 ## Multiple modules
 
 If your project has more than one Android module with AutoMobile tests, add the dependency and

@@ -2,6 +2,7 @@ import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-c
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { BackStackInfo, ActivityInfo, TaskInfo, BootedDevice } from "../../models";
 import { logger } from "../../utils/logger";
+import { getActiveRecorder } from "../diagnostics/RunHealthRecorder";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { BackStack } from "./interfaces/BackStack";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -242,6 +243,7 @@ export class GetBackStack implements BackStack {
         `depth=${depth}, activities=${activities.length}, tasks=${tasks.length}, ` +
         `currentActivity=${currentActivity?.name || "unknown"}`
       );
+      getActiveRecorder()?.recordBackStack(duration);
 
       return backStackInfo;
     } catch (error) {

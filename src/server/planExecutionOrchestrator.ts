@@ -24,6 +24,12 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { ProgressCallback } from "./toolRegistry";
 import type { Plan } from "../models/Plan";
+import {
+  RunHealthRecorder,
+  clearActiveRecorder,
+  setActiveRecorder,
+} from "../features/diagnostics/RunHealthRecorder";
+import { DefaultHealthWriter, type HealthWriter } from "../features/diagnostics/healthWriter";
 
 /**
  * Test metadata captured per-execution for the test-execution timing repository.
@@ -82,6 +88,8 @@ export interface PlanExecutionDependencies {
   timer?: Timer;
   /** Video recording manager surface — replaced by a fake in tests. */
   videoRecorder?: VideoRecorder;
+  /** Writer for end-of-run health summaries — replaced by a fake in tests. */
+  healthWriter?: HealthWriter;
 }
 
 interface VideoState {
@@ -179,11 +187,14 @@ export class PlanExecutionOrchestrator {
   private readonly testExecutionRepository: TestExecutionRepository;
   private readonly createSchemaValidator: () => Pick<PlanSchemaValidator, "loadSchema" | "validateYaml">;
   private readonly videoRecorder: VideoRecorder;
+  private readonly healthWriter: HealthWriter;
 
   // Set in execute(); used by all phase methods for [PERF +Xms] elapsed-time logs.
   private perfStart = 0;
   // Computed once in preparePlan(); reused by allocateDevices().
   private normalizedDevices?: NormalizedPlanDevices;
+  // Bracketed by execute(); fan-out target for hook sites in deeper layers.
+  private healthRecorder?: RunHealthRecorder;
 
   constructor(context: ExecutionContext, deps: PlanExecutionDependencies = {}) {
     this.device = context.device;
@@ -197,6 +208,7 @@ export class PlanExecutionOrchestrator {
       startVideoRecording: defaultStartVideoRecording,
       stopVideoRecording: defaultStopVideoRecording,
     };
+    this.healthWriter = deps.healthWriter ?? new DefaultHealthWriter();
   }
 
   private perfLog(message: string): void {
@@ -210,6 +222,16 @@ export class PlanExecutionOrchestrator {
   async execute(): Promise<ExecutePlanResult> {
     const startTime = this.timer.now();
     const stopHeartbeat = this.startProgressHeartbeat();
+
+    this.healthRecorder = new RunHealthRecorder({
+      sessionId: this.request.sessionUuid ?? null,
+      timer: this.timer,
+    });
+    this.healthRecorder.setDevice({
+      id: this.device.deviceId,
+      model: this.device.name ?? null,
+    });
+    setActiveRecorder(this.healthRecorder);
 
     try {
       this.perfStart = this.timer.now();
@@ -283,6 +305,17 @@ export class PlanExecutionOrchestrator {
       return response;
     } finally {
       stopHeartbeat();
+      if (this.healthRecorder) {
+        try {
+          const summary = this.healthRecorder.finalize();
+          this.healthWriter.write(summary);
+        } catch (error) {
+          logger.warn(
+            `[HEALTH] Failed to finalize run health summary: ${error instanceof Error ? error.message : String(error)}`
+          );
+        }
+        clearActiveRecorder(this.healthRecorder);
+      }
     }
   }
 
@@ -319,6 +352,8 @@ export class PlanExecutionOrchestrator {
     this.perfLog("Parsing plan from YAML");
     const plan = importPlanFromYaml(yamlContent);
     this.perfLog(`Plan parsed: '${plan.name}' with ${plan.steps.length} steps`);
+
+    this.healthRecorder?.setPlanName(plan.name);
 
     this.normalizedDevices = normalizePlanDevices(plan.devices);
     this.reconcileDeviceLists();

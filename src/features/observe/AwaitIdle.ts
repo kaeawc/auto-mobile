@@ -1,6 +1,7 @@
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { logger } from "../../utils/logger";
+import { getActiveRecorder } from "../diagnostics/RunHealthRecorder";
 import { Idle } from "./Idle";
 import { BootedDevice, GfxMetrics } from "../../models";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
@@ -193,6 +194,7 @@ export class AwaitIdle implements AwaitIdleInterface {
     let state = initState;
     let pollCount = 0;
     let isStable = false;
+    let errored = false;
     const finalMetrics: {
       percentile50thMs: number | null;
       percentile90thMs: number | null;
@@ -253,6 +255,7 @@ export class AwaitIdle implements AwaitIdleInterface {
       }
     } catch {
       logger.error("[AwaitIdle] Encountered an error while waiting for UI stability");
+      errored = true;
     }
 
     // Get final gfxinfo to capture percentiles
@@ -273,6 +276,8 @@ export class AwaitIdle implements AwaitIdleInterface {
     }
 
     const stabilityWaitMs = this.timer.now() - initState.startTime;
+    const awaitIdleOutcome = errored ? "error" : isStable ? "settled" : "timeout";
+    getActiveRecorder()?.recordAwaitIdle(awaitIdleOutcome, stabilityWaitMs);
 
     return {
       packageName,

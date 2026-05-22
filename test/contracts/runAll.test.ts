@@ -5,6 +5,7 @@ import { DefaultChecksumCalculator } from "../../src/utils/ChecksumCalculator";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
+import { CryptoRandom, SeededRandom } from "../../src/utils/Random";
 import { SystemTimer } from "../../src/utils/SystemTimer";
 import { DefaultFileSystem } from "../../src/utils/filesystem/DefaultFileSystem";
 import { FakeChecksumCalculator } from "../fakes/FakeChecksumCalculator";
@@ -20,9 +21,13 @@ import {
 } from "./CommandExecutorContract";
 import { runFileDownloaderContract } from "./FileDownloaderContract";
 import { runFileSystemContract } from "./FileSystemContract";
+import { runRandomContract } from "./RandomContract";
 import { runTimerContract } from "./TimerContract";
 
 const quote = (value: string): string => JSON.stringify(value);
+
+runRandomContract("CryptoRandom", () => new CryptoRandom());
+runRandomContract("SeededRandom", () => new SeededRandom(42));
 
 runTimerContract("SystemTimer", () => new SystemTimer(), { realTime: true });
 runTimerContract("FakeTimer auto-advance", () => {

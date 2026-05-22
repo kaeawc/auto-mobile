@@ -1,4 +1,5 @@
 import { logger } from "./logger";
+import { getActiveRecorder } from "../features/diagnostics/RunHealthRecorder";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import type { AccessibilityDetector as IAccessibilityDetector, AccessibilityService } from "./interfaces/AccessibilityDetector";
 import { SystemTimer, type Timer } from "./SystemTimer";
@@ -76,6 +77,7 @@ export class DefaultAccessibilityDetector implements IAccessibilityDetector {
     const startTime = this.timer.now();
     const { enabled, service } = await this.detectAccessibilityState(deviceId, adb);
     const detectionTime = this.timer.now() - startTime;
+    getActiveRecorder()?.recordAccessibilityDetection(detectionTime);
 
     if (detectionTime > 50) {
       logger.warn(

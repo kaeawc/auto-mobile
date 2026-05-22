@@ -7,6 +7,7 @@
 
 import WebSocket from "ws";
 import { logger } from "../../../utils/logger";
+import { getActiveRecorder } from "../../diagnostics/RunHealthRecorder";
 import type { PerformanceTracker, TimingEntry } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../../utils/toolUtils";
@@ -103,6 +104,7 @@ export class CtrlProxyHierarchy {
       const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
       if (!connected) {
         logger.warn("[CTRL_PROXY] Failed to establish WebSocket connection");
+        getActiveRecorder()?.recordHierarchy("failed");
         return {
           hierarchy: null,
           fresh: false
@@ -130,6 +132,7 @@ export class CtrlProxyHierarchy {
               `receivedAt=${cachedHierarchy.receivedAt}, ` +
               `updatedAt=${updatedAt}, age=${cacheAge}ms, fresh=${isFresh}`
             );
+            getActiveRecorder()?.recordHierarchy("cache-hit");
 
             return {
               hierarchy: cachedHierarchy.hierarchy,
@@ -143,6 +146,7 @@ export class CtrlProxyHierarchy {
           const isFresh = cacheAge < 1000;
           const duration = this.context.timer.now() - startTime;
           logger.debug(`[CTRL_PROXY] Cache hit: ${duration}ms (age: ${cacheAge}ms, fresh: ${isFresh}, updatedAt: ${updatedAt})`);
+          getActiveRecorder()?.recordHierarchy("cache-hit");
 
           return {
             hierarchy: cachedHierarchy.hierarchy,
@@ -173,6 +177,7 @@ export class CtrlProxyHierarchy {
             this.lastKnownPackageName = freshData.hierarchy.packageName;
           }
           logger.debug(`[CTRL_PROXY] Received fresh hierarchy in ${duration}ms (updatedAt: ${freshData.hierarchy.updatedAt})`);
+          getActiveRecorder()?.recordHierarchy("fresh", duration);
           return {
             hierarchy: freshData.hierarchy,
             fresh: true,
@@ -196,6 +201,7 @@ export class CtrlProxyHierarchy {
             }
             currentCache.fresh = false;
             logger.debug(`[CTRL_PROXY] Returning stale cached data (updatedAt: ${currentCache.hierarchy.updatedAt}), marked cache as stale`);
+            getActiveRecorder()?.recordHierarchy("stale");
             return {
               hierarchy: currentCache.hierarchy,
               fresh: false,
@@ -203,13 +209,28 @@ export class CtrlProxyHierarchy {
               perfTiming: currentCache.perfTiming
             };
           }
+          // Timeout with no cache to fall through to — count as a hard timeout
+          // and return directly so we don't double-record below.
+          getActiveRecorder()?.recordHierarchy("timeout");
+          return {
+            hierarchy: null,
+            fresh: false
+          };
         }
       } else if (skipWaitForFresh || this.shouldSkipWebSocketWait()) {
         logger.debug(`[CTRL_PROXY] Skipping WebSocket wait (skipWaitForFresh=${skipWaitForFresh}, recentTimeout=${this.shouldSkipWebSocketWait()})`);
       }
 
-      // No cached data available
-      logger.debug("[CTRL_PROXY] No cached hierarchy data available");
+      // Reached when we didn't take any of the recording branches above — counted
+      // as `failed` so the bucket sum matches actual call count.
+      const skippedWsWait = skipWaitForFresh || this.shouldSkipWebSocketWait();
+      logger.debug(
+        `[CTRL_PROXY] getLatestHierarchy returning null (failed): ` +
+        `cache=${cachedHierarchy ? "present-but-unused" : "absent"}, ` +
+        `waitForFresh=${waitForFresh}, skipWaitForFresh=${skipWaitForFresh}, ` +
+        `skippedWsWait=${skippedWsWait}`
+      );
+      getActiveRecorder()?.recordHierarchy("failed");
       return {
         hierarchy: null,
         fresh: false
@@ -217,6 +238,7 @@ export class CtrlProxyHierarchy {
     } catch (error) {
       const duration = this.context.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Failed to get hierarchy after ${duration}ms: ${error}`);
+      getActiveRecorder()?.recordHierarchy("failed");
       return {
         hierarchy: null,
         fresh: false

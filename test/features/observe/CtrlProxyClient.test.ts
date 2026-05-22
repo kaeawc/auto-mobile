@@ -1,5 +1,11 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import {
+  RunHealthRecorder,
+  __resetActiveRecorderForTests,
+  clearActiveRecorder,
+  setActiveRecorder,
+} from "../../../src/features/diagnostics/RunHealthRecorder";
 import { NavigationGraphManager } from "../../../src/features/navigation/NavigationGraphManager";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { AndroidCtrlProxyManager } from "../../../src/utils/CtrlProxyManager";
@@ -333,6 +339,92 @@ describe("AndroidCtrlProxyClient", function() {
         expect(result.fresh).toBe(false);
       } finally {
         await testClient.close();
+      }
+    });
+
+
+    test("records hierarchy failed when WebSocket connection cannot be established", async function() {
+      __resetActiveRecorderForTests();
+      const recorder = new RunHealthRecorder({
+        sessionId: "hierarchy-failed-test",
+        timer: fakeTimer,
+      });
+      setActiveRecorder(recorder);
+
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createInstantFailureWebSocketFactory(fakeTimer),
+        fakeTimer
+      );
+
+      try {
+        await testClient.getLatestHierarchy(true, 1000);
+
+        const summary = recorder.finalize();
+        expect(summary.hierarchy.failed).toBe(1);
+        expect(summary.hierarchy.syncRequests).toBe(1);
+        expect(summary.hierarchy.freshDeliveries).toBe(0);
+      } finally {
+        await testClient.close();
+        clearActiveRecorder(recorder);
+        __resetActiveRecorderForTests();
+      }
+    });
+
+
+    test("records hierarchy cache-hit when cached data is returned without waiting for fresh", async function() {
+      const mockHierarchyData = {
+        updatedAt: fakeTimer.now(),
+        packageName: "com.example.cachehit",
+        hierarchy: {
+          text: "Cache Hit Data",
+          "resource-id": "com.example.cachehit:id/root",
+        },
+      };
+
+      const testTimer = new FakeTimer();
+      testTimer.enableAutoAdvance();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+
+      try {
+        const warmCachePromise = testClient.getLatestHierarchy(true, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: mockHierarchyData,
+        }));
+        await testTimer.resolvePromise(warmCachePromise);
+
+        __resetActiveRecorderForTests();
+        const recorder = new RunHealthRecorder({
+          sessionId: "hierarchy-cache-hit-test",
+          timer: testTimer,
+        });
+        setActiveRecorder(recorder);
+
+        const result = await testClient.getLatestHierarchy(false, 0);
+
+        expect(result.hierarchy).not.toBeNull();
+        expect(result.hierarchy!.hierarchy.text).toBe("Cache Hit Data");
+
+        const summary = recorder.finalize();
+        expect(summary.hierarchy.cacheHits).toBe(1);
+        expect(summary.hierarchy.syncRequests).toBe(1);
+        expect(summary.hierarchy.freshDeliveries).toBe(0);
+        expect(summary.hierarchy.failed).toBe(0);
+      } finally {
+        await testClient.close();
+        __resetActiveRecorderForTests();
       }
     });
 

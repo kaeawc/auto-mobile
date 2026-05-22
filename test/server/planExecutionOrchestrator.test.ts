@@ -26,6 +26,12 @@ mock.module("../../src/utils/planUtils", () => {
 });
 
 import { PlanExecutionOrchestrator, convertDebugStepsToRecords, VideoRecorder } from "../../src/server/planExecutionOrchestrator";
+import type { HealthWriter } from "../../src/features/diagnostics/healthWriter";
+import type { RunHealthSummary } from "../../src/features/diagnostics/types";
+import {
+  __resetActiveRecorderForTests,
+  getActiveRecorder,
+} from "../../src/features/diagnostics/RunHealthRecorder";
 
 const buildVideoRecorder = (
   filePath: string = "/tmp/fake-recording.mp4",
@@ -248,6 +254,143 @@ steps:
     const result = await orchestrator.execute();
     // Even though recording failed, the plan itself succeeded.
     expect(result.success).toBe(true);
+  });
+});
+
+
+class FakeHealthWriter implements HealthWriter {
+
+  public readonly written: RunHealthSummary[] = [];
+
+
+  write(summary: RunHealthSummary): string | null {
+    this.written.push(summary);
+    return "/fake/health.json";
+  }
+}
+
+
+describe("PlanExecutionOrchestrator run-health summary lifecycle", () => {
+
+  beforeEach(() => {
+    executePlanMock.mockClear();
+    executePlanMock.mockImplementation(() =>
+      Promise.resolve({
+        success: true,
+        executedSteps: 2,
+        totalSteps: 2,
+        debug: { executionTimeMs: 100, steps: [] },
+      })
+    );
+    __resetActiveRecorderForTests();
+  });
+
+
+  test("execute() installs a recorder during the inner run and clears it after", async () => {
+    const healthWriter = new FakeHealthWriter();
+    let recorderDuringRun: ReturnType<typeof getActiveRecorder> | undefined;
+    executePlanMock.mockImplementationOnce(() => {
+      // Capture the active recorder while runPlan is in flight.
+      recorderDuringRun = getActiveRecorder();
+      return Promise.resolve({
+        success: true,
+        executedSteps: 1,
+        totalSteps: 1,
+        debug: { executionTimeMs: 50, steps: [] },
+      });
+    });
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: { ...baseRequest, sessionUuid: "session-xyz" } },
+      { ...baseDeps(), healthWriter }
+    );
+    await orchestrator.execute();
+
+    expect(recorderDuringRun).not.toBeNull();
+    expect(recorderDuringRun?.sessionId).toBe("session-xyz");
+    expect(getActiveRecorder()).toBeNull();
+  });
+
+
+  test("execute() writes a finalized summary with plan name and device info", async () => {
+    const healthWriter = new FakeHealthWriter();
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: { ...baseRequest, sessionUuid: "session-abc" } },
+      { ...baseDeps(), healthWriter }
+    );
+    await orchestrator.execute();
+
+    expect(healthWriter.written).toHaveLength(1);
+    const summary = healthWriter.written[0];
+    expect(summary.sessionId).toBe("session-abc");
+    expect(summary.planName).toBe("simple-test");
+    expect(summary.device?.id).toBe(iosDevice.deviceId);
+    expect(summary.device?.model).toBe(iosDevice.name);
+  });
+
+
+  test("execute() emits sessionId=null for ad-hoc runs with no sessionUuid", async () => {
+    const healthWriter = new FakeHealthWriter();
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      { ...baseDeps(), healthWriter }
+    );
+    await orchestrator.execute();
+    expect(healthWriter.written[0].sessionId).toBeNull();
+  });
+
+
+  test("execute() writes the summary even when the plan validation fails", async () => {
+    const healthWriter = new FakeHealthWriter();
+    const orchestrator = new PlanExecutionOrchestrator(
+      {
+        device: iosDevice,
+        request: { ...baseRequest, planContent: "not: a: valid: plan:\n  - missing" },
+      },
+      { ...baseDeps(), healthWriter }
+    );
+    const result = await orchestrator.execute();
+
+    expect(result.success).toBe(false);
+    expect(healthWriter.written).toHaveLength(1);
+    // Plan name never resolved because YAML failed schema validation.
+    expect(healthWriter.written[0].planName).toBeNull();
+  });
+
+
+  test("execute() writes the summary even when the inner runPlan returns failure", async () => {
+    const healthWriter = new FakeHealthWriter();
+    executePlanMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: false,
+        executedSteps: 1,
+        totalSteps: 2,
+        failedStep: { stepIndex: 1, tool: "tapOn", error: "boom" },
+      })
+    );
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      { ...baseDeps(), healthWriter }
+    );
+    await orchestrator.execute();
+    expect(healthWriter.written).toHaveLength(1);
+  });
+
+
+  test("a failing health writer never crashes the run", async () => {
+    const exploding: HealthWriter = {
+      write: () => {
+        throw new Error("writer exploded");
+      },
+    };
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      { ...baseDeps(), healthWriter: exploding }
+    );
+    const result = await orchestrator.execute();
+    expect(result.success).toBe(true);
+    expect(getActiveRecorder()).toBeNull();
   });
 });
 

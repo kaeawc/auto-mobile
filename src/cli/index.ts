@@ -214,6 +214,77 @@ async function runDoctorCommand(params: Record<string, any>): Promise<void> {
 }
 
 /**
+ * Pretty-print or JSON-emit a run-health summary file. Purely local — does
+ * not contact the daemon. Usage: `automobile --cli health --path <file>`
+ * or `automobile --cli health --path <file> --json`.
+ */
+async function runHealthCommand(params: Record<string, any>): Promise<void> {
+  const filePath = params.path ?? params.file;
+  if (typeof filePath !== "string" || filePath.length === 0) {
+    console.error(
+      "Error: health requires --path <file>. Usage: --cli health --path <session.json> [--json]"
+    );
+    process.exit(1);
+  }
+  const jsonOutput = params.json === true;
+
+  const fs = await import("fs");
+  let raw: string;
+  try {
+    raw = fs.readFileSync(filePath, "utf-8");
+  } catch (error) {
+    console.error(
+      `Error: failed to read ${filePath}: ${error instanceof Error ? error.message : String(error)}`
+    );
+    process.exit(1);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    console.error(
+      `Error: ${filePath} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`
+    );
+    process.exit(1);
+  }
+
+  // Lightweight structural sanity check — catches "wrong file passed in" without
+  // pretending to be a real schema validator. If a field is missing here, the
+  // pretty-printer would crash with a less helpful message downstream.
+  const requiredKeys = [
+    "sessionId",
+    "startedAt",
+    "finishedAt",
+    "durationMs",
+    "toolCalls",
+    "hierarchy",
+    "awaitIdle",
+  ];
+  if (!parsed || typeof parsed !== "object") {
+    console.error(`Error: ${filePath} is not a JSON object.`);
+    process.exit(1);
+  }
+  const missing = requiredKeys.filter(k => !(k in (parsed as Record<string, unknown>)));
+  if (missing.length > 0) {
+    console.error(
+      `Error: ${filePath} does not look like a run-health summary — missing keys: ${missing.join(", ")}.`
+    );
+    process.exit(1);
+  }
+  const summary = parsed as import("../features/diagnostics/types").RunHealthSummary;
+
+  if (jsonOutput) {
+    console.log(JSON.stringify(summary, null, 2));
+    return;
+  }
+
+  const { prettyPrintRunHealth } = await import("../features/diagnostics/healthPrettyPrinter");
+  console.log(prettyPrintRunHealth(summary));
+}
+
+
+/**
  * Handle doctor command result from daemon
  */
 function handleDoctorResult(result: any, jsonOutput: boolean): void {
@@ -317,6 +388,12 @@ export async function runCliCommand(args: string[]): Promise<void> {
       return;
     }
 
+    // Special handling for health command - purely local, reads JSON from disk
+    if (toolName === "health") {
+      await runHealthCommand(params);
+      return;
+    }
+
     // All tool execution goes through daemon (mandatory)
     logger.debug(`Executing tool via daemon: ${toolName}`);
     const daemonResult = await runToolViaDaemon(toolName, params);
@@ -355,6 +432,8 @@ Examples:
   bunx @kaeawc/auto-mobile@latest --cli startDevice --avdName "pixel_7_api_34"
   bunx @kaeawc/auto-mobile@latest --cli --session-uuid abc-123-uuid observe
   bunx @kaeawc/auto-mobile@latest --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
+  bunx @kaeawc/auto-mobile@latest --cli health --path build/automobile/health-*.json
+  bunx @kaeawc/auto-mobile@latest --cli health --path build/automobile/health-*.json --json
 
 Options:
   help [tool-name]              Show help for a specific tool

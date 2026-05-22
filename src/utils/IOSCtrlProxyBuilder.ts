@@ -11,7 +11,7 @@ import {
   IOS_CTRL_PROXY_RUNNER_SHA256,
   IOS_CTRL_PROXY_SHA256_CHECKSUM,
   LATEST_RELEASE_VERSION,
-  resolveLatestVersion
+  resolveAssetVersion
 } from "../constants/release";
 import {
   DefaultIOSCtrlProxyBundleDownloader,
@@ -691,7 +691,7 @@ export class IOSCtrlProxyBuilder {
     const appHashes = await this.computeAppHashes();
     const metadata: IOSCtrlProxyBundleMetadata = {
       checksum: this.getExpectedChecksum() || null,
-      version: resolveLatestVersion(),
+      version: resolveAssetVersion(IOS_CTRL_PROXY_RELEASE_VERSION),
       extractedAt: new Date().toISOString(),
       appHashes
     };

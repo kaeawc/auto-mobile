@@ -1,27 +1,46 @@
 import { describe, test, expect, beforeEach } from "bun:test";
-import { checkVersion, checkCtrlProxy } from "../../src/doctor/checks/automobile";
-import { RELEASE_VERSION } from "../../src/constants/release";
+import {
+  checkCtrlProxy,
+  checkCtrlProxyVersion,
+  checkDaemonVersion,
+} from "../../src/doctor/checks/automobile";
+import {
+  LATEST_RELEASE_VERSION,
+  RELEASE_VERSION,
+  resolveAssetVersion,
+} from "../../src/constants/release";
+import { getMcpServerVersion } from "../../src/utils/mcpVersion";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
 
-describe("checkVersion", () => {
+describe("checkDaemonVersion", () => {
   test("returns pass status", () => {
-    const result = checkVersion();
-
-    expect(result.status).toBe("pass");
+    expect(checkDaemonVersion().status).toBe("pass");
   });
 
-  test("includes version in message", () => {
-    const result = checkVersion();
+  test("reports the daemon JS package version, not the CtrlProxy version", () => {
+    const result = checkDaemonVersion();
 
-    expect(result.message).toBe(`Version ${RELEASE_VERSION}`);
-    expect(result.value).toBe(RELEASE_VERSION);
+    expect(result.name).toBe("AutoMobile Daemon Version");
+    expect(result.value).toBe(getMcpServerVersion());
+    expect(result.message).toBe(`Version ${getMcpServerVersion()}`);
+  });
+});
+
+describe("checkCtrlProxyVersion", () => {
+  test("returns pass status", () => {
+    expect(checkCtrlProxyVersion().status).toBe("pass");
   });
 
-  test("has correct name", () => {
-    const result = checkVersion();
+  test("reports the concrete on-device CtrlProxy version from the registry", () => {
+    const result = checkCtrlProxyVersion();
+    const expected = resolveAssetVersion(RELEASE_VERSION);
 
-    expect(result.name).toBe("AutoMobile Version");
+    expect(result.name).toBe("CtrlProxy Release Version");
+    expect(result.value).toBe(expected);
+    if (RELEASE_VERSION === LATEST_RELEASE_VERSION) {
+      expect(result.message).toMatch(/\(latest\)$/);
+    }
   });
 });
 

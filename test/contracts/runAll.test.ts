@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { DefaultChecksumCalculator } from "../../src/utils/ChecksumCalculator";
+import { FakeClock, SystemClock } from "../../src/utils/Clock";
 import { DefaultFileDownloader } from "../../src/utils/FileDownloader";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
@@ -14,6 +15,7 @@ import { FakeHostCommandExecutor } from "../fakes/FakeHostCommandExecutor";
 import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { runChecksumCalculatorContract } from "./ChecksumCalculatorContract";
+import { runClockContract } from "./ClockContract";
 import {
   runHostCommandExecutorContract,
   runProcessExecutorContract
@@ -23,6 +25,9 @@ import { runFileSystemContract } from "./FileSystemContract";
 import { runTimerContract } from "./TimerContract";
 
 const quote = (value: string): string => JSON.stringify(value);
+
+runClockContract("SystemClock", () => new SystemClock());
+runClockContract("FakeClock", () => new FakeClock("2026-01-01T00:00:00.000Z"));
 
 runTimerContract("SystemTimer", () => new SystemTimer(), { realTime: true });
 runTimerContract("FakeTimer auto-advance", () => {

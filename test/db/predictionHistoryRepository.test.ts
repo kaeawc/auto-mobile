@@ -4,14 +4,17 @@ import type { Database } from "../../src/db/types";
 import { PredictionHistoryRepository } from "../../src/db/predictionHistoryRepository";
 import type { PredictionOutcomeRecord, TransitionKey } from "../../src/db/predictionHistoryRepository";
 import { createTestDatabase } from "./testDbHelper";
+import { FakeClock } from "../../src/utils/Clock";
 
 describe("PredictionHistoryRepository", () => {
   let db: Kysely<Database>;
   let repo: PredictionHistoryRepository;
+  let clock: FakeClock;
 
   beforeEach(async () => {
     db = await createTestDatabase();
-    repo = new PredictionHistoryRepository(db);
+    clock = new FakeClock("2026-01-02T03:04:05.000Z");
+    repo = new PredictionHistoryRepository(db, clock);
   });
 
   afterEach(async () => {
@@ -45,11 +48,14 @@ describe("PredictionHistoryRepository", () => {
       expect(outcomes).toHaveLength(1);
       expect(outcomes[0].app_id).toBe("com.example.app");
       expect(outcomes[0].correct).toBe(1);
+      expect(outcomes[0].created_at).toBe("2026-01-02T03:04:05.000Z");
 
       const stats = await db.selectFrom("prediction_transition_stats").selectAll().execute();
       expect(stats).toHaveLength(1);
       expect(stats[0].attempts).toBe(1);
       expect(stats[0].successes).toBe(1);
+      expect(stats[0].created_at).toBe("2026-01-02T03:04:05.000Z");
+      expect(stats[0].updated_at).toBe("2026-01-02T03:04:05.000Z");
     });
 
     test("records incorrect prediction", async () => {
@@ -89,11 +95,13 @@ describe("PredictionHistoryRepository", () => {
       };
 
       await repo.upsertTransitionStats(key, 0.9, true);
+      clock.setNow("2026-01-03T03:04:05.000Z");
       const result = await repo.upsertTransitionStats(key, 0.7, false);
 
       expect(result.attempts).toBe(2);
       expect(result.successes).toBe(1);
       expect(result.total_confidence).toBeCloseTo(1.6, 5);
+      expect(result.updated_at).toBe("2026-01-03T03:04:05.000Z");
     });
 
     test("computes brier score sum", async () => {

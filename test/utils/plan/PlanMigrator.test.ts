@@ -234,7 +234,7 @@ describe("PlanMigrator", () => {
         expect(plan.steps[0].params.action).toBe("tap");
       });
 
-      test("renames id to elementId for tapOn", () => {
+      test("renames id to elementId for tapOn (wrapped into selector)", () => {
         const { plan } = migratePlan({
           name: "Plan",
           mcpVersion: "1.0.0",
@@ -242,9 +242,61 @@ describe("PlanMigrator", () => {
           steps: [{ tool: "tapOn", params: { id: "submit_button" } }],
         });
 
-        expect(plan.steps[0].params.elementId).toBe("submit_button");
+        const selector = plan.steps[0].params.selector as { elementId?: string };
+        expect(selector.elementId).toBe("submit_button");
         expect(plan.steps[0].params.id).toBeUndefined();
+        expect(plan.steps[0].params.elementId).toBeUndefined();
       });
+
+      test("wraps legacy tapOn { text } under { selector: { text } } for 0.0.30+ schema", () => {
+        const { plan, report } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{ tool: "tapOn", params: { text: "Schedule Appointment" } }],
+        });
+
+        const selector = plan.steps[0].params.selector as { text?: string };
+        expect(selector.text).toBe("Schedule Appointment");
+        expect(plan.steps[0].params.text).toBeUndefined();
+        expect(
+          report.warnings.some(w => w.message.includes("Wrapped legacy tapOn"))
+        ).toBe(true);
+      });
+
+      test("does not double-wrap tapOn that already has selector", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "tapOn",
+            params: { selector: { text: "Already wrapped" } }
+          }],
+        });
+
+        const selector = plan.steps[0].params.selector as { text?: string };
+        expect(selector.text).toBe("Already wrapped");
+      });
+
+      test("wraps both elementId and text together into selector", () => {
+        const { plan } = migratePlan({
+          name: "Plan",
+          mcpVersion: "1.0.0",
+          metadata: { createdAt: "2024-01-01", version: "1.0.0" },
+          steps: [{
+            tool: "tapOn",
+            params: { elementId: "submit_btn", text: "Submit" },
+          }],
+        });
+
+        const selector = plan.steps[0].params.selector as { elementId?: string; text?: string };
+        expect(selector.elementId).toBe("submit_btn");
+        expect(selector.text).toBe("Submit");
+        expect(plan.steps[0].params.elementId).toBeUndefined();
+        expect(plan.steps[0].params.text).toBeUndefined();
+      });
+
 
       test("renames inputText.value to text", () => {
         const { plan } = migratePlan({
@@ -402,7 +454,7 @@ describe("PlanMigrator", () => {
         expect(report.warnings.some(w => w.message.includes("Mapped step description to label"))).toBe(true);
       });
 
-      test("merges inline step fields into params", () => {
+      test("merges inline step fields into params (tapOn text wrapped under selector)", () => {
         const { plan } = migratePlan({
           name: "Plan",
           mcpVersion: "1.0.0",
@@ -410,8 +462,10 @@ describe("PlanMigrator", () => {
           steps: [{ tool: "tapOn", text: "Hello", action: "tap" }],
         });
 
-        expect(plan.steps[0].params.text).toBe("Hello");
+        const selector = plan.steps[0].params.selector as { text?: string };
+        expect(selector.text).toBe("Hello");
         expect(plan.steps[0].params.action).toBe("tap");
+        expect(plan.steps[0].params.text).toBeUndefined();
       });
 
       test("skips non-record steps", () => {

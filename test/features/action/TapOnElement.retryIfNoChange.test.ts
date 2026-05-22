@@ -86,7 +86,7 @@ describe("retryTapIfNoChange", () => {
     expect(tapCallCount).toBe(1);
   });
 
-  test("retries tap when post-tap hierarchy is null (no hash)", async () => {
+  test("skips retry when post-tap hierarchy refresh returns null (likely activity transition)", async () => {
     const { tap } = createTapOnElement();
     const preHierarchy = makeHierarchy("before");
 
@@ -108,7 +108,7 @@ describe("retryTapIfNoChange", () => {
       { width: 1080, height: 1920 },
     );
 
-    expect(tapCallCount).toBe(1);
+    expect(tapCallCount).toBe(0);
   });
 
   test("sleeps before checking and before retrying", async () => {
@@ -138,7 +138,7 @@ describe("retryTapIfNoChange", () => {
       { width: 1080, height: 1920 },
     );
 
-    expect(sleepDurations).toEqual([150, 100]);
+    expect(sleepDurations).toEqual([300, 100]);
   });
 });
 

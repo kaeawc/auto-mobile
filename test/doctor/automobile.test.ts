@@ -31,7 +31,7 @@ describe("checkCtrlProxyVersion", () => {
     expect(checkCtrlProxyVersion().status).toBe("pass");
   });
 
-  test("reports a concrete version string regardless of how the release was configured", () => {
+  test("reports the concrete on-device CtrlProxy version from the registry", () => {
     const result = checkCtrlProxyVersion();
     const expected = resolveAssetVersion(RELEASE_VERSION);
 

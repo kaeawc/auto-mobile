@@ -115,10 +115,8 @@ export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
 /**
  * Resolve a version string to its concrete equivalent.
  *
- * Most module-level constants (URLs, on-disk metadata, doctor checks) want a
- * concrete version like "0.0.30", never the placeholder "latest". This helper
- * does the registry lookup once so callers don't have to remember whether
- * RELEASE_VERSION might still be the literal "latest" string.
+ * Module-level constants (URLs, on-disk metadata, doctor checks) want a
+ * concrete version like "0.0.30", never the placeholder "latest".
  */
 export function resolveAssetVersion(version: string): string {
   if (version === LATEST_RELEASE_VERSION) {
@@ -130,8 +128,8 @@ export function resolveAssetVersion(version: string): string {
 function buildReleaseAssetUrl(filename: string, version: string): string {
   const assetVersion = resolveAssetVersion(version);
   if (assetVersion === LATEST_RELEASE_VERSION) {
-    // Degenerate case: registry is empty AND nothing pinned. Fall back to
-    // GitHub's redirecting /latest/download/ endpoint.
+    // Degenerate case: empty registry. Fall back to GitHub's redirecting
+    // /latest/download/ endpoint.
     return `https://github.com/kaeawc/auto-mobile/releases/latest/download/${filename}`;
   }
   return `https://github.com/kaeawc/auto-mobile/releases/download/${assetVersion}/${filename}`;

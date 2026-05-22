@@ -7,8 +7,8 @@ import {
   LATEST_RELEASE_VERSION,
   RELEASE_CHECKSUM_REGISTRY,
   RELEASE_VERSION,
-  resolveChecksum,
   resolveAssetVersion,
+  resolveChecksum,
   resolveLatestVersion,
   type ReleaseChecksumEntry,
 } from "../../src/constants/release";
@@ -76,18 +76,20 @@ describe("resolveLatestVersion", function() {
 });
 
 describe("resolveAssetVersion", function() {
-  test("latest resolves to registry[0] version", function() {
+  test("passes through concrete versions unchanged", function() {
+    expect(resolveAssetVersion("0.0.18")).toBe("0.0.18");
+  });
+
+  test("resolves the 'latest' placeholder to the newest registry entry", function() {
     expect(resolveAssetVersion(LATEST_RELEASE_VERSION)).toBe(
       RELEASE_CHECKSUM_REGISTRY[0].version
     );
   });
-
-  test("concrete version passes through", function() {
-    expect(resolveAssetVersion("0.0.18")).toBe("0.0.18");
-  });
 });
 
-describe("module exports: URL and checksum use the same resolved version", function() {
+describe("module-level URL and checksum exports", function() {
+  // Guards against drift between APK_URL and APK_SHA256_CHECKSUM — both must
+  // resolve via the same RELEASE_VERSION path.
   const newest = RELEASE_CHECKSUM_REGISTRY[0];
 
   test("RELEASE_VERSION is the latest channel", function() {
@@ -99,7 +101,7 @@ describe("module exports: URL and checksum use the same resolved version", funct
     expect(IOS_CTRL_PROXY_IPA_URL).toContain(`/releases/download/${newest.version}/control-proxy.ipa`);
   });
 
-  test("APK_SHA256_CHECKSUM and IPA checksum match the newest registered entry", function() {
+  test("APK and IPA checksums match the newest registered entry", function() {
     expect(APK_SHA256_CHECKSUM).toBe(newest.apkSha256);
     expect(IOS_CTRL_PROXY_SHA256_CHECKSUM).toBe(newest.ipaSha256);
   });

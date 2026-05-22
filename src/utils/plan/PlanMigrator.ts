@@ -243,6 +243,30 @@ const migrateStepFields = (
       recordWarning(warnings, "Renamed id to elementId for tapOn.", stepIndex);
       changed = true;
     }
+    // Back-compat: tapOn's top-level { elementId } / { text } moved under `selector`
+    // in v0.0.30 (see PR #2255 split of tapOn/tapAny). Wrap the legacy shape so plans
+    // authored against 0.0.28-style schemas still validate.
+    const selectorIsRecord = isRecord(mergedParams.selector);
+    if (!selectorIsRecord) {
+      const selector: Record<string, unknown> = {};
+      if (typeof mergedParams.elementId === "string") {
+        selector.elementId = mergedParams.elementId;
+        delete mergedParams.elementId;
+      }
+      if (typeof mergedParams.text === "string") {
+        selector.text = mergedParams.text;
+        delete mergedParams.text;
+      }
+      if (Object.keys(selector).length > 0) {
+        mergedParams.selector = selector;
+        recordWarning(
+          warnings,
+          "Wrapped legacy tapOn { elementId|text } under { selector: { ... } } for v0.0.30+ schema.",
+          stepIndex
+        );
+        changed = true;
+      }
+    }
   }
 
   if (normalizedTool === "inputText") {

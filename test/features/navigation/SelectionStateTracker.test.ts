@@ -18,12 +18,47 @@ const createObservation = (viewHierarchy: ViewHierarchyResult): ObserveResult =>
 });
 
 describe("SelectionStateTracker", () => {
+  test("skips capture entirely when ui perf mode is disabled (--no-ui-perf-mode)", async () => {
+    const detector = new FakeSelectionStateDetector();
+    const capturer = new FakeScreenshotCapturer();
+    const tracker = new SelectionStateTracker({
+      detector,
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => false,
+    });
+
+    const observation = createObservation(
+      createHierarchy({
+        text: "Tab1",
+        selected: "false",
+        bounds: "[0,0][10,10]"
+      })
+    );
+
+    const element: Element = {
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 },
+      text: "Tab1",
+      clickable: true
+    };
+
+    const state = await tracker.prepare({
+      action: "tap",
+      observation,
+      element
+    });
+
+    expect(state).toBeNull();
+    expect(capturer.getCallCount()).toBe(0);
+    expect(detector.getContexts()).toHaveLength(0);
+  });
+
   test("skips capture when accessibility selected state is present", async () => {
     const detector = new FakeSelectionStateDetector();
     const capturer = new FakeScreenshotCapturer();
     const tracker = new SelectionStateTracker({
       detector,
-      screenshotCapturer: capturer
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => true
     });
 
     const observation = createObservation(
@@ -56,7 +91,8 @@ describe("SelectionStateTracker", () => {
     const capturer = new FakeScreenshotCapturer();
     const tracker = new SelectionStateTracker({
       detector,
-      screenshotCapturer: capturer
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => true
     });
 
     capturer.setPaths(["before.png", "after.png"]);
@@ -111,7 +147,8 @@ describe("SelectionStateTracker", () => {
     const capturer = new FakeScreenshotCapturer();
     const tracker = new SelectionStateTracker({
       detector,
-      screenshotCapturer: capturer
+      screenshotCapturer: capturer,
+      isUiPerfModeEnabled: () => true
     });
 
     const observation = createObservation(

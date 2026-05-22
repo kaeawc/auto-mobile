@@ -16,8 +16,7 @@ import { logger } from "../../utils/logger";
 const RELEASES_URL = "https://github.com/kaeawc/auto-mobile/releases";
 
 /**
- * Report the daemon JS package version. This is the version of the
- * @kaeawc/auto-mobile module currently running, sourced from package.json.
+ * Report the daemon JS package version, sourced from package.json.
  */
 export function checkDaemonVersion(): CheckResult {
   const version = getMcpServerVersion();

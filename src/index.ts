@@ -463,6 +463,22 @@ async function main() {
     const resolvedRelease = resolveAssetVersion(RELEASE_VERSION);
     logger.info(`CtrlProxy release: ${resolvedRelease} (bundled with AutoMobile ${getMcpServerVersion()})`);
 
+    // Log-only echoes for daemon CLI flags whose side effects are applied
+    // downstream via startDaemon(). Surfacing them at startup makes CI logs
+    // grep-verifiable so a missing flag is visible without re-running.
+    const silentDaemonFlags: Array<[boolean, string]> = [
+      [!uiPerfMode, "UI perf mode disabled (--no-ui-perf-mode): skipping selection-state visual capture on taps and UI perf auditing"],
+      [dismissKeyboardAfterInput, "Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)"],
+      [noA11yIncludeNotImportantViews, "Accessibility includeNotImportantViews disabled (--no-include-not-important-views)"],
+      [noA11yReportViewIds, "Accessibility reportViewIds disabled (--no-report-view-ids)"],
+      [noA11yRetrieveInteractiveWindows, "Accessibility retrieveInteractiveWindows disabled (--no-retrieve-interactive-windows)"],
+    ];
+    for (const [active, message] of silentDaemonFlags) {
+      if (active) {
+        logger.info(message);
+      }
+    }
+
     if (daemonMode) {
       await startDaemon({
         port: daemonPort,

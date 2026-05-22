@@ -251,6 +251,19 @@ export class ScrollUntilVisible {
         throw new Error("Lost observation after swipe during scroll until visible.");
       }
 
+      // If the post-swipe fingerprint matches the pre-swipe fingerprint, the
+      // observation likely returned stale cached data (the swipe gesture was
+      // dispatched but the cache hadn't been invalidated yet) rather than
+      // reflecting an actually-stationary list. This is the canonical signal
+      // that the scroll-end detector below will misfire, so surface it loudly.
+      const postSwipeFingerprint = this.computeHierarchyFingerprint(lastObservation.viewHierarchy!);
+      if (postSwipeFingerprint === lastFingerprint) {
+        logger.warn(
+          `[SwipeOn] iter=${scrollIteration} post-swipe fingerprint matches pre-swipe — ` +
+          `observation may be stale (cache hit) or swipe had no visible effect`
+        );
+      }
+
       // Wait for scroll animation to fully settle before inspecting the hierarchy.
       // The post-swipe observation may reflect a mid-scroll position (the accessibility service
       // can return a cached hierarchy captured before the fling decelerates to rest). Polling

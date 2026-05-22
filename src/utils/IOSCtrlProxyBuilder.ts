@@ -624,11 +624,8 @@ export class IOSCtrlProxyBuilder {
       const bundleReady = await this.isBundleValid(bundlePath, expectedChecksum);
 
       if (!bundleReady) {
-        // Cached-bundle fallback is gated on the "latest" channel intentionally:
-        // when the user explicitly pins a version via AUTOMOBILE_CTRL_PROXY_VERSION,
-        // silently substituting a different cached artifact would violate the
-        // contract. On the default channel we accept running an older-but-
-        // working CtrlProxy if the network is briefly unhappy.
+        // Cached-bundle fallback applies only on the default "latest" channel;
+        // a pinned npm package bakes in a specific registry default.
         const isLatest = IOS_CTRL_PROXY_RELEASE_VERSION.trim().toLowerCase() === LATEST_RELEASE_VERSION;
         const cachedBundleExists = await this.isBundleValid(bundlePath, "");
         try {

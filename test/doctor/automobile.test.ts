@@ -5,7 +5,6 @@ import {
   checkDaemonVersion,
 } from "../../src/doctor/checks/automobile";
 import {
-  LATEST_RELEASE_VERSION,
   RELEASE_VERSION,
   resolveAssetVersion,
 } from "../../src/constants/release";
@@ -40,13 +39,9 @@ describe("checkCtrlProxyVersion", () => {
     expect(result.value).toBe(expected);
   });
 
-  test("message annotates whether the version is pinned or default", () => {
+  test("message references the bundled AutoMobile package", () => {
     const result = checkCtrlProxyVersion();
-    if (RELEASE_VERSION !== LATEST_RELEASE_VERSION) {
-      expect(result.message).toMatch(/pinned via AUTOMOBILE_CTRL_PROXY_VERSION/);
-    } else {
-      expect(result.message).toMatch(/\(latest\)$/);
-    }
+    expect(result.message).toMatch(/bundled with AutoMobile/);
   });
 });
 

@@ -107,51 +107,10 @@ export function resolveLatestVersion(): string {
   return RELEASE_CHECKSUM_REGISTRY[0].version;
 }
 
-/**
- * Resolve the effective CtrlProxy release version, honoring an optional
- * env-var override.
- *
- * Without the env var set, the daemon uses the newest validated version from
- * RELEASE_CHECKSUM_REGISTRY (equivalent to "latest"). Setting the env var
- * pins both the on-device APK download URL and the expected checksum to a
- * specific historical release — useful when:
- *
- *  - the latest CtrlProxy has a regression you want to dodge, or
- *  - you want CI to behave deterministically across daemon upgrades.
- *
- * Unknown versions throw at module load rather than silently falling back
- * to latest; CI configs should be explicit, and a typo should fail fast
- * rather than quietly downgrade.
- *
- * Exported for testing — pass the env value and registry explicitly.
- */
-export function resolveConfiguredVersion(
-  envValue: string | undefined,
-  registry: ReleaseChecksumEntry[] = RELEASE_CHECKSUM_REGISTRY
-): string {
-  const trimmed = envValue?.trim();
-  if (!trimmed) {
-    return LATEST_RELEASE_VERSION;
-  }
-  if (trimmed.toLowerCase() === LATEST_RELEASE_VERSION) {
-    return LATEST_RELEASE_VERSION;
-  }
-  const hit = registry.find(e => e.version === trimmed);
-  if (!hit) {
-    const known = registry.map(e => e.version).join(", ") || "<empty registry>";
-    throw new Error(
-      `AUTOMOBILE_CTRL_PROXY_VERSION=${trimmed} not found in release registry. ` +
-      `Known versions: ${known}.`
-    );
-  }
-  return trimmed;
-}
+// --- Backward-compatible exports derived from registry[0] ("latest") ---
 
-// --- Backward-compatible exports derived from RELEASE_VERSION ---
-
-export const RELEASE_VERSION: string = resolveConfiguredVersion(
-  process.env.AUTOMOBILE_CTRL_PROXY_VERSION
-);
+/** Default release channel for this AutoMobile build. Pin the npm package to pin CtrlProxy. */
+export const RELEASE_VERSION: string = LATEST_RELEASE_VERSION;
 
 /**
  * Resolve a version string to its concrete equivalent.

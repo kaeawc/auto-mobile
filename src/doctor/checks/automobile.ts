@@ -6,7 +6,7 @@
 import { CheckResult } from "../types";
 import { DaemonManager } from "../../daemon/manager";
 import { getDaemonHealthReport } from "../../daemon/debugTools";
-import { LATEST_RELEASE_VERSION, RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
+import { RELEASE_VERSION, resolveAssetVersion } from "../../constants/release";
 import { getMcpServerVersion } from "../../utils/mcpVersion";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -30,20 +30,16 @@ export function checkDaemonVersion(): CheckResult {
 }
 
 /**
- * Report the on-device CtrlProxy release version. Distinct from the daemon
- * version: the daemon ships its own JS via npm, but the on-device APK/IPA
- * comes from the release registry and can be pinned independently via
- * AUTOMOBILE_CTRL_PROXY_VERSION.
+ * Report the on-device CtrlProxy release version bundled with this
+ * AutoMobile build (registry default). Pin {@link checkDaemonVersion} via
+ * the npm package to pin both daemon JS and CtrlProxy together.
  */
 export function checkCtrlProxyVersion(): CheckResult {
   const resolved = resolveAssetVersion(RELEASE_VERSION);
-  const pinned = RELEASE_VERSION !== LATEST_RELEASE_VERSION;
   return {
     name: "CtrlProxy Release Version",
     status: "pass",
-    message: pinned
-      ? `Version ${resolved} (pinned via AUTOMOBILE_CTRL_PROXY_VERSION)`
-      : `Version ${resolved} (latest)`,
+    message: `Version ${resolved} (bundled with AutoMobile ${getMcpServerVersion()})`,
     value: resolved,
   };
 }

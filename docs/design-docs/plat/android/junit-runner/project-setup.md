@@ -164,23 +164,20 @@ The daemon needs the AutoMobile CtrlProxy APK installed on the device for view h
 during `observe` and interaction steps. The daemon auto-downloads it from GitHub Releases on first
 use.
 
-#### Pinning a specific CtrlProxy version
+#### Pinning daemon and CtrlProxy together
 
-By default the daemon installs the newest validated CtrlProxy release. To pin to a specific
-historical release (e.g., to dodge a regression in the latest CtrlProxy, or to stabilize CI
-across daemon JS upgrades), set `AUTOMOBILE_CTRL_PROXY_VERSION`:
+Each AutoMobile npm release bundles a `RELEASE_CHECKSUM_REGISTRY` whose default is the
+matching CtrlProxy (same semver, e.g. `@kaeawc/auto-mobile@0.0.28` → CtrlProxy `0.0.28`).
+Download URL and SHA256 checksum always come from that registry entry — they cannot drift.
+
+To pin in CI or locally, install a specific package version instead of `latest`:
 
 ```bash
-export AUTOMOBILE_CTRL_PROXY_VERSION=0.0.28
+bunx @kaeawc/auto-mobile@0.0.28 …
 ```
 
-This pins both the download URL and the expected SHA256 checksum. Daemon startup logs confirm
-the pin (`CtrlProxy pinned to version 0.0.28 (AUTOMOBILE_CTRL_PROXY_VERSION)`). Unknown
-versions fail fast at startup with a list of known versions, so typos are caught immediately
-rather than silently downgrading.
-
-Useful in CI where you want the daemon JS at `latest` (to pick up bug fixes) but the on-device
-APK pinned (to avoid the WebSocket protocol skew that a fresh CtrlProxy can introduce).
+For a custom or debug APK without changing the npm package, use `AUTOMOBILE_CTRL_PROXY_APK_PATH`
+(below).
 
 #### Local development build
 

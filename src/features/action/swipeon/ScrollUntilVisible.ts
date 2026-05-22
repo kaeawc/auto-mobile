@@ -21,6 +21,7 @@ import { Timer } from "../../../utils/SystemTimer";
 import { SwipeOnResolvedOptions, BoomerangConfig, TalkBackSwipeRunner, OverlayAnalyzer, ScrollAccessibilityService } from "./types";
 import { resolveContainerSwipeCoordinates } from "./resolveContainerSwipeCoordinates";
 import { getScreenBounds } from "../../../utils/screenBounds";
+import { exponentialBackoff } from "../../../utils/Backoff";
 
 function oppositeDirection(dir: SwipeDirection): SwipeDirection {
   switch (dir) {
@@ -388,7 +389,10 @@ export class ScrollUntilVisible {
 
     // Retry logic similar to TapOnElement
     if (!element && attempt < ScrollUntilVisible.MAX_ATTEMPTS) {
-      const delayNextAttempt = Math.min(10 * Math.pow(2, attempt), 1000);
+      const delayNextAttempt = exponentialBackoff({
+        initialDelayMs: 10,
+        maxDelayMs: 1000
+      }).delayForAttempt(attempt + 1);
       await this.deps.timer.sleep(delayNextAttempt);
 
       let latestViewHierarchy: ViewHierarchyResult | null = null;

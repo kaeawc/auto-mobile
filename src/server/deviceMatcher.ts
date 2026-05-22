@@ -1,5 +1,6 @@
 import type { BootedDevice, DeviceInfo, Platform } from "../models";
 import type { DeviceMatchCriteria, FormFactor, MatchingStrategy } from "../models/DeviceMatchCriteria";
+import { defaultRandom, type Random } from "../utils/Random";
 
 /**
  * Interface for matching devices against criteria.
@@ -85,6 +86,7 @@ function matchesCriteria<T extends { platform: Platform; name: string; osVersion
 function applyStrategy<T extends { osVersion?: string }>(
   candidates: T[],
   strategy: MatchingStrategy,
+  random: Random,
 ): T | null {
   if (candidates.length === 0) {return null;}
   if (candidates.length === 1) {return candidates[0];}
@@ -99,7 +101,7 @@ function applyStrategy<T extends { osVersion?: string }>(
         compareVersions(a.osVersion ?? "0", b.osVersion ?? "0")
       )[0];
     case "RANDOM":
-      return candidates[Math.floor(Math.random() * candidates.length)];
+      return random.pick(candidates);
   }
 }
 
@@ -107,13 +109,15 @@ function applyStrategy<T extends { osVersion?: string }>(
  * Default device matcher implementation.
  */
 export class DefaultDeviceMatcher implements DeviceMatcher {
+  constructor(private readonly random: Random = defaultRandom) {}
+
   matchBootedDevice(
     criteria: DeviceMatchCriteria,
     devices: BootedDevice[],
     strategy: MatchingStrategy,
   ): BootedDevice | null {
     const filtered = devices.filter(d => matchesCriteria(d, criteria));
-    return applyStrategy(filtered, strategy);
+    return applyStrategy(filtered, strategy, this.random);
   }
 
   matchDeviceImage(
@@ -122,6 +126,6 @@ export class DefaultDeviceMatcher implements DeviceMatcher {
     strategy: MatchingStrategy,
   ): DeviceInfo | null {
     const filtered = images.filter(d => matchesCriteria(d, criteria));
-    return applyStrategy(filtered, strategy);
+    return applyStrategy(filtered, strategy, this.random);
   }
 }

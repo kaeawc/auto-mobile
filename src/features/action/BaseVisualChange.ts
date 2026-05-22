@@ -14,6 +14,7 @@ import { throwIfAborted } from "../../utils/toolUtils";
 import { NavigationGraphManager } from "../navigation/NavigationGraphManager";
 import { PredictionAnalyzer, PredictionActionContext } from "../observe/PredictionAnalyzer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { sequenceBackoff } from "../../utils/Backoff";
 
 export interface ProgressCallback {
   (progress: number, total?: number, message?: string): Promise<void>;
@@ -234,7 +235,8 @@ export class BaseVisualChange {
     // Use actionStartTime as minTimestamp to ensure we get data captured after the action
     // This prevents returning stale cached data from before the action was executed
     const minTimestamp = options.actionStartTime ?? 0;
-    const retryDelaysMs = [50, 100, 200, 400];
+    const retryBackoff = sequenceBackoff([50, 100, 200, 400]);
+    const maxRetryAttempts = 4;
     const previousHash = this.hashViewHierarchy(previousObserveResult?.viewHierarchy);
 
     perf.serial("finalObserve");
@@ -261,9 +263,9 @@ export class BaseVisualChange {
       return !!previousHash && !!currentHash && previousHash === currentHash;
     };
 
-    for (let attempt = 0; attempt < retryDelaysMs.length && shouldRetry(latestObservation); attempt++) {
-      const delayMs = retryDelaysMs[attempt];
-      logger.info(`[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${retryDelaysMs.length})`);
+    for (let attempt = 0; attempt < maxRetryAttempts && shouldRetry(latestObservation); attempt++) {
+      const delayMs = retryBackoff.delayForAttempt(attempt + 1);
+      logger.info(`[BaseVisualChange] Observation appears stale/unchanged, retrying in ${delayMs}ms (attempt ${attempt + 1}/${maxRetryAttempts})`);
       await this.timer.sleep(delayMs);
       perf.serial(`finalObserve_retry_${attempt + 1}`);
       latestObservation = await this.observeScreen.execute({ queryOptions: options.queryOptions, perf, skipWaitForFresh: false, minTimestamp, signal: options.signal });

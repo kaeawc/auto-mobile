@@ -1,7 +1,6 @@
 import { promises as fsPromises, type Stats } from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { randomUUID } from "node:crypto";
 import type {
   VideoFormat,
   VideoRecordingConfig,
@@ -12,6 +11,7 @@ import type {
   VideoResolution,
 } from "../../models";
 import { logger, type Logger } from "../../utils/logger";
+import { defaultIdGenerator, type IdGenerator } from "../../utils/IdGenerator";
 
 export interface VideoCaptureConfig extends VideoRecordingConfig {
   recordingId: string;
@@ -65,7 +65,7 @@ export interface VideoRecorderServiceDependencies {
   backend: VideoCaptureBackend;
   archiveRoot?: string;
   logger?: Pick<Logger, "info" | "warn" | "error" | "debug">;
-  idGenerator?: () => string;
+  idGenerator?: IdGenerator | (() => string);
   now?: () => Date;
 }
 
@@ -131,7 +131,7 @@ export class VideoRecorderService {
   private backend: VideoCaptureBackend;
   private archiveRoot: string;
   private log: Pick<Logger, "info" | "warn" | "error" | "debug">;
-  private idGenerator: () => string;
+  private idGenerator: IdGenerator;
   private now: () => Date;
   private activeRecordings = new Map<string, ActiveRecordingState>();
 
@@ -141,7 +141,7 @@ export class VideoRecorderService {
       dependencies.archiveRoot ??
       path.join(os.homedir(), ".auto-mobile", "video-archive");
     this.log = dependencies.logger ?? logger;
-    this.idGenerator = dependencies.idGenerator ?? (() => randomUUID());
+    this.idGenerator = normalizeIdGenerator(dependencies.idGenerator);
     this.now = dependencies.now ?? (() => new Date());
   }
 
@@ -149,7 +149,7 @@ export class VideoRecorderService {
     options: StartVideoRecordingOptions = {}
   ): Promise<ActiveVideoRecording> {
     const config = parseVideoRecordingConfig(options.config);
-    const recordingId = this.idGenerator();
+    const recordingId = this.idGenerator.next();
     const startedAt = this.now().toISOString();
     const recordingDir = this.getRecordingDir(recordingId);
 
@@ -245,6 +245,16 @@ export class VideoRecorderService {
     }
   }
 }
+
+const normalizeIdGenerator = (idGenerator?: IdGenerator | (() => string)): IdGenerator => {
+  if (idGenerator === undefined) {
+    return defaultIdGenerator;
+  }
+  if (typeof idGenerator === "function") {
+    return { next: idGenerator };
+  }
+  return idGenerator;
+};
 
 function parseQualityPreset(
   value: VideoRecordingConfigInput["qualityPreset"]

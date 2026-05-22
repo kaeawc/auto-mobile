@@ -8,6 +8,7 @@ import {
   parseVideoRecordingConfig,
   DEFAULT_VIDEO_RECORDING_CONFIG,
 } from "../../../src/features/video/VideoRecorderService";
+import { CountingIdGenerator } from "../../../src/utils/IdGenerator";
 import { FakeVideoCaptureBackend } from "../../fakes/FakeVideoCaptureBackend";
 
 describe("parseVideoRecordingConfig", () => {
@@ -87,17 +88,15 @@ describe("VideoRecorderService", () => {
   let backend: FakeVideoCaptureBackend;
   let service: VideoRecorderService;
   let archiveRoot: string;
-  let idCounter: number;
 
   beforeEach(async () => {
     backend = new FakeVideoCaptureBackend();
     archiveRoot = path.join(os.tmpdir(), `video-test-${Date.now()}`);
-    idCounter = 0;
 
     service = new VideoRecorderService({
       backend,
       archiveRoot,
-      idGenerator: () => `rec-${++idCounter}`,
+      idGenerator: new CountingIdGenerator("rec"),
       now: () => new Date("2024-01-15T10:30:00.000Z"),
     });
   });

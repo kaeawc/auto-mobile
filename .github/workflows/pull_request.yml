@@ -1453,11 +1453,11 @@ jobs:
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
 
   # =============================================================================
-  # MCP Context Thresholds
+  # MCP Benchmarks
   # =============================================================================
 
-  benchmark-context-thresholds:
-    name: "Benchmark MCP Context Thresholds"
+  benchmarks:
+    name: "MCP Benchmarks"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
@@ -1469,19 +1469,28 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Run Context Threshold Benchmark"
-        id: benchmark
+      - name: "Run MCP Benchmarks"
+        shell: bash
         run: |
-          # Create reports directory
           mkdir -p reports
 
-          # Run benchmark and capture exit code
-          bun run benchmark-context --output reports/context-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
+          if ! bun run benchmark-context --output reports/context-benchmark.json; then
+            echo "CONTEXT_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
 
-          # Always preserve the report file even if benchmark failed
-          exit 0
+          if ! bun run benchmark-tools --output reports/tool-benchmark.json; then
+            echo "TOOL_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
 
-      - name: "Upload Benchmark Report"
+          if ! timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json; then
+            echo "STARTUP_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+          if ! bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json; then
+            echo "NPM_UNPACKED_SIZE_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: "Upload Context Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1489,46 +1498,7 @@ jobs:
           path: reports/context-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
-            cat reports/context-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
-
-  # =============================================================================
-  # MCP Tool Call Throughput
-  # =============================================================================
-
-  benchmark-tool-throughput:
-    name: "Benchmark MCP Tool Throughput"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run Tool Throughput Benchmark"
-        id: benchmark
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-tools --output reports/tool-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload Tool Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1536,47 +1506,7 @@ jobs:
           path: reports/tool-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
-            cat reports/tool-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP tool throughput benchmark passed - no regressions"
-
-  # =============================================================================
-  # MCP Startup Benchmark
-  # =============================================================================
-
-  benchmark-startup:
-    name: "Benchmark MCP Startup"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run Startup Benchmark"
-        id: benchmark
-        timeout-minutes: 1
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload Startup Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1584,100 +1514,13 @@ jobs:
           path: reports/startup-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP startup benchmark failed - regressions detected"
-            cat reports/startup-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP startup benchmark passed - no regressions"
-
-  # =============================================================================
-  # NPM Unpacked Size Benchmark
-  # =============================================================================
-
-  benchmark-npm-unpacked-size:
-    name: "Benchmark NPM Unpacked Size"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run NPM Unpacked Size Benchmark"
-        id: benchmark
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload NPM Unpacked Size Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
           name: npm-unpacked-size-report
           path: reports/npm-unpacked-size.json
           retention-days: 90
-
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
-            cat reports/npm-unpacked-size.json
-            exit 1
-          fi
-          echo "::notice::NPM unpacked size benchmark passed - within threshold"
-
-  # =============================================================================
-  # Consolidated MCP Benchmark Comment
-  # =============================================================================
-
-  post-benchmark-results:
-    name: "Post Consolidated Benchmark Results"
-    runs-on: ubuntu-latest
-    needs: [benchmark-context-thresholds, benchmark-tool-throughput, benchmark-startup, benchmark-npm-unpacked-size]
-    if: ${{ always() && (needs.benchmark-context-thresholds.result != 'skipped' || needs.benchmark-tool-throughput.result != 'skipped' || needs.benchmark-startup.result != 'skipped' || needs.benchmark-npm-unpacked-size.result != 'skipped') }}
-    steps:
-      - name: "Download Context Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: context-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download Tool Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: tool-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download Startup Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: startup-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download NPM Unpacked Size Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: npm-unpacked-size-report
-          path: reports
-        continue-on-error: true
 
       - name: "Post Consolidated Comment"
         if: github.event.pull_request.head.repo.full_name == github.repository
@@ -2006,6 +1849,49 @@ jobs:
                 body: body
               });
             }
+
+      - name: "Check Benchmark Results"
+        if: always()
+        shell: bash
+        run: |
+          failed=false
+
+          if [ "${CONTEXT_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
+            cat reports/context-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
+          fi
+
+          if [ "${TOOL_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
+            cat reports/tool-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP tool throughput benchmark passed - no regressions"
+          fi
+
+          if [ "${STARTUP_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP startup benchmark failed - regressions detected"
+            cat reports/startup-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP startup benchmark passed - no regressions"
+          fi
+
+          if [ "${NPM_UNPACKED_SIZE_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
+            cat reports/npm-unpacked-size.json || true
+            failed=true
+          else
+            echo "::notice::NPM unpacked size benchmark passed - within threshold"
+          fi
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+
 
   # =============================================================================
   # Gate Jobs for Branch Protection

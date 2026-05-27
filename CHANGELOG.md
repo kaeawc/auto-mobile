@@ -1,5 +1,16 @@
 # Changelog
 
+## [v0.0.31] - 2026-05-27
+### Changed
+- Dead Code Detection: Threshold Exceeded ([#1874](https://github.com/kaeawc/auto-mobile/issues/1874)) (automated, dead-code)
+### Other
+- Only 2 of 7 daemon CLI flags log a startup confirmation ([#2286](https://github.com/kaeawc/auto-mobile/issues/2286))
+- CtrlProxy `getLatestHierarchy` 100ms fresh-data wait too short for contended environments ([#2285](https://github.com/kaeawc/auto-mobile/issues/2285))
+- Issue 3: `SelectionStateTracker` ignores `--no-ui-perf-mode` and dominates CI ADB overhead ([#2284](https://github.com/kaeawc/auto-mobile/issues/2284))
+- `retryTapIfNoChange` throws `ReferenceError: isTalkBackEnabled is not defined` ([#2282](https://github.com/kaeawc/auto-mobile/issues/2282))
+- Bug: ReferenceError 'isTalkBackEnabled is not defined' in tapOn retryIfNoChange path ([#2277](https://github.com/kaeawc/auto-mobile/issues/2277))
+- bug(ios): observe returns "received Android hierarchy for iOS device" inside conversation views ([#2275](https://github.com/kaeawc/auto-mobile/issues/2275))
+
 ## [v0.0.30] - 2026-05-20
 ### Other
 - Remove tapClickableParent from tapOn schema — redundant with auto-escalation ([#2248](https://github.com/kaeawc/auto-mobile/issues/2248))

@@ -91,6 +91,7 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
     timeoutMs?: number,
+    heartbeatTimeoutMs?: number,
   ): Promise<Session> {
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
@@ -109,7 +110,7 @@ export class SessionManager {
       cacheData: {},
       lastHeartbeat: now,
       sessionTimeoutMs,
-      heartbeatTimeoutMs: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+      heartbeatTimeoutMs: heartbeatTimeoutMs ?? SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
       hasReceivedHeartbeat: false,
     };
 

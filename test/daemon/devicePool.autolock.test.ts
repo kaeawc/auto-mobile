@@ -160,6 +160,57 @@ describe("DevicePool autolock", () => {
       expect(session!.expiresAt).toBe(timer.now() + 60_000);
     });
 
+    it("aligns the session heartbeat timeout with the idle timeout", async () => {
+      // The daemon heartbeat watchdog reaps sessions whose heartbeat is stale.
+      // Autolock clients do not send heartbeats, so the heartbeat timeout must
+      // match the idle timeout or the device would be released far too early.
+      await pool.initializeWithDevices([
+        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android");
+      const session = sessionManager.getSession(sessionId!);
+
+      expect(session!.heartbeatTimeoutMs).toBe(60_000);
+      // Not the default 10s heartbeat window that would reap a non-heartbeating client.
+      expect(session!.heartbeatTimeoutMs).not.toBe(SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS);
+    });
+
+    it("survives the daemon heartbeat watchdog until the idle timeout", async () => {
+      // Mirrors the reaping predicate in daemon.ts startHeartbeatMonitor():
+      //   after the initial grace, a session is cancelled when
+      //   now - lastHeartbeat > heartbeatTimeoutMs (and it has no active executions).
+      const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
+      const wouldReap = (createdAt: number, lastHeartbeat: number, heartbeatTimeoutMs: number, now: number, hasReceivedHeartbeat: boolean): boolean => {
+        if (!hasReceivedHeartbeat && now - createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
+          return false;
+        }
+        return now - lastHeartbeat > heartbeatTimeoutMs;
+      };
+
+      await pool.initializeWithDevices([
+        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android");
+      const session = sessionManager.getSession(sessionId!)!;
+
+      // With the OLD 10s heartbeat timeout the watchdog would have reaped this at ~20s.
+      expect(
+        wouldReap(session.createdAt, session.lastHeartbeat, SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS, 20_000, false)
+      ).toBe(true);
+
+      // With the aligned timeout it survives the grace + well past the old window...
+      expect(
+        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, 30_000, false)
+      ).toBe(false);
+
+      // ...and is only reaped once the idle timeout elapses with no activity.
+      expect(
+        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, 60_001, false)
+      ).toBe(true);
+    });
+
     it("auto-releases the device after the idle timeout (periodic cleanup)", async () => {
       await pool.initializeWithDevices([
         { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },

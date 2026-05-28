@@ -943,7 +943,12 @@ export class DevicePool {
     device.autolockSessionId = sessionId;
 
     const timeoutMs = getDevicePoolTimeoutMs();
-    await this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs);
+    // Autolock clients (CLI/agents) do not send heartbeats, so align the heartbeat
+    // timeout with the idle timeout. Otherwise the daemon's heartbeat watchdog
+    // (10s default) would reap the lock far sooner than the configured idle timeout.
+    // Interactions still bump lastHeartbeat, so an active client stays locked while
+    // a truly idle one is released after the idle timeout.
+    await this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs);
     logger.info(`Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`);
     return sessionId;
   }

@@ -90,9 +90,7 @@ function parseArgs(): {
 
   // Detect debug-perf mode for performance timing and audit output
   const debugPerf =
-    args.includes("--debug-perf") ||
-    args.includes("--perf-debug") ||
-    process.env.AUTOMOBILE_DEBUG_PERF === "1";
+    args.includes("--debug-perf") || process.env.AUTOMOBILE_DEBUG_PERF === "1";
 
   // Detect debug mode to enable debug tools (debugSearch, bugReport)
   const debug =
@@ -433,7 +431,7 @@ async function main() {
 
     const cliOverrides: Array<[FeatureFlagKey, boolean, string, Record<string, unknown> | null | undefined]> = [
       ["debug", debug, "--debug"],
-      ["debug-perf", debugPerf, "--debug-perf/--perf-debug"],
+      ["debug-perf", debugPerf, "--debug-perf"],
       ["ui-perf-mode", uiPerfMode, "--ui-perf-mode"],
       ["mem-perf-audit", memPerfAuditMode, "--mem-perf-audit"],
       ["accessibility-audit", a11yAuditMode, "--accessibility-audit", accessibilityConfig],

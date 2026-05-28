@@ -623,7 +623,7 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       i++;
     } else if (args[i] === "--debug") {
       options.debug = true;
-    } else if (args[i] === "--debug-perf" || args[i] === "--perf-debug") {
+    } else if (args[i] === "--debug-perf") {
       options.debugPerf = true;
     } else if (args[i] === "--plan-execution-lock-scope") {
       const scope = args[i + 1];

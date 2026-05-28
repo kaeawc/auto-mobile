@@ -170,7 +170,7 @@ export interface ObserveResult {
   displayedTimeMetrics?: DisplayedTimeMetric[];
 
   /**
-   * Performance audit results (only present when --debug-perf/--perf-debug is enabled)
+   * Performance audit results (only present when --debug-perf is enabled)
    * Contains validation against thresholds and detailed diagnostics
    */
   performanceAudit?: PerformanceAuditResult;

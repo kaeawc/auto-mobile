@@ -12,7 +12,7 @@ present these flags can only be set on MCP startup as CLI args. The plan is to h
 
 **`--debug`** - Enable debug logging
 
-**`--debug-perf`** / **`--perf-debug`** - Enable performance debug output, including response performance audits
+**`--debug-perf`** - Enable performance debug output, including response performance audits
 
 ### Performance Flags
 

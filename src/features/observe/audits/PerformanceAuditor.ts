@@ -1,7 +1,7 @@
 import { logger } from "../../../utils/logger";
-import { serverConfig } from "../../../utils/ServerConfig";
 import { PerformanceAudit } from "../../performance/PerformanceAudit";
 import { ThresholdManager } from "../../performance/ThresholdManager";
+import { isPerformanceAuditEnabled } from "../../performance/performanceAuditConfig";
 import { DeviceCapabilitiesDetector } from "../../../utils/DeviceCapabilities";
 import type { BootedDevice, ObserveResult } from "../../../models";
 import { defaultAdbClientFactory, type AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
@@ -33,12 +33,11 @@ export class PerformanceAuditor {
   constructor(opts: PerformanceAuditorOptions) {
     this.device = opts.device;
     this.adbFactory = opts.adbFactory ?? defaultAdbClientFactory;
-    this.isEnabled = opts.isEnabled ?? (() => serverConfig.isUiPerfModeEnabled());
+    this.isEnabled = opts.isEnabled ?? isPerformanceAuditEnabled;
   }
 
   async run(result: ObserveResult, perf: PerformanceTracker): Promise<void> {
-    // Check if performance audit is enabled via CLI flag
-    // This will be replaced with global configuration in issue #67
+    // Check if performance audit is enabled via CLI/config/env gates.
     if (!this.isEnabled()) {
       return;
     }

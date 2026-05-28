@@ -18,26 +18,27 @@ export const DEVICE_POOL_MATCHING: MatchingStrategy =
 
 /**
  * Device pool autolock.
- * When set to "1", startDevice generates a UUID that must be used
- * for all subsequent interactions with the device.
+ * When enabled, startDevice generates a UUID that must be used
+ * for all subsequent interactions with the device, and the device is
+ * auto-released after an idle timeout. Read at call time so the daemon
+ * picks up env changes without a restart.
  */
-const autolockOverride =
-  process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ??
-  process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
-export const DEVICE_POOL_AUTOLOCK_ENABLED = autolockOverride === "1";
+export function isDevicePoolAutolockEnabled(): boolean {
+  const override =
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK ??
+    process.env.AUTO_MOBILE_DEVICE_POOL_AUTOLOCK;
+  return override === "1";
+}
 
 /**
  * Device pool idle timeout in milliseconds.
  * When autolock is enabled, a device is freed if no interaction
  * occurs within this duration. Default: 60 seconds.
  */
-const timeoutOverride =
-  process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT ??
-  process.env.AUTO_MOBILE_DEVICE_POOL_TIMEOUT;
-const parsedTimeout = timeoutOverride
-  ? Number.parseInt(timeoutOverride, 10)
-  : NaN;
-export const DEVICE_POOL_TIMEOUT_MS =
-  Number.isFinite(parsedTimeout) && parsedTimeout > 0
-    ? parsedTimeout * 1000
-    : 60_000;
+export function getDevicePoolTimeoutMs(): number {
+  const override =
+    process.env.AUTOMOBILE_DEVICE_POOL_TIMEOUT ??
+    process.env.AUTO_MOBILE_DEVICE_POOL_TIMEOUT;
+  const parsed = override ? Number.parseInt(override, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0 ? parsed * 1000 : 60_000;
+}

@@ -161,9 +161,14 @@ export class SessionManager {
     const existing = this.getSession(sessionId);
     if (existing) {
       logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
-      // Update last used time
+      // Resolving a session for a tool call is activity: extend both the idle
+      // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
+      // latter, the daemon heartbeat watchdog would reap an actively-used session
+      // whose tools never write session cache (e.g. autolock CLI/agent clients
+      // that do not send explicit heartbeats).
       const now = this.timer.now();
       existing.lastUsedAt = now;
+      existing.lastHeartbeat = now;
       existing.expiresAt = now + existing.sessionTimeoutMs;
       return existing;
     }

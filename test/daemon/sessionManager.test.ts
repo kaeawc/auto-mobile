@@ -66,6 +66,21 @@ describe("SessionManager", () => {
       expect(session2.expiresAt).toBe(initialExpiry + 10);
     });
 
+    test("should bump lastHeartbeat when resolving an existing session", async () => {
+      // The daemon heartbeat watchdog reaps sessions on a stale lastHeartbeat.
+      // Resolving a session for a tool call must count as activity, otherwise an
+      // actively-used autolock client (which sends no explicit heartbeats) would
+      // be reaped mid-use.
+      const session1 = await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      const initialHeartbeat = session1.lastHeartbeat;
+      fakeTimer.advanceTime(30_000);
+
+      const session2 = await sessionManager.getOrCreateSession("session-1");
+
+      expect(session2.lastHeartbeat).toBe(initialHeartbeat + 30_000);
+      expect(session2.lastHeartbeat).toBe(fakeTimer.now());
+    });
+
     test("should preserve custom timeout when getting existing session", async () => {
       await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
       fakeTimer.advanceTime(4000);

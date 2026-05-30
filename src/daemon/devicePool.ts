@@ -9,7 +9,7 @@ import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
-import { DEVICE_POOL_AUTOLOCK_ENABLED, DEVICE_POOL_TIMEOUT_MS } from "./poolConfig";
+import { isDevicePoolAutolockEnabled, getDevicePoolTimeoutMs } from "./poolConfig";
 
 /**
  * Error class for device pool operations with retryability flag.
@@ -106,6 +106,11 @@ export class DevicePool {
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
     this.retryExecutor = retryExecutor;
+
+    // Free autolocked devices when their session expires (idle timeout auto-release).
+    this.sessionManager.onSessionRelease((sessionId, deviceId) => {
+      this.releaseAutolockedDevice(sessionId, deviceId);
+    });
   }
 
   /**
@@ -903,7 +908,7 @@ export class DevicePool {
    * @returns The generated session ID, or undefined if autolock is disabled
    */
   async autolockDevice(deviceId: string, platform: Platform): Promise<string | undefined> {
-    if (!DEVICE_POOL_AUTOLOCK_ENABLED) {
+    if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
 
@@ -937,9 +942,67 @@ export class DevicePool {
     device.assignmentCount++;
     device.autolockSessionId = sessionId;
 
-    await this.sessionManager.createSession(sessionId, deviceId, platform, DEVICE_POOL_TIMEOUT_MS);
-    logger.info(`Autolocked device ${deviceId} with session ${sessionId} (timeout: ${DEVICE_POOL_TIMEOUT_MS}ms)`);
+    const timeoutMs = getDevicePoolTimeoutMs();
+    // Autolock clients (CLI/agents) do not send heartbeats, so align the heartbeat
+    // timeout with the idle timeout. Otherwise the daemon's heartbeat watchdog
+    // (10s default) would reap the lock far sooner than the configured idle timeout.
+    // Interactions still bump lastHeartbeat, so an active client stays locked while
+    // a truly idle one is released after the idle timeout.
+    await this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs);
+    logger.info(`Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`);
     return sessionId;
+  }
+
+  /**
+   * Free a device whose autolock session has been released or has expired.
+   *
+   * Invoked via the SessionManager release callback. Only acts on devices that
+   * were locked by the released session, so non-autolock sessions and devices
+   * that have since been re-locked by a different session are left untouched.
+   */
+  private releaseAutolockedDevice(sessionId: string, deviceId: string): void {
+    const device = this.devices.get(deviceId);
+    if (!device || device.autolockSessionId !== sessionId) {
+      return;
+    }
+
+    device.sessionId = null;
+    device.status = "idle";
+    device.errorCount = 0;
+    device.autolockSessionId = undefined;
+    this.lastReleasedDeviceId = deviceId;
+
+    logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
+  }
+
+  /**
+   * Assert that a session is permitted to interact with a device.
+   *
+   * When autolock is enabled and a device is locked to a session, only that
+   * session UUID may drive it. A mismatched or absent session UUID is rejected.
+   * No-op when autolock is disabled or the device is not locked.
+   */
+  assertAutolockAccess(deviceId: string, sessionUuid: string | undefined): void {
+    if (!isDevicePoolAutolockEnabled()) {
+      return;
+    }
+
+    const device = this.devices.get(deviceId);
+    if (!device || !device.autolockSessionId) {
+      return;
+    }
+
+    if (device.autolockSessionId !== sessionUuid) {
+      throw new ActionableError(
+        `Device '${deviceId}' is locked to another session.\n` +
+        `Autolock is enabled, so every tool call must include the sessionId ` +
+        `returned by 'startDevice' for this device.\n\n` +
+        `Options:\n` +
+        `  - Pass the sessionId from the 'startDevice' that locked this device\n` +
+        `  - Use 'startDevice' to lock a different available device\n` +
+        `  - Wait for the idle timeout to release this device`
+      );
+    }
   }
 
   /**

@@ -18,6 +18,7 @@ import { createToolExecutionContext, updateSessionCache } from "./ToolExecutionC
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
+import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getMcpRecorder } from "./mcpRecordingManager";
@@ -297,6 +298,11 @@ class ToolRegistryClass {
         }
       } else {
         logger.info(`[ToolRegistry] ${name}: Skipping device resolution.`);
+      }
+
+      // Enforce autolock: a locked device may only be driven by the session that locked it.
+      if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
+        DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
       }
 
       // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation

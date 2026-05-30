@@ -15,7 +15,8 @@ import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "./deviceMatcher";
-import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
+import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -387,9 +388,18 @@ export function registerDeviceTools() {
     await ctrlProxySetup(device, perf);
 
     // Always generate a session ID for consistent device interactions.
-    // When autolock is enabled, the session ID is enforced for all subsequent tool calls.
+    // When autolock is enabled, lock the device to a pool-issued session UUID that
+    // is enforced for all subsequent tool calls and auto-released after an idle timeout.
     // When disabled, AutoMobile assumes a single agent and the session ID is advisory.
-    const sessionId = randomUUID();
+    let sessionId: string | undefined;
+    if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
+      sessionId = await DaemonState.getInstance()
+        .getDevicePool()
+        .autolockDevice(device.deviceId, device.platform);
+    }
+    if (!sessionId) {
+      sessionId = randomUUID();
+    }
 
     perf.end();
     const timing = perf.getTimings();

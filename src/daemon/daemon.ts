@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
+import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { DevicePool } from "./devicePool";
 import { DaemonState } from "./daemonState";
 import {
@@ -69,7 +70,7 @@ export class Daemon {
   private host: string;
   private debug: boolean;
   private healthCheckTimer: NodeJS.Timeout | null = null;
-  private heartbeatMonitorTimer: NodeJS.Timeout | null = null;
+  private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private deviceDisconnectTimer: NodeJS.Timeout | null = null;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private stoppingRecordings: Set<string> = new Set();
@@ -753,30 +754,13 @@ export class Daemon {
    * Start periodic heartbeat checks to cancel stale sessions
    */
   private startHeartbeatMonitor(): void {
-    const HEARTBEAT_CHECK_INTERVAL_MS = 10000;
-    const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
-
-    this.heartbeatMonitorTimer = defaultTimer.setInterval(async () => {
-      const now = this.timer.now();
-      const sessions = this.sessionManager.getAllSessions();
-
-      for (const session of sessions) {
-        if (!session.hasReceivedHeartbeat && now - session.createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
-          continue;
-        }
-        if (executionTracker.hasActiveSessionUuidExecutions(session.sessionId)) {
-          continue;
-        }
-        const timeoutMs = session.heartbeatTimeoutMs ?? SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
-        const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
-        if (now - lastHeartbeat > timeoutMs) {
-          logger.warn(`Session ${session.sessionId} heartbeat timeout, cancelling`);
-          await this.cancelAndReleaseSession(session.sessionId);
-        }
-      }
-    }, HEARTBEAT_CHECK_INTERVAL_MS);
-
-    this.heartbeatMonitorTimer.unref();
+    this.heartbeatMonitor = new SessionHeartbeatMonitor(
+      this.sessionManager,
+      sessionId => executionTracker.hasActiveSessionUuidExecutions(sessionId),
+      sessionId => this.cancelAndReleaseSession(sessionId),
+      this.timer,
+    );
+    this.heartbeatMonitor.start();
   }
 
   private startDeviceDisconnectMonitor(): void {
@@ -1069,9 +1053,9 @@ export class Daemon {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
-    if (this.heartbeatMonitorTimer) {
-      clearInterval(this.heartbeatMonitorTimer);
-      this.heartbeatMonitorTimer = null;
+    if (this.heartbeatMonitor) {
+      this.heartbeatMonitor.stop();
+      this.heartbeatMonitor = null;
     }
     if (this.deviceDisconnectTimer) {
       clearInterval(this.deviceDisconnectTimer);

@@ -250,6 +250,7 @@ class ToolRegistryClass {
 
       if (shouldResolveDevice) {
         await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId);
+        await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId);
       }
 
       // If session UUID provided, resolve device from session
@@ -564,6 +565,49 @@ class ToolRegistryClass {
 
     throw new ActionableError(
       "Multiple iOS simulators detected. Provide sessionUuid to target a specific simulator."
+    );
+  }
+
+  /**
+   * When device pool autolock is enabled, a tool call that does not name a target
+   * (no sessionUuid and no deviceId) must not be routed to an arbitrary device if
+   * more than one candidate exists — that would defeat the per-session device
+   * ownership autolock provides. Require the sessionUuid returned by startDevice.
+   *
+   * No-op when autolock is disabled, when a target is already specified, when a
+   * device was pinned via setActiveDevice, or when only one candidate exists.
+   */
+  private async enforceSessionUuidForAutolock(
+    platform: SomePlatform,
+    sessionUuid: string | undefined,
+    providedDeviceId: string | undefined
+  ): Promise<void> {
+    if (!isDevicePoolAutolockEnabled()) {
+      return;
+    }
+    if (sessionUuid || providedDeviceId) {
+      return;
+    }
+
+    // A device pinned via setActiveDevice is an unambiguous target.
+    const currentDevice = this.deviceSessionManager.getCurrentDevice();
+    const currentPlatform = this.deviceSessionManager.getCurrentPlatform();
+    if (currentDevice && (platform === "either" || platform === currentPlatform)) {
+      return;
+    }
+
+    const connectedPlatforms = await this.deviceSessionManager.detectConnectedPlatforms();
+    const candidates = platform === "either"
+      ? connectedPlatforms
+      : connectedPlatforms.filter(device => device.platform === platform);
+
+    if (candidates.length <= 1) {
+      return;
+    }
+
+    throw new ActionableError(
+      "Device pool autolock is enabled and multiple devices are available. " +
+      "Provide the sessionId returned by 'startDevice' (or a deviceId) to target a specific device."
     );
   }
 

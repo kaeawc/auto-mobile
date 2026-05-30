@@ -390,40 +390,54 @@ export class SessionManager {
   }
 
   /**
+   * Remove all expired sessions and fire release callbacks for them.
+   *
+   * Runs on the periodic cleanup timer, but is also invoked by the heartbeat
+   * monitor on its (much shorter) interval so that idle sessions — including
+   * autolocked devices, whose idle timeout equals their heartbeat timeout — are
+   * released promptly instead of waiting for the next 5-minute sweep.
+   */
+  cleanupExpiredSessions(): void {
+    const expiredSessions: string[] = [];
+
+    for (const [sessionId, session] of this.sessions) {
+      if (this.isSessionExpired(session)) {
+        expiredSessions.push(sessionId);
+      }
+    }
+
+    if (expiredSessions.length === 0) {
+      return;
+    }
+
+    logger.info(
+      `Cleaning up ${expiredSessions.length} expired sessions: ` +
+      expiredSessions.join(", ")
+    );
+
+    for (const sessionId of expiredSessions) {
+      const session = this.sessions.get(sessionId);
+      const deviceId = session?.assignedDevice;
+      this.removeSession(sessionId);
+      // Notify release callbacks so session-scoped state is cleaned up
+      if (deviceId) {
+        for (const callback of this.releaseCallbacks) {
+          try {
+            callback(sessionId, deviceId);
+          } catch (error) {
+            logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Start periodic cleanup of expired sessions
    */
   private startCleanupTimer(): void {
     this.cleanupTimer = this.timer.setInterval(() => {
-      const expiredSessions: string[] = [];
-
-      for (const [sessionId, session] of this.sessions) {
-        if (this.isSessionExpired(session)) {
-          expiredSessions.push(sessionId);
-        }
-      }
-
-      if (expiredSessions.length > 0) {
-        logger.info(
-          `Cleaning up ${expiredSessions.length} expired sessions: ` +
-          expiredSessions.join(", ")
-        );
-
-        for (const sessionId of expiredSessions) {
-          const session = this.sessions.get(sessionId);
-          const deviceId = session?.assignedDevice;
-          this.removeSession(sessionId);
-          // Notify release callbacks so session-scoped state is cleaned up
-          if (deviceId) {
-            for (const callback of this.releaseCallbacks) {
-              try {
-                callback(sessionId, deviceId);
-              } catch (error) {
-                logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
-              }
-            }
-          }
-        }
-      }
+      this.cleanupExpiredSessions();
     }, this.CLEANUP_INTERVAL_MS);
 
     // Allow process to exit even if timer is running

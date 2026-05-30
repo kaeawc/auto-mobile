@@ -211,6 +211,43 @@ describe("DevicePool autolock", () => {
       ).toBe(true);
     });
 
+    it("ongoing interaction keeps an autolocked device alive past the heartbeat window", async () => {
+      // Integration: a locked device driven through repeated session resolutions
+      // (createToolExecutionContext -> getOrCreateSession on every tool call) must
+      // not be reaped by the heartbeat watchdog, because each interaction bumps
+      // lastHeartbeat. Mirrors the daemon.ts startHeartbeatMonitor() predicate.
+      const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
+      const reapableAt = (session: { createdAt: number; lastHeartbeat: number; heartbeatTimeoutMs: number; hasReceivedHeartbeat: boolean }, now: number): boolean => {
+        if (!session.hasReceivedHeartbeat && now - session.createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
+          return false;
+        }
+        return now - session.lastHeartbeat > session.heartbeatTimeoutMs;
+      };
+
+      await pool.initializeWithDevices([
+        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android");
+
+      // Simulate a client interacting every 40s for 200s — each call exceeds the
+      // old 10s heartbeat window but is well within the 60s idle window.
+      for (let elapsed = 40_000; elapsed <= 200_000; elapsed += 40_000) {
+        timer.advanceTime(40_000);
+        await sessionManager.getOrCreateSession(sessionId!);
+        const live = sessionManager.getSession(sessionId!)!;
+        expect(reapableAt(live, timer.now())).toBe(false);
+      }
+
+      // Device is still locked after 200s of active use.
+      expect(pool.getDevice("emulator-5554")!.status).toBe("busy");
+
+      // Snapshot the live session, then stop interacting: once the heartbeat window
+      // elapses with no further activity, the watchdog predicate would reap it.
+      const snapshot = { ...sessionManager.getSession(sessionId!)! };
+      expect(reapableAt(snapshot, timer.now() + 61_000)).toBe(true);
+    });
+
     it("auto-releases the device after the idle timeout (periodic cleanup)", async () => {
       await pool.initializeWithDevices([
         { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },

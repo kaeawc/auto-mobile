@@ -48,6 +48,7 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
+import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -110,6 +111,9 @@ export class Daemon {
     }
     if (options.dismissKeyboardAfterInput) {
       serverConfig.setDismissKeyboardAfterInputEnabled(true);
+    }
+    if (options.debugPerf) {
+      setDebugPerfEnabled(true);
     }
     if (options.noUiPerfMode) {
       serverConfig.setUiPerfMode(false);

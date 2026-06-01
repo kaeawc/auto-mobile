@@ -7,6 +7,7 @@ import { BootedDevice, ExecResult, AndroidUser } from "../../src/models";
  */
 export class FakeAdbExecutor implements AdbExecutor {
   private commandResponses: Map<string, ExecResult> = new Map();
+  private commandResponseSequences: Map<string, ExecResult[]> = new Map();
   private commandErrors: Map<string, Error> = new Map();
   private defaultResponse: ExecResult = this.createExecResult("", "");
   private defaultError: Error | null = null;
@@ -60,6 +61,20 @@ export class FakeAdbExecutor implements AdbExecutor {
     // If response already has the required methods, use it as-is; otherwise enhance it
     const enhancedResponse = this.ensureExecResultMethods(response);
     this.commandResponses.set(commandPattern, enhancedResponse);
+  }
+
+  /**
+   * Configure an ordered sequence of responses for a command pattern. Each
+   * matching call consumes the next response; the final response is repeated
+   * once the sequence is exhausted. Useful for fail-then-succeed flows.
+   * @param commandPattern - Pattern to match against executed commands (substring match)
+   * @param responses - Responses to return in order
+   */
+  setCommandResponseSequence(commandPattern: string, responses: ExecResult[]): void {
+    this.commandResponseSequences.set(
+      commandPattern,
+      responses.map(response => this.ensureExecResultMethods(response))
+    );
   }
 
   /**
@@ -186,6 +201,13 @@ export class FakeAdbExecutor implements AdbExecutor {
     // If a default error is configured, throw it
     if (this.defaultError) {
       throw this.defaultError;
+    }
+
+    // Check for sequenced responses (consumed in order) before single responses
+    for (const [pattern, responses] of this.commandResponseSequences.entries()) {
+      if (command.includes(pattern) && responses.length > 0) {
+        return responses.length > 1 ? responses.shift()! : responses[0];
+      }
     }
 
     // Check for configured responses based on pattern matching

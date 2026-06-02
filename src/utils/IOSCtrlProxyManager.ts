@@ -4,7 +4,7 @@ import { requireBootedDevice } from "./requireBootedDevice";
 import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
-import { exec, type ChildProcess } from "child_process";
+import { spawn, type ChildProcess } from "child_process";
 import { PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
@@ -808,14 +808,22 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     logger.info("[IOSCtrlProxy] Using xcodebuild test-without-building to start runner on simulator");
 
-    // Start in background with env vars passed via exec options (not interpolated into the command)
-    // Note: exec() is used here intentionally — the command is built from internal constants,
-    // not user input, and we need shell features (2>&1 redirection, quoted paths).
-    const child = exec(command, { env: { ...process.env, ...childEnv } }, error => {
-      if (error) {
-        logger.warn(`[IOSCtrlProxy] xcodebuild test exited: ${error.message}`);
-        this.handleProcessExit();
+    // Start in background with env vars passed via spawn options (not interpolated into the command).
+    // Uses spawn with shell:true instead of exec() to avoid the default 1MB maxBuffer limit.
+    // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB, causing
+    // "stdout maxBuffer length exceeded" crashes when using exec().
+    const child = spawn(command, [], { shell: true, env: { ...process.env, ...childEnv }, stdio: ["ignore", "pipe", "pipe"] });
+
+    child.on("error", error => {
+      logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
+      this.handleProcessExit();
+    });
+
+    child.on("exit", (code, signal) => {
+      if (code !== 0 || signal) {
+        logger.warn(`[IOSCtrlProxy] xcodebuild test exited: code=${code}, signal=${signal}`);
       }
+      this.handleProcessExit();
     });
 
     if (child.pid) {
@@ -1162,11 +1170,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       "2>&1"
     ].join(" ");
 
-    // Start in background
-    const child = exec(command, error => {
-      if (error) {
-        logger.warn(`[IOSCtrlProxy] xcodebuild test exited: ${error.message}`);
+    // Start in background using spawn with shell:true to avoid the default 1MB maxBuffer limit.
+    // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB.
+    const child = spawn(command, [], { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+
+    child.on("error", error => {
+      logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
+      this.handleProcessExit();
+    });
+
+    child.on("exit", (code, signal) => {
+      if (code !== 0 || signal) {
+        logger.warn(`[IOSCtrlProxy] xcodebuild test exited: code=${code}, signal=${signal}`);
       }
+      this.handleProcessExit();
     });
 
     if (child.pid) {

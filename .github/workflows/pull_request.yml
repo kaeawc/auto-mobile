@@ -138,13 +138,13 @@ jobs:
               pull_number: prNumber,
             });
 
-            const { data: files } = await github.rest.pulls.listFiles({
+            const files = await github.paginate(github.rest.pulls.listFiles, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               pull_number: prNumber,
             });
 
-            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
               owner: context.repo.owner,
               repo: context.repo.repo,
               issue_number: prNumber,

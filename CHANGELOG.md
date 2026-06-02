@@ -1,5 +1,12 @@
 # Changelog
 
+## [v0.0.32] - 2026-06-02
+### Changed
+- Dead Code Detection: Threshold Exceeded ([#2313](https://github.com/kaeawc/auto-mobile/issues/2313)) (automated, dead-code)
+### Other
+- Can't pin the on-device CtrlProxy release independently of the daemon ([#2293](https://github.com/kaeawc/auto-mobile/issues/2293))
+- `retryIfNoChange` fires false-positive retries during activity transitions ([#2283](https://github.com/kaeawc/auto-mobile/issues/2283))
+
 ## [v0.0.31] - 2026-05-27
 ### Changed
 - Dead Code Detection: Threshold Exceeded ([#1874](https://github.com/kaeawc/auto-mobile/issues/1874)) (automated, dead-code)

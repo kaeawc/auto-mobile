@@ -29,6 +29,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.filter.outputs.docs_only }}
       sha256_only: ${{ steps.check-sha256.outputs.sha256_only }}
+      auto_chore: ${{ steps.check-auto-chore.outputs.auto_chore }}
       desktop_core_changed: ${{ steps.filter-desktop-core.outputs.desktop_core }}
       ide_plugin_changed: ${{ steps.filter-ide-plugin.outputs.ide_plugin }}
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
@@ -124,6 +125,61 @@ jobs:
             core.setOutput('sha256_only', sha256Only.toString());
             return sha256Only;
 
+      - name: "Check for auto chore changes"
+        id: check-auto-chore
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = context.issue.number;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const { data: files } = await github.rest.pulls.listFiles({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const { data: labels } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const docPatterns = [
+              /\.md$/,
+              /^docs\//,
+              /^docs\/.*\.(gif|png|webp)$/i,
+              /^mkdocs\.yml$/,
+              /^\.lychee\.toml$/
+            ];
+            const isDocFile = (filename) => docPatterns.some(pattern => pattern.test(filename));
+
+            const labelNames = labels.map(label => label.name);
+            const sameRepo = pr.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            const automated = labelNames.includes('automated');
+            const documentation = labelNames.includes('documentation');
+            const titleMatches = pr.title.startsWith('chore:');
+            const branchMatches = pr.head.ref.startsWith('auto-update/');
+            const allFilesAreDocs = files.length > 0 && files.every(file => isDocFile(file.filename));
+            const autoChore = sameRepo && automated && documentation && titleMatches && branchMatches && allFilesAreDocs;
+
+            console.log('PR Title:', pr.title);
+            console.log('Head branch:', pr.head.ref);
+            console.log('Same repository:', sameRepo);
+            console.log('Automated label:', automated);
+            console.log('Documentation label:', documentation);
+            console.log('Files changed:', files.map(f => f.filename).join(', '));
+            console.log('All files are docs:', allFilesAreDocs);
+            console.log('Result - auto chore:', autoChore);
+
+            core.setOutput('auto_chore', autoChore.toString());
+            return autoChore;
+
       - name: "Check for Desktop Core module changes"
         id: filter-desktop-core
         uses: dorny/paths-filter@v3
@@ -196,7 +252,7 @@ jobs:
       - name: "Decide if Android jobs should run"
         id: android_should_run
         run: |
-          if [[ "${{ steps.filter-android.outputs.android }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" ]]; then
+          if [[ "${{ steps.filter-android.outputs.android }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -205,7 +261,7 @@ jobs:
       - name: "Decide if iOS jobs should run"
         id: ios_should_run
         run: |
-          if [[ "${{ steps.filter-ios.outputs.ios }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" ]]; then
+          if [[ "${{ steps.filter-ios.outputs.ios }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -396,6 +452,7 @@ jobs:
     name: "Fast Validation"
     runs-on: ubuntu-latest
     needs: detect-changes
+    if: needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -448,7 +505,7 @@ jobs:
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
+    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -628,7 +685,7 @@ jobs:
     name: "Bun Security Audit"
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
+    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1886,8 +1943,9 @@ jobs:
 
   ios-gate:
     name: "iOS"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
+      - detect-changes
       - ios-swift-packages
       - ios-xcode-build
       - ios-xctest-runner-simulator-tests
@@ -1897,6 +1955,7 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
+            "${{ needs.detect-changes.result }}" \
             "${{ needs.ios-swift-packages.result }}" \
             "${{ needs.ios-xcode-build.result }}" \
             "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
@@ -1911,8 +1970,9 @@ jobs:
 
   android-gate:
     name: "Android"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
+      - detect-changes
       - build-android-control-proxy
       - build-junit-runner-library
       - build-playground-app
@@ -1926,6 +1986,7 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
+            "${{ needs.detect-changes.result }}" \
             "${{ needs.build-android-control-proxy.result }}" \
             "${{ needs.build-junit-runner-library.result }}" \
             "${{ needs.build-playground-app.result }}" \
@@ -1944,8 +2005,9 @@ jobs:
 
   ide-plugin-gate:
     name: "IDE Plugin"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
+      - detect-changes
       - build-ide-plugin
       - ide-plugin-unit-tests
     runs-on: ubuntu-latest
@@ -1953,6 +2015,7 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
+            "${{ needs.detect-changes.result }}" \
             "${{ needs.build-ide-plugin.result }}" \
             "${{ needs.ide-plugin-unit-tests.result }}" \
           )

@@ -2,7 +2,7 @@
 
 #### What can I use this for?
 
-- [Explore app ux](using/ux-exploration.md), [create UI tests](using/ui-tests.md), and easily create [bug reports]() with built-in [video recording](design-docs/mcp/observe/video-recording.md) and [visual highlights](design-docs/mcp/observe/visual-highlighting.md).
+- [Explore app ux](using/ux-exploration.md), [create UI tests](using/ui-tests.md), and easily create [bug reports](using/reproducing-bugs.md) with built-in [video recording](design-docs/mcp/observe/video-recording.md) and [visual highlights](design-docs/mcp/observe/visual-highlighting.md).
 - Measure [startup](using/perf-analysis/startup.md), [scroll framerate](using/perf-analysis/scroll-framerate.md), and [screen transitions](using/perf-analysis/screen-transition.md).
 - Audit accessibility compliance with [contrast ratios](using/a11y.md#contrast) & [tap targets](using/a11y.md#tap-targets).
 - (Coming soon) record tests via AutoMobile's companion Android plugin & MacOS app.

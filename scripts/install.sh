@@ -89,6 +89,45 @@ command_exists() {
     command -v "$1" >/dev/null 2>&1
 }
 
+env_truthy() {
+    local value="${1:-}"
+    value="$(printf '%s' "${value}" | tr '[:upper:]' '[:lower:]')"
+    [[ "${value}" == "1" || "${value}" == "true" || "${value}" == "yes" || "${value}" == "on" ]]
+}
+
+toml_escape_string() {
+    local value="$1"
+    value="${value//\\/\\\\}"
+    value="${value//\"/\\\"}"
+    printf '%s' "${value}"
+}
+
+toml_array_from_csv() {
+    local csv="$1"
+    local result="["
+    local first=true
+    local item
+    local -a items
+
+    IFS=',' read -r -a items <<< "${csv}"
+    for item in "${items[@]}"; do
+        item="${item#"${item%%[![:space:]]*}"}"
+        item="${item%"${item##*[![:space:]]}"}"
+        if [[ -z "${item}" ]]; then
+            continue
+        fi
+        if [[ "${first}" == "true" ]]; then
+            first=false
+        else
+            result+=", "
+        fi
+        result+="\"$(toml_escape_string "${item}")\""
+    done
+
+    result+="]"
+    printf '%s' "${result}"
+}
+
 # Compare semver versions: returns 0 if $1 >= $2
 version_gte() {
     local v1="$1"
@@ -1775,6 +1814,16 @@ generate_auto_mobile_config_toml() {
 command = "bunx"
 args = ${args}
 EOF
+
+    if env_truthy "${AUTOMOBILE_CODEX_MCP_REQUIRED:-}"; then
+        echo "required = true"
+    fi
+    if [[ -n "${AUTOMOBILE_CODEX_MCP_ENABLED_TOOLS:-}" ]]; then
+        echo "enabled_tools = $(toml_array_from_csv "${AUTOMOBILE_CODEX_MCP_ENABLED_TOOLS}")"
+    fi
+    if [[ -n "${AUTOMOBILE_CODEX_MCP_DISABLED_TOOLS:-}" ]]; then
+        echo "disabled_tools = $(toml_array_from_csv "${AUTOMOBILE_CODEX_MCP_DISABLED_TOOLS}")"
+    fi
 
     if [[ "${has_env}" == "true" ]]; then
         echo ""

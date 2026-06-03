@@ -10,6 +10,32 @@ curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/ins
 
 Once you've finished that, learn [how to use AutoMobile](using/ux-exploration.md)
 
+## Codex policy options
+
+When the installer configures Codex, it writes an `[mcp_servers.auto-mobile]`
+section to `~/.codex/config.toml`. You can opt in to Codex's MCP policy fields
+before running the installer:
+
+```bash
+AUTOMOBILE_CODEX_MCP_REQUIRED=true \
+AUTOMOBILE_CODEX_MCP_ENABLED_TOOLS=observe,tapOn,swipeOn,inputText \
+AUTOMOBILE_CODEX_MCP_DISABLED_TOOLS=androidDeviceShell \
+curl -fsSL https://raw.githubusercontent.com/kaeawc/auto-mobile/main/scripts/install.sh | bash
+```
+
+This produces Codex-side TOML like:
+
+```toml
+[mcp_servers.auto-mobile]
+command = "bunx"
+args = ["@kaeawc/auto-mobile@latest"]
+required = true
+enabled_tools = ["observe", "tapOn", "swipeOn", "inputText"]
+disabled_tools = ["androidDeviceShell"]
+```
+
+`disabled_tools` is applied by Codex after `enabled_tools`.
+
 ## Homebrew (macOS)
 
 AutoMobile is published to the shared `kaeawc/tap` Homebrew tap on every

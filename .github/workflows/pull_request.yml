@@ -537,18 +537,25 @@ jobs:
     name: "Installer Minimal (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true'
+    env:
+      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
+      - name: "Skip installer validation"
+        if: env.RUN_INSTALLER != 'true'
+        run: echo "Skipping installer validation for documentation-only changes"
+
       - name: "Git Checkout"
+        if: env.RUN_INSTALLER == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Run Installer (minimal)"
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -558,6 +565,7 @@ jobs:
           echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Run Uninstaller"
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -566,7 +574,7 @@ jobs:
           echo "UNINSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Upload Logs"
-        if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure()
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure())
         uses: actions/upload-artifact@v6
         with:
           name: installer-minimal-${{ matrix.os }}-logs
@@ -574,7 +582,7 @@ jobs:
           retention-days: 7
 
       - name: "Fail on error"
-        if: env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0'
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0')
         shell: bash
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
@@ -585,18 +593,25 @@ jobs:
     name: "Installer Development (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true'
+    env:
+      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
+      - name: "Skip installer validation"
+        if: env.RUN_INSTALLER != 'true'
+        run: echo "Skipping installer validation for documentation-only changes"
+
       - name: "Git Checkout"
+        if: env.RUN_INSTALLER == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Run Installer (development)"
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -606,11 +621,11 @@ jobs:
           echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Verify runtime dependencies"
-        if: env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         run: ./scripts/ci/verify-runtime-deps.sh
 
       - name: "Build from source"
-        if: env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         shell: bash
         run: |
           export PATH="${HOME}/.bun/bin:${PATH}"
@@ -618,11 +633,11 @@ jobs:
           bunx turbo run build --output-logs=errors-only
 
       - name: "Daemon lifecycle (start → health → doctor → stop)"
-        if: env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         run: ./scripts/ci/daemon-lifecycle.sh
 
       - name: "Upload Logs"
-        if: env.INSTALL_EXIT_CODE != '0' || failure()
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || failure())
         uses: actions/upload-artifact@v6
         with:
           name: installer-development-${{ matrix.os }}-logs
@@ -630,7 +645,7 @@ jobs:
           retention-days: 7
 
       - name: "Fail on error"
-        if: env.INSTALL_EXIT_CODE != '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE != '0'
         shell: bash
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
@@ -714,8 +729,9 @@ jobs:
     name: "Node TypeScript Build and Test (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
     timeout-minutes: 10
+    env:
+      RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -723,12 +739,18 @@ jobs:
           - macos-latest
           - windows-latest
     steps:
+      - name: "Skip Node TypeScript build and test"
+        if: env.RUN_MCP_BUILD_TEST != 'true'
+        run: echo "Skipping Node TypeScript build and test for documentation-only or SHA256-only changes"
+
       - name: "Git Checkout"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Cache Bun dependencies"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -739,6 +761,7 @@ jobs:
             bun-${{ matrix.os }}-
 
       - name: "Cache Turborepo"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
         with:
           path: .turbo
@@ -748,9 +771,11 @@ jobs:
             turbo-${{ matrix.os }}-
 
       - name: "Setup Auto Mobile"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Lint"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         env:
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
@@ -759,6 +784,7 @@ jobs:
         run: turbo run lint --output-logs=errors-only --log-order=grouped
 
       - name: "Run Build"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         env:
           TURBO_TELEMETRY_DISABLED: "1"
@@ -771,6 +797,7 @@ jobs:
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-${{ matrix.os }}.log"
 
       - name: "Run Tests"
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         env:
           # Enable debug logging on Windows to trace what's starting the adb daemon
@@ -787,7 +814,7 @@ jobs:
           turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
 
       - name: "Upload Build/Test Logs"
-        if: failure() || cancelled() || matrix.os == 'windows-latest'
+        if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
         uses: actions/upload-artifact@v6
         with:
           name: mcp-build-test-logs-${{ matrix.os }}

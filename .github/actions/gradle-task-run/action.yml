@@ -225,7 +225,7 @@ runs:
       working-directory: ${{ inputs.gradle-project-directory }}
       run: |
         export GRADLE_FLAGS=$(cat /tmp/gradle_flags.txt)
-        ./gradlew ${{ inputs.gradle-tasks }} $GRADLE_FLAGS
+        "${GITHUB_WORKSPACE}/scripts/ci/run-gradle-with-retry.sh" -- ./gradlew ${{ inputs.gradle-tasks }} $GRADLE_FLAGS
 
     - name: "Check if any JUnit tests reports were created"
       id: junit-reports-exist

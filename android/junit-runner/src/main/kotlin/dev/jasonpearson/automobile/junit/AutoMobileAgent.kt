@@ -4,11 +4,10 @@ import ai.koog.agents.core.agent.AIAgent
 import ai.koog.agents.core.tools.SimpleTool
 import ai.koog.agents.core.tools.ToolRegistry
 import ai.koog.prompt.executor.clients.anthropic.AnthropicModels
-import ai.koog.prompt.executor.clients.google.GoogleModels
 import ai.koog.prompt.executor.clients.openai.OpenAIModels
-import ai.koog.prompt.executor.llms.all.simpleAnthropicExecutor
-import ai.koog.prompt.executor.llms.all.simpleGoogleAIExecutor
-import ai.koog.prompt.executor.llms.all.simpleOpenAIExecutor
+import ai.koog.prompt.executor.model.PromptExecutor
+import ai.koog.prompt.llm.LLModel
+import ai.koog.serialization.typeToken
 import java.io.File
 import java.net.URI
 import java.net.http.HttpClient
@@ -151,7 +150,9 @@ open class AutoMobileAgent(
 
       val recoveryResult = runBlocking {
         try {
-          println("Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})...")
+          println(
+              "Starting AI recovery for step ${context.failedStepIndex + 1} (${context.failedTool})..."
+          )
 
           aiAgent.run(recoveryPrompt)
 
@@ -451,7 +452,7 @@ open class AutoMobileAgent(
   /** Observe the current device state and UI hierarchy */
   class ObserveTool(private val mcpClient: MCPClient) :
       SimpleTool<ObserveTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "observe",
           description = "Observe the current device state and UI hierarchy",
       ) {
@@ -472,7 +473,7 @@ open class AutoMobileAgent(
   /** Tap on UI elements by text, coordinates, or description */
   class TapOnTool(private val mcpClient: MCPClient) :
       SimpleTool<TapOnTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "tapOn",
           description = "Tap on UI elements by text, coordinates, or description",
       ) {
@@ -503,7 +504,7 @@ open class AutoMobileAgent(
   /** Enter text into input fields or send text to the device */
   class TypeTextTool(private val mcpClient: MCPClient) :
       SimpleTool<TypeTextTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "typeText",
           description = "Enter text into input fields or send text to the device",
       ) {
@@ -519,7 +520,7 @@ open class AutoMobileAgent(
   /** Input text with optional IME action */
   class InputTextTool(private val mcpClient: MCPClient) :
       SimpleTool<InputTextTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "inputText",
           description = "Input text with optional IME action",
       ) {
@@ -536,7 +537,7 @@ open class AutoMobileAgent(
   /** Perform swipe gestures for scrolling or navigation */
   class SwipeTool(private val mcpClient: MCPClient) :
       SimpleTool<SwipeTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "swipe",
           description = "Perform swipe gestures for scrolling or navigation",
       ) {
@@ -561,7 +562,7 @@ open class AutoMobileAgent(
   /** Scroll within a container element */
   class ScrollTool(private val mcpClient: MCPClient) :
       SimpleTool<ScrollTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "scroll",
           description = "Scroll within a container element",
       ) {
@@ -595,7 +596,7 @@ open class AutoMobileAgent(
   /** Wait for elements to appear or conditions to be met */
   class WaitForTool(private val mcpClient: MCPClient) :
       SimpleTool<WaitForTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "waitFor",
           description = "Wait for elements to appear or conditions to be met",
       ) {
@@ -640,7 +641,7 @@ open class AutoMobileAgent(
   /** Navigate back in the app using the back button */
   class GoBackTool(private val mcpClient: MCPClient) :
       SimpleTool<GoBackTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "goBack",
           description = "Navigate back in the app using the back button",
       ) {
@@ -656,7 +657,7 @@ open class AutoMobileAgent(
   /** Press a hardware button */
   class PressButtonTool(private val mcpClient: MCPClient) :
       SimpleTool<PressButtonTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "pressButton",
           description = "Press a hardware button",
       ) {
@@ -672,7 +673,7 @@ open class AutoMobileAgent(
   /** Clear text from input fields */
   class ClearTextTool(private val mcpClient: MCPClient) :
       SimpleTool<ClearTextTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "clearText",
           description = "Clear text from input fields",
       ) {
@@ -687,7 +688,7 @@ open class AutoMobileAgent(
   /** Launch an app by package ID */
   class LaunchAppTool(private val mcpClient: MCPClient) :
       SimpleTool<LaunchAppTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "launchApp",
           description = "Launch an app by package ID",
       ) {
@@ -703,7 +704,7 @@ open class AutoMobileAgent(
   /** Terminate an app by package ID */
   class TerminateAppTool(private val mcpClient: MCPClient) :
       SimpleTool<TerminateAppTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "terminateApp",
           description = "Terminate an app by package ID",
       ) {
@@ -719,7 +720,7 @@ open class AutoMobileAgent(
   /** Double tap on coordinates */
   class DoubleTapOnTool(private val mcpClient: MCPClient) :
       SimpleTool<DoubleTapOnTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "doubleTapOn",
           description = "Double tap on coordinates",
       ) {
@@ -735,7 +736,7 @@ open class AutoMobileAgent(
   /** Long press on coordinates or elements */
   class LongPressOnTool(private val mcpClient: MCPClient) :
       SimpleTool<LongPressOnTool.Args>(
-          argsSerializer = Args.serializer(),
+          argsType = typeToken<Args>(),
           name = "longPressOn",
           description = "Long press on coordinates or elements",
       ) {
@@ -893,19 +894,8 @@ open class AutoMobileAgent(
 
   class DefaultAIAgentFactory : AIAgentFactory {
     override fun createAIAgent(config: ModelConfig): AIAgent<String, String> {
-      val executor =
-          when (config.provider) {
-            ModelProvider.OPENAI -> simpleOpenAIExecutor(config.apiKey)
-            ModelProvider.ANTHROPIC -> simpleAnthropicExecutor(config.apiKey)
-            ModelProvider.GOOGLE -> simpleGoogleAIExecutor(config.apiKey)
-          }
-
-      val model =
-          when (config.provider) {
-            ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
-            ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
-            ModelProvider.GOOGLE -> GoogleModels.Gemini2_5Pro
-          }
+      val executor = createPromptExecutor(config)
+      val model = selectModel(config.provider)
 
       val systemPrompt =
           """
@@ -936,19 +926,8 @@ open class AutoMobileAgent(
         mcpClient: MCPClient,
         maxToolCalls: Int,
     ): AIAgent<String, String> {
-      val executor =
-          when (config.provider) {
-            ModelProvider.OPENAI -> simpleOpenAIExecutor(config.apiKey)
-            ModelProvider.ANTHROPIC -> simpleAnthropicExecutor(config.apiKey)
-            ModelProvider.GOOGLE -> simpleGoogleAIExecutor(config.apiKey)
-          }
-
-      val model =
-          when (config.provider) {
-            ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
-            ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
-            ModelProvider.GOOGLE -> GoogleModels.Gemini2_5Pro
-          }
+      val executor = createPromptExecutor(config)
+      val model = selectModel(config.provider)
 
       // Create AutoMobile MCP tools using class-based pattern (no reflection)
       val toolFactory = AutoMobileMCPToolFactory(mcpClient)
@@ -990,6 +969,26 @@ open class AutoMobileAgent(
           llmModel = model,
           toolRegistry = toolRegistry,
           systemPrompt = systemPrompt,
+      )
+    }
+
+    private fun createPromptExecutor(config: ModelConfig): PromptExecutor =
+        when (config.provider) {
+          ModelProvider.OPENAI -> PromptExecutor.builder().openAI(config.apiKey).build()
+          ModelProvider.ANTHROPIC -> PromptExecutor.builder().anthropic(config.apiKey).build()
+          ModelProvider.GOOGLE -> unsupportedGoogleProvider()
+        }
+
+    private fun selectModel(provider: ModelProvider): LLModel =
+        when (provider) {
+          ModelProvider.OPENAI -> OpenAIModels.Chat.GPT4o
+          ModelProvider.ANTHROPIC -> AnthropicModels.Sonnet_4
+          ModelProvider.GOOGLE -> unsupportedGoogleProvider()
+        }
+
+    private fun unsupportedGoogleProvider(): Nothing {
+      throw UnsupportedOperationException(
+          "Koog 1.0.0 stable artifacts do not publish a Google prompt executor; use OpenAI or Anthropic."
       )
     }
   }

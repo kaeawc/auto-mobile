@@ -4,7 +4,7 @@ import { requireBootedDevice } from "./requireBootedDevice";
 import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type PerformanceTracker } from "./PerformanceTracker";
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
-import { spawn, type ChildProcess } from "child_process";
+import { type ChildProcess } from "child_process";
 import { PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
@@ -812,7 +812,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     // Uses spawn with shell:true instead of exec() to avoid the default 1MB maxBuffer limit.
     // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB, causing
     // "stdout maxBuffer length exceeded" crashes when using exec().
-    const child = spawn(command, [], { shell: true, env: { ...process.env, ...childEnv }, stdio: ["ignore", "pipe", "pipe"] });
+    // Routed through the injected processExecutor so tests can observe/control the process.
+    const child = this.processExecutor.spawn(command, [], { shell: true, env: { ...process.env, ...childEnv }, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);
@@ -1172,7 +1173,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     // Start in background using spawn with shell:true to avoid the default 1MB maxBuffer limit.
     // xcodebuild outputs verbose hierarchy dumps that easily exceed 1MB.
-    const child = spawn(command, [], { shell: true, stdio: ["ignore", "pipe", "pipe"] });
+    // Routed through the injected processExecutor so tests can observe/control the process.
+    const child = this.processExecutor.spawn(command, [], { shell: true, stdio: ["ignore", "pipe", "pipe"] });
 
     child.on("error", error => {
       logger.warn(`[IOSCtrlProxy] xcodebuild test error: ${error.message}`);

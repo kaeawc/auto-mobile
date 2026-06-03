@@ -3,6 +3,11 @@ import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import { DaemonClient, DaemonUnavailableError } from "../daemon/client";
 import { DaemonManager } from "../daemon/manager";
+import {
+  createOpenAIMcpToolDefinition,
+  OPENAI_MCP_TOOL_USAGE,
+  parseOpenAIMcpToolCliArgs,
+} from "../openai";
 
 // Import all tool registration functions
 import { registerObserveTools } from "../server/observeTools";
@@ -281,6 +286,28 @@ function handleToolResult(result: any, toolName: string): void {
   }
 }
 
+function runOpenAIMcpToolCommand(args: string[]): void {
+  const options = parseOpenAIMcpToolCliArgs(args);
+  if (options.help) {
+    console.log(OPENAI_MCP_TOOL_USAGE.trimEnd());
+    return;
+  }
+
+  if (!options.serverUrl) {
+    throw new ActionableError("--server-url is required");
+  }
+
+  const definition = createOpenAIMcpToolDefinition({
+    serverUrl: options.serverUrl,
+    serverLabel: options.serverLabel,
+    serverDescription: options.serverDescription,
+    deferLoading: options.deferLoading,
+    requireApproval: options.requireApproval,
+  });
+
+  console.log(JSON.stringify(definition, null, 2));
+}
+
 // Main CLI command runner
 export async function runCliCommand(args: string[]): Promise<void> {
   try {
@@ -299,6 +326,11 @@ export async function runCliCommand(args: string[]): Promise<void> {
       } else {
         showHelp();
       }
+      return;
+    }
+
+    if (args[0] === "openai-mcp-tool") {
+      runOpenAIMcpToolCommand(args.slice(1));
       return;
     }
 
@@ -347,17 +379,20 @@ AutoMobile CLI - Android Device Automation
 Usage:
   bunx @kaeawc/auto-mobile@latest --cli [--session-uuid <uuid>] <tool-name> [--param value ...]
   bunx @kaeawc/auto-mobile@latest --cli help [tool-name]
+  bunx @kaeawc/auto-mobile@latest --cli openai-mcp-tool --server-url URL [options]
 
 Examples:
   bunx @kaeawc/auto-mobile@latest --cli listDeviceImages
   bunx @kaeawc/auto-mobile@latest --cli observe
   bunx @kaeawc/auto-mobile@latest --cli tapOn --text "Submit"
   bunx @kaeawc/auto-mobile@latest --cli startDevice --avdName "pixel_7_api_34"
+  bunx @kaeawc/auto-mobile@latest --cli openai-mcp-tool --server-url https://example.com/auto-mobile/mcp --defer-loading
   bunx @kaeawc/auto-mobile@latest --cli --session-uuid abc-123-uuid observe
   bunx @kaeawc/auto-mobile@latest --cli --session-uuid $SESSION_UUID tapOn --text "Submit"
 
 Options:
   help [tool-name]              Show help for a specific tool
+  openai-mcp-tool               Generate an OpenAI Responses API MCP tool declaration
   --session-uuid <uuid>         Associate tool execution with a session (optional)
 
 Parameters:

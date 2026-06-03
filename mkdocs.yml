@@ -78,6 +78,7 @@ nav:
       - 'UX Exploration': using/ux-exploration.md
       - 'Reproducing Bugs': using/reproducing-bugs.md
       - 'UI Tests': using/ui-tests.md
+      - 'OpenAI API': using/openai-api.md
       - 'Performance Analysis':
           - 'Overview': using/perf-analysis/index.md
           - 'Startup': using/perf-analysis/startup.md

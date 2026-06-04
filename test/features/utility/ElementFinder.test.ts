@@ -237,6 +237,16 @@ describe("DefaultElementFinder", () => {
       const results = finder.findClickableElements(hierarchy);
       expect(results).toHaveLength(1);
     });
+
+    test("treats click accessibility actions as clickable", () => {
+      const hierarchy = makeHierarchy([
+        { $: { actions: ["click"], "resource-id": "com.example:id/icon_button", bounds: "[0,0][100,50]" } },
+        { $: { actions: ["focus"], "resource-id": "com.example:id/focus_only", bounds: "[0,50][100,100]" } },
+      ]);
+      const results = finder.findClickableElements(hierarchy);
+      expect(results).toHaveLength(1);
+      expect(results[0]["resource-id"]).toBe("com.example:id/icon_button");
+    });
   });
 
   describe("isElementFocused", () => {

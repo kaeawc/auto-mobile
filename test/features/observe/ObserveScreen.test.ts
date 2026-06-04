@@ -5,6 +5,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { ObserveResult } from "../../../src/models/ObserveResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { logger } from "../../../src/utils/logger";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 
 describe("ObserveScreen", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -105,6 +108,52 @@ describe("ObserveScreen", function() {
       observeScreen.appendError(result, "");
 
       expect(result.error).toBe("");
+    });
+
+    test("should populate observable element lists", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        updatedAt: 123,
+        screenWidth: 1080,
+        screenHeight: 1920,
+        systemInsets: { top: 24, right: 0, bottom: 48, left: 0 },
+        wakefulness: "Awake",
+        hierarchy: {
+          node: {
+            bounds: "[0,0][1080,1920]",
+            node: [
+              {
+                "resource-id": "com.example:id/action",
+                bounds: "[900,1700][1020,1820]",
+                actions: ["click"],
+              },
+              {
+                text: "Ready",
+                bounds: "[0,100][200,160]",
+              },
+            ],
+          },
+        },
+      } as any);
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, fakeAdb, {
+          viewHierarchy,
+          cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+          performanceAuditor: { run: async () => undefined } as any,
+          accessibilityAuditor: { run: async () => undefined } as any,
+          accessibilityStateDetector: { run: async () => undefined } as any,
+        });
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.elements?.clickable).toHaveLength(1);
+        expect(result.elements?.clickable[0]["resource-id"]).toBe("com.example:id/action");
+        expect(result.elements?.text).toHaveLength(1);
+        expect(result.elements?.text[0].text).toBe("Ready");
+      } finally {
+        resetObserveCacheStore();
+      }
     });
   });
 

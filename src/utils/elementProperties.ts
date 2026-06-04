@@ -4,6 +4,13 @@ export function isTruthyFlag(value: unknown): boolean {
   return value === true || value === "true";
 }
 
+export function hasAccessibilityAction(
+  value: unknown,
+  action: string
+): boolean {
+  return Array.isArray(value) && value.some(item => item === action);
+}
+
 export function buildContainerFromElement(element: Element): { elementId?: string; text?: string } | null {
   if (element["resource-id"]) {
     return { elementId: element["resource-id"] };

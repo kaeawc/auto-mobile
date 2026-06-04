@@ -473,10 +473,23 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     return Boolean(
       (props.resourceId && props.resourceId !== "") ||
       (props["resource-id"] && props["resource-id"] !== "") ||
+      (props.viewId && props.viewId !== "") ||
+      (props["view-id"] && props["view-id"] !== "") ||
       (props.text && props.text !== "") ||
       (props.contentDesc && props.contentDesc !== "") ||
       (props["content-desc"] && props["content-desc"] !== "") ||
       (props["test-tag"] && props["test-tag"] !== "") ||
+      (props.role && props.role !== "") ||
+      (props["state-description"] && props["state-description"] !== "") ||
+      (props["error-message"] && props["error-message"] !== "") ||
+      (props["hint-text"] && props["hint-text"] !== "") ||
+      (props["tooltip-text"] && props["tooltip-text"] !== "") ||
+      (props["pane-title"] && props["pane-title"] !== "") ||
+      (props["live-region"] && props["live-region"] !== "") ||
+      (props["collection-info"] && props["collection-info"] !== "") ||
+      (props["collection-item-info"] && props["collection-item-info"] !== "") ||
+      (props["range-info"] && props["range-info"] !== "") ||
+      (props["input-type"] && props["input-type"] !== "") ||
       props.recomposition ||
       props.recompositionMetrics
     );
@@ -490,11 +503,17 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   meetsBooleanFilterCriteria(props: any): boolean {
     return Boolean(
       (props.clickable === "true") ||
+      (props.focusable === "true") ||
       (props.scrollable === "true") ||
       (props.focused === "true") ||
+      (props["accessibility-focused"] === "true") ||
+      (props.checkable === "true") ||
+      (props.checked === "true") ||
       (props.selected === "true") ||
       (props.selected === true) ||
-      (props["long-clickable"] === "true")
+      (props["long-clickable"] === "true") ||
+      (Array.isArray(props.actions) && props.actions.length > 0) ||
+      (props.extras && Object.keys(props.extras).length > 0)
     );
   }
 
@@ -637,16 +656,37 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "text",
       "resourceId",
       "resource-id",
+      "viewId",
+      "view-id",
       "contentDesc",
       "content-desc",
       "clickable",
       "long-clickable",
       "scrollable",
       "enabled",
+      "focusable",
+      "focused",
+      "accessibility-focused",
+      "checkable",
+      "checked",
       "selected",
       "bounds",
       "test-tag",
+      "role",
+      "state-description",
+      "error-message",
+      "hint-text",
+      "tooltip-text",
+      "pane-title",
+      "live-region",
+      "collection-info",
+      "collection-item-info",
+      "range-info",
+      "input-type",
+      "actions",
       "extras",
+      "occlusionState",
+      "occludedBy",
       "recomposition",
       "recompositionMetrics"
     ];

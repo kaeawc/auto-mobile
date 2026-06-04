@@ -37,7 +37,7 @@ import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
-import { isTruthyFlag } from "../../utils/elementProperties";
+import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -695,19 +695,23 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private isClickableElement(element: Element): boolean {
-    return isTruthyFlag(element.clickable);
+    return isTruthyFlag(element.clickable) || hasAccessibilityAction(element.actions, "click");
   }
 
   private isLongClickableElement(element: Element): boolean {
-    return isTruthyFlag(element["long-clickable"]) || isTruthyFlag(element.longClickable);
+    return isTruthyFlag(element["long-clickable"]) ||
+      isTruthyFlag(element.longClickable) ||
+      hasAccessibilityAction(element.actions, "long_click");
   }
 
   private isClickableProps(props: Record<string, unknown>): boolean {
-    return isTruthyFlag(props.clickable);
+    return isTruthyFlag(props.clickable) || hasAccessibilityAction(props.actions, "click");
   }
 
   private isLongClickableProps(props: Record<string, unknown>): boolean {
-    return isTruthyFlag(props["long-clickable"]) || isTruthyFlag(props.longClickable);
+    return isTruthyFlag(props["long-clickable"]) ||
+      isTruthyFlag(props.longClickable) ||
+      hasAccessibilityAction(props.actions, "long_click");
   }
 
   private nodeMatchesElement(

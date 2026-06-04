@@ -36,6 +36,7 @@ import { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
 import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
+import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -60,6 +61,7 @@ export class RealObserveScreen implements ObserveScreen {
   private performanceAuditor: PerformanceAuditor;
   private accessibilityAuditor: AccessibilityAuditor;
   private accessibilityStateDetector: AccessibilityStateDetector;
+  private elementsBuilder: ObserveElementsBuilder;
 
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
@@ -192,6 +194,7 @@ export class RealObserveScreen implements ObserveScreen {
       device,
       adb: this.adb,
     });
+    this.elementsBuilder = new ObserveElementsBuilder();
   }
 
   // ---------- Public API ----------
@@ -259,6 +262,10 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
+
+      if (result.viewHierarchy) {
+        result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
+      }
 
       // Screenshot: fire-and-forget unless an accessibility audit is configured
       // (the audit needs the screenshot file on disk before it runs).

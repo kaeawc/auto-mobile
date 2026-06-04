@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.33] - 2026-06-04
+### Other
+- No changes.
+
 ## [v0.0.32] - 2026-06-02
 ### Changed
 - Dead Code Detection: Threshold Exceeded ([#2313](https://github.com/kaeawc/auto-mobile/issues/2313)) (automated, dead-code)

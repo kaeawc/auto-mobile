@@ -509,7 +509,7 @@ class ViewHierarchyExtractorTest {
                 hasRoot = true,
             ),
         )
-    assertEquals(Integer.valueOf(42), extractor.pickPrimaryAppWindowId(windows))
+    assertEquals(42, extractor.pickPrimaryAppWindowId(windows))
   }
 
   @Test
@@ -557,7 +557,7 @@ class ViewHierarchyExtractorTest {
                 hasRoot = true,
             ),
         )
-    assertEquals(Integer.valueOf(2), extractor.pickPrimaryAppWindowId(windows))
+    assertEquals(2, extractor.pickPrimaryAppWindowId(windows))
   }
 
   @Test

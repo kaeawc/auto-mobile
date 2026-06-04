@@ -17,8 +17,6 @@ import { defaultTimer } from "../utils/SystemTimer";
 import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
-import { RealHierarchyPlatformValidator } from "./hierarchyPlatformValidator";
-import type { HierarchyPlatformValidator } from "./hierarchyPlatformValidator";
 import { serverConfig } from "../utils/ServerConfig";
 import {
   accessibilityStateSchema,
@@ -267,32 +265,21 @@ const waitForObservation = async (
 };
 
 // Register tools (this will be called when this file is imported)
-export function registerObserveTools(
-  platformValidator: HierarchyPlatformValidator = new RealHierarchyPlatformValidator()
-) {
+export function registerObserveTools() {
   // Observe handler
   const observeHandler = async (device: BootedDevice, args: ObserveArgs, _progress?: unknown, signal?: AbortSignal) => {
     try {
       const observeScreen = new RealObserveScreen(device);
       const waitFor = args.waitFor;
+      // ObserveScreen.execute() rejects stale cross-platform hierarchies at the
+      // source, so every observation reaching here is already platform-validated
+      // (raw-mode append below is likewise gated on a validated primary hierarchy).
       const waitOutcome = waitFor
         ? await waitForObservation(observeScreen, waitFor, signal, args.skipBackStack ?? false)
         : null;
       const result = waitOutcome
         ? waitOutcome.observation
         : await observeScreen.execute({ perf: createGlobalPerformanceTracker(), skipWaitForFresh: true, signal });
-
-      if (result.viewHierarchy?.hierarchy) {
-        const validation = platformValidator.validate(device.platform, result.viewHierarchy);
-        if (!validation.valid) {
-          logger.error(
-            `[observe] Platform mismatch: device ${device.deviceId} is ${device.platform} but received hierarchy from other platform. ` +
-            `Discarding stale data to prevent cross-platform contamination.`
-          );
-          result.viewHierarchy = undefined;
-          result.error = validation.error;
-        }
-      }
 
       if (args.raw) {
         await observeScreen.appendRawViewHierarchy(result, signal);

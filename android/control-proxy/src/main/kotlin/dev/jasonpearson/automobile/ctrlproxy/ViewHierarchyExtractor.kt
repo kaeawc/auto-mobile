@@ -1262,6 +1262,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       val bounds: ElementBounds,
       val windowLayer: Int,
       val windowKey: Int,
+      val windowType: String,
       val order: Int,
       val subtreeEnd: Int,
   )
@@ -1359,6 +1360,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           hierarchy,
           windowKey,
           windowLayer,
+          windowEntry.windowType,
           path = "",
           orderCounter = OrderCounter(),
           nodes = nodes,
@@ -1393,6 +1395,16 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       for (j in i + 1 until sortedNodes.size) {
         val occluder = sortedNodes[j]
+        // IME windows have a transparent outer wrapper whose accessibility node tree spans far
+        // beyond the actual keyboard rectangle (the IME window bounds). Treating those wrapper
+        // nodes as occluders falsely marks the app underneath as fully hidden. Limit IME
+        // cross-window occlusion contributions to nodes whose bounds are entirely inside the
+        // IME window's reported bounds — but we don't have those at this layer. Simplest correct
+        // fix: don't let IME nodes occlude content in OTHER windows. Internal IME-vs-IME
+        // occlusion is preserved (same-window check below).
+        if (occluder.windowType == "input_method" && occluder.windowKey != node.windowKey) {
+          continue
+        }
         if (occluder.windowKey == node.windowKey) {
           // Determine relationship between node and occluder
           val relationship =
@@ -1465,6 +1477,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       element: UIElementInfo,
       windowKey: Int,
       windowLayer: Int,
+      windowType: String,
       path: String,
       orderCounter: OrderCounter,
       nodes: MutableList<OcclusionNode>,
@@ -1476,7 +1489,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     for ((index, child) in children.withIndex()) {
       val childPath = if (path.isBlank()) index.toString() else "$path.$index"
       val childEnd =
-          collectOcclusionNodes(child, windowKey, windowLayer, childPath, orderCounter, nodes)
+          collectOcclusionNodes(
+              child,
+              windowKey,
+              windowLayer,
+              windowType,
+              childPath,
+              orderCounter,
+              nodes,
+          )
       end = max(end, childEnd)
     }
 
@@ -1489,6 +1510,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               bounds = bounds,
               windowLayer = windowLayer,
               windowKey = windowKey,
+              windowType = windowType,
               order = start,
               subtreeEnd = end,
           )

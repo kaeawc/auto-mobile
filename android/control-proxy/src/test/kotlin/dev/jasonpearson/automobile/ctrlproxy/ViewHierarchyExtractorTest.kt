@@ -561,6 +561,70 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
+  fun `IME wrapper spanning full screen does not occlude app window hierarchy`() {
+    // On a Pixel 10 Pro with Gboard, the IME window reports bounds matching the keyboard
+    // (e.g. y=1464..2410) but its accessibility node tree has a transparent outer wrapper
+    // spanning the entire area below the status bar (e.g. y=172..2410). If those wrapper
+    // nodes participate in cross-window occlusion, they cover ~93% of the app window; together
+    // with the status bar that pushes the app over the 0.95 hidden threshold and every Slack
+    // node gets stripped. The fix excludes IME nodes from being occluders for other windows.
+    val toolbar =
+        elementWithBounds(resourceId = "toolbar", bounds = bounds(0, 172, 1080, 400))
+    val composer =
+        elementWithBounds(resourceId = "composer", bounds = bounds(0, 1200, 1080, 1340))
+    val appRoot =
+        elementWithBounds(
+            resourceId = "app-root",
+            bounds = bounds(0, 0, 1080, 2410),
+            children = listOf(toolbar, composer),
+        )
+    // IME root reports the full transparent wrapper bounds, not the actual keyboard rect.
+    val imeWrapper =
+        elementWithBounds(
+            resourceId = "ime-wrapper",
+            bounds = bounds(0, 172, 1080, 2410),
+        )
+
+    val appEntry =
+        extractor.createWindowEntry(
+            windowId = 116,
+            windowLayer = 0,
+            hierarchy = appRoot,
+            windowType = "application",
+            isActive = true,
+            isFocused = true,
+        )
+    val imeEntry =
+        extractor.createWindowEntry(
+            windowId = 108,
+            windowLayer = 5,
+            hierarchy = imeWrapper,
+            windowType = "input_method",
+            isActive = false,
+            isFocused = false,
+        )
+    val occlusionInfo = extractor.buildOcclusionInfoForTest(listOf(appEntry, imeEntry))
+    val filtered =
+        extractor.filterOccludedHierarchyForTest(
+            element = appRoot,
+            occlusionInfo = occlusionInfo,
+            windowKey = 116,
+            path = "",
+            isRoot = true,
+        )
+
+    assertNotNull("App root must survive IME wrapper occlusion", filtered)
+    assertNotNull(
+        "Toolbar above the keyboard must remain",
+        findElementByResourceId(filtered!!, "toolbar"),
+    )
+    assertNotNull(
+        "Composer above the keyboard must remain",
+        findElementByResourceId(filtered, "composer"),
+    )
+  }
+
+  @Test
   fun `keyboard window does not remove app window hierarchy via occlusion`() {
     // Simulate the keyboard-open scenario from issue #1488:
     // App window covers full screen [0,0][1280,2856]

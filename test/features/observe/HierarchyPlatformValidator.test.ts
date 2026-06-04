@@ -233,16 +233,28 @@ describe("discardHierarchyDerivedData", () => {
     expect(result.activeWindow).toBeUndefined();
   });
 
-  test("leaves device-derived fields untouched", () => {
+  test("resets hierarchy-derived screen metrics to base defaults", () => {
     const result = contaminatedResult();
+    result.rotation = 1;
     result.wakefulness = "Awake";
+
+    discardHierarchyDerivedData(result);
+
+    // collectAllData copies these from the (now-rejected) hierarchy, so a stale
+    // iOS screen size must not survive to mislead tap-coordinate scaling.
+    expect(result.screenSize).toEqual({ width: 0, height: 0 });
+    expect(result.systemInsets).toEqual({ top: 0, right: 0, bottom: 0, left: 0 });
+    expect(result.rotation).toBeUndefined();
+    expect(result.wakefulness).toBeUndefined();
+  });
+
+  test("leaves genuinely device-derived fields untouched", () => {
+    const result = contaminatedResult();
     result.backStack = { } as never;
 
     discardHierarchyDerivedData(result);
 
-    // Screen size / insets and direct device queries are not hierarchy-derived.
-    expect(result.screenSize).toEqual({ width: 390, height: 844 });
-    expect(result.wakefulness).toBe("Awake");
+    // backStack comes from a direct device query, not the rejected hierarchy.
     expect(result.backStack).toBeDefined();
   });
 });

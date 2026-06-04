@@ -78,9 +78,15 @@ export class RealHierarchyPlatformValidator implements HierarchyPlatformValidato
  * resource, or the navigation graph recorder — can act on stale data from the
  * other platform.
  *
- * Note: this intentionally leaves device-derived fields (wakefulness, backStack,
- * accessibilityState, screenSize/systemInsets/rotation defaults) untouched, since
- * those come from direct device queries rather than the rejected hierarchy.
+ * Screen metrics (screenSize/systemInsets/rotation/wakefulness) are reset to the
+ * base-result defaults because collectAllData() copies them from the hierarchy
+ * (e.g. the iOS logical screen size) before this scrubber runs; leaving them
+ * would mislead clients that scale tap coordinates against screenSize.
+ *
+ * Genuinely device-derived fields (backStack, accessibilityState) come from
+ * direct device queries rather than the rejected hierarchy and are left intact.
+ *
+ * Note: if you add a new hierarchy-derived field to ObserveResult, clear it here.
  */
 export function discardHierarchyDerivedData(result: ObserveResult): void {
   result.viewHierarchy = undefined;
@@ -92,6 +98,12 @@ export function discardHierarchyDerivedData(result: ObserveResult): void {
   result.notificationPermissionDetected = undefined;
   result.predictions = undefined;
   result.activeWindow = undefined;
+
+  // Screen metrics copied from the rejected hierarchy — reset to base defaults.
+  result.screenSize = { width: 0, height: 0 };
+  result.systemInsets = { top: 0, right: 0, bottom: 0, left: 0 };
+  result.rotation = undefined;
+  result.wakefulness = undefined;
 }
 
 /**

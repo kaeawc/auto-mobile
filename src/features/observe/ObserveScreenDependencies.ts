@@ -14,6 +14,7 @@ import type { DeviceStateCollector } from "./collectors/DeviceStateCollector";
 import type { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import type { AccessibilityAuditor } from "./audits/AccessibilityAuditor";
 import type { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
+import type { HierarchyPlatformValidator } from "./HierarchyPlatformValidator";
 
 /**
  * Dependencies for ObserveScreen that can be injected for testing.
@@ -42,4 +43,7 @@ export interface ObserveScreenDependencies {
   performanceAuditor?: PerformanceAuditor;
   accessibilityAuditor?: AccessibilityAuditor;
   accessibilityStateDetector?: AccessibilityStateDetector;
+
+  // Rejects cross-platform (stale) hierarchies. Defaults to RealHierarchyPlatformValidator.
+  platformValidator?: HierarchyPlatformValidator;
 }

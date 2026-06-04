@@ -208,6 +208,18 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     val hasImeWindow =
         windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.root != null }
 
+    // When the IME is visible it owns input focus, so AccessibilityWindowInfo.isActive() is true
+    // for the IME and false for the user's app underneath. Picking the "active" window in that
+    // state surfaces the keyboard's hierarchy as the main one and drops the app's. To preserve
+    // the app, identify the topmost TYPE_APPLICATION window with an extractable root and treat
+    // that as the primary window for visibility-filter bypass and mainHierarchy selection.
+    val primaryAppWindowId: Int? =
+        pickPrimaryAppWindowId(
+            windows.map {
+              WindowMeta(id = it.id, type = it.type, layer = it.layer, hasRoot = it.root != null)
+            },
+        )
+
     // Extract from each window
     for (window in windows) {
       try {
@@ -260,13 +272,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             )
         )
 
-        // When IME is present and this is the active app window, skip isVisibleToUser
+        // When IME is present and this is the primary app window, skip isVisibleToUser
         // filtering. Android marks app nodes as not visible when an IME window overlays them,
-        // but they are still physically on screen above the keyboard.
-        val skipVisibilityFilter =
-            hasImeWindow &&
-                window.isActive &&
-                window.type == AccessibilityWindowInfo.TYPE_APPLICATION
+        // but they are still physically on screen above the keyboard. We can't rely on
+        // window.isActive here because the IME owns input focus while it is visible.
+        val skipVisibilityFilter = hasImeWindow && window.id == primaryAppWindowId
         val element =
             extractNodeInfo(
                 rootNode,
@@ -300,7 +310,11 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           intentChooserDetected = detectIntentChooserIndicators(processedElement)
         }
 
-        if (window.isActive) {
+        // When IME is up, the IME window reports isActive=true; prefer the app window
+        // underneath so mainHierarchy reflects the user's app, not the keyboard.
+        val isPrimaryWindow =
+            if (hasImeWindow) window.id == primaryAppWindowId else window.isActive
+        if (isPrimaryWindow) {
           mainHierarchy = processedElement
           mainPackageName = packageName
           if (notificationPermissionDetected == null && processedElement != null) {
@@ -389,7 +403,15 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           }
       windowEntries.clear()
       windowEntries.addAll(filteredEntries)
-      mainHierarchy = windowEntries.firstOrNull { it.isActive }?.hierarchy ?: mainHierarchy
+      // Re-select main hierarchy after occlusion filtering. When IME is up the IME entry is
+      // the isActive one, so fall back to the primary app window in that case.
+      mainHierarchy =
+          if (hasImeWindow && primaryAppWindowId != null) {
+            windowEntries.firstOrNull { it.windowId == primaryAppWindowId }?.hierarchy
+                ?: mainHierarchy
+          } else {
+            windowEntries.firstOrNull { it.isActive }?.hierarchy ?: mainHierarchy
+          }
 
       // Debug: Check if Tab text survives occlusion filtering
       mainHierarchy?.let {
@@ -538,6 +560,37 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       packageName: String?,
   ): Boolean {
     return detectNotificationPermissionDialog(element, packageName)
+  }
+
+  /**
+   * Metadata about a window used for primary-window selection. Pulled into a data class so the
+   * selection logic can be unit-tested without mocking [AccessibilityWindowInfo].
+   */
+  internal data class WindowMeta(
+      val id: Int,
+      val type: Int,
+      val layer: Int,
+      val hasRoot: Boolean,
+  )
+
+  /**
+   * Selects the window id that hierarchy extraction should treat as the "primary" user-facing
+   * window when an IME is visible. Returns null when no IME is up (callers should fall back to
+   * `window.isActive`).
+   *
+   * Android marks the IME's [AccessibilityWindowInfo.isActive] as true while the keyboard is
+   * showing, which would otherwise cause `mainHierarchy` selection and the
+   * `isVisibleToUser` bypass to apply to the keyboard instead of the app underneath it.
+   */
+  internal fun pickPrimaryAppWindowId(windows: List<WindowMeta>): Int? {
+    val hasIme =
+        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.hasRoot }
+    if (!hasIme) return null
+    return windows
+        .asSequence()
+        .filter { it.type == AccessibilityWindowInfo.TYPE_APPLICATION && it.hasRoot }
+        .maxByOrNull { it.layer }
+        ?.id
   }
 
   /**

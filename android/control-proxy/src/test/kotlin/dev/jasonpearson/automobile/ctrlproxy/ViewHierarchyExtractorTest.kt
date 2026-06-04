@@ -1,6 +1,7 @@
 package dev.jasonpearson.automobile.ctrlproxy
 
 import android.graphics.Rect
+import android.view.accessibility.AccessibilityWindowInfo
 import dev.jasonpearson.automobile.ctrlproxy.models.ElementBounds
 import dev.jasonpearson.automobile.ctrlproxy.models.UIElementInfo
 import kotlinx.coroutines.test.runTest
@@ -460,6 +461,103 @@ class ViewHierarchyExtractorTest {
     assertEquals("hidden", filtered!!.occlusionState)
     assertEquals("occluding-root", filtered.occludedBy)
     assertNotNull(findElementByResourceId(filtered, "root-child"))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId returns null when no IME is up`() {
+    val windows =
+        listOf(
+            ViewHierarchyExtractor.WindowMeta(
+                id = 10,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                layer = 5,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 11,
+                type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                layer = 6,
+                hasRoot = true,
+            ),
+        )
+    assertNull(extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId returns topmost app window when IME is up`() {
+    // Reproduces the Gboard-over-Slack scenario observed on a Pixel 10 Pro:
+    // the IME has isActive=true (owns input focus) and the app window has isActive=false,
+    // so the extractor must not rely on isActive to find the user-facing app.
+    val windows =
+        listOf(
+            ViewHierarchyExtractor.WindowMeta(
+                id = 42,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                layer = 1,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 99,
+                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+                layer = 10,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 7,
+                type = AccessibilityWindowInfo.TYPE_SYSTEM,
+                layer = 20,
+                hasRoot = true,
+            ),
+        )
+    assertEquals(Integer.valueOf(42), extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId ignores IME with null root`() {
+    // An IME window present in the windows list but without a root cannot contribute
+    // occlusion and should not trigger the primary-window remap.
+    val windows =
+        listOf(
+            ViewHierarchyExtractor.WindowMeta(
+                id = 42,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                layer = 1,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 99,
+                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+                layer = 10,
+                hasRoot = false,
+            ),
+        )
+    assertNull(extractor.pickPrimaryAppWindowId(windows))
+  }
+
+  @Test
+  fun `pickPrimaryAppWindowId picks highest-layer app window among multiple`() {
+    val windows =
+        listOf(
+            ViewHierarchyExtractor.WindowMeta(
+                id = 1,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                layer = 1,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 2,
+                type = AccessibilityWindowInfo.TYPE_APPLICATION,
+                layer = 3,
+                hasRoot = true,
+            ),
+            ViewHierarchyExtractor.WindowMeta(
+                id = 99,
+                type = AccessibilityWindowInfo.TYPE_INPUT_METHOD,
+                layer = 10,
+                hasRoot = true,
+            ),
+        )
+    assertEquals(Integer.valueOf(2), extractor.pickPrimaryAppWindowId(windows))
   }
 
   @Test

@@ -337,6 +337,82 @@ describe("TapOnElement TalkBack mode detection", () => {
       expect(result.element["resource-id"]).toBe("com.example:id/settings_row");
     });
 
+    test("uses parent with click action when clickable flag is absent", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: {
+              "class": "android.view.View",
+              "actions": ["click"],
+              "bounds": "[0,0][240,96]",
+              "resource-id": "com.example:id/action_row"
+            },
+            node: [
+              {
+                $: {
+                  "class": "android.widget.TextView",
+                  "text": "Manage account",
+                  "bounds": "[24,24][216,72]"
+                }
+              }
+            ]
+          }
+        }
+      } as any;
+
+      const textOnlyChild = {
+        bounds: { left: 24, top: 24, right: 216, bottom: 72 },
+        text: "Manage account"
+      } as any;
+
+      const result = (tapOnElement as any).resolveTapTargetElement(
+        textOnlyChild,
+        viewHierarchy,
+        "tap",
+        true
+      );
+
+      expect(result.usedParent).toBe(true);
+      expect(result.element["resource-id"]).toBe("com.example:id/action_row");
+    });
+
+    test("uses parent with long click action for longPress when flag is absent", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: {
+              "class": "android.view.View",
+              "actions": ["long_click"],
+              "bounds": "[0,0][240,96]",
+              "resource-id": "com.example:id/action_row"
+            },
+            node: {
+              $: {
+                "class": "android.widget.TextView",
+                "text": "Manage account",
+                "bounds": "[24,24][216,72]"
+              }
+            }
+          }
+        }
+      } as any;
+
+      const textOnlyChild = {
+        bounds: { left: 24, top: 24, right: 216, bottom: 72 },
+        text: "Manage account"
+      } as any;
+
+      const result = (tapOnElement as any).resolveTapTargetElement(
+        textOnlyChild,
+        viewHierarchy,
+        "longPress",
+        true
+      );
+
+      expect(result.usedParent).toBe(true);
+      expect(result.element["resource-id"]).toBe("com.example:id/action_row");
+    });
+
     test("prefers long-clickable parent for longPress", () => {
       const viewHierarchy = {
         hierarchy: {

@@ -9,6 +9,7 @@ import { PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
 import { DeviceAppInspector } from "./ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
 import {
   getHostControlHost,
@@ -729,10 +730,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // MARK: - Private Helpers
 
   private isSimulator(): boolean {
-    // Simulators have UUIDs like "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX"
-    // Physical devices have serial numbers (alphanumeric without dashes in UUID format)
-    const uuidPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
-    return uuidPattern.test(this.device.deviceId);
+    // Simulators have UUIDs like "XXXXXXXX-XXXX-XXXX-XXXX-XXXXXXXXXXXX";
+    // physical devices have serial-style UDIDs.
+    return isIosSimulatorUdid(this.device.deviceId);
   }
 
   private useHostControl(): boolean {

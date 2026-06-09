@@ -5,6 +5,7 @@ import { BootedDevice } from "../../models";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
 
@@ -17,8 +18,6 @@ export class UninstallApp {
   private adb: AdbExecutor;
   private simctl: SimCtlClient;
   private deviceAppUninstaller: DeviceAppUninstaller;
-
-  private static readonly SIMULATOR_UUID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
   constructor(
     device: BootedDevice,
@@ -33,7 +32,7 @@ export class UninstallApp {
   }
 
   private isSimulator(): boolean {
-    return UninstallApp.SIMULATOR_UUID_PATTERN.test(this.device.deviceId);
+    return isIosSimulatorUdid(this.device.deviceId);
   }
 
   /**

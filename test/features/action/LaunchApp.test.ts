@@ -405,4 +405,82 @@ describe("LaunchApp", () => {
       }
     });
   });
+
+  describe("iOS clearAppData", () => {
+    const userBundleId = "com.example.myapp";
+    const systemBundleId = "com.apple.Preferences";
+
+    function createClearDataHarness(bundleId: string) {
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+      const fakeCtrlProxy = new FakeIOSCtrlProxy();
+
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+      );
+      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+        setTargetBundleId: () => {},
+      } as unknown as IOSCtrlProxyManager);
+
+      const calls: string[] = [];
+      const fakeSimctl = {
+        launchApp: async (id: string) => { calls.push(`launch:${id}`); return { success: true, pid: 123 }; },
+        terminateApp: async (id: string) => { calls.push(`terminate:${id}`); },
+        executeCommand: async (command: string) => {
+          calls.push(`exec:${command}`);
+          // Empty container path → ClearAppDataIos treats it as "not installed"
+          // and skips the fs wipe, so this stays a pure unit test (no real fs).
+          return { stdout: "", stderr: "", trim: () => "", toString: () => "", includes: () => false } as any;
+        },
+      };
+
+      const iosObserveScreen = new FakeObserveScreen();
+      iosObserveScreen.setObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} }, packageName: bundleId } as any,
+      });
+      const iosWindow = new FakeWindow();
+      iosWindow.configureCachedActiveWindow({ appId: bundleId, activityName: "Main", layoutSeqSum: 1 });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [bundleId] });
+
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
+      (iosLaunchApp as any).observeScreen = iosObserveScreen;
+      (iosLaunchApp as any).window = iosWindow;
+      (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
+
+      return { iosLaunchApp, fakeCtrlProxy, calls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+    }
+
+    test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId);
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        // Data container resolved via get_app_container (the fast clear path)
+        expect(calls.some(c => c.startsWith("exec:get_app_container") && c.includes(userBundleId))).toBe(true);
+        // CtrlProxy cache dropped so the hierarchy re-snapshots the fresh launch
+        expect(fakeCtrlProxy.clearCacheCallCount).toBeGreaterThan(0);
+        // App is relaunched after the wipe
+        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("does not wipe data for a system bundle even when clearAppData is true", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, calls, cleanup } = createClearDataHarness(systemBundleId);
+      try {
+        const result = await iosLaunchApp.execute(systemBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        // No get_app_container resolution for system bundles
+        expect(calls.some(c => c.startsWith("exec:get_app_container"))).toBe(false);
+      } finally {
+        cleanup();
+      }
+    });
+  });
 });

@@ -40,6 +40,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private performanceTiming: CtrlProxyPerfTiming | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  public clearCacheCallCount: number = 0;
 
   // Failure modes
   private failureMap: Map<string, Error> = new Map();
@@ -958,6 +959,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   clearCache(): void {
     this.hasCachedHierarchyState = false;
+    this.clearCacheCallCount++;
   }
 
   async close(): Promise<void> {

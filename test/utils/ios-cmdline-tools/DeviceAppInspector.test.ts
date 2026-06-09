@@ -333,4 +333,59 @@ describe("DeviceAppInspector", () => {
     // And it does not attempt the darwin devicectl info/copy flow.
     expect(commands.every(c => !c.includes("devicectl"))).toBe(true);
   });
+
+  test("clearAppDataViaReinstall surfaces the install error (not 'could not resolve') when reinstall fails after uninstall", async () => {
+    const workDir = await createTempDir();
+    const fixtureApp = await createFixtureApp(workDir);
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    const commands: string[] = [];
+
+    const exec = async (command: string) => {
+      commands.push(command);
+      if (command.includes("device info apps")) {
+        const jsonPath = parseDevicectlJsonOutputPath(command);
+        if (jsonPath) {
+          const payload = { apps: [{ bundleIdentifier: bundleId, bundleURL: "file:///private/var/containers/Bundle/Application/ABC/CtrlProxyApp.app" }] };
+          await fs.writeFile(jsonPath, JSON.stringify(payload), "utf-8");
+        }
+      }
+      if (command.includes("device copy from")) {
+        const destination = parseArgValue(command, "--destination");
+        if (destination) {
+          const target = join(destination, "CtrlProxyApp.app");
+          await fs.mkdir(target, { recursive: true });
+          await fs.copyFile(join(fixtureApp, "Info.plist"), join(target, "Info.plist"));
+        }
+      }
+      // Uninstall succeeds; the reinstall (install app) fails on-device.
+      if (command.includes("device install app")) {
+        throw new Error("devicectl install failed: device locked");
+      }
+      return {
+        stdout: "",
+        stderr: "",
+        toString() { return this.stdout; },
+        trim() { return this.stdout.trim(); },
+        includes(searchString: string) { return this.stdout.includes(searchString); }
+      };
+    };
+
+    const inspector = new DeviceAppInspector({
+      platform: () => "darwin",
+      exec,
+      readFile: async path => fs.readFile(path, "utf-8"),
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      hostControl
+    });
+
+    // The real install error must propagate — not be masked as "could not resolve".
+    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId))
+      .rejects.toThrow(/install failed: device locked/);
+    // The uninstall did run (app was removed), so the failure is actionable.
+    expect(commands.some(c => c.includes("device uninstall app"))).toBe(true);
+  });
 });

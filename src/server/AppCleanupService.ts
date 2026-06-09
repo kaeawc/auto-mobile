@@ -1,5 +1,6 @@
 import { BootedDevice, ClearAppDataResult, TerminateAppResult } from "../models";
 import { ClearAppData } from "../features/action/ClearAppData";
+import { ClearAppDataIos } from "../features/action/ClearAppDataIos";
 import { TerminateApp } from "../features/action/TerminateApp";
 import { Logger, logger } from "../utils/logger";
 
@@ -39,7 +40,8 @@ export class DefaultAppCleanupService implements AppCleanupService {
 
   constructor(dependencies: AppCleanupDependencies = {}) {
     this.createClearAppData =
-      dependencies.createClearAppData ?? ((device: BootedDevice) => new ClearAppData(device));
+      dependencies.createClearAppData ?? ((device: BootedDevice) =>
+        device.platform === "ios" ? new ClearAppDataIos(device) : new ClearAppData(device));
     this.createTerminateApp =
       dependencies.createTerminateApp ?? ((device: BootedDevice) => new TerminateApp(device));
     this.log = dependencies.logger ?? logger;
@@ -51,13 +53,6 @@ export class DefaultAppCleanupService implements AppCleanupService {
     }
 
     if (config.clearAppData) {
-      if (device.platform !== "android") {
-        this.log.warn(
-          `[AppCleanupService] cleanupClearAppData requested for non-Android device ${device.deviceId}; skipping clear app data`
-        );
-        return;
-      }
-
       try {
         const clearAppData = this.createClearAppData(device);
         const result = await clearAppData.execute(config.appId);

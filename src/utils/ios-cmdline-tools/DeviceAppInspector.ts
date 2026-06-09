@@ -175,6 +175,38 @@ export class DeviceAppInspector {
       return result.data?.hash ?? null;
     }
 
+    return this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
+  }
+
+  /**
+   * Clear a physical device app's data by uninstalling and reinstalling it.
+   * iOS exposes no direct data-wipe for on-device sandboxes, so we copy the
+   * installed (device-signed) bundle off the device, uninstall the app — which
+   * removes its data container — and reinstall the copied bundle. The app
+   * returns in a fresh state. Throws if the installed bundle can't be resolved.
+   */
+  public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
+    const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async bundlePath => {
+      await this.uninstallApp(deviceUdid, bundleId, false);
+      await this.installApp(deviceUdid, bundlePath);
+      return true;
+    });
+    if (!done) {
+      throw new Error(`Could not resolve installed bundle for ${bundleId} to reinstall`);
+    }
+  }
+
+  /**
+   * Copy the device-installed `.app` bundle to a temp dir and run `fn` against
+   * its on-disk path, cleaning up the temp dir afterward. Returns `fn`'s result,
+   * or null if the bundle can't be located (or not on macOS). Local devicectl
+   * path only — host-control callers handle their own remote primitives.
+   */
+  private async withInstalledAppBundle<T>(
+    deviceUdid: string,
+    bundleId: string,
+    fn: (bundlePath: string) => Promise<T>
+  ): Promise<T | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
     }
@@ -225,7 +257,7 @@ export class DeviceAppInspector {
         if (!bundleOnDisk) {
           return null;
         }
-        return await hashAppBundle(bundleOnDisk);
+        return await fn(bundleOnDisk);
       } finally {
         await this.deps.rm(copyDir);
       }

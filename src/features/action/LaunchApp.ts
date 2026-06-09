@@ -279,7 +279,13 @@ export class LaunchApp extends BaseVisualChange {
               new ClearAppDataIos(this.device, this.simctl).execute(bundleId)
             );
             if (!clearResult.success) {
-              logger.warn(`[LaunchApp] iOS clearAppData failed for ${bundleId}: ${clearResult.error ?? "unknown error"}`);
+              // Do NOT launch with stale data — callers request clearAppData to
+              // guarantee a clean launch. Fail loudly instead of silently
+              // reporting success on an un-cleared app.
+              const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+              logger.warn(`[LaunchApp] iOS clearAppData failed for ${bundleId}: ${error}`);
+              perf.end();
+              return { success: false, packageName: bundleId, error };
             }
           } else if (clearAppData && isSystemBundleId) {
             logger.warn(`[LaunchApp] Ignoring clearAppData for system bundle ${bundleId}`);

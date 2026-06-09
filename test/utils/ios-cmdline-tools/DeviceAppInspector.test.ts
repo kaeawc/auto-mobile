@@ -300,4 +300,37 @@ describe("DeviceAppInspector", () => {
 
     await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId)).rejects.toThrow();
   });
+
+  test("clearAppDataViaReinstall fails explicitly under host control (no copy primitive)", async () => {
+    const hostControl = new FakeHostControlDeviceAppInspector();
+    hostControl.setUseHostControl(true);
+    hostControl.setRunningInDocker(true);
+    hostControl.setAvailable(true);
+
+    const commands: string[] = [];
+    const inspector = new DeviceAppInspector({
+      platform: () => "linux",
+      exec: async (command: string) => {
+        commands.push(command);
+        return {
+          stdout: "", stderr: "",
+          toString() { return this.stdout; },
+          trim() { return this.stdout.trim(); },
+          includes(searchString: string) { return this.stdout.includes(searchString); }
+        };
+      },
+      readFile: async () => "",
+      mkdtemp: async prefix => fs.mkdtemp(prefix),
+      rm: async path => fs.rm(path, { recursive: true, force: true }),
+      readdir: async path => fs.readdir(path),
+      stat: async path => fs.stat(path),
+      tmpdir,
+      hostControl
+    });
+
+    // Explicit, actionable error — not the misleading "could not resolve bundle".
+    await expect(inspector.clearAppDataViaReinstall("device-udid", bundleId)).rejects.toThrow(/host control/i);
+    // And it does not attempt the darwin devicectl info/copy flow.
+    expect(commands.every(c => !c.includes("devicectl"))).toBe(true);
+  });
 });

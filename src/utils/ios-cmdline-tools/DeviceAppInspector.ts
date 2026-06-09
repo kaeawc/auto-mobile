@@ -184,8 +184,21 @@ export class DeviceAppInspector {
    * installed (device-signed) bundle off the device, uninstall the app — which
    * removes its data container — and reinstall the copied bundle. The app
    * returns in a fresh state. Throws if the installed bundle can't be resolved.
+   *
+   * Not available under host control (Docker): the host-control bridge exposes
+   * install/uninstall but no primitive to copy the installed bundle off-device,
+   * so we can't obtain a reinstall artifact. We fail with an explicit message
+   * rather than the misleading "could not resolve bundle" from the darwin path.
    */
   public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
+    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+    if (useHostControl) {
+      throw new Error(
+        `Clearing app data via uninstall+reinstall is not supported under host control for ${bundleId}: ` +
+        "the host-control bridge cannot copy the installed bundle off-device to reinstall it."
+      );
+    }
+
     const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async bundlePath => {
       await this.uninstallApp(deviceUdid, bundleId, false);
       await this.installApp(deviceUdid, bundlePath);

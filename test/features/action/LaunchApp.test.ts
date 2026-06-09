@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { promises as fsp } from "fs";
+import * as os from "os";
+import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -409,8 +412,15 @@ describe("LaunchApp", () => {
   describe("iOS clearAppData", () => {
     const userBundleId = "com.example.myapp";
     const systemBundleId = "com.apple.Preferences";
+    const tempDirs: string[] = [];
 
-    function createClearDataHarness(bundleId: string) {
+    afterEach(async () => {
+      for (const dir of tempDirs.splice(0)) {
+        await fsp.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    function createClearDataHarness(bundleId: string, opts: { containerPath?: string } = {}) {
       const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
       const fakeCtrlProxy = new FakeIOSCtrlProxy();
 
@@ -421,15 +431,16 @@ describe("LaunchApp", () => {
         setTargetBundleId: () => {},
       } as unknown as IOSCtrlProxyManager);
 
+      // get_app_container returns this path (empty → clear fails as "not installed").
+      const containerPath = opts.containerPath ?? "";
       const calls: string[] = [];
       const fakeSimctl = {
         launchApp: async (id: string) => { calls.push(`launch:${id}`); return { success: true, pid: 123 }; },
         terminateApp: async (id: string) => { calls.push(`terminate:${id}`); },
         executeCommand: async (command: string) => {
           calls.push(`exec:${command}`);
-          // Empty container path → ClearAppDataIos treats it as "not installed"
-          // and skips the fs wipe, so this stays a pure unit test (no real fs).
-          return { stdout: "", stderr: "", trim: () => "", toString: () => "", includes: () => false } as any;
+          const stdout = command.startsWith("get_app_container") ? containerPath : "";
+          return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
         },
       };
 
@@ -455,7 +466,9 @@ describe("LaunchApp", () => {
 
     test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
       fakeTimer.enableAutoAdvance();
-      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId);
+      const containerPath = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "automobile-launch-clear-"));
+      tempDirs.push(containerPath);
+      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId, { containerPath });
       try {
         const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
         expect(result.success).toBe(true);
@@ -465,6 +478,21 @@ describe("LaunchApp", () => {
         expect(fakeCtrlProxy.clearCacheCallCount).toBeGreaterThan(0);
         // App is relaunched after the wipe
         expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("aborts the launch (no simctl launch) when the clear fails", async () => {
+      fakeTimer.enableAutoAdvance();
+      // No containerPath → get_app_container returns empty → clear fails.
+      const { iosLaunchApp, calls, cleanup } = createClearDataHarness(userBundleId);
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Failed to clear app data");
+        // Must NOT launch with stale data
+        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(false);
       } finally {
         cleanup();
       }

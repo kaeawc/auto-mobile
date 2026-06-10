@@ -8,6 +8,7 @@ import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
 
@@ -23,8 +24,6 @@ export class InstallApp {
   private simctl: SimCtlClient;
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
-
-  private static readonly SIMULATOR_UUID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
   constructor(
     device: BootedDevice,
@@ -45,7 +44,7 @@ export class InstallApp {
   }
 
   private isSimulator(): boolean {
-    return InstallApp.SIMULATOR_UUID_PATTERN.test(this.device.deviceId);
+    return isIosSimulatorUdid(this.device.deviceId);
   }
 
   async execute(

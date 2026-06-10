@@ -4,6 +4,7 @@ import type { BootedDevice, ExecResult } from "../../models";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import { logger } from "../../utils/logger";
 import { AndroidCtrlProxyClient } from "./android";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 /**
  * Source of iOS app metadata — injectable for testing.
@@ -103,9 +104,7 @@ export class GetAppMetadata {
       return null;
     }
 
-    const isSimulator = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(
-      this.device.deviceId
-    );
+    const isSimulator = isIosSimulatorUdid(this.device.deviceId);
 
     if (isSimulator) {
       return this.getSimulatorMetadata(bundleId);

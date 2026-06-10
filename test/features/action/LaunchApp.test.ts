@@ -1,4 +1,7 @@
-import { beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test, spyOn } from "bun:test";
+import { promises as fsp } from "fs";
+import * as os from "os";
+import * as nodePath from "path";
 import { LaunchApp } from "../../../src/features/action/LaunchApp";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 import { DefaultPerformanceTracker } from "../../../src/utils/PerformanceTracker";
@@ -400,6 +403,109 @@ describe("LaunchApp", () => {
         const result = await iosLaunchApp.execute(systemBundleId, false, false);
         expect(result.success).toBe(true);
         expect(targetBundleIdCalls).toEqual([]);
+      } finally {
+        cleanup();
+      }
+    });
+  });
+
+  describe("iOS clearAppData", () => {
+    const userBundleId = "com.example.myapp";
+    const systemBundleId = "com.apple.Preferences";
+    const tempDirs: string[] = [];
+
+    afterEach(async () => {
+      for (const dir of tempDirs.splice(0)) {
+        await fsp.rm(dir, { recursive: true, force: true });
+      }
+    });
+
+    function createClearDataHarness(bundleId: string, opts: { containerPath?: string } = {}) {
+      const iosDevice: BootedDevice = { name: "test-ios", platform: "ios", deviceId: "AAAAAAAA-BBBB-CCCC-DDDD-EEEEEEEEEEEE" };
+      const fakeCtrlProxy = new FakeIOSCtrlProxy();
+
+      const ctrlProxySpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(
+        fakeCtrlProxy as unknown as IOSCtrlProxyClient
+      );
+      const managerSpy = spyOn(IOSCtrlProxyManager, "getInstance").mockReturnValue({
+        setTargetBundleId: () => {},
+      } as unknown as IOSCtrlProxyManager);
+
+      // get_app_container returns this path (empty → clear fails as "not installed").
+      const containerPath = opts.containerPath ?? "";
+      const calls: string[] = [];
+      const fakeSimctl = {
+        launchApp: async (id: string) => { calls.push(`launch:${id}`); return { success: true, pid: 123 }; },
+        terminateApp: async (id: string) => { calls.push(`terminate:${id}`); },
+        executeCommand: async (command: string) => {
+          calls.push(`exec:${command}`);
+          const stdout = command.startsWith("get_app_container") ? containerPath : "";
+          return { stdout, stderr: "", trim: () => stdout.trim(), toString: () => stdout, includes: (s: string) => stdout.includes(s) } as any;
+        },
+      };
+
+      const iosObserveScreen = new FakeObserveScreen();
+      iosObserveScreen.setObserveResult({
+        updatedAt: Date.now(),
+        screenSize: { width: 1080, height: 1920 },
+        systemInsets: { top: 0, bottom: 0, left: 0, right: 0 },
+        viewHierarchy: { hierarchy: { node: {} }, packageName: bundleId } as any,
+      });
+      const iosWindow = new FakeWindow();
+      iosWindow.configureCachedActiveWindow({ appId: bundleId, activityName: "Main", layoutSeqSum: 1 });
+      const installedApps = new FakeInstalledAppsProvider(fakeTimer, { installedApps: [bundleId] });
+
+      const iosLaunchApp = new LaunchApp(iosDevice, fakeAdb as unknown as any, fakeSimctl as any, fakeTimer, { installedAppsProvider: installedApps });
+      (iosLaunchApp as any).awaitIdle = new FakeAwaitIdle();
+      (iosLaunchApp as any).observeScreen = iosObserveScreen;
+      (iosLaunchApp as any).window = iosWindow;
+      (iosLaunchApp as any).waitForIosHierarchyReady = async () => {};
+
+      return { iosLaunchApp, fakeCtrlProxy, calls, cleanup: () => { ctrlProxySpy.mockRestore(); managerSpy.mockRestore(); } };
+    }
+
+    test("wipes the data container and re-wires CtrlProxy when clearAppData is true", async () => {
+      fakeTimer.enableAutoAdvance();
+      const containerPath = await fsp.mkdtemp(nodePath.join(os.tmpdir(), "automobile-launch-clear-"));
+      tempDirs.push(containerPath);
+      const { iosLaunchApp, fakeCtrlProxy, calls, cleanup } = createClearDataHarness(userBundleId, { containerPath });
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        // Data container resolved via get_app_container (the fast clear path)
+        expect(calls.some(c => c.startsWith("exec:get_app_container") && c.includes(userBundleId))).toBe(true);
+        // CtrlProxy cache dropped so the hierarchy re-snapshots the fresh launch
+        expect(fakeCtrlProxy.clearCacheCallCount).toBeGreaterThan(0);
+        // App is relaunched after the wipe
+        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(true);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("aborts the launch (no simctl launch) when the clear fails", async () => {
+      fakeTimer.enableAutoAdvance();
+      // No containerPath → get_app_container returns empty → clear fails.
+      const { iosLaunchApp, calls, cleanup } = createClearDataHarness(userBundleId);
+      try {
+        const result = await iosLaunchApp.execute(userBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(false);
+        expect(result.error).toContain("Failed to clear app data");
+        // Must NOT launch with stale data
+        expect(calls.some(c => c === `launch:${userBundleId}`)).toBe(false);
+      } finally {
+        cleanup();
+      }
+    });
+
+    test("does not wipe data for a system bundle even when clearAppData is true", async () => {
+      fakeTimer.enableAutoAdvance();
+      const { iosLaunchApp, calls, cleanup } = createClearDataHarness(systemBundleId);
+      try {
+        const result = await iosLaunchApp.execute(systemBundleId, /* clearAppData */ true, /* coldBoot */ false);
+        expect(result.success).toBe(true);
+        // No get_app_container resolution for system bundles
+        expect(calls.some(c => c.startsWith("exec:get_app_container"))).toBe(false);
       } finally {
         cleanup();
       }

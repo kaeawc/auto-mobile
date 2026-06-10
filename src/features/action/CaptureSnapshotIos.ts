@@ -3,11 +3,11 @@ import type { SnapshotCaptureProvider } from "../../utils/interfaces/SnapshotPro
 import type { CaptureSnapshotArgs, CaptureSnapshotResult } from "./CaptureSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
-
-const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
 export class CaptureSnapshotIos implements SnapshotCaptureProvider {
   private device: BootedDevice;
@@ -128,7 +128,7 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
     for (const bundleId of bundleIds) {
       try {
         logger.info(`[iOS] Backing up app data: ${bundleId}`);
-        const containerPath = await this.getAppContainerPath(bundleId);
+        const containerPath = await getAppDataContainerPath(this.simctl, this.device.deviceId, bundleId);
         if (!containerPath) {
           failedPackages.push(bundleId);
           continue;
@@ -183,22 +183,6 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
     };
   }
 
-  private async getAppContainerPath(bundleId: string): Promise<string | null> {
-    try {
-      const command = `get_app_container ${this.quoteArg(this.device.deviceId)} ${this.quoteArg(bundleId)} data`;
-      const result = await this.simctl.executeCommand(command);
-      const containerPath = result.stdout.trim();
-      if (!containerPath) {
-        logger.warn(`[iOS] No data container path for ${bundleId}`);
-        return null;
-      }
-      return containerPath;
-    } catch (error) {
-      logger.warn(`[iOS] Failed to resolve container for ${bundleId}: ${error}`);
-      return null;
-    }
-  }
-
   private async copyAppContainer(
     containerPath: string,
     appDataPath: string,
@@ -210,7 +194,7 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
     for (const folder of IOS_APP_DATA_FOLDERS) {
       const sourcePath = path.join(containerPath, folder);
       const destinationPath = path.join(targetRoot, folder);
-      if (await this.pathExists(sourcePath)) {
+      if (await pathExists(sourcePath)) {
         await fs.cp(sourcePath, destinationPath, { recursive: true });
       }
     }
@@ -249,18 +233,5 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
     const metadataPath = this.store.getMetadataPath(snapshotName, pathOptions);
     await fs.writeFile(metadataPath, JSON.stringify(manifest, null, 2), "utf-8");
     logger.info(`[iOS] Wrote metadata to ${metadataPath}`);
-  }
-
-  private async pathExists(targetPath: string): Promise<boolean> {
-    try {
-      await fs.access(targetPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private quoteArg(value: string): string {
-    return JSON.stringify(value);
   }
 }

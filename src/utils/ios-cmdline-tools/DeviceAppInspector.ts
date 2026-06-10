@@ -175,39 +175,99 @@ export class DeviceAppInspector {
       return result.data?.hash ?? null;
     }
 
+    // withInstalledAppBundle propagates callback errors; preserve this method's
+    // null-on-failure contract by swallowing a hashing failure here.
+    try {
+      return await this.withInstalledAppBundle(deviceUdid, bundleId, bundlePath => hashAppBundle(bundlePath));
+    } catch (error) {
+      logger.warn(`[DeviceAppInspector] Failed to hash installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+      return null;
+    }
+  }
+
+  /**
+   * Clear a physical device app's data by uninstalling and reinstalling it.
+   * iOS exposes no direct data-wipe for on-device sandboxes, so we copy the
+   * installed (device-signed) bundle off the device, uninstall the app — which
+   * removes its data container — and reinstall the copied bundle. The app
+   * returns in a fresh state. Throws if the installed bundle can't be resolved,
+   * or with the underlying devicectl error if the uninstall/install step fails
+   * (so a post-uninstall install failure surfaces rather than being masked).
+   *
+   * Not available under host control (Docker): the host-control bridge exposes
+   * install/uninstall but no primitive to copy the installed bundle off-device,
+   * so we can't obtain a reinstall artifact. We fail with an explicit message
+   * rather than the misleading "could not resolve bundle" from the darwin path.
+   */
+  public async clearAppDataViaReinstall(deviceUdid: string, bundleId: string): Promise<void> {
+    const useHostControl = this.deps.hostControl.shouldUseHostControl() && this.deps.hostControl.isRunningInDocker();
+    if (useHostControl) {
+      throw new Error(
+        `Clearing app data via uninstall+reinstall is not supported under host control for ${bundleId}: ` +
+        "the host-control bridge cannot copy the installed bundle off-device to reinstall it."
+      );
+    }
+
+    const done = await this.withInstalledAppBundle(deviceUdid, bundleId, async bundlePath => {
+      await this.uninstallApp(deviceUdid, bundleId, false);
+      await this.installApp(deviceUdid, bundlePath);
+      return true;
+    });
+    if (!done) {
+      throw new Error(`Could not resolve installed bundle for ${bundleId} to reinstall`);
+    }
+  }
+
+  /**
+   * Copy the device-installed `.app` bundle to a temp dir and run `fn` against
+   * its on-disk path, cleaning up temp dirs afterward. Returns null if the bundle
+   * can't be located (or not on macOS). Local devicectl path only — host-control
+   * callers handle their own remote primitives.
+   *
+   * Lookup failures (info/copy) are swallowed → null. The callback's own errors
+   * PROPAGATE: clearAppDataViaReinstall must surface an install failure that
+   * happens after the uninstall, not mask it as "could not resolve bundle".
+   */
+  private async withInstalledAppBundle<T>(
+    deviceUdid: string,
+    bundleId: string,
+    fn: (bundlePath: string) => Promise<T>
+  ): Promise<T | null> {
     if (this.deps.platform() !== "darwin") {
       return null;
     }
 
     const tempDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-devicectl-"));
     const jsonPath = join(tempDir, "apps.json");
+    let copyDir: string | undefined;
     try {
-      const infoCommand = [
-        "xcrun",
-        "devicectl",
-        "device",
-        "info",
-        "apps",
-        "--device", deviceUdid,
-        "--bundle-id", bundleId,
-        "--json-output", quoteShell(jsonPath),
-        "--quiet"
-      ].join(" ");
-      await this.deps.exec(infoCommand);
-
-      const raw = await this.deps.readFile(jsonPath);
-      const data = JSON.parse(raw) as unknown;
-      const entry = findBundleEntry(data, bundleId);
-      if (!entry) {
-        return null;
-      }
-      const bundlePath = extractBundlePath(entry);
-      if (!bundlePath) {
-        return null;
-      }
-
-      const copyDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-device-app-"));
+      let bundleOnDisk: string | null;
       try {
+        const infoCommand = [
+          "xcrun",
+          "devicectl",
+          "device",
+          "info",
+          "apps",
+          "--device", deviceUdid,
+          "--bundle-id", bundleId,
+          "--json-output", quoteShell(jsonPath),
+          "--quiet"
+        ].join(" ");
+        await this.deps.exec(infoCommand);
+
+        const raw = await this.deps.readFile(jsonPath);
+        const data = JSON.parse(raw) as unknown;
+        const entry = findBundleEntry(data, bundleId);
+        if (!entry) {
+          return null;
+        }
+        const bundlePath = extractBundlePath(entry);
+        if (!bundlePath) {
+          return null;
+        }
+
+        copyDir = await this.deps.mkdtemp(join(this.deps.tmpdir(), "automobile-device-app-"));
         const copyCommand = [
           "xcrun",
           "devicectl",
@@ -221,18 +281,21 @@ export class DeviceAppInspector {
         ].join(" ");
         await this.deps.exec(copyCommand);
 
-        const bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
-        if (!bundleOnDisk) {
-          return null;
-        }
-        return await hashAppBundle(bundleOnDisk);
-      } finally {
+        bundleOnDisk = await findAppBundleInDir(copyDir, this.deps);
+      } catch (error) {
+        logger.warn(`[DeviceAppInspector] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
+        return null;
+      }
+
+      if (!bundleOnDisk) {
+        return null;
+      }
+      // Outside the lookup try/catch: callback errors propagate to the caller.
+      return await fn(bundleOnDisk);
+    } finally {
+      if (copyDir) {
         await this.deps.rm(copyDir);
       }
-    } catch (error) {
-      logger.warn(`[DeviceAppInspector] Failed to read installed app bundle for ${bundleId}: ${error instanceof Error ? error.message : String(error)}`);
-      return null;
-    } finally {
       await this.deps.rm(tempDir);
     }
   }

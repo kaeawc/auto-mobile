@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.35] - 2026-06-10
+### Other
+- launchApp times out on iOS when clearAppData is true ([#2368](https://github.com/kaeawc/auto-mobile/issues/2368))
+
 ## [v0.0.34] - 2026-06-04
 ### Other
 - No changes.

@@ -74,6 +74,71 @@ function sendToolsCall(socketPath: string, toolName: string): Promise<DaemonResp
   });
 }
 
+function sendToolsCallWithArgs(
+  socketPath: string,
+  toolName: string,
+  args: Record<string, unknown>
+): Promise<DaemonResponse> {
+  return sendRequest(socketPath, {
+    id: randomUUID(),
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: toolName, arguments: args },
+  });
+}
+
+function sendToolsCallWithoutArgs(socketPath: string, toolName: string): Promise<DaemonResponse> {
+  return sendRequest(socketPath, {
+    id: randomUUID(),
+    type: "mcp_request",
+    method: "tools/call",
+    params: { name: toolName },
+  });
+}
+
+function sendTwoToolsCallsOnOneSocket(socketPath: string, toolName: string): Promise<DaemonResponse[]> {
+  return new Promise((resolve, reject) => {
+    const client = new Socket();
+    const responses: DaemonResponse[] = [];
+    let buffer = "";
+
+    client.connect(socketPath, () => {
+      for (let i = 0; i < 2; i++) {
+        client.write(JSON.stringify({
+          id: randomUUID(),
+          type: "mcp_request",
+          method: "tools/call",
+          params: { name: toolName, arguments: {} },
+        }) + "\n");
+      }
+    });
+
+    client.on("data", data => {
+      buffer += data.toString();
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) {
+        if (!line.trim()) {
+          continue;
+        }
+        responses.push(JSON.parse(line) as DaemonResponse);
+        if (responses.length === 2) {
+          client.destroy();
+          resolve(responses);
+          return;
+        }
+      }
+    });
+
+    client.on("error", reject);
+    client.on("close", () => {
+      if (responses.length < 2) {
+        reject(new Error(`Connection closed after ${responses.length} responses`));
+      }
+    });
+  });
+}
+
 describe("UnixSocketServer MCP forward serialization", () => {
   let socketPath: string;
   let server: UnixSocketServer;
@@ -132,6 +197,97 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("forwards the Unix socket session as the implicit autolock key", async () => {
+    const forwardedCalls: unknown[] = [];
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          forwardedCalls.push(request);
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "startDevice", { platform: "android" }),
+      sendToolsCallWithArgs(socketPath, "startDevice", { platform: "android" }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(forwardedCalls).toHaveLength(2);
+
+    const firstArgs = (forwardedCalls[0] as { arguments: Record<string, unknown> }).arguments;
+    const secondArgs = (forwardedCalls[1] as { arguments: Record<string, unknown> }).arguments;
+    expect(firstArgs.platform).toBe("android");
+    expect(secondArgs.platform).toBe("android");
+    expect(typeof firstArgs.__mcpSessionId).toBe("string");
+    expect(typeof secondArgs.__mcpSessionId).toBe("string");
+    expect(firstArgs.__mcpSessionId).not.toBe(secondArgs.__mcpSessionId);
+  });
+
+  test("uses a stable implicit autolock key for multiple calls on one Unix socket", async () => {
+    const forwardedCalls: unknown[] = [];
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          forwardedCalls.push(request);
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const responses = await sendTwoToolsCallsOnOneSocket(socketPath, "observe");
+
+    expect(responses.every(response => response.success)).toBe(true);
+    expect(forwardedCalls).toHaveLength(2);
+    const firstArgs = (forwardedCalls[0] as { arguments: Record<string, unknown> }).arguments;
+    const secondArgs = (forwardedCalls[1] as { arguments: Record<string, unknown> }).arguments;
+    expect(typeof firstArgs.__mcpSessionId).toBe("string");
+    expect(secondArgs.__mcpSessionId).toBe(firstArgs.__mcpSessionId);
+  });
+
+  test("adds the Unix socket session autolock key when tool arguments are omitted", async () => {
+    let forwardedCall: unknown;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          forwardedCall = request;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const response = await sendToolsCallWithoutArgs(socketPath, "observe");
+
+    expect(response.success).toBe(true);
+    expect(forwardedCall).toBeDefined();
+    const args = (forwardedCall as { arguments: Record<string, unknown> }).arguments;
+    expect(Object.keys(args)).toEqual(["__mcpSessionId"]);
+    expect(typeof args.__mcpSessionId).toBe("string");
   });
 
   test("queued request fails fast when queue wait exceeds its timeout", async () => {

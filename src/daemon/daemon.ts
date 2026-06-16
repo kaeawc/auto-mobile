@@ -40,6 +40,7 @@ import { NavigationGraphManager } from "../features/navigation/NavigationGraphMa
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../utils/appearance/AppearanceSyncScheduler";
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
@@ -79,9 +80,15 @@ export class Daemon {
   private devicePool: DevicePool;
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
+  private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
 
-  constructor(options: DaemonOptions = {}, installedAppsRepository?: InstalledAppsStore, timer: Timer = defaultTimer) {
+  constructor(
+    options: DaemonOptions = {},
+    installedAppsRepository?: InstalledAppsStore,
+    timer: Timer = defaultTimer,
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()
+  ) {
     this.port = options.port || DEFAULT_DAEMON_PORT;
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
@@ -89,7 +96,8 @@ export class Daemon {
     this.debug = options.debug || false;
     this.daemonSessionId = randomUUID();
     this.timer = timer;
-    this.sessionManager = new SessionManager();
+    this.deviceSessionRepository = deviceSessionRepository;
+    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
@@ -99,8 +107,11 @@ export class Daemon {
     this.devicePool = new DevicePool(
       this.sessionManager,
       this.daemonSessionId,
+      this.timer,
+      this.installedAppsRepository,
       undefined,
-      this.installedAppsRepository
+      undefined,
+      this.deviceSessionRepository
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
@@ -1026,6 +1037,11 @@ export class Daemon {
       getDatabase();
       // Clear installed apps cache from previous daemon sessions
       await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
+      await this.deviceSessionRepository.markStaleActiveSessionsExpired(
+        this.daemonSessionId,
+        this.timer.now(),
+        "daemon-restart"
+      );
       logger.info(`[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`);
     } catch (error) {
       logger.error(`Failed to initialize database: ${error}`);

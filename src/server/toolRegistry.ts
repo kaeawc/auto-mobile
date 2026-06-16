@@ -203,6 +203,7 @@ class ToolRegistryClass {
       const baseSessionUuid = args.sessionUuid;
       const deviceLabel = typeof args.device === "string" ? args.device : undefined;
       const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
+      const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
       let sessionUuid = baseSessionUuid;
       const keepScreenAwake = typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 
@@ -237,21 +238,28 @@ class ToolRegistryClass {
         }
       }
 
-      logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
       const toolStartMs = this.timer.now();
-      void this.toolCallRepository.recordToolCall({
-        toolName: name,
-        timestamp: new Date().toISOString(),
-        sessionUuid,
-      });
 
       // Extract platform from args, default to "either" for backward compatibility
       let platform: SomePlatform = args.platform || "either";
 
       if (shouldResolveDevice) {
+        const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
+        if (implicitSessionUuid) {
+          sessionUuid = implicitSessionUuid;
+          args.sessionUuid = implicitSessionUuid;
+          logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
+        }
         await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId);
         await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId);
       }
+
+      logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
+      void this.toolCallRepository.recordToolCall({
+        toolName: name,
+        timestamp: new Date().toISOString(),
+        sessionUuid,
+      });
 
       // If session UUID provided, resolve device from session
       if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
@@ -568,11 +576,41 @@ class ToolRegistryClass {
     );
   }
 
+  private resolveImplicitAutolockSession(
+    platform: SomePlatform,
+    sessionUuid: string | undefined,
+    providedDeviceId: string | undefined,
+    mcpSessionId: string | undefined
+  ): string | undefined {
+    if (sessionUuid) {
+      return undefined;
+    }
+    if (!isDevicePoolAutolockEnabled() || !DaemonState.getInstance().isInitialized()) {
+      return undefined;
+    }
+
+    const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
+    const sessionId = DaemonState.getInstance()
+      .getDevicePool()
+      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter);
+    if (!sessionId) {
+      return undefined;
+    }
+
+    if (!providedDeviceId) {
+      return sessionId;
+    }
+
+    const session = DaemonState.getInstance().getSessionManager().getSession(sessionId);
+    return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
+  }
+
   /**
    * When device pool autolock is enabled, a tool call that does not name a target
    * (no sessionUuid and no deviceId) must not be routed to an arbitrary device if
    * more than one candidate exists — that would defeat the per-session device
-   * ownership autolock provides. Require the sessionUuid returned by startDevice.
+   * ownership autolock provides. Resolve the MCP session's autolock session when
+   * available; otherwise require the sessionUuid returned by startDevice.
    *
    * No-op when autolock is disabled, when a target is already specified, when a
    * device was pinned via setActiveDevice, or when only one candidate exists.
@@ -607,7 +645,7 @@ class ToolRegistryClass {
 
     throw new ActionableError(
       "Device pool autolock is enabled and multiple devices are available. " +
-      "Provide the sessionId returned by 'startDevice' (or a deviceId) to target a specific device."
+      "Call startDevice first from this MCP session, or provide the sessionId returned by 'startDevice' (or a deviceId) to target a specific device."
     );
   }
 

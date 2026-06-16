@@ -160,6 +160,32 @@ describe("DevicePool autolock", () => {
       expect(session!.expiresAt).toBe(timer.now() + 60_000);
     });
 
+    it("maps an MCP session to its generated autolock session", async () => {
+      await pool.initializeWithDevices([
+        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "ios")).toBeUndefined();
+      expect(pool.resolveAutolockSessionForMcpSession("other-mcp-session", "android")).toBeUndefined();
+    });
+
+    it("clears MCP session mapping when the autolock session expires", async () => {
+      await pool.initializeWithDevices([
+        { name: "Pixel 7", platform: "android", deviceId: "emulator-5554" },
+      ]);
+
+      const sessionId = await pool.autolockDevice("emulator-5554", "android", "mcp-session-1");
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(sessionId);
+
+      timer.advanceTime(61 * 1000);
+      expect(sessionManager.getSession(sessionId!)).toBeNull();
+
+      expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBeUndefined();
+    });
+
     it("aligns the session heartbeat timeout with the idle timeout", async () => {
       // The daemon heartbeat watchdog reaps sessions whose heartbeat is stale.
       // Autolock clients do not send heartbeats, so the heartbeat timeout must

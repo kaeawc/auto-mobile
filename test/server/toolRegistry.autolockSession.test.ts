@@ -3,6 +3,11 @@ import { ToolRegistry } from "../../src/server/toolRegistry";
 import { FakeDeviceSessionManager } from "../fakes/FakeDeviceSessionManager";
 import { BootedDevice } from "../../src/models";
 import { z } from "zod";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 
 const AUTOLOCK_ENV_KEYS = [
   "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
@@ -24,6 +29,7 @@ describe("ToolRegistry autolock session enforcement", () => {
 
   let fakeDeviceSessionManager: FakeDeviceSessionManager;
   let originalDeviceSessionManager: unknown;
+  let daemonSessionManager: SessionManager | undefined;
 
   const schema = z.object({
     platform: z.enum(["ios", "android"]).optional(),
@@ -48,6 +54,8 @@ describe("ToolRegistry autolock session enforcement", () => {
   afterEach(() => {
     (ToolRegistry as any).deviceSessionManager = originalDeviceSessionManager;
     ToolRegistry.clearTools();
+    DaemonState.getInstance().reset();
+    daemonSessionManager?.stopCleanupTimer();
     setAutolock(false);
   });
 
@@ -129,5 +137,96 @@ describe("ToolRegistry autolock session enforcement", () => {
     const response = await tool.handler({ platform: "android" });
     expect(response).toEqual({ success: true });
     expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(1);
+  });
+
+  test("resolves the autolock session from the MCP session when sessionUuid is omitted", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([androidA, androidB]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    const sessionId = await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
+
+    let handledDevice: BootedDevice | undefined;
+    let handledArgs: Record<string, unknown> | undefined;
+    ToolRegistry.registerDeviceAware("implicitAutolockSession", "implicitAutolockSession", schema, async (device, args) => {
+      handledDevice = device;
+      handledArgs = args;
+      return { success: true };
+    });
+    const tool = ToolRegistry.getTool("implicitAutolockSession")!;
+
+    const response = await tool.handler({
+      platform: "android",
+      keepScreenAwake: false,
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    expect(response).toEqual({ success: true });
+    expect(handledDevice?.deviceId).toBe(androidA.deviceId);
+    expect(handledArgs?.sessionUuid).toBe(sessionId);
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
+
+  test("resolves the MCP autolock session when the provided deviceId belongs to it", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([androidA, androidB]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    const sessionId = await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
+
+    let handledDevice: BootedDevice | undefined;
+    let handledArgs: Record<string, unknown> | undefined;
+    ToolRegistry.registerDeviceAware("implicitAutolockWithDeviceId", "implicitAutolockWithDeviceId", schema, async (device, args) => {
+      handledDevice = device;
+      handledArgs = args;
+      return { success: true };
+    });
+    const tool = ToolRegistry.getTool("implicitAutolockWithDeviceId")!;
+
+    const response = await tool.handler({
+      platform: "android",
+      deviceId: androidA.deviceId,
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    expect(response).toEqual({ success: true });
+    expect(handledDevice?.deviceId).toBe(androidA.deviceId);
+    expect(handledArgs?.sessionUuid).toBe(sessionId);
+    expect(fakeDeviceSessionManager.getEnsureDeviceReadyCallCount()).toBe(0);
+  });
+
+  test("does not apply an MCP autolock session to a different provided deviceId", async () => {
+    setAutolock(true);
+    fakeDeviceSessionManager.setConnectedDevices([androidA, androidB]);
+
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const fakeDeviceUtils = new FakeDeviceUtils();
+    fakeDeviceUtils.setBootedDevices("android", [androidA, androidB]);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([androidA, androidB]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+    await pool.autolockDevice(androidA.deviceId, "android", "mcp-session-1");
+    await pool.autolockDevice(androidB.deviceId, "android", "mcp-session-2");
+
+    const tool = registerTool("implicitAutolockDifferentDeviceId");
+
+    await expect(tool.handler({
+      platform: "android",
+      deviceId: androidB.deviceId,
+      __mcpSessionId: "mcp-session-1",
+    })).rejects.toThrow("Device 'emulator-5556' is locked to another session.");
   });
 });

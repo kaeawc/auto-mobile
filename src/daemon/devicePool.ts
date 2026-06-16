@@ -10,6 +10,7 @@ import { InstalledAppsRepository } from "../db/installedAppsRepository";
 import { RetryExecutor, defaultRetryExecutor } from "../utils/retry/RetryExecutor";
 import { createGlobalPerformanceTracker } from "../utils/PerformanceTracker";
 import { isDevicePoolAutolockEnabled, getDevicePoolTimeoutMs } from "./poolConfig";
+import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 
 /**
  * Error class for device pool operations with retryability flag.
@@ -78,10 +79,12 @@ export class DevicePool {
   private timer: Timer;
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
+  private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
   private readonly retryExecutor: RetryExecutor;
+  private readonly deviceSessionRepository: DeviceSessionRepository;
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
@@ -96,7 +99,8 @@ export class DevicePool {
     timer: Timer = defaultTimer,
     installedAppsRepository?: InstalledAppsStore,
     deviceManager: PlatformDeviceManager = new MultiPlatformDeviceManager(),
-    retryExecutor: RetryExecutor = defaultRetryExecutor
+    retryExecutor: RetryExecutor = defaultRetryExecutor,
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()
   ) {
     this.instanceId = ++DevicePool.instanceCounter;
     logger.info(`[DEVICE-POOL-DEBUG] Creating DevicePool instance #${this.instanceId}`);
@@ -106,6 +110,7 @@ export class DevicePool {
     this.installedAppsRepository = installedAppsRepository ?? new InstalledAppsRepository();
     this.deviceManager = deviceManager;
     this.retryExecutor = retryExecutor;
+    this.deviceSessionRepository = deviceSessionRepository;
 
     // Free autolocked devices when their session expires (idle timeout auto-release).
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
@@ -900,14 +905,15 @@ export class DevicePool {
    * Lock a device with an autolock session ID.
    *
    * Generates a new session UUID bound to the device. When autolock is enabled,
-   * subsequent tool calls must include this session ID to interact with the device.
-   * The session has a configurable idle timeout (AUTO_MOBILE_DEVICE_POOL_TIMEOUT).
+   * subsequent tool calls from the same MCP session can resolve this UUID
+   * implicitly; other clients must include it explicitly. The session has a
+   * configurable idle timeout (AUTO_MOBILE_DEVICE_POOL_TIMEOUT).
    *
    * @param deviceId - The device to lock
    * @param platform - Device platform
    * @returns The generated session ID, or undefined if autolock is disabled
    */
-  async autolockDevice(deviceId: string, platform: Platform): Promise<string | undefined> {
+  async autolockDevice(deviceId: string, platform: Platform, mcpSessionId?: string): Promise<string | undefined> {
     if (!isDevicePoolAutolockEnabled()) {
       return undefined;
     }
@@ -948,8 +954,56 @@ export class DevicePool {
     // (10s default) would reap the lock far sooner than the configured idle timeout.
     // Interactions still bump lastHeartbeat, so an active client stays locked while
     // a truly idle one is released after the idle timeout.
-    await this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs);
+    const session = await this.sessionManager.createSession(sessionId, deviceId, platform, timeoutMs, timeoutMs);
+    if (mcpSessionId) {
+      this.mcpSessionAutolockMap.set(mcpSessionId, sessionId);
+    }
+    await this.deviceSessionRepository.markAutolockSession(sessionId, {
+      mcpSessionId: mcpSessionId ?? null,
+      daemonSessionId: this.daemonSessionId,
+      lastUsedAtMs: session.lastUsedAt,
+      expiresAtMs: session.expiresAt,
+    });
     logger.info(`Autolocked device ${deviceId} with session ${sessionId} (timeout: ${timeoutMs}ms)`);
+    return sessionId;
+  }
+
+  /**
+   * Resolve the autolock session associated with an MCP client session.
+   *
+   * startDevice binds its generated device-session UUID to the MCP session that
+   * called it. Later tool calls from the same MCP session can omit sessionUuid;
+   * this lookup restores the device-session UUID while it is still live.
+   */
+  resolveAutolockSessionForMcpSession(
+    mcpSessionId: string | undefined,
+    platform?: Platform
+  ): string | undefined {
+    if (!mcpSessionId) {
+      return undefined;
+    }
+
+    const sessionId = this.mcpSessionAutolockMap.get(mcpSessionId);
+    if (!sessionId) {
+      return undefined;
+    }
+
+    const session = this.sessionManager.getSession(sessionId);
+    if (!session) {
+      this.mcpSessionAutolockMap.delete(mcpSessionId);
+      return undefined;
+    }
+
+    const device = this.devices.get(session.assignedDevice);
+    if (!device || device.autolockSessionId !== sessionId) {
+      this.mcpSessionAutolockMap.delete(mcpSessionId);
+      return undefined;
+    }
+
+    if (platform && device.platform !== platform) {
+      return undefined;
+    }
+
     return sessionId;
   }
 
@@ -971,8 +1025,17 @@ export class DevicePool {
     device.errorCount = 0;
     device.autolockSessionId = undefined;
     this.lastReleasedDeviceId = deviceId;
+    this.clearMcpAutolockMappings(sessionId);
 
     logger.info(`Autolock idle timeout: released device ${deviceId} from session ${sessionId}`);
+  }
+
+  private clearMcpAutolockMappings(sessionId: string): void {
+    for (const [mcpSessionId, mappedSessionId] of this.mcpSessionAutolockMap) {
+      if (mappedSessionId === sessionId) {
+        this.mcpSessionAutolockMap.delete(mcpSessionId);
+      }
+    }
   }
 
   /**
@@ -995,8 +1058,8 @@ export class DevicePool {
     if (device.autolockSessionId !== sessionUuid) {
       throw new ActionableError(
         `Device '${deviceId}' is locked to another session.\n` +
-        `Autolock is enabled, so every tool call must include the sessionId ` +
-        `returned by 'startDevice' for this device.\n\n` +
+        `Autolock is enabled, so tool calls must either come from the same MCP session ` +
+        `that called 'startDevice' or include the sessionId returned for this device.\n\n` +
         `Options:\n` +
         `  - Pass the sessionId from the 'startDevice' that locked this device\n` +
         `  - Use 'startDevice' to lock a different available device\n` +

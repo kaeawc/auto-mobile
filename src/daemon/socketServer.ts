@@ -278,7 +278,7 @@ export class UnixSocketServer {
             const mcpClient = await this.getMcpClient();
 
             try {
-              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs);
+              return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
             } catch (ideError) {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
@@ -296,7 +296,7 @@ export class UnixSocketServer {
                     detail: `no budget remaining after session reconnect (elapsed ${this.timer.now() - forwardStartMs}ms)`,
                   });
                 }
-                return await this.handleIdeRequest(freshClient, request, retryRemainingMs);
+                return await this.handleIdeRequest(freshClient, request, retryRemainingMs, sessionId);
               }
               throw ideError;
             }
@@ -517,7 +517,8 @@ export class UnixSocketServer {
   private async handleIdeRequest(
     mcpClient: Client,
     request: DaemonRequest,
-    timeoutMs: number
+    timeoutMs: number,
+    socketSessionId: string
   ): Promise<any> {
     const requestOptions = { timeout: timeoutMs };
 
@@ -528,7 +529,7 @@ export class UnixSocketServer {
       case "tools/call": {
         return await mcpClient.callTool({
           name: request.params.name,
-          arguments: request.params.arguments,
+          arguments: this.withSocketSessionAutolockKey(request.params.arguments, socketSessionId),
         }, undefined, requestOptions);
       }
       case "resources/list": {
@@ -550,6 +551,23 @@ export class UnixSocketServer {
       default:
         throw new Error(`Unsupported daemon method: ${request.method}`);
     }
+  }
+
+  private withSocketSessionAutolockKey(args: unknown, socketSessionId: string): unknown {
+    if (args === null || args === undefined) {
+      return {
+        __mcpSessionId: socketSessionId,
+      };
+    }
+
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return args;
+    }
+
+    return {
+      ...args,
+      __mcpSessionId: socketSessionId,
+    };
   }
 
   /**

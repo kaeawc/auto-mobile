@@ -80,6 +80,7 @@ export interface StartDeviceArgs {
   deviceId?: string;
   preferRunning?: boolean;
   timeoutMs?: number;
+  __mcpSessionId?: string;
 }
 
 export interface KillDeviceArgs {
@@ -395,7 +396,7 @@ export function registerDeviceTools() {
     if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
       sessionId = await DaemonState.getInstance()
         .getDevicePool()
-        .autolockDevice(device.deviceId, device.platform);
+        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId);
     }
     if (!sessionId) {
       sessionId = randomUUID();

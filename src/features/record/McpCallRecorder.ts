@@ -38,6 +38,7 @@ export const INTERNAL_PARAMS = new Set([
   "device",
   "devices",
   "keepScreenAwake",
+  "__mcpSessionId",
 ]);
 
 export function stripInternalParams(args: Record<string, unknown>): Record<string, unknown> {

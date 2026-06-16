@@ -4,14 +4,31 @@ import { FakeDeviceUtils } from "../fakes/FakeDeviceUtils";
 import { FakeDeviceMatcher } from "../fakes/FakeDeviceMatcher";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import type { BootedDevice, DeviceInfo } from "../../src/models";
+import { DaemonState } from "../../src/daemon/daemonState";
+import { SessionManager } from "../../src/daemon/sessionManager";
+import { DevicePool } from "../../src/daemon/devicePool";
+import { FakeTimer } from "../fakes/FakeTimer";
+
+const AUTOLOCK_ENV_KEYS = [
+  "AUTOMOBILE_DEVICE_POOL_AUTOLOCK",
+  "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
+] as const;
+
+function clearAutolockEnv(): void {
+  for (const key of AUTOLOCK_ENV_KEYS) {
+    delete process.env[key];
+  }
+}
 
 describe("startDevice handler", () => {
   let fakeDeviceUtils: FakeDeviceUtils;
   let fakeMatcher: FakeDeviceMatcher;
+  let daemonSessionManager: SessionManager | undefined;
 
   beforeEach(() => {
     fakeDeviceUtils = new FakeDeviceUtils();
     fakeMatcher = new FakeDeviceMatcher();
+    daemonSessionManager = undefined;
 
     setDeviceToolsDependencies({
       deviceManagerFactory: () => fakeDeviceUtils,
@@ -25,6 +42,9 @@ describe("startDevice handler", () => {
 
   afterEach(() => {
     resetDeviceToolsDependencies();
+    clearAutolockEnv();
+    DaemonState.getInstance().reset();
+    daemonSessionManager?.stopCleanupTimer();
   });
 
   async function callStartDevice(args: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -249,5 +269,25 @@ describe("startDevice handler", () => {
 
     expect(result.deviceId).toBe("UDID-17-2");
     expect(result.osVersion).toBe("17.2");
+  });
+
+  it("registers the generated autolock session for the MCP session", async () => {
+    process.env.AUTOMOBILE_DEVICE_POOL_AUTOLOCK = "1";
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([androidDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    fakeDeviceUtils.setBootedDevices("android", [androidDevice]);
+    fakeMatcher.setBootedResult(androidDevice);
+
+    const result = await callStartDevice({
+      platform: "android",
+      __mcpSessionId: "mcp-session-1",
+    });
+
+    expect(typeof result.sessionId).toBe("string");
+    expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(result.sessionId);
   });
 });

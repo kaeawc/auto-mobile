@@ -69,6 +69,31 @@ export interface McpServerOptions {
   daemonMode?: boolean;
 }
 
+const INTERNAL_MCP_SESSION_PARAM = "__mcpSessionId";
+
+function extractInternalMcpSessionId(params: unknown): string | undefined {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return undefined;
+  }
+
+  const value = (params as Record<string, unknown>)[INTERNAL_MCP_SESSION_PARAM];
+  return typeof value === "string" ? value : undefined;
+}
+
+function stripInternalToolParams(params: unknown): unknown {
+  if (!params || typeof params !== "object" || Array.isArray(params)) {
+    return params;
+  }
+
+  if (!(INTERNAL_MCP_SESSION_PARAM in params)) {
+    return params;
+  }
+
+  const rest = { ...(params as Record<string, unknown>) };
+  delete rest[INTERNAL_MCP_SESSION_PARAM];
+  return rest;
+}
+
 function flattenZodIssues(issues: ZodIssue[]): ZodIssue[] {
   const flattened: ZodIssue[] = [];
 
@@ -246,6 +271,8 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     }
 
     const sessionId = options.sessionContext?.sessionId;
+    const requestMcpSessionId = extractInternalMcpSessionId(toolParams);
+    const implicitAutolockMcpSessionId = requestMcpSessionId ?? (!daemonMode ? sessionId : undefined);
     const rawSessionUuid =
       toolParams &&
       typeof toolParams === "object" &&
@@ -270,12 +297,15 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     // Parse and validate the parameters
     let parsedParams;
     try {
-      parsedParams = tool.schema.parse(toolParams);
+      parsedParams = tool.schema.parse(stripInternalToolParams(toolParams));
     } catch (error) {
       throw new ActionableError(`Invalid parameters for tool ${name}: ${formatToolParamError(name, error)}`);
     }
 
     const execution = executionTracker.startExecution(name, sessionId, sessionUuid);
+    const handlerParams = implicitAutolockMcpSessionId && parsedParams && typeof parsedParams === "object"
+      ? { ...parsedParams, [INTERNAL_MCP_SESSION_PARAM]: implicitAutolockMcpSessionId }
+      : parsedParams;
 
     // Create progress callback if tool supports progress
     const progressCallback = tool.supportsProgress
@@ -300,7 +330,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
     try {
       return await runWithAbortSignal(
         execution.abortController.signal,
-        () => tool.handler(parsedParams, progressCallback, execution.abortController.signal)
+        () => tool.handler(handlerParams, progressCallback, execution.abortController.signal)
       );
     } finally {
       executionTracker.endExecution(execution.id);

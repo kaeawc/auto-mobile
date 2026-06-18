@@ -57,7 +57,7 @@ navigation3 = "1.1.2"              # Used in playground app
 kotlinx-serialization-json = "1.11.0"
 appcompat = "1.7.1"
 material = "1.14.0"
-lifecycleViewmodelNavigation3Android = "2.10.0"
+lifecycleViewmodelNavigation3Android = "2.11.0"
 
 # Network and server libraries
 ktor = "3.5.0"

@@ -184,3 +184,17 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     });
   }
 });
+
+describe("inputTextSchema", () => {
+  test("accepts supported Android input modes", () => {
+    for (const mode of ["a11y", "eventLast", "eventAll"]) {
+      const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "android" });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  test("rejects unsupported input modes", () => {
+    const result = inputTextSchema.safeParse({ text: "hello", mode: "realKeyEvents", platform: "android" });
+    expect(result.success).toBe(false);
+  });
+});

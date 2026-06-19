@@ -371,7 +371,7 @@ export const clearStateSchema = addDeviceTargetingToSchema(z.object({
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   text: z.string().min(1).describe("Text to input"),
   mode: z.enum(["a11y", "eventLast", "eventAll"]).optional()
-    .describe("(Android only) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default."),
+    .describe("(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default."),
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
@@ -807,8 +807,9 @@ export function registerInteractionTools() {
   const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
     RecompositionTracker.getInstance().recordInteraction();
     const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
+    const mode = device.platform === "android" ? args.mode : undefined;
     const inputText = new InputText(device);
-    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard, args.mode);
+    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard, mode);
     return createJSONToolResponse({
       message: `Input text`,
       observation: result.observation,
@@ -996,7 +997,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "inputText",
-    "Input text",
+    "Input text. The optional mode field is Android-only and ignored on iOS.",
     inputTextSchema,
     inputTextHandler,
     false // Does not support progress notifications

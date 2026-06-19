@@ -1782,7 +1782,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1793,7 +1793,7 @@
           "description": "Text to input"
         },
         "mode": {
-          "description": "(Android only) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default.",
+          "description": "(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default.",
           "type": "string",
           "enum": [
             "a11y",

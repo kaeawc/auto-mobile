@@ -33,6 +33,11 @@ function stubAndroidSetText(requestSetText: RequestSetText): void {
   })) as typeof AndroidCtrlProxyClient.getInstance;
 }
 
+function inputCommands(factory: FakeAdbClientFactory): string[] {
+  return factory.getFakeClient().getAllCommands()
+    .filter(command => command.startsWith("shell input "));
+}
+
 describe("InputText", () => {
   const androidDevice: BootedDevice = {
     deviceId: "input-text-device",
@@ -97,7 +102,7 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
     expect(setTextCalls).toEqual([{ text: "@Jason Pearso", dismissKeyboard: false }]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent KEYCODE_N"]);
+    expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_N"]);
   });
 
   test("eventLast restores suffix with final a11y setText", async () => {
@@ -117,20 +122,44 @@ describe("InputText", () => {
       { text: "abc de", dismissKeyboard: false },
       { text: "abc def  ", dismissKeyboard: false },
     ]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual(["shell input keyevent KEYCODE_F"]);
+    expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_F"]);
   });
 
-  test("eventLast uses shifted key combination for uppercase ASCII", async () => {
+  test("eventLast uses shifted key combination for uppercase ASCII on Android 12+", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
     stubAndroidSetText(async () => ({ success: true, totalTimeMs: 1 }));
 
     const result = await testInputText(inputText).executeAndroidTextInput("HellO", undefined, false, "eventLast");
 
     expect(result.success).toBe(true);
-    expect(factory.getFakeClient().getAllCommands()).toEqual([
+    expect(inputCommands(factory)).toEqual([
       "shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_O"
+    ]);
+  });
+
+  test("eventLast falls back to keyevent and restores text for shifted ASCII before Android 12", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
+
+    stubAndroidSetText(async (text, _resourceId, _timeoutMs, _perf, dismissKeyboard) => {
+      setTextCalls.push({ text, dismissKeyboard });
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput("HellO", undefined, false, "eventLast");
+
+    expect(result.success).toBe(true);
+    expect(setTextCalls).toEqual([
+      { text: "Hell", dismissKeyboard: false },
+      { text: "HellO", dismissKeyboard: false },
+    ]);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_SHIFT_LEFT KEYCODE_O"
     ]);
   });
 
@@ -149,13 +178,14 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual(["  你好  "]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
   });
 
   test("eventAll sends mappable ASCII text as key events", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "31\n");
 
     stubAndroidSetText(async text => {
       setTextCalls.push(text);
@@ -167,7 +197,7 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
     expect(setTextCalls).toEqual([""]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual([
+    expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_AT",
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
@@ -191,7 +221,7 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
     expect(setTextCalls).toEqual(["", "ab你好", "ab你好c😊"]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual([
+    expect(inputCommands(factory)).toEqual([
       "shell input keyevent KEYCODE_A",
       "shell input keyevent KEYCODE_B",
       "shell input keyevent KEYCODE_C",
@@ -210,7 +240,29 @@ describe("InputText", () => {
     expect(result.success).toBe(false);
     expect(result.method).toBe("eventAll");
     expect(result.error).toContain("focused field missing");
-    expect(factory.getFakeClient().getAllCommands()).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
+  });
+
+  test("eventAll falls back to keyevent and restores text for shifted ASCII before Android 12", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput("aB", undefined, false, "eventAll");
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("eventAll");
+    expect(setTextCalls).toEqual(["", "aB"]);
+    expect(inputCommands(factory)).toEqual([
+      "shell input keyevent KEYCODE_A",
+      "shell input keyevent KEYCODE_SHIFT_LEFT KEYCODE_B"
+    ]);
   });
 
   test("eventAll falls back to a11y when there are no key-event-mappable characters", async () => {
@@ -228,6 +280,6 @@ describe("InputText", () => {
     expect(result.success).toBe(true);
     expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual(["你好😊"]);
-    expect(factory.getFakeClient().getAllCommands()).toEqual([]);
+    expect(inputCommands(factory)).toEqual([]);
   });
 });

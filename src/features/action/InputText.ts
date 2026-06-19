@@ -5,12 +5,22 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 
 export type InputTextMode = "a11y" | "eventLast" | "eventAll";
 
+interface KeyEventPlan {
+  commands: string[];
+  needsTextRestore: boolean;
+}
+
+const ANDROID_KEYCOMBINATION_MIN_API_LEVEL = 31;
+
 export class InputText extends BaseVisualChange {
+  private androidInputKeyCombinationSupported: boolean | undefined;
+
   constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null) {
     super(device, adbFactoryOrExecutor);
     this.device = device;
@@ -157,16 +167,16 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    const keyCommand = this.getAsciiKeyEventCommand(char);
-    if (!keyCommand) {
+    const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+    if (!keyEventPlan) {
       logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
       const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
       return { ...result, method: "a11y" };
     }
 
-    await this.adb.executeCommand(keyCommand);
+    await this.executeKeyEventPlan(keyEventPlan);
 
-    if (suffix.length > 0 || dismissKeyboard) {
+    if (suffix.length > 0 || dismissKeyboard || keyEventPlan.needsTextRestore) {
       const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
       if (!finalResult.success) {
         logger.warn(`[InputText] eventLast final setText failed: ${finalResult.error}`);
@@ -197,7 +207,7 @@ export class InputText extends BaseVisualChange {
     dismissKeyboard: boolean = false
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const chars = Array.from(text);
-    if (!chars.some(char => this.getAsciiKeyEventCommand(char))) {
+    if (!await this.hasAsciiKeyEventPlan(chars)) {
       const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
       return { ...result, method: "a11y" };
     }
@@ -217,16 +227,28 @@ export class InputText extends BaseVisualChange {
     let targetText = "";
     for (let index = 0; index < chars.length; index++) {
       const char = chars[index] ?? "";
-      const keyCommand = this.getAsciiKeyEventCommand(char);
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
 
-      if (keyCommand) {
-        await this.adb.executeCommand(keyCommand);
+      if (keyEventPlan) {
+        await this.executeKeyEventPlan(keyEventPlan);
         targetText += char;
+        if (keyEventPlan.needsTextRestore) {
+          const restoreResult = await a11yClient.requestSetText(targetText, undefined, undefined, undefined, false);
+          if (!restoreResult.success) {
+            logger.warn(`[InputText] eventAll restore setText failed after legacy key events: ${restoreResult.error}`);
+            return {
+              success: false,
+              text,
+              error: `Accessibility service setText failed after eventAll key event: ${restoreResult.error}`,
+              method: "eventAll"
+            };
+          }
+        }
         continue;
       }
 
       let unsupportedRun = char;
-      while (index + 1 < chars.length && !this.getAsciiKeyEventCommand(chars[index + 1] ?? "")) {
+      while (index + 1 < chars.length && !(await this.getAsciiKeyEventPlan(chars[index + 1] ?? ""))) {
         index++;
         unsupportedRun += chars[index] ?? "";
       }
@@ -285,17 +307,33 @@ export class InputText extends BaseVisualChange {
     return null;
   }
 
-  private getAsciiKeyEventCommand(char: string): string | null {
+  private async hasAsciiKeyEventPlan(chars: string[]): Promise<boolean> {
+    for (const char of chars) {
+      if (await this.getAsciiKeyEventPlan(char)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
     if (/^[a-z]$/.test(char)) {
-      return `shell input keyevent KEYCODE_${char.toUpperCase()}`;
+      return {
+        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`],
+        needsTextRestore: false
+      };
     }
 
     if (/^[A-Z]$/.test(char)) {
-      return `shell input keycombination KEYCODE_SHIFT_LEFT KEYCODE_${char}`;
+      return this.createShiftedKeyEventPlan(`KEYCODE_${char}`);
     }
 
     if (/^[0-9]$/.test(char)) {
-      return `shell input keyevent KEYCODE_${char}`;
+      return {
+        commands: [`shell input keyevent KEYCODE_${char}`],
+        needsTextRestore: false
+      };
     }
 
     const directKeyCodes: Record<string, string> = {
@@ -339,15 +377,49 @@ export class InputText extends BaseVisualChange {
 
     const direct = directKeyCodes[char];
     if (direct) {
-      return `shell input keyevent ${direct}`;
+      return {
+        commands: [`shell input keyevent ${direct}`],
+        needsTextRestore: false
+      };
     }
 
     const shifted = shiftedKeyCodes[char];
     if (shifted) {
-      return `shell input keycombination KEYCODE_SHIFT_LEFT ${shifted}`;
+      return this.createShiftedKeyEventPlan(shifted);
     }
 
     return null;
+  }
+
+  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan> {
+    if (await this.supportsAndroidInputKeyCombination()) {
+      return {
+        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`],
+        needsTextRestore: false
+      };
+    }
+
+    return {
+      commands: [`shell input keyevent KEYCODE_SHIFT_LEFT ${baseKeyCode}`],
+      needsTextRestore: true
+    };
+  }
+
+  private async supportsAndroidInputKeyCombination(): Promise<boolean> {
+    if (this.androidInputKeyCombinationSupported !== undefined) {
+      return this.androidInputKeyCombinationSupported;
+    }
+
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
+    this.androidInputKeyCombinationSupported =
+      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+    return this.androidInputKeyCombinationSupported;
+  }
+
+  private async executeKeyEventPlan(plan: KeyEventPlan): Promise<void> {
+    for (const command of plan.commands) {
+      await this.adb.executeCommand(command);
+    }
   }
 
   /**

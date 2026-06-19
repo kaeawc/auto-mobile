@@ -8,6 +8,7 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import type { ElementBounds } from "../../../../src/models";
 
 describe("SwipeOn autoTarget", () => {
   const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -27,7 +28,7 @@ describe("SwipeOn autoTarget", () => {
   });
 
   const createScrollableNode = (
-    bounds: string,
+    bounds: ElementBounds,
     resourceId: string
   ) => ({
     $: {
@@ -75,8 +76,8 @@ describe("SwipeOn autoTarget", () => {
 
   test("auto-targets the largest non-fullscreen scrollable when multiple exist", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode("[0,0][1000,2000]", "root-scroll"),
-      createScrollableNode("[0,200][1000,1800]", "list-scroll")
+      createScrollableNode({ left: 0, top: 0, right: 1000, bottom: 2000 }, "root-scroll"),
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -91,7 +92,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("auto-targets the single scrollable that matches the swipe direction", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode("[0,200][1000,1800]", "list-scroll")
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -105,7 +106,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("falls back to screen swipe when single scrollable does not match direction", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode("[0,0][800,200]", "horizontal-scroll")
+      createScrollableNode({ left: 0, top: 0, right: 800, bottom: 200 }, "horizontal-scroll")
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 
@@ -119,7 +120,7 @@ describe("SwipeOn autoTarget", () => {
 
   test("respects autoTarget=false and performs a screen swipe", async () => {
     const hierarchy = createHierarchy([
-      createScrollableNode("[0,200][1000,1800]", "list-scroll")
+      createScrollableNode({ left: 0, top: 200, right: 1000, bottom: 1800 }, "list-scroll")
     ]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
 

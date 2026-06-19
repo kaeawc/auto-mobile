@@ -31,7 +31,7 @@ describe("SelectionStateTracker", () => {
       createHierarchy({
         text: "Tab1",
         selected: "false",
-        bounds: "[0,0][10,10]"
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
       })
     );
 
@@ -65,7 +65,7 @@ describe("SelectionStateTracker", () => {
       createHierarchy({
         text: "Home",
         selected: "true",
-        bounds: "[0,0][10,10]"
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
       })
     );
 
@@ -107,7 +107,7 @@ describe("SelectionStateTracker", () => {
       createHierarchy({
         text: "Tab1",
         selected: "false",
-        bounds: "[0,0][10,10]"
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
       })
     );
 
@@ -154,7 +154,7 @@ describe("SelectionStateTracker", () => {
     const observation = createObservation(
       createHierarchy({
         text: "Label",
-        bounds: "[0,0][10,10]"
+        bounds: { left: 0, top: 0, right: 10, bottom: 10 }
       })
     );
 

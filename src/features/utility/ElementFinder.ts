@@ -650,7 +650,7 @@ export class DefaultElementFinder implements ElementFinder {
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeBounds = this.parser.parseBounds(nodeProperties.bounds);
+        const nodeBounds = this.parser.parseBounds(node.bounds ?? nodeProperties.bounds);
 
         if (!nodeBounds) {
           return;

@@ -8,6 +8,7 @@ import { FakeObserveScreen } from "../../../fakes/FakeObserveScreen";
 import { FakeGestureExecutor } from "../../../fakes/FakeGestureExecutor";
 import { FakeWindow } from "../../../fakes/FakeWindow";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import type { ElementBounds } from "../../../../src/models";
 
 describe("SwipeOn container overlays", () => {
   const device = { name: "test-device", platform: "android", deviceId: "device-1" } as const;
@@ -32,14 +33,21 @@ describe("SwipeOn container overlays", () => {
     }
   });
 
-  const createNode = (bounds: string, attributes: Record<string, string>) => ({
+  const b = (left: number, top: number, right: number, bottom: number): ElementBounds => ({
+    left,
+    top,
+    right,
+    bottom
+  });
+
+  const createNode = (bounds: ElementBounds, attributes: Record<string, string>) => ({
     $: {
       bounds,
       ...attributes
     }
   });
 
-  const createContainerNode = (bounds: string, resourceId: string, children: any[] = []) => ({
+  const createContainerNode = (bounds: ElementBounds, resourceId: string, children: any[] = []) => ({
     $: {
       bounds,
       "resource-id": resourceId,
@@ -78,12 +86,12 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("avoids clickable overlays outside the container subtree", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "map-container");
-    const overlayTop = createNode("[0,0][1000,200]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
+    const overlayTop = createNode(b(0, 0, 1000, 200), {
       "resource-id": "search-bar",
       "clickable": "true"
     });
-    const overlayCenter = createNode("[400,0][600,2000]", {
+    const overlayCenter = createNode(b(400, 0, 600, 2000), {
       "resource-id": "overlay-strip",
       "clickable": "true"
     });
@@ -106,11 +114,11 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("ignores clickable elements inside the container subtree", async () => {
-    const childOverlay = createNode("[0,0][1000,800]", {
+    const childOverlay = createNode(b(0, 0, 1000, 800), {
       "resource-id": "child-overlay",
       "clickable": "true"
     });
-    const containerNode = createContainerNode("[0,0][1000,2000]", "list-container", [childOverlay]);
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "list-container", [childOverlay]);
 
     const hierarchy = createHierarchy([containerNode]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
@@ -130,12 +138,12 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("keeps the larger overlay when overlap is partial", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "map-container");
-    const overlayLarge = createNode("[0,0][1000,400]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
+    const overlayLarge = createNode(b(0, 0, 1000, 400), {
       "resource-id": "large-overlay",
       "clickable": "true"
     });
-    const overlaySmall = createNode("[0,0][1000,200]", {
+    const overlaySmall = createNode(b(0, 0, 1000, 200), {
       "resource-id": "small-overlay",
       "clickable": "true"
     });
@@ -156,12 +164,12 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("avoids all overlapping clickable elements when multiple exist", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "map-container");
-    const overlayLarge = createNode("[0,0][1000,1000]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "map-container");
+    const overlayLarge = createNode(b(0, 0, 1000, 1000), {
       "resource-id": "large-overlay",
       "clickable": "true"
     });
-    const overlaySmall = createNode("[0,0][1000,900]", {
+    const overlaySmall = createNode(b(0, 0, 1000, 900), {
       "resource-id": "small-overlay",
       "clickable": "true"
     });
@@ -184,32 +192,32 @@ describe("SwipeOn container overlays", () => {
 
   test("handles complex scenarios like Google Maps with multiple overlays", async () => {
     // Simulate Google Maps layout with multiple overlays
-    const containerNode = createContainerNode("[0,0][1080,2400]", "com.google.android.apps.maps:id/fullscreens_group");
+    const containerNode = createContainerNode(b(0, 0, 1080, 2400), "com.google.android.apps.maps:id/fullscreens_group");
 
     // Search bar at top
-    const searchBar = createNode("[0,0][1080,226]", {
+    const searchBar = createNode(b(0, 0, 1080, 226), {
       "resource-id": "com.google.android.apps.maps:id/search_omnibox_container",
       "clickable": "true"
     });
 
     // Category chips below search bar
-    const categoryChips = createNode("[31,226][1080,352]", {
+    const categoryChips = createNode(b(31, 226, 1080, 352), {
       "resource-id": "com.google.android.apps.maps:id/recycler_view",
       "clickable": "true"
     });
 
     // Bottom controls
-    const locationButton = createNode("[881,1886][1080,2072]", {
+    const locationButton = createNode(b(881, 1886, 1080, 2072), {
       "resource-id": "com.google.android.apps.maps:id/mylocation_button",
       "clickable": "true"
     });
 
-    const streetViewThumb = createNode("[36,1907][272,2049]", {
+    const streetViewThumb = createNode(b(36, 1907, 272, 2049), {
       "resource-id": "com.google.android.apps.maps:id/street_view_thumbnail",
       "clickable": "true"
     });
 
-    const layersButton = createNode("[928,378][1080,520]", {
+    const layersButton = createNode(b(928, 378, 1080, 520), {
       "resource-id": "com.google.android.apps.maps:id/layers_fab",
       "clickable": "true"
     });
@@ -254,7 +262,7 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("uses default bounds when no overlays are present", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "container-no-overlays");
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container-no-overlays");
 
     const hierarchy = createHierarchy([containerNode]);
     fakeObserveScreen.setObserveResult(createObserveResult(hierarchy));
@@ -274,12 +282,12 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("handles horizontal swipes with overlays on top and bottom", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "horizontal-container");
-    const topOverlay = createNode("[0,0][1000,300]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "horizontal-container");
+    const topOverlay = createNode(b(0, 0, 1000, 300), {
       "resource-id": "top-bar",
       "clickable": "true"
     });
-    const bottomOverlay = createNode("[0,1700][1000,2000]", {
+    const bottomOverlay = createNode(b(0, 1700, 1000, 2000), {
       "resource-id": "bottom-bar",
       "clickable": "true"
     });
@@ -303,8 +311,8 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("ignores non-clickable elements", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "container-with-non-clickable");
-    const nonClickableOverlay = createNode("[0,0][1000,500]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container-with-non-clickable");
+    const nonClickableOverlay = createNode(b(0, 0, 1000, 500), {
       "resource-id": "non-clickable-element",
       "clickable": "false"
     });
@@ -328,8 +336,8 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("avoids focusable elements even if not clickable", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "container-with-focusable");
-    const focusableOverlay = createNode("[0,0][1000,300]", {
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container-with-focusable");
+    const focusableOverlay = createNode(b(0, 0, 1000, 300), {
       "resource-id": "focusable-element",
       "focusable": "true"
     });
@@ -351,9 +359,9 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("ignores overlays completely outside container bounds", async () => {
-    const containerNode = createContainerNode("[100,100][900,1900]", "inner-container");
+    const containerNode = createContainerNode(b(100, 100, 900, 1900), "inner-container");
     // Overlay outside container bounds
-    const outsideOverlay = createNode("[0,0][50,2000]", {
+    const outsideOverlay = createNode(b(0, 0, 50, 2000), {
       "resource-id": "outside-overlay",
       "clickable": "true"
     });
@@ -376,9 +384,9 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("warns when overlays leave minimal safe space", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "mostly-blocked-container");
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "mostly-blocked-container");
     // Create overlays that cover most of the vertical space
-    const overlay1 = createNode("[0,0][1000,1950]", {
+    const overlay1 = createNode(b(0, 0, 1000, 1950), {
       "resource-id": "massive-overlay",
       "clickable": "true"
     });
@@ -403,9 +411,9 @@ describe("SwipeOn container overlays", () => {
   });
 
   test("handles overlays with partial intersection", async () => {
-    const containerNode = createContainerNode("[0,0][1000,2000]", "container");
+    const containerNode = createContainerNode(b(0, 0, 1000, 2000), "container");
     // Overlay that only partially overlaps container
-    const partialOverlay = createNode("[500,0][1500,400]", {
+    const partialOverlay = createNode(b(500, 0, 1500, 400), {
       "resource-id": "partial-overlay",
       "clickable": "true"
     });

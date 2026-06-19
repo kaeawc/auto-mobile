@@ -34,7 +34,7 @@ describe("DragAndDrop", () => {
           $: {
             "resource-id": "source-id",
             "text": "Source",
-            "bounds": "[0,0][100,100]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
             "class": "android.widget.TextView"
           }
         },
@@ -42,7 +42,7 @@ describe("DragAndDrop", () => {
           $: {
             "resource-id": "target-id",
             "text": "Target",
-            "bounds": "[200,200][300,300]",
+            "bounds": { left: 200, top: 200, right: 300, bottom: 300 },
             "class": "android.widget.TextView"
           }
         }

@@ -13,16 +13,16 @@ describe("ViewHierarchy filtering", () => {
     const result = viewHierarchy.filterViewHierarchy({
       hierarchy: {
         node: {
-          bounds: "[0,0][1080,1920]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
           node: [
             {
               "resource-id": "com.example:id/icon_button",
               "view-id": "com.example:id/icon_button",
-              bounds: "[900,1700][1020,1820]",
-              actions: ["click"],
+              "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
+              "actions": ["click"],
             },
             {
-              bounds: "[0,0][10,10]",
+              bounds: { left: 0, top: 0, right: 10, bottom: 10 },
             },
           ],
         },
@@ -32,8 +32,8 @@ describe("ViewHierarchy filtering", () => {
     expect(result.hierarchy.node).toEqual({
       "resource-id": "com.example:id/icon_button",
       "view-id": "com.example:id/icon_button",
-      bounds: "[900,1700][1020,1820]",
-      actions: ["click"],
+      "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
+      "actions": ["click"],
     });
   });
 });

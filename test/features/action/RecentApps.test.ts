@@ -79,14 +79,14 @@ describe("RecentApps", () => {
             $: {
               "resource-id": "com.android.systemui:id/navigationBarBackground",
               "class": "android.view.View",
-              "bounds": "[0,1800][1080,1920]"
+              "bounds": { left: 0, top: 1800, right: 1080, bottom: 1920 }
             }
           },
           {
             $: {
               "resource-id": "com.android.systemui:id/home_handle",
               "class": "android.view.View",
-              "bounds": "[480,1850][600,1870]"
+              "bounds": { left: 480, top: 1850, right: 600, bottom: 1870 }
             }
           }
         ]
@@ -107,7 +107,7 @@ describe("RecentApps", () => {
             $: {
               "resource-id": "com.android.systemui:id/recent_apps",
               "class": "android.widget.ImageView",
-              "bounds": "[720,1810][1080,1910]",
+              "bounds": { left: 720, top: 1810, right: 1080, bottom: 1910 },
               "clickable": "true"
             }
           }

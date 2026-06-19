@@ -14,7 +14,7 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.widget.FrameLayout", bounds: "[0,0][1080,1920]" },
+            $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
           },
         },
         density: 440,
@@ -44,7 +44,7 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "UIWindow", bounds: "[0,0][390,844]" },
+            $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
             node: [{ $: { class: "UIView", text: "Hello" } }],
           },
         },
@@ -90,7 +90,7 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "UIWindow", bounds: "[0,0][390,844]" },
+            $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
             node: [
               {
                 $: { class: "UIView", text: "Messages", clickable: "true" },
@@ -125,7 +125,7 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.widget.FrameLayout", bounds: "[0,0][1080,1920]" },
+            $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } },
           },
         },
         density: 440,
@@ -142,7 +142,7 @@ describe("RealHierarchyPlatformValidator", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { class: "android.view.View", bounds: "[0,0][1080,2400]" },
+            $: { class: "android.view.View", bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } },
           },
         },
         sdkInt: 33,
@@ -294,7 +294,7 @@ describe("enforceHierarchyPlatform", () => {
 
   test("preserves a matching hierarchy and its derived fields", () => {
     const result = baseResult({
-      hierarchy: { node: { $: { class: "android.widget.FrameLayout", bounds: "[0,0][1080,1920]" } } },
+      hierarchy: { node: { $: { class: "android.widget.FrameLayout", bounds: { left: 0, top: 0, right: 1080, bottom: 1920 } } } },
       density: 440,
       sdkInt: 34,
     });

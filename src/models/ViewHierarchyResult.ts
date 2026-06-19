@@ -77,7 +77,7 @@ export interface ViewHierarchyWindowInfo {
 
 // Define types for the view hierarchy structure
 export interface NodeAttributes {
-  [key: string]: string;
+  [key: string]: unknown;
 }
 
 export interface ViewHierarchyNode {

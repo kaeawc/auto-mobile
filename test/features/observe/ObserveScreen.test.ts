@@ -120,16 +120,16 @@ describe("ObserveScreen", function() {
         wakefulness: "Awake",
         hierarchy: {
           node: {
-            bounds: "[0,0][1080,1920]",
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
             node: [
               {
                 "resource-id": "com.example:id/action",
-                bounds: "[900,1700][1020,1820]",
-                actions: ["click"],
+                "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
+                "actions": ["click"],
               },
               {
                 text: "Ready",
-                bounds: "[0,100][200,160]",
+                bounds: { left: 0, top: 100, right: 200, bottom: 160 },
               },
             ],
           },
@@ -179,21 +179,21 @@ describe("ObserveScreen", function() {
             {
               "text": "Button 1",
               "resource-id": "com.example:id/button1",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "false"
             },
             {
               "text": "Input Field",
               "resource-id": "com.example:id/input",
-              "bounds": "[0,60][200,100]",
+              "bounds": { left: 0, top: 60, right: 200, bottom: 100 },
               "clickable": "true",
               "focused": "true"
             },
             {
               "text": "Button 2",
               "resource-id": "com.example:id/button2",
-              "bounds": "[0,110][100,160]",
+              "bounds": { left: 0, top: 110, right: 100, bottom: 160 },
               "clickable": "true",
               "focused": "false"
             }
@@ -216,14 +216,14 @@ describe("ObserveScreen", function() {
             {
               "text": "Button 1",
               "resource-id": "com.example:id/button1",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "false"
             },
             {
               "text": "Button 2",
               "resource-id": "com.example:id/button2",
-              "bounds": "[0,110][100,160]",
+              "bounds": { left: 0, top: 110, right: 100, bottom: 160 },
               "clickable": "true",
               "focused": "false"
             }
@@ -252,20 +252,20 @@ describe("ObserveScreen", function() {
           node: {
             "text": "Container",
             "resource-id": "com.example:id/container",
-            "bounds": "[0,0][300,200]",
+            "bounds": { left: 0, top: 0, right: 300, bottom: 200 },
             "focused": "false",
             "node": [
               {
                 "text": "Nested Button",
                 "resource-id": "com.example:id/nested_button",
-                "bounds": "[10,10][90,40]",
+                "bounds": { left: 10, top: 10, right: 90, bottom: 40 },
                 "clickable": "true",
                 "focused": "false"
               },
               {
                 "text": "Nested Input",
                 "resource-id": "com.example:id/nested_input",
-                "bounds": "[10,50][200,80]",
+                "bounds": { left: 10, top: 50, right: 200, bottom: 80 },
                 "clickable": "true",
                 "focused": "true"
               }
@@ -288,7 +288,7 @@ describe("ObserveScreen", function() {
           node: {
             "text": "Button",
             "resource-id": "com.example:id/button",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": true  // Boolean instead of string
           }
@@ -309,7 +309,7 @@ describe("ObserveScreen", function() {
             "$": {
               "text": "Button with $",
               "resource-id": "com.example:id/button_dollar",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "true"
             }
@@ -513,10 +513,10 @@ describe("ObserveScreen", function() {
     const extract = (viewHierarchy: any) =>
       (observeScreen as any).extractScreenSizeFromHierarchy(viewHierarchy);
 
-    test("should extract from Android-style bounds string", function() {
+    test("should extract from Android-style object bounds", function() {
       const result = extract({
         hierarchy: {
-          node: { $: { bounds: "[0,0][1080,2400]" } }
+          node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } }
         }
       });
       expect(result).toEqual({ width: 1080, height: 2400 });

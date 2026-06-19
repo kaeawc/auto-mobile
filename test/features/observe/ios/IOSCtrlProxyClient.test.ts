@@ -626,7 +626,12 @@ describe("IOSCtrlProxyClient", function() {
         expect(result.hierarchy.node.$["content-desc"]).toBe("Submit button");
         expect(result.hierarchy.node.$["resource-id"]).toBe("submit_btn");
         expect(result.hierarchy.node.$["class"]).toBe("UIButton");
-        expect(result.hierarchy.node.$["bounds"]).toBe("[10,20][100,60]");
+        expect(result.hierarchy.node.$["bounds"]).toEqual({
+          left: 10,
+          top: 20,
+          right: 100,
+          bottom: 60
+        });
         expect(result.hierarchy.node.$["clickable"]).toBe("true");
       } finally {
         await testClient.close();

@@ -1,5 +1,49 @@
 import { ElementBounds } from "../models/ElementBounds";
 
+export function isElementBounds(value: unknown): value is ElementBounds {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+
+  const candidate = value as Partial<ElementBounds>;
+  return (
+    typeof candidate.left === "number" &&
+    typeof candidate.top === "number" &&
+    typeof candidate.right === "number" &&
+    typeof candidate.bottom === "number"
+  );
+}
+
+export function parseBoundsString(boundsString: string): ElementBounds | null {
+  if (!boundsString) {
+    return null;
+  }
+
+  const match = boundsString.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
+  if (!match) {
+    return null;
+  }
+
+  return {
+    left: parseInt(match[1], 10),
+    top: parseInt(match[2], 10),
+    right: parseInt(match[3], 10),
+    bottom: parseInt(match[4], 10)
+  };
+}
+
+export function parseBounds(value: unknown): ElementBounds | null {
+  if (isElementBounds(value)) {
+    return value;
+  }
+
+  if (typeof value === "string") {
+    return parseBoundsString(value);
+  }
+
+  return null;
+}
+
 export function boundsEqual(a: ElementBounds, b: ElementBounds): boolean {
   return a.left === b.left && a.top === b.top && a.right === b.right && a.bottom === b.bottom;
 }

@@ -150,9 +150,9 @@ describe("HierarchyCollector", () => {
   });
 
   describe("extractScreenSize", () => {
-    test("parses Android bounds format", () => {
+    test("parses Android object bounds format", () => {
       const size = collector.extractScreenSize({
-        hierarchy: { node: { $: { bounds: "[0,0][1080,2400]" } } }
+        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } } }
       } as any);
       expect(size).toEqual({ width: 1080, height: 2400 });
     });
@@ -171,7 +171,7 @@ describe("HierarchyCollector", () => {
 
     test("returns null when width or height is zero", () => {
       const size = collector.extractScreenSize({
-        hierarchy: { node: { $: { bounds: "[0,0][0,0]" } } }
+        hierarchy: { node: { $: { bounds: { left: 0, top: 0, right: 0, bottom: 0 } } } }
       } as any);
       expect(size).toBeNull();
     });

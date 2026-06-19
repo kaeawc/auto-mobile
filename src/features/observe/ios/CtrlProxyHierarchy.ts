@@ -20,7 +20,7 @@ import type {
 
 /** Converted node format — `$` carries standard attributes, `extras` carries SDK walker data. */
 interface ConvertedNode {
-  $: Record<string, string>;
+  $: Record<string, unknown>;
   extras?: Record<string, string>;
   node?: ConvertedNode[];
 }
@@ -227,7 +227,7 @@ export class CtrlProxyHierarchy {
   // ===========================================================================
 
   private convertNode(node: CtrlProxyNode): ConvertedNode {
-    const attrs: Record<string, string> = {};
+    const attrs: Record<string, unknown> = {};
 
     if (node.text) {attrs["text"] = node.text;}
     if (node.value) {attrs["value"] = node.value;}
@@ -246,7 +246,7 @@ export class CtrlProxyHierarchy {
     if (node.className) {attrs["class"] = node.className;}
     if (testTag) {attrs["test-tag"] = testTag;}
     if (node.bounds) {
-      attrs["bounds"] = `[${node.bounds.left},${node.bounds.top}][${node.bounds.right},${node.bounds.bottom}]`;
+      attrs["bounds"] = node.bounds;
     }
     if (node.clickable) {attrs["clickable"] = node.clickable;}
     if (node.enabled) {attrs["enabled"] = node.enabled;}

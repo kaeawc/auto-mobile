@@ -6,7 +6,12 @@ import dev.jasonpearson.automobile.desktop.core.layout.ElementBounds
 import dev.jasonpearson.automobile.desktop.core.layout.UIElementInfo
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import kotlinx.serialization.json.JsonElement
+import kotlinx.serialization.json.JsonObject
+import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.decodeFromJsonElement
+import kotlinx.serialization.json.intOrNull
 import java.util.Base64
 
 /**
@@ -85,8 +90,7 @@ class RealLayoutDataSource(
     }
 
     private fun parseHierarchy(node: HierarchyNodeDto, depth: Int, counter: IntArray): UIElementInfo {
-        // Parse bounds from string format "[left,top][right,bottom]"
-        val bounds = node.bounds?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
+        val bounds = parseBounds(node.bounds)
 
         // Generate a unique ID using counter to ensure uniqueness across tree
         val nodeIndex = counter[0]++
@@ -115,9 +119,21 @@ class RealLayoutDataSource(
         )
     }
 
+    private fun parseBounds(boundsElement: JsonElement?): ElementBounds {
+        return when (boundsElement) {
+            is JsonObject -> ElementBounds(
+                left = (boundsElement["left"] as? JsonPrimitive)?.intOrNull ?: 0,
+                top = (boundsElement["top"] as? JsonPrimitive)?.intOrNull ?: 0,
+                right = (boundsElement["right"] as? JsonPrimitive)?.intOrNull ?: 0,
+                bottom = (boundsElement["bottom"] as? JsonPrimitive)?.intOrNull ?: 0,
+            )
+            is JsonPrimitive -> boundsElement.contentOrNull?.let { parseBoundsString(it) } ?: ElementBounds(0, 0, 0, 0)
+            else -> ElementBounds(0, 0, 0, 0)
+        }
+    }
+
     private fun parseBoundsString(boundsStr: String): ElementBounds {
-        // Parse format "[left,top][right,bottom]"
-        val regex = """\[(\d+),(\d+)\]\[(\d+),(\d+)\]""".toRegex()
+        val regex = """\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""".toRegex()
         val match = regex.find(boundsStr)
         return if (match != null) {
             val (left, top, right, bottom) = match.destructured
@@ -187,7 +203,7 @@ private data class HierarchyNodeDto(
     val text: String? = null,
     @kotlinx.serialization.SerialName("content-desc")
     val contentDesc: String? = null,
-    val bounds: String? = null,
+    val bounds: JsonElement? = null,
     val clickable: String? = null,
     val enabled: String? = null,
     val focused: String? = null,
@@ -197,7 +213,7 @@ private data class HierarchyNodeDto(
     val checkable: String? = null,
     val checked: String? = null,
     // node can be either a single object or array - use JsonElement
-    val node: kotlinx.serialization.json.JsonElement? = null,
+    val node: JsonElement? = null,
 ) {
     // Parse children from the polymorphic node field
     val children: List<HierarchyNodeDto>

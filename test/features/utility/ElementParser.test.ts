@@ -4,13 +4,19 @@ import type { ViewHierarchyNode, ViewHierarchyResult } from "../../../src/models
 
 describe("DefaultElementParser", () => {
   const parser = new DefaultElementParser();
+  const bounds = (left: number, top: number, right: number, bottom: number) => ({
+    left,
+    top,
+    right,
+    bottom
+  });
 
   describe("extractNodeProperties", () => {
     test("returns $ properties when present", () => {
-      const node = { $: { text: "hello", bounds: "[0,0][100,100]" } } as ViewHierarchyNode;
+      const node = { $: { text: "hello", bounds: bounds(0, 0, 100, 100) } } as ViewHierarchyNode;
       const props = parser.extractNodeProperties(node);
       expect(props.text).toBe("hello");
-      expect(props.bounds).toBe("[0,0][100,100]");
+      expect(props.bounds).toEqual(bounds(0, 0, 100, 100));
     });
 
     test("returns node itself when $ is missing", () => {
@@ -27,7 +33,12 @@ describe("DefaultElementParser", () => {
   });
 
   describe("parseBounds", () => {
-    test("parses valid bounds string", () => {
+    test("returns valid object bounds", () => {
+      const parsed = parser.parseBounds(bounds(10, 20, 300, 400));
+      expect(parsed).toEqual({ left: 10, top: 20, right: 300, bottom: 400 });
+    });
+
+    test("parses legacy bounds string", () => {
       const bounds = parser.parseBounds("[10,20][300,400]");
       expect(bounds).toEqual({ left: 10, top: 20, right: 300, bottom: 400 });
     });
@@ -60,8 +71,8 @@ describe("DefaultElementParser", () => {
       expect(parser.parseNodeBounds(null as any)).toBeNull();
     });
 
-    test("parses Android node with string bounds", () => {
-      const node = { $: { text: "Login", bounds: "[10,20][300,400]" } } as ViewHierarchyNode;
+    test("parses Android node with object bounds", () => {
+      const node = { $: { text: "Login", bounds: bounds(10, 20, 300, 400) } } as ViewHierarchyNode;
       const element = parser.parseNodeBounds(node);
       expect(element).not.toBeNull();
       expect(element!.bounds).toEqual({ left: 10, top: 20, right: 300, bottom: 400 });
@@ -264,7 +275,7 @@ describe("DefaultElementParser", () => {
     test("flattens single element", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: { $: { text: "button", bounds: "[0,0][100,50]" } },
+          node: { $: { text: "button", bounds: bounds(0, 0, 100, 50) } },
         },
       };
       const result = parser.flattenViewHierarchy(viewHierarchy);
@@ -278,10 +289,10 @@ describe("DefaultElementParser", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { text: "parent", bounds: "[0,0][100,100]" },
+            $: { text: "parent", bounds: bounds(0, 0, 100, 100) },
             node: [
-              { $: { text: "child1", bounds: "[0,0][50,50]" } },
-              { $: { text: "child2", bounds: "[50,0][100,50]" } },
+              { $: { text: "child1", bounds: bounds(0, 0, 50, 50) } },
+              { $: { text: "child2", bounds: bounds(50, 0, 100, 50) } },
             ],
           },
         },
@@ -297,10 +308,10 @@ describe("DefaultElementParser", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: {
-            $: { text: "parent", bounds: "[0,0][100,100]" },
+            $: { text: "parent", bounds: bounds(0, 0, 100, 100) },
             node: [
               { $: { text: "no-bounds" } },
-              { $: { text: "valid", bounds: "[0,0][50,50]" } },
+              { $: { text: "valid", bounds: bounds(0, 0, 50, 50) } },
             ],
           },
         },
@@ -312,7 +323,7 @@ describe("DefaultElementParser", () => {
     test("extracts content-desc as text", () => {
       const viewHierarchy: ViewHierarchyResult = {
         hierarchy: {
-          node: { $: { "content-desc": "Close button", "bounds": "[0,0][100,50]" } },
+          node: { $: { "content-desc": "Close button", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } } },
         },
       };
       const result = parser.flattenViewHierarchy(viewHierarchy);

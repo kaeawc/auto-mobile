@@ -295,7 +295,7 @@ export class TapAnyElement extends BaseVisualChange {
           logger.info(
             `[TapAnyElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on clickable element: ` +
             `text=${JSON.stringify(element.text)}, ` +
-            `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}]`
+            `bounds=${JSON.stringify(element.bounds)}`
           );
 
           switch (this.device.platform) {

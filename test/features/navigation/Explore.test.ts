@@ -110,7 +110,7 @@ describe("Explore", () => {
         "resource-id": "com.test:id/button",
         "clickable": "true",
         "enabled": "true",
-        "bounds": "[0,0][100,50]"
+        "bounds": { left: 0, top: 0, right: 100, bottom: 50 }
       }
     };
 

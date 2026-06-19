@@ -16,6 +16,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { parseBounds } from "../../utils/bounds";
 
 /**
  * Interface for element bounds
@@ -316,28 +317,6 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
-   * Parse bounds string to numeric coordinates, handling negative values
-   * @param boundsStr - Bounds string in format [left,top][right,bottom]
-   * @returns Parsed bounds or null if invalid
-   */
-  private parseBoundsString(boundsStr: string): ElementBounds | null {
-    if (!boundsStr || typeof boundsStr !== "string") {
-      return null;
-    }
-    // Handle negative coordinates with -? prefix
-    const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
-    if (!match) {
-      return null;
-    }
-    return {
-      left: parseInt(match[1], 10),
-      top: parseInt(match[2], 10),
-      right: parseInt(match[3], 10),
-      bottom: parseInt(match[4], 10)
-    };
-  }
-
-  /**
    * Check if bounds are completely offscreen
    * @param bounds - Element bounds
    * @param screenWidth - Screen width
@@ -378,15 +357,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return null;
     }
 
-    // Parse bounds from string if present
-    const boundsStr = node.bounds || (node.$ && node.$.bounds);
-    let bounds: ElementBounds | null = null;
-
-    if (typeof boundsStr === "string") {
-      bounds = this.parseBoundsString(boundsStr);
-    } else if (boundsStr && typeof boundsStr === "object") {
-      bounds = boundsStr as ElementBounds;
-    }
+    const bounds = parseBounds(node.bounds ?? node.$?.bounds);
 
     // Check if this node is completely offscreen
     const isOffscreen = bounds && this.isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);
@@ -633,7 +604,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
-   * Parse a node's bounds if they're in string format
+   * Parse a node's bounds into the object bounds format.
    * @param node - The node to parse
    * @returns The node with parsed bounds or null
    */

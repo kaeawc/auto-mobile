@@ -48,7 +48,7 @@ describe("DragAndDrop vision fallback", () => {
           $: {
             "resource-id": "source-id",
             "text": "Source",
-            "bounds": "[0,0][100,100]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
             "class": "android.widget.TextView"
           }
         }

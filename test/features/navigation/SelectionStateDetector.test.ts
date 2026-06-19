@@ -27,7 +27,7 @@ describe("SelectionStateDetector", () => {
       createHierarchy({
         text: "Home",
         selected: "true",
-        bounds: "[0,0][50,50]"
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 }
       })
     );
 
@@ -59,7 +59,7 @@ describe("SelectionStateDetector", () => {
       createHierarchy({
         text: "NotSelected",
         selected: "false",
-        bounds: "[0,0][50,50]"
+        bounds: { left: 0, top: 0, right: 50, bottom: 50 }
       })
     );
 

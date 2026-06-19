@@ -491,7 +491,12 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
-      expect(result.hierarchy.bounds).toBe("[175,687][692,973]");
+      expect(result.hierarchy.bounds).toEqual({
+        left: 175,
+        top: 687,
+        right: 692,
+        bottom: 973
+      });
       expect(result.hierarchy.clickable).toBeUndefined();
       expect(result.hierarchy.enabled).toBe("true");
       expect(result.intentChooserDetected).toBe(true);
@@ -500,7 +505,12 @@ describe("AndroidCtrlProxyClient", function() {
       // Check child node conversion
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
-      expect(result.hierarchy.node.bounds).toBe("[0,0][100,50]");
+      expect(result.hierarchy.node.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 50
+      });
       expect(result.hierarchy.node.clickable).toBe("true");
     });
 

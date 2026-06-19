@@ -30,8 +30,8 @@ describe("ObserveScreen.execute cross-platform hierarchy rejection", () => {
       result.viewHierarchy = {
         hierarchy: {
           node: {
-            $: { class: "UIWindow", bounds: "[0,0][390,844]" },
-            node: [{ $: { class: "UIButton", text: "Continue", bounds: "[0,0][200,80]" } }]
+            $: { class: "UIWindow", bounds: { left: 0, top: 0, right: 390, bottom: 844 } },
+            node: [{ $: { class: "UIButton", text: "Continue", bounds: { left: 0, top: 0, right: 200, bottom: 80 } } }]
           }
         },
         screenScale: 3.0,

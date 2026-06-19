@@ -1,10 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import { DefaultElementSelector } from "../../../src/features/utility/DefaultElementSelector";
 import { DefaultElementFinder } from "../../../src/features/utility/ElementFinder";
+import type { ElementBounds } from "../../../src/models";
 import type { ViewHierarchyResult } from "../../../src/models/ViewHierarchyResult";
 
 type NodeSpec = {
-  bounds: string;
+  bounds: ElementBounds;
   text?: string;
   resourceId?: string;
 };
@@ -14,7 +15,7 @@ const createViewHierarchy = (nodes: NodeSpec[]): ViewHierarchyResult => {
     hierarchy: {
       node: {
         $: {
-          bounds: "[0,0][100,100]",
+          bounds: { left: 0, top: 0, right: 100, bottom: 100 },
           class: "android.widget.FrameLayout"
         },
         node: nodes.map(node => ({
@@ -34,8 +35,8 @@ describe("DefaultElementSelector", () => {
   test("first strategy returns smallest exact match", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
-      { bounds: "[0,0][30,30]", text: "Match" },
-      { bounds: "[0,0][10,10]", text: "Match" }
+      { bounds: { left: 0, top: 0, right: 30, bottom: 30 }, text: "Match" },
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" }
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -51,8 +52,8 @@ describe("DefaultElementSelector", () => {
     const random = () => randomValues.shift() ?? 0;
     const selector = new DefaultElementSelector(new DefaultElementFinder(), random);
     const viewHierarchy = createViewHierarchy([
-      { bounds: "[0,0][10,10]", text: "Match" },
-      { bounds: "[0,0][20,20]", text: "Match" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" },
+      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match" }
     ]);
 
     const first = selector.selectByText(viewHierarchy, "Match", { strategy: "random" });
@@ -68,8 +69,8 @@ describe("DefaultElementSelector", () => {
   test("random strategy prefers exact matches over fuzzy", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0.9);
     const viewHierarchy = createViewHierarchy([
-      { bounds: "[0,0][10,10]", text: "Match" },
-      { bounds: "[0,0][20,20]", text: "Match 2" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Match" },
+      { bounds: { left: 0, top: 0, right: 20, bottom: 20 }, text: "Match 2" }
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "random" });
@@ -81,7 +82,7 @@ describe("DefaultElementSelector", () => {
   test("returns null when no matches are found", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0);
     const viewHierarchy = createViewHierarchy([
-      { bounds: "[0,0][10,10]", text: "Other" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, text: "Other" }
     ]);
 
     const match = selector.selectByText(viewHierarchy, "Match", { strategy: "first" });
@@ -94,7 +95,7 @@ describe("DefaultElementSelector", () => {
   test("random strategy returns single match for resource ID", () => {
     const selector = new DefaultElementSelector(new DefaultElementFinder(), () => 0.5);
     const viewHierarchy = createViewHierarchy([
-      { bounds: "[0,0][10,10]", resourceId: "test:id/button" }
+      { bounds: { left: 0, top: 0, right: 10, bottom: 10 }, resourceId: "test:id/button" }
     ]);
 
     const match = selector.selectByResourceId(viewHierarchy, "test:id/button", { strategy: "random" });

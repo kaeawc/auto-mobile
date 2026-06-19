@@ -524,7 +524,7 @@ export class TapOnElement extends BaseVisualChange {
       if (element) {
         logger.warn(
           `[TapOnElement] Element found but center is off-screen, will retry. ` +
-          `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}], ` +
+          `bounds=${JSON.stringify(element.bounds)}, ` +
           `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
         );
         selection = { ...selection, element: null };
@@ -563,7 +563,7 @@ export class TapOnElement extends BaseVisualChange {
         if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
           logger.warn(
             `[TapOnElement] Element found but center is off-screen, retrying. ` +
-            `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}]`
+            `bounds=${JSON.stringify(element.bounds)}`
           );
           selection = { ...selection, element: null };
           element = null;
@@ -996,7 +996,7 @@ export class TapOnElement extends BaseVisualChange {
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
             `text=${JSON.stringify(tapElement.text ?? options.text)}, ` +
-            `bounds=[${tapBounds?.left},${tapBounds?.top}][${tapBounds?.right},${tapBounds?.bottom}], ` +
+            `bounds=${JSON.stringify(tapBounds)}, ` +
             `clickable=${tapElement.clickable}, usedParent=${usedParent}`
           );
 

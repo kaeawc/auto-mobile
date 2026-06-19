@@ -107,10 +107,10 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `ElementBounds toString produces correct format`() {
+  fun `ElementBounds toString produces object format`() {
     val bounds = ElementBounds(10, 20, 100, 80)
     val result = bounds.toString()
-    assertEquals("[10,20][100,80]", result)
+    assertEquals("""{"left":10,"top":20,"right":100,"bottom":80}""", result)
   }
 
   @Test

@@ -34,7 +34,7 @@ describe("PinchOn", () => {
           $: {
             "resource-id": "container-id",
             "text": "Container",
-            "bounds": "[0,0][200,200]",
+            "bounds": { left: 0, top: 0, right: 200, bottom: 200 },
             "class": "android.widget.FrameLayout"
           }
         }

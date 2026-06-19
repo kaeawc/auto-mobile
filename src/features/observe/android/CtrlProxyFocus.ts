@@ -297,9 +297,8 @@ export class CtrlProxyFocus {
       converted.recomposition = node.recomposition;
     }
 
-    // Convert bounds from object format to string format to match XML parser output
     if (node.bounds) {
-      converted.bounds = `[${node.bounds.left},${node.bounds.top}][${node.bounds.right},${node.bounds.bottom}]`;
+      converted.bounds = node.bounds;
     }
 
     // Convert child nodes recursively

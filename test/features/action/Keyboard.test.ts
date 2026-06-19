@@ -52,7 +52,7 @@ describe("Keyboard", () => {
         $: {
           focused: "true",
           class: "android.widget.EditText",
-          bounds: "[10,20][210,120]"
+          bounds: { left: 10, top: 20, right: 210, bottom: 120 }
         }
       }
     }

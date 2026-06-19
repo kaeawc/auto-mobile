@@ -37,6 +37,7 @@ export interface SystemTrayArgs {
 
 export interface InputTextArgs {
   text: string;
+  mode?: "a11y" | "eventLast" | "eventAll";
   imeAction?: "done" | "next" | "search" | "send" | "go" | "previous";
   dismissKeyboard?: boolean;
   platform: Platform;

@@ -140,7 +140,7 @@ describe("InputText", () => {
     ]);
   });
 
-  test("eventLast falls back to keyevent and restores text for shifted ASCII before Android 12", async () => {
+  test("eventLast falls back to a11y for shifted ASCII before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
@@ -154,13 +154,11 @@ describe("InputText", () => {
     const result = await testInputText(inputText).executeAndroidTextInput("HellO", undefined, false, "eventLast");
 
     expect(result.success).toBe(true);
+    expect(result.method).toBe("a11y");
     expect(setTextCalls).toEqual([
-      { text: "Hell", dismissKeyboard: false },
       { text: "HellO", dismissKeyboard: false },
     ]);
-    expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_SHIFT_LEFT KEYCODE_O"
-    ]);
+    expect(inputCommands(factory)).toEqual([]);
   });
 
   test("eventLast falls back to a11y when no printable non-whitespace ASCII exists", async () => {
@@ -243,7 +241,7 @@ describe("InputText", () => {
     expect(inputCommands(factory)).toEqual([]);
   });
 
-  test("eventAll falls back to keyevent and restores text for shifted ASCII before Android 12", async () => {
+  test("eventAll uses a11y instead of shifted keyevents before Android 12", async () => {
     const factory = new FakeAdbClientFactory();
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: string[] = [];
@@ -254,15 +252,33 @@ describe("InputText", () => {
       return { success: true, totalTimeMs: 1 };
     });
 
-    const result = await testInputText(inputText).executeAndroidTextInput("aB", undefined, false, "eventAll");
+    const result = await testInputText(inputText).executeAndroidTextInput("a+B", undefined, false, "eventAll");
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventAll");
-    expect(setTextCalls).toEqual(["", "aB"]);
+    expect(setTextCalls).toEqual(["", "a+B"]);
     expect(inputCommands(factory)).toEqual([
-      "shell input keyevent KEYCODE_A",
-      "shell input keyevent KEYCODE_SHIFT_LEFT KEYCODE_B"
+      "shell input keyevent KEYCODE_A"
     ]);
+  });
+
+  test("eventAll falls back to a11y for shifted-only text before Android 12", async () => {
+    const factory = new FakeAdbClientFactory();
+    const inputText = new InputText(androidDevice, factory as AdbClientFactory);
+    const setTextCalls: string[] = [];
+    factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
+
+    stubAndroidSetText(async text => {
+      setTextCalls.push(text);
+      return { success: true, totalTimeMs: 1 };
+    });
+
+    const result = await testInputText(inputText).executeAndroidTextInput("B+", undefined, false, "eventAll");
+
+    expect(result.success).toBe(true);
+    expect(result.method).toBe("a11y");
+    expect(setTextCalls).toEqual(["B+"]);
+    expect(inputCommands(factory)).toEqual([]);
   });
 
   test("eventAll falls back to a11y when there are no key-event-mappable characters", async () => {

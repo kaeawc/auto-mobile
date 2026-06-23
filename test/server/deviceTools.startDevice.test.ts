@@ -290,4 +290,25 @@ describe("startDevice handler", () => {
     expect(typeof result.sessionId).toBe("string");
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(result.sessionId);
   });
+
+  it("binds the returned sessionId to the started device when autolock is disabled", async () => {
+    const timer = new FakeTimer();
+    daemonSessionManager = new SessionManager(timer);
+    const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
+    await pool.initializeWithDevices([iosDevice]);
+    DaemonState.getInstance().initialize(daemonSessionManager, pool);
+
+    fakeDeviceUtils.setBootedDevices("ios", [iosDevice]);
+    fakeMatcher.setBootedResult(iosDevice);
+
+    const result = await callStartDevice({ platform: "ios" });
+
+    expect(typeof result.sessionId).toBe("string");
+    const session = daemonSessionManager.getSession(result.sessionId as string);
+    expect(session).not.toBeNull();
+    expect(session!.assignedDevice).toBe(iosDevice.deviceId);
+    expect(session!.platform).toBe("ios");
+    expect(pool.getDevice(iosDevice.deviceId)?.sessionId).toBe(result.sessionId);
+    expect(pool.getDevice(iosDevice.deviceId)?.status).toBe("busy");
+  });
 });

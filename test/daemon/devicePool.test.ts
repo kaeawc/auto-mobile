@@ -157,21 +157,24 @@ describe("DevicePool", () => {
     test("should bind a specific device to a session", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
 
-      await devicePool.bindDeviceToSession("session-1", "sim-1", "ios");
+      const sessionId = await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
 
+      expect(sessionId).toBe("session-1");
       const device = devicePool.getDevice("sim-1");
       expect(device?.sessionId).toBe("session-1");
       expect(device?.status).toBe("busy");
       expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-1");
     });
 
-    test("should not rebind a device assigned to a different session", async () => {
+    test("should reuse a live session when the device is already bound", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
-      await devicePool.bindDeviceToSession("session-1", "sim-1", "ios");
+      await devicePool.bindOrReuseDeviceSession("session-1", "sim-1", "ios");
 
-      await expect(
-        devicePool.bindDeviceToSession("session-2", "sim-1", "ios")
-      ).rejects.toThrow("already assigned to session session-1");
+      const sessionId = await devicePool.bindOrReuseDeviceSession("session-2", "sim-1", "ios");
+
+      expect(sessionId).toBe("session-1");
+      expect(devicePool.getDevice("sim-1")?.sessionId).toBe("session-1");
+      expect(sessionManager.getSession("session-2")).toBeNull();
     });
   });
 

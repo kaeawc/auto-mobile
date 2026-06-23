@@ -903,11 +903,11 @@ export class DevicePool {
 
   /**
    * Bind a known device to a session without running the pool's idle-device
-   * selection. startDevice already resolved the exact device the caller asked
-   * for, so the returned session ID must map back to that same device.
+   * selection. If the device is already bound to a live session, reuse that
+   * session so repeated startDevice calls stay idempotent.
    */
-  async bindDeviceToSession(sessionId: string, deviceId: string, platform: Platform): Promise<void> {
-    await this.assignmentMutex.runExclusive(async () => {
+  async bindOrReuseDeviceSession(sessionId: string, deviceId: string, platform: Platform): Promise<string> {
+    return await this.assignmentMutex.runExclusive(async () => {
       if (!this.devices.has(deviceId)) {
         const bootedDevices = await this.deviceManager.getBootedDevices(platform);
         const booted = bootedDevices.find(d => d.deviceId === deviceId);
@@ -921,10 +921,26 @@ export class DevicePool {
         throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
       }
 
-      if (device.sessionId && device.sessionId !== sessionId) {
-        throw new ActionableError(
-          `Device '${deviceId}' is already assigned to session ${device.sessionId}.`
-        );
+      if (device.sessionId) {
+        const existingSession = this.sessionManager.getSession(device.sessionId);
+        if (
+          existingSession &&
+          existingSession.assignedDevice === deviceId &&
+          existingSession.platform === device.platform
+        ) {
+          const refreshedSession = await this.sessionManager.getOrCreateSession(existingSession.sessionId);
+          logger.info(`Reusing existing session ${refreshedSession.sessionId} for device ${deviceId}`);
+          return refreshedSession.sessionId;
+        }
+
+        if (existingSession) {
+          throw new ActionableError(
+            `Device '${deviceId}' is already assigned to session ${device.sessionId}.`
+          );
+        }
+
+        device.sessionId = null;
+        device.status = "idle";
       }
 
       device.sessionId = sessionId;
@@ -935,6 +951,7 @@ export class DevicePool {
 
       await this.sessionManager.createSession(sessionId, deviceId, platform);
       logger.info(`Bound device ${deviceId} to session ${sessionId}`);
+      return sessionId;
     });
   }
 

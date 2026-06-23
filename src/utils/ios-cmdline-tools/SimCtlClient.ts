@@ -470,10 +470,6 @@ export class SimCtlClient implements SimCtl {
   }
 
   private async isLocalSimctlAvailable(): Promise<boolean> {
-    if (process.platform !== "darwin") {
-      return false;
-    }
-
     if (this.usesInjectedExecAsync) {
       try {
         await this.execAsync("xcrun", ["simctl", "--version"]);
@@ -481,6 +477,10 @@ export class SimCtlClient implements SimCtl {
       } catch {
         return false;
       }
+    }
+
+    if (process.platform !== "darwin") {
+      return false;
     }
 
     if (!SimCtlClient.localSimctlAvailability) {

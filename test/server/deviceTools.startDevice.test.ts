@@ -291,7 +291,7 @@ describe("startDevice handler", () => {
     expect(pool.resolveAutolockSessionForMcpSession("mcp-session-1", "android")).toBe(result.sessionId);
   });
 
-  it("binds the returned sessionId to the started device when autolock is disabled", async () => {
+  it("reuses the returned sessionId for repeated startDevice calls when autolock is disabled", async () => {
     const timer = new FakeTimer();
     daemonSessionManager = new SessionManager(timer);
     const pool = new DevicePool(daemonSessionManager, "daemon-session", timer, undefined, fakeDeviceUtils);
@@ -302,8 +302,10 @@ describe("startDevice handler", () => {
     fakeMatcher.setBootedResult(iosDevice);
 
     const result = await callStartDevice({ platform: "ios" });
+    const repeated = await callStartDevice({ platform: "ios" });
 
     expect(typeof result.sessionId).toBe("string");
+    expect(repeated.sessionId).toBe(result.sessionId);
     const session = daemonSessionManager.getSession(result.sessionId as string);
     expect(session).not.toBeNull();
     expect(session!.assignedDevice).toBe(iosDevice.deviceId);

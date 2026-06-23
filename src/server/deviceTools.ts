@@ -403,9 +403,9 @@ export function registerDeviceTools() {
     if (!sessionId) {
       sessionId = randomUUID();
       if (DaemonState.getInstance().isInitialized()) {
-        await DaemonState.getInstance()
+        sessionId = await DaemonState.getInstance()
           .getDevicePool()
-          .bindDeviceToSession(sessionId, device.deviceId, device.platform);
+          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform);
       }
     }
 

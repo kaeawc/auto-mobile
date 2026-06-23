@@ -13,7 +13,6 @@ export type InputTextMode = "a11y" | "eventLast" | "eventAll";
 
 interface KeyEventPlan {
   commands: string[];
-  needsTextRestore: boolean;
 }
 
 const ANDROID_KEYCOMBINATION_MIN_API_LEVEL = 31;
@@ -154,6 +153,13 @@ export class InputText extends BaseVisualChange {
     const { index, char } = split;
     const prefix = text.slice(0, index);
     const suffix = text.slice(index + 1);
+    const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+    if (!keyEventPlan) {
+      logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      return { ...result, method: "a11y" };
+    }
+
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
     const prefixResult = await a11yClient.requestSetText(prefix, undefined, undefined, undefined, false);
@@ -167,16 +173,9 @@ export class InputText extends BaseVisualChange {
       };
     }
 
-    const keyEventPlan = await this.getAsciiKeyEventPlan(char);
-    if (!keyEventPlan) {
-      logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
-      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
-      return { ...result, method: "a11y" };
-    }
-
     await this.executeKeyEventPlan(keyEventPlan);
 
-    if (suffix.length > 0 || dismissKeyboard || keyEventPlan.needsTextRestore) {
+    if (suffix.length > 0 || dismissKeyboard) {
       const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
       if (!finalResult.success) {
         logger.warn(`[InputText] eventLast final setText failed: ${finalResult.error}`);
@@ -232,18 +231,6 @@ export class InputText extends BaseVisualChange {
       if (keyEventPlan) {
         await this.executeKeyEventPlan(keyEventPlan);
         targetText += char;
-        if (keyEventPlan.needsTextRestore) {
-          const restoreResult = await a11yClient.requestSetText(targetText, undefined, undefined, undefined, false);
-          if (!restoreResult.success) {
-            logger.warn(`[InputText] eventAll restore setText failed after legacy key events: ${restoreResult.error}`);
-            return {
-              success: false,
-              text,
-              error: `Accessibility service setText failed after eventAll key event: ${restoreResult.error}`,
-              method: "eventAll"
-            };
-          }
-        }
         continue;
       }
 
@@ -320,8 +307,7 @@ export class InputText extends BaseVisualChange {
   private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
     if (/^[a-z]$/.test(char)) {
       return {
-        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`],
-        needsTextRestore: false
+        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`]
       };
     }
 
@@ -331,8 +317,7 @@ export class InputText extends BaseVisualChange {
 
     if (/^[0-9]$/.test(char)) {
       return {
-        commands: [`shell input keyevent KEYCODE_${char}`],
-        needsTextRestore: false
+        commands: [`shell input keyevent KEYCODE_${char}`]
       };
     }
 
@@ -378,8 +363,7 @@ export class InputText extends BaseVisualChange {
     const direct = directKeyCodes[char];
     if (direct) {
       return {
-        commands: [`shell input keyevent ${direct}`],
-        needsTextRestore: false
+        commands: [`shell input keyevent ${direct}`]
       };
     }
 
@@ -391,18 +375,14 @@ export class InputText extends BaseVisualChange {
     return null;
   }
 
-  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan> {
+  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan | null> {
     if (await this.supportsAndroidInputKeyCombination()) {
       return {
-        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`],
-        needsTextRestore: false
+        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`]
       };
     }
 
-    return {
-      commands: [`shell input keyevent KEYCODE_SHIFT_LEFT ${baseKeyCode}`],
-      needsTextRestore: true
-    };
+    return null;
   }
 
   private async supportsAndroidInputKeyCombination(): Promise<boolean> {

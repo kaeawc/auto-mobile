@@ -79,12 +79,12 @@ public class WebSocketServer: WebSocketServing {
         listener?.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                print("[WebSocketServer] Server ready on port \(self?.port ?? 0)")
+                break
             case let .failed(error):
                 print("[WebSocketServer] Server failed: \(error)")
                 self?.stop()
             case .cancelled:
-                print("[WebSocketServer] Server cancelled")
+                break
             default:
                 break
             }
@@ -95,7 +95,6 @@ public class WebSocketServer: WebSocketServing {
         }
 
         listener?.start(queue: queue)
-        print("[WebSocketServer] Starting server on port \(port)...")
     }
 
     /// Stops the server
@@ -104,7 +103,6 @@ public class WebSocketServer: WebSocketServing {
         connections.removeAll()
         listener?.cancel()
         listener = nil
-        print("[WebSocketServer] Server stopped")
     }
 
     // MARK: - Connection Handling
@@ -112,8 +110,6 @@ public class WebSocketServer: WebSocketServing {
     private func handleNewConnection(_ nwConnection: NWConnection) {
         let connectionId = nextConnectionId
         nextConnectionId += 1
-
-        print("[WebSocketServer] New connection #\(connectionId) from \(nwConnection.endpoint)")
 
         let connection = WebSocketConnection(
             id: connectionId,
@@ -124,7 +120,6 @@ public class WebSocketServer: WebSocketServing {
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
             self?.connections.removeValue(forKey: connectionId)
-            print("[WebSocketServer] Connection #\(connectionId) closed")
         }
 
         connections[connectionId] = connection
@@ -136,7 +131,7 @@ public class WebSocketServer: WebSocketServing {
 
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
-            print("[WebSocketServer] Received: \(request.type)")
+            print("[WebSocketServer] Received request type=\(request.type) requestId=\(request.requestId ?? "nil")")
 
             // Track the entire request handling with PerfProvider
             perfProvider.serial("handleRequest:\(request.type)")
@@ -254,12 +249,6 @@ public class WebSocketServer: WebSocketServing {
             encoder.outputFormatting = .sortedKeys
             let data = try encoder.encode(response)
             broadcast(data)
-            // Only log occasionally to avoid spam (snapshot contains timestamp)
-            if Int(snapshot.timestamp) % 5000 < 500 {
-                print(
-                    "[WebSocketServer] Broadcast performance update: fps=\(snapshot.fps ?? 0), frameTime=\(snapshot.frameTimeMs ?? 0)ms"
-                )
-            }
         } catch {
             print("[WebSocketServer] Failed to encode performance update: \(error)")
         }

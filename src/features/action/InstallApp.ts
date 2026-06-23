@@ -322,6 +322,19 @@ export class InstallApp {
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
     let packageName = this.findBundleIdByPath(afterApps, appPath);
 
+    if (!packageName) {
+      const expectedBundleId = await perf.track("resolveBundleId", () => this.resolveAppBundleId(appPath));
+      if (expectedBundleId) {
+        if (!afterBundleIds.has(expectedBundleId)) {
+          throw new Error(
+            `Install reported success, but bundle ${expectedBundleId} was not present on iOS simulator ` +
+            `${this.device.deviceId} after installation.`
+          );
+        }
+        packageName = expectedBundleId;
+      }
+    }
+
     const warnings: string[] = [];
 
     if (downgraded) {

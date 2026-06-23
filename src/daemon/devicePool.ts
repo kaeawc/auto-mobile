@@ -902,6 +902,43 @@ export class DevicePool {
   }
 
   /**
+   * Bind a known device to a session without running the pool's idle-device
+   * selection. startDevice already resolved the exact device the caller asked
+   * for, so the returned session ID must map back to that same device.
+   */
+  async bindDeviceToSession(sessionId: string, deviceId: string, platform: Platform): Promise<void> {
+    await this.assignmentMutex.runExclusive(async () => {
+      if (!this.devices.has(deviceId)) {
+        const bootedDevices = await this.deviceManager.getBootedDevices(platform);
+        const booted = bootedDevices.find(d => d.deviceId === deviceId);
+        if (booted) {
+          await this.addDevice(booted);
+        }
+      }
+
+      const device = this.devices.get(deviceId);
+      if (!device) {
+        throw new ActionableError(`Device '${deviceId}' is not available in the device pool.`);
+      }
+
+      if (device.sessionId && device.sessionId !== sessionId) {
+        throw new ActionableError(
+          `Device '${deviceId}' is already assigned to session ${device.sessionId}.`
+        );
+      }
+
+      device.sessionId = sessionId;
+      device.status = "busy";
+      device.lastUsedAt = this.nextLastUsedAt();
+      device.assignmentCount++;
+      device.errorCount = 0;
+
+      await this.sessionManager.createSession(sessionId, deviceId, platform);
+      logger.info(`Bound device ${deviceId} to session ${sessionId}`);
+    });
+  }
+
+  /**
    * Lock a device with an autolock session ID.
    *
    * Generates a new session UUID bound to the device. When autolock is enabled,

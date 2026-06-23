@@ -153,6 +153,26 @@ describe("DevicePool", () => {
       const device2 = await devicePool.assignDeviceToSession("session-2");
       expect(device1).toBe(device2);
     });
+
+    test("should bind a specific device to a session", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+
+      await devicePool.bindDeviceToSession("session-1", "sim-1", "ios");
+
+      const device = devicePool.getDevice("sim-1");
+      expect(device?.sessionId).toBe("session-1");
+      expect(device?.status).toBe("busy");
+      expect(sessionManager.getSession("session-1")?.assignedDevice).toBe("sim-1");
+    });
+
+    test("should not rebind a device assigned to a different session", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-1", "ios", "iPhone 15")]);
+      await devicePool.bindDeviceToSession("session-1", "sim-1", "ios");
+
+      await expect(
+        devicePool.bindDeviceToSession("session-2", "sim-1", "ios")
+      ).rejects.toThrow("already assigned to session session-1");
+    });
   });
 
   describe("assignMultipleDevices", () => {

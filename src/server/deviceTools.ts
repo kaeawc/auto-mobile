@@ -391,7 +391,9 @@ export function registerDeviceTools() {
     // Always generate a session ID for consistent device interactions.
     // When autolock is enabled, lock the device to a pool-issued session UUID that
     // is enforced for all subsequent tool calls and auto-released after an idle timeout.
-    // When disabled, AutoMobile assumes a single agent and the session ID is advisory.
+    // When disabled, still bind the returned session to this exact device so callers
+    // can mix startDevice -> setActiveDevice -> session-targeted tools without the
+    // session path assigning a different simulator/device on first use.
     let sessionId: string | undefined;
     if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
       sessionId = await DaemonState.getInstance()
@@ -400,6 +402,11 @@ export function registerDeviceTools() {
     }
     if (!sessionId) {
       sessionId = randomUUID();
+      if (DaemonState.getInstance().isInitialized()) {
+        await DaemonState.getInstance()
+          .getDevicePool()
+          .bindDeviceToSession(sessionId, device.deviceId, device.platform);
+      }
     }
 
     perf.end();

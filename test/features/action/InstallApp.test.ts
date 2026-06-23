@@ -403,8 +403,9 @@ describe("InstallApp", () => {
       [],
       [{ bundleId: "com.example.a" }, { bundleId: "com.example.b" }]
     ]);
+    fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -420,13 +421,31 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.existing" }],
       [{ bundleId: "com.example.existing" }]
     ]);
+    fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
     expect(result.packageName).toBeUndefined();
     expect(result.warning).toContain("bundle ID could not be determined");
+  });
+
+  test("iOS simulator install fails when expected bundle is absent after simctl success", async () => {
+    const appPath = "/tmp/MyApp.app";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const sequencedSimctl = new SequencedFakeSimctl();
+    sequencedSimctl.setListResponses([
+      [],
+      []
+    ]);
+    fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
+
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
+
+    await expect(installApp.execute(appPath)).rejects.toThrow(
+      "Install reported success, but bundle com.example.app was not present"
+    );
   });
 
   test("propagates devicectl failure for iOS physical device install", async () => {

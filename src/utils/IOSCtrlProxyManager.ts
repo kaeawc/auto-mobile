@@ -124,6 +124,21 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private cachedRunning: { isRunning: boolean; timestamp: number } | null = null;
   private static readonly AVAILABILITY_CACHE_TTL = 60 * 60 * 1000; // 1 hour
   private static readonly STATUS_CACHE_TTL = 30 * 1000; // 30 seconds
+  private static readonly IMPORTANT_OUTPUT_MARKERS = [
+    "error",
+    "failed",
+    "failure",
+    "fatal",
+    "exception",
+    "crash",
+    "panic",
+    "timed out",
+    "timeout",
+    "denied",
+    "unable",
+    "not found",
+    "xctestconfiguration",
+  ];
 
   // Setup state tracking
   private attemptedSetup: boolean = false;
@@ -847,7 +862,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     if (child.stdout) {
       child.stdout.on("data", (data: Buffer | string) => {
         const output = data.toString().trim();
-        if (output) {
+        if (output && this.shouldPromoteCtrlProxyOutput(output)) {
           logger.info(`[CtrlProxy stdout] ${output.slice(0, 500)}`);
         }
       });
@@ -857,10 +872,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       child.stderr.on("data", (data: Buffer | string) => {
         const output = data.toString().trim();
         if (output && !output.includes("Build Succeeded")) {
-          logger.warn(`[CtrlProxy stderr] ${output.slice(0, 500)}`);
+          if (this.shouldPromoteCtrlProxyOutput(output)) {
+            logger.warn(`[CtrlProxy stderr] ${output.slice(0, 500)}`);
+          } else {
+            logger.debug(`[CtrlProxy stderr] ${output.slice(0, 500)}`);
+          }
         }
       });
     }
+  }
+
+  private shouldPromoteCtrlProxyOutput(output: string): boolean {
+    if (process.env.AUTOMOBILE_CTRLPROXY_VERBOSE === "true") {
+      return true;
+    }
+
+    const lower = output.toLowerCase();
+    return IOSCtrlProxyManager.IMPORTANT_OUTPUT_MARKERS.some(marker => lower.includes(marker));
   }
 
   /**

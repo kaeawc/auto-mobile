@@ -60,7 +60,7 @@ export class DaemonState implements DaemonStateLike {
     }
     const stats = this.devicePool.getStats();
     const poolInstanceId = this.devicePool.instanceId;
-    logger.info(`[DAEMON-STATE-DEBUG] getDevicePool returning pool instance #${poolInstanceId} with ${stats.total} devices`);
+    logger.debug(`[DAEMON-STATE-DEBUG] getDevicePool returning pool instance #${poolInstanceId} with ${stats.total} devices`);
     return this.devicePool;
   }
 

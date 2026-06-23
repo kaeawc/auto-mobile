@@ -641,7 +641,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           const result = await adbWithDevice.executeCommand("emu avd name", infoTimeoutMs, undefined, true);
           const avdName = result.stdout.trim().replace(/\r?\n.*$/, ""); // Remove any trailing newlines and additional text
 
-          logger.info(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
+          logger.debug(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
 
           runningDevices.push({
             name: avdName || `Unknown (${deviceId})`,
@@ -651,7 +651,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           });
         } catch (error) {
           // If we can't get the AVD name, just use the device ID
-          logger.info(`Failed to get AVD name for ${deviceId}: ${error}`);
+          logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
           runningDevices.push({
             name: `Unknown (${deviceId})`,
             platform: "android",
@@ -669,7 +669,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
 
             if (avdName) {
-              logger.info(`AVD name detection for ${device.deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
+              logger.debug(`AVD name detection for ${device.deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
               runningDevices.push({
                 name: avdName,
                 platform: "android",
@@ -688,7 +688,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         const cachedModel = this.modelNameCache.get(device.deviceId);
         if (cachedModel) {
           deviceName = cachedModel;
-          logger.info(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
+          logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
         } else {
           try {
             const adbWithDevice = this.adbFactory.create(device);
@@ -703,12 +703,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             if (modelName && modelName !== "unknown" && modelName.length > 0) {
               deviceName = modelName;
               this.modelNameCache.set(device.deviceId, modelName);
-              logger.info(`Got model name for ${device.deviceId}: "${modelName}"`);
+              logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
             } else {
-              logger.info(`No model name found for ${device.deviceId}, using device ID`);
+              logger.debug(`No model name found for ${device.deviceId}, using device ID`);
             }
           } catch (error) {
-            logger.info(`Failed to get model name for ${device.deviceId}: ${error}`);
+            logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
           }
         }
 
@@ -723,7 +723,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
 
       return runningDevices;
     } catch (error) {
-      logger.error(`[DeviceListTimeout] Failed to get running emulators (ADB likely timed out):`, error);
+      logger.debug(`[DeviceListTimeout] Failed to get running emulators: ${error}`);
       return [];
     }
   }

@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.36] - 2026-06-23
+### Other
+- installApp succeeds but app not present for launchApp/openLink (device resolution incoherence) ([#2387](https://github.com/kaeawc/auto-mobile/issues/2387))
+
 ## [v0.0.35] - 2026-06-10
 ### Other
 - launchApp times out on iOS when clearAppData is true ([#2368](https://github.com/kaeawc/auto-mobile/issues/2368))

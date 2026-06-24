@@ -253,7 +253,19 @@ export class DevicePool {
    * Add a new device to the pool
    */
   async addDevice(device: BootedDevice): Promise<void> {
-    if (this.devices.has(device.deviceId)) {
+    const existing = this.devices.get(device.deviceId);
+    if (existing) {
+      // A successful (re)boot of an errored, idle device clears its failure state so
+      // criteria autoboot can hand it out instead of failing with "no devices match".
+      if (existing.status === "error" && !existing.sessionId) {
+        existing.status = "idle";
+        existing.errorCount = 0;
+        existing.iosVersion = device.iosVersion ?? existing.iosVersion;
+        existing.simulatorType = this.getBootedDeviceSimulatorType(device) ?? existing.simulatorType;
+        existing.lastUsedAt = this.seedLastUsedAt(this.timer.now());
+        logger.info(`Recovered errored device ${device.deviceId} after successful boot`);
+        return;
+      }
       logger.warn(`Device ${device.deviceId} already in pool`);
       return;
     }

@@ -112,19 +112,22 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly timer: Timer;
   private readonly lockFilePath: string;
   private readonly pidFilePath: string;
+  private readonly socketPath: string;
 
   constructor(
-    clientFactory: DaemonClientFactory = () => new DaemonClient(),
+    clientFactory: DaemonClientFactory | undefined = undefined,
     stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
     timer: Timer = defaultTimer,
     lockFilePath: string = LOCK_FILE_PATH,
-    pidFilePath: string = PID_FILE_PATH
+    pidFilePath: string = PID_FILE_PATH,
+    socketPath: string = SOCKET_PATH
   ) {
-    this.clientFactory = clientFactory;
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = lockFilePath;
     this.pidFilePath = pidFilePath;
+    this.socketPath = socketPath;
+    this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
   /**
@@ -313,10 +316,10 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     // Clean up stale socket and PID files from previous sessions
-    if (existsSync(SOCKET_PATH)) {
+    if (existsSync(this.socketPath)) {
       logger.debug("Removing stale socket file");
       try {
-        await unlink(SOCKET_PATH);
+        await unlink(this.socketPath);
       } catch (error) {
         logger.warn(`Failed to remove stale socket file: ${error instanceof Error ? error.message : String(error)}`);
       }
@@ -429,6 +432,9 @@ export class DaemonManager implements DaemonManagerLike {
     }
     if (this.lockFilePath !== LOCK_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
+    }
+    if (this.socketPath !== SOCKET_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
     }
 
     const daemonProcess = spawn(autoMobileCmd, args, {
@@ -570,12 +576,13 @@ export class DaemonManager implements DaemonManagerLike {
     const pollInterval = 100; // Poll every 100ms
 
     while (this.timer.now() - startTime < timeout) {
-      // Check if socket exists
-      if (existsSync(SOCKET_PATH)) {
-        // Check if daemon is responding
+      if (existsSync(this.socketPath)) {
         const status = await this.status();
         if (status.running) {
-          return true;
+          if (await this.verifyDaemonConnection()) {
+            return true;
+          }
+          await this.removeInvalidSocketPath();
         }
       }
 
@@ -583,6 +590,46 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     return false;
+  }
+
+  private async verifyDaemonConnection(): Promise<boolean> {
+    const client = this.createClient();
+    try {
+      await client.connect();
+      return true;
+    } catch (error) {
+      logger.debug(`Daemon socket readiness probe failed: ${error instanceof Error ? error.message : String(error)}`);
+      return false;
+    } finally {
+      try {
+        await client.close();
+      } catch (error) {
+        logger.debug(`Failed to close daemon readiness probe client: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+
+  /**
+   * Remove a daemon socket path that failed the readiness probe.
+   *
+   * This is only invoked after {@link verifyDaemonConnection} could not connect,
+   * which is the authoritative signal that the path is unusable. A stale socket
+   * inode left behind by a SIGKILL'd daemon is still an `isSocket()` inode, so we
+   * must remove it regardless of file type — otherwise a reused PID makes
+   * `status()` report running and the readiness loop spins until it times out.
+   * This mirrors the unconditional stale-socket cleanup in {@link start}.
+   */
+  private async removeInvalidSocketPath(): Promise<void> {
+    if (!existsSync(this.socketPath)) {
+      return;
+    }
+
+    try {
+      await unlink(this.socketPath);
+      logger.debug(`Removed invalid daemon socket path: ${this.socketPath}`);
+    } catch (error) {
+      logger.debug(`Failed to remove invalid daemon socket path: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**

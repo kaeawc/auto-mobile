@@ -4,6 +4,7 @@ import { logger } from "../utils/logger";
 import { SOCKET_PATH, DAEMON_STARTUP_TIMEOUT_MS, CONNECTION_TIMEOUT_MS, DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "./constants";
 import type { DaemonOptions } from "./types";
 import { compareVersions } from "../server/deviceMatcher";
+import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
 /**
  * Configuration for the DaemonMcpProxy
@@ -21,6 +22,8 @@ export interface DaemonMcpProxyConfig {
   daemonManager?: DaemonManagerLike;
   /** Options to pass when auto-starting the daemon */
   daemonOptions?: DaemonOptions;
+  /** Timer for version restart cooldown checks */
+  timer?: Pick<Timer, "now">;
 }
 
 /**
@@ -67,6 +70,7 @@ export class DaemonMcpProxy {
   private config: DaemonMcpProxyConfig;
   private daemonManager: DaemonManagerLike;
   private clientFactory: DaemonClientFactory;
+  private readonly timer: Pick<Timer, "now">;
   private connecting: Promise<void> | null = null;
   private connected: boolean = false;
 
@@ -87,6 +91,7 @@ export class DaemonMcpProxy {
       this.config.socketPath,
       this.config.connectionTimeoutMs
     ));
+    this.timer = config.timer ?? defaultTimer;
   }
 
   /**
@@ -124,7 +129,8 @@ export class DaemonMcpProxy {
       }
       logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
       await this.startDaemon();
-    } else if (this.config.autoStartDaemon) {
+      await this.ensureVersionMatches();
+    } else {
       await this.ensureVersionMatches();
     }
 
@@ -136,33 +142,57 @@ export class DaemonMcpProxy {
   }
 
   /**
-   * Restart the daemon when this MCP server is strictly newer than the running daemon,
-   * so a newly-pinned or freshly-resolved-@latest client upgrades the shared daemon in place.
-   *
-   * "Newer wins, older connects anyway" — older clients attach to whatever's running,
-   * which prevents ping-pong restarts when concurrent agents are pinned to different versions.
-   *
-   * A cooldown (DAEMON_VERSION_RESTART_COOLDOWN_MS) on `startedAt` further suppresses
-   * thrash from racing restarts during a coordinated upgrade.
+   * Ensure the client never attaches to a daemon running a different package version.
+   * Newer clients may restart older daemons, but every mismatch remains a hard gate.
    */
   private async ensureVersionMatches(): Promise<void> {
     const status = await this.daemonManager.status();
-    if (!status.running || !status.version) {
+    if (!status.running) {
       return;
     }
-    const cmp = compareVersions(DAEMON_VERSION, status.version);
-    // NaN means non-numeric version (prerelease tag, "unknown", etc.) — be conservative and skip.
-    if (!Number.isFinite(cmp) || cmp <= 0) {
+
+    const runningVersion = status.version?.trim() ?? "";
+    if (runningVersion === DAEMON_VERSION) {
       return;
     }
-    if (status.startedAt && Date.now() - status.startedAt < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
-      logger.info(
-        `[DaemonMcpProxy] Daemon ${status.version} is older than ${DAEMON_VERSION} but was started ${Date.now() - status.startedAt}ms ago, skipping restart (cooldown)`
+
+    const cmp = runningVersion.length > 0
+      ? compareVersions(DAEMON_VERSION, runningVersion)
+      : Number.POSITIVE_INFINITY;
+
+    if (!this.config.autoStartDaemon) {
+      throw this.versionMismatchError(runningVersion, "auto-start is disabled");
+    }
+
+    if (runningVersion.length > 0 && !Number.isFinite(cmp)) {
+      throw this.versionMismatchError(
+        runningVersion,
+        "version comparison is not numeric"
       );
-      return;
     }
+
+    if (cmp <= 0) {
+      throw this.versionMismatchError(
+        runningVersion,
+        "the running daemon is newer than this client"
+      );
+    }
+
+    if (status.startedAt) {
+      const daemonAgeMs = this.timer.now() - status.startedAt;
+      if (daemonAgeMs < DAEMON_VERSION_RESTART_COOLDOWN_MS) {
+        logger.warn(
+          `[DaemonMcpProxy] Skipping version-mismatch restart due to cooldown: daemon ${runningVersion || "unknown"} is ${daemonAgeMs}ms old, client version is ${DAEMON_VERSION}`
+        );
+        throw this.versionMismatchError(
+          runningVersion,
+          "restart is in cooldown"
+        );
+      }
+    }
+
     logger.info(
-      `[DaemonMcpProxy] Daemon version ${status.version} is older than MCP server ${DAEMON_VERSION}, restarting daemon`
+      `[DaemonMcpProxy] Daemon version ${runningVersion || "unknown"} differs from MCP server ${DAEMON_VERSION}, restarting daemon`
     );
     await this.daemonManager.restart(this.config.daemonOptions ?? {});
     const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
@@ -171,6 +201,26 @@ export class DaemonMcpProxy {
         `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
       );
     }
+
+    const restartedStatus = await this.daemonManager.status();
+    const restartedVersion = restartedStatus.version?.trim() ?? "";
+    if (!restartedStatus.running || restartedVersion !== DAEMON_VERSION) {
+      throw this.versionMismatchError(
+        restartedVersion,
+        "daemon restart completed but version still differs"
+      );
+    }
+  }
+
+  private versionMismatchError(runningVersion: string, reason: string): DaemonUnavailableError {
+    const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
+    const clientVersion = DAEMON_VERSION.trim();
+    const restartCommand = clientVersion.length > 0 && clientVersion !== "unknown"
+      ? `bunx @kaeawc/auto-mobile@${clientVersion} --daemon restart`
+      : "the same installed auto-mobile package";
+    return new DaemonUnavailableError(
+      `AutoMobile daemon version mismatch: daemon=${daemonVersion}, client=${DAEMON_VERSION} (${reason}). Restart the daemon with: ${restartCommand}`
+    );
   }
 
   /**

@@ -9,7 +9,7 @@
  * - CtrlProxyText: setText, clearText, IME actions, select all
  * - CtrlProxyHierarchy: Hierarchy retrieval, caching, conversion
  * - CtrlProxyScreenshot: Screenshot capture
- * - CtrlProxyNavigation: pressHome, launchApp
+ * - CtrlProxyNavigation: pressHome, pressBack, launchApp
  */
 
 import WebSocket from "ws";
@@ -115,6 +115,7 @@ import type {
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -197,6 +198,10 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestPressHome(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyPressHomeResult>;
+
+  requestPressBack(
+    timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult>;
 
   requestRecentApps(
     timeoutMs?: number, perf?: PerformanceTracker
@@ -954,6 +959,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         case "clear_text_result":
         case "select_all_result":
         case "press_home_result":
+        case "press_back_result":
         case "recent_apps_result":
         case "launch_app_result":
           result = {
@@ -1279,6 +1285,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxyPressHomeResult> {
     return this.navigation.requestPressHome(timeoutMs, perf);
+  }
+
+  async requestPressBack(
+    timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult> {
+    return this.navigation.requestPressBack(timeoutMs, perf);
   }
 
   async requestRecentApps(

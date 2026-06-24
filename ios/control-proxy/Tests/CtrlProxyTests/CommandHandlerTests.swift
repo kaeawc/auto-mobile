@@ -464,6 +464,28 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(childNames, ["pressHome", "switchForegroundApp", "updateApplication"])
     }
 
+    func testPressBackSuccess() {
+        let request = WebSocketRequest(
+            type: "request_press_back",
+            requestId: "back-123"
+        )
+
+        guard let backResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(backResponse.success, true)
+        XCTAssertEqual(backResponse.type, "press_back_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressBackCallCount(), 1)
+
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data from handlePressBack")
+            return
+        }
+        XCTAssertEqual(perfTimings.count, 1)
+        XCTAssertEqual(perfTimings[0].name, "handlePressBack")
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["pressBack"])
+    }
+
     func testLaunchAppSuccess() {
         // Default: app not running, no coldBoot → full launch
         fakeElementLocator.getAppStateResult = .notRunning

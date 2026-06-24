@@ -981,7 +981,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "pressButton",
-    "Press hardware button",
+    "Press device or navigation button",
     pressButtonSchema,
     pressButtonHandler,
     true // Supports progress notifications

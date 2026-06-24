@@ -121,7 +121,7 @@ export class PressButton extends BaseVisualChange {
    */
   private async executeiOSButtonPress(button: string): Promise<PressButtonResult> {
     const normalizedButton = button.toLowerCase();
-    if (normalizedButton !== "home") {
+    if (normalizedButton !== "home" && normalizedButton !== "back") {
       return {
         success: false,
         button,
@@ -131,14 +131,16 @@ export class PressButton extends BaseVisualChange {
     }
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await client.requestPressHome();
+    const result = normalizedButton === "home"
+      ? await client.requestPressHome()
+      : await client.requestPressBack();
 
     if (!result.success) {
       return {
         success: false,
         button,
         keyCode: -1,
-        error: result.error ?? "Failed to press iOS home button"
+        error: result.error ?? `Failed to press iOS ${normalizedButton} button`
       };
     }
 

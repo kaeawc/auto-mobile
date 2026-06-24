@@ -155,6 +155,9 @@ export type CtrlProxySelectAllResult = BaseResult;
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;
 
+/** Press back result from CtrlProxy iOS */
+export type CtrlProxyPressBackResult = BaseResult;
+
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {
   previousOrientation: string;

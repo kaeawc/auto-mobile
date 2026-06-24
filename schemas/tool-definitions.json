@@ -4227,7 +4227,7 @@
   },
   {
     "name": "pressButton",
-    "description": "Press hardware button",
+    "description": "Press device or navigation button",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",

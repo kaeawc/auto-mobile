@@ -81,6 +81,29 @@ describe("daemon file cleanup", () => {
     expect(existsSync(pidFilePath)).toBe(true);
   });
 
+  test("cleanupStaleDaemonFilesForDeadPidSync rechecks PID ownership before cleanup", () => {
+    const { socketPath, pidFilePath } = createTempFiles();
+
+    const cleaned = cleanupStaleDaemonFilesForDeadPidSync({
+      pidFilePath,
+      socketPaths: [socketPath],
+      isProcessRunning: () => {
+        writeFileSync(pidFilePath, JSON.stringify({
+          pid: 67890,
+          socketPath,
+          port: 3000,
+          startedAt: 0,
+          version: "test",
+        } satisfies PidFileData));
+        return false;
+      },
+    });
+
+    expect(cleaned).toBe(false);
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidFilePath)).toBe(true);
+  });
+
   test("cleanupDaemonFilesSync skips cleanup when PID file belongs to another process", () => {
     const { socketPath, pidFilePath } = createTempFiles();
 

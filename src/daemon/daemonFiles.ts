@@ -86,12 +86,12 @@ export function getDaemonSocketPaths(): string[] {
   ];
 }
 
-export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<void> {
+export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<boolean> {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
-    return;
+    return false;
   }
 
   for (const socketPath of socketPaths) {
@@ -112,14 +112,15 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
       // Best-effort cleanup.
     }
   }
+  return true;
 }
 
-export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): void {
+export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): boolean {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
 
   if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
-    return;
+    return false;
   }
 
   for (const socketPath of socketPaths) {
@@ -140,6 +141,7 @@ export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): 
       // Best-effort cleanup.
     }
   }
+  return true;
 }
 
 export function readPidFileDataSync(pidFilePath: string = PID_FILE_PATH): PidFileData | null {
@@ -184,9 +186,9 @@ export function cleanupStaleDaemonFilesForDeadPidSync(
     return false;
   }
 
-  cleanupDaemonFilesSync({
+  return cleanupDaemonFilesSync({
     pidFilePath,
     socketPaths: options.socketPaths,
+    expectedPid: pidData.pid,
   });
-  return true;
 }

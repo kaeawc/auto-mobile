@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import { readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../utils/logger";
@@ -582,17 +582,18 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
+  /**
+   * Remove a daemon socket path that failed the readiness probe.
+   *
+   * This is only invoked after {@link verifyDaemonConnection} could not connect,
+   * which is the authoritative signal that the path is unusable. A stale socket
+   * inode left behind by a SIGKILL'd daemon is still an `isSocket()` inode, so we
+   * must remove it regardless of file type — otherwise a reused PID makes
+   * `status()` report running and the readiness loop spins until it times out.
+   * This mirrors the unconditional stale-socket cleanup in {@link start}.
+   */
   private async removeInvalidSocketPath(): Promise<void> {
     if (!existsSync(this.socketPath)) {
-      return;
-    }
-
-    try {
-      if (statSync(this.socketPath).isSocket()) {
-        return;
-      }
-    } catch (error) {
-      logger.debug(`Failed to inspect daemon socket path: ${error instanceof Error ? error.message : String(error)}`);
       return;
     }
 

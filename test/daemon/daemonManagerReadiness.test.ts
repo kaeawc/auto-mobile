@@ -132,32 +132,49 @@ describe("DaemonManager readiness", () => {
     expect(existsSync(socketPath)).toBe(false);
   });
 
-  test("does not remove a socket path when a readiness probe fails", async () => {
-    const { lockPath, pidPath, socketPath } = createPaths();
-    const fakeTimer = new FakeTimer();
-    fakeTimer.enableAutoAdvance();
-    const clients: ProbeClient[] = [];
-    writePidFile(pidPath, socketPath);
+  // A daemon killed with SIGKILL leaves its Unix socket pathname behind as a
+  // socket inode. If the PID is later reused, status() reports running, but the
+  // readiness probe still cannot connect. The stale socket inode must be removed
+  // so the loop does not spin until timeout (and so a fresh daemon can bind it).
+  // Gated off Windows: net.Server.listen(path) there means a named pipe, not a
+  // filesystem socket inode, so a real socket inode cannot be created this way.
+  test.skipIf(process.platform === "win32")(
+    "removes a stale socket inode when the readiness probe cannot connect",
+    async () => {
+      const { lockPath, pidPath, socketPath } = createPaths();
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const clients: ProbeClient[] = [];
+      writePidFile(pidPath, socketPath);
 
-    const server = createServer();
-    servers.push(server);
-    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+      // Bind a real Unix socket so the path is a genuine socket inode (the case
+      // the previous isSocket() guard wrongly preserved). The probe still fails
+      // because it cannot complete the daemon handshake, so the inode is stale
+      // from the client's perspective and must be removed. Left listening for
+      // afterEach cleanup; closing here would unlink the inode itself.
+      const server = createServer();
+      servers.push(server);
+      await new Promise<void>(resolve => server.listen(socketPath, resolve));
+      expect(existsSync(socketPath)).toBe(true);
 
-    const manager = new DaemonManager(
-      () => {
-        const client = new ProbeClient(false);
-        clients.push(client);
-        return client;
-      },
-      undefined,
-      fakeTimer,
-      lockPath,
-      pidPath,
-      socketPath
-    );
+      const manager = new DaemonManager(
+        () => {
+          const client = new ProbeClient(false);
+          clients.push(client);
+          return client;
+        },
+        undefined,
+        fakeTimer,
+        lockPath,
+        pidPath,
+        socketPath
+      );
 
-    await expect(manager.waitForReady(250)).resolves.toBe(false);
-    expect(clients).toHaveLength(3);
-    expect(existsSync(socketPath)).toBe(true);
-  });
+      await expect(manager.waitForReady(250)).resolves.toBe(false);
+      expect(clients).toHaveLength(1);
+      expect(clients[0].connectCallCount).toBe(1);
+      expect(clients[0].closeCallCount).toBe(1);
+      expect(existsSync(socketPath)).toBe(false);
+    }
+  );
 });

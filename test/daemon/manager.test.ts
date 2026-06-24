@@ -1,5 +1,5 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { runDaemonCommand } from "../../src/daemon/manager";
+import { resolveDaemonLaunchCommand, runDaemonCommand } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
 
@@ -32,6 +32,32 @@ class FakeDaemonClient implements DaemonClientLike {
     return {};
   }
 }
+
+describe("resolveDaemonLaunchCommand", () => {
+  test("uses the current entry script when one is available", () => {
+    const launch = resolveDaemonLaunchCommand("/tmp/auto-mobile/dist/src/index.js", "bunx", "1.2.3");
+
+    expect(launch).toEqual({
+      command: process.execPath,
+      args: ["/tmp/auto-mobile/dist/src/index.js", "--daemon-mode"],
+    });
+  });
+
+  test("pins bunx fallback to the initiating package version", () => {
+    const launch = resolveDaemonLaunchCommand("", "bunx", "1.2.3");
+
+    expect(launch).toEqual({
+      command: "bunx",
+      args: ["-y", "@kaeawc/auto-mobile@1.2.3", "--daemon-mode"],
+    });
+  });
+
+  test("rejects unknown versions instead of falling back to latest", () => {
+    expect(() => resolveDaemonLaunchCommand("", "bunx", "unknown")).toThrow(
+      "current package version is unknown"
+    );
+  });
+});
 
 describe("Daemon manager available-devices", () => {
   test("queries the booted devices resource when daemon is not initialized", async () => {

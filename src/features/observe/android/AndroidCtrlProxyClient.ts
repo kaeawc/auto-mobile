@@ -786,7 +786,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   private cachedScreenDimensions: { width: number; height: number } | null = null;
   private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
-  private suppressNextScreenshotObservationStreamPush: boolean = false;
+  // Request ids whose screenshot responses must not be auto-pushed to the
+  // observation stream. Scoped per-request so an unrelated in-flight screenshot
+  // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
+  private screenshotObservationStreamSuppressions: Set<string> = new Set();
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
@@ -1624,8 +1627,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  async requestScreenshot(timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<ScreenshotResult> {
+  async requestScreenshot(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    suppressObservationStreamPush: boolean = false
+  ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
+    let suppressedRequestId: string | undefined;
 
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
@@ -1635,6 +1643,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       const requestId = this.requestManager.generateId("screenshot");
+      if (suppressObservationStreamPush) {
+        this.screenshotObservationStreamSuppressions.add(requestId);
+        suppressedRequestId = requestId;
+      }
 
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
         requestId, "screenshot", timeoutMs,
@@ -1665,6 +1677,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
+    } finally {
+      // Clean up the suppression token in case the response never arrived
+      // (timeout/error). The message handler deletes it on a normal response;
+      // this guards against leaking ids for in-flight requests that never resolve.
+      if (suppressedRequestId !== undefined) {
+        this.screenshotObservationStreamSuppressions.delete(suppressedRequestId);
+      }
     }
   }
 
@@ -1672,12 +1691,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 5000,
     perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<ScreenshotResult> {
-    this.suppressNextScreenshotObservationStreamPush = true;
-    try {
-      return await this.requestScreenshot(timeoutMs, perf);
-    } finally {
-      this.suppressNextScreenshotObservationStreamPush = false;
-    }
+    return this.requestScreenshot(timeoutMs, perf, true);
   }
 
   async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
@@ -1876,8 +1890,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
-        const suppressObservationStreamPush = this.suppressNextScreenshotObservationStreamPush;
-        this.suppressNextScreenshotObservationStreamPush = false;
+        const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(message.requestId);
         if (!suppressObservationStreamPush) {
           this.pushScreenshotToObservationStream(message.data);
         } else {

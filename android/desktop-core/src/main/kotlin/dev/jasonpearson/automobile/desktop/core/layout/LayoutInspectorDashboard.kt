@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
@@ -66,6 +67,7 @@ fun LayoutInspectorDashboard(
                 }
                 if (result != null) {
                     dashboardLog.info("Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}")
+                    state.updateConnectionStatus(ConnectionStatus.Connected)
                     state.applyHierarchyUpdate(result.first, result.second)
                     dashboardLog.info("Updated state with new hierarchy")
                 } else {
@@ -86,6 +88,7 @@ fun LayoutInspectorDashboard(
                     java.util.Base64.getDecoder().decode(base64)
                 }
                 dashboardLog.info("Decoded screenshot: ${screenshotData.size} bytes")
+                state.updateConnectionStatus(ConnectionStatus.Connected)
                 state.updateScreenshot(
                     data = screenshotData,
                     width = update.screenWidth,
@@ -115,6 +118,16 @@ fun LayoutInspectorDashboard(
         LaunchedEffect(streamClient, gracePeriod) {
             streamClient.connectionState.collect { connectionState ->
                 gracePeriod.onStreamStateChange(connectionState)
+            }
+        }
+        LaunchedEffect(streamClient) {
+            streamClient.deviceEvents.collect { event ->
+                when (event) {
+                    is DeviceStreamEvent.DeviceConnectionLost -> {
+                        dashboardLog.warn("Device connection lost for ${event.deviceId}: ${event.error}")
+                        state.disconnect()
+                    }
+                }
             }
         }
     }
@@ -290,4 +303,3 @@ fun LayoutInspectorDashboard(
         }
     }
 }
-

@@ -83,6 +83,10 @@ class ObservationStreamClient {
     )
     val performanceUpdates: SharedFlow<PerformanceStreamUpdate> = _performanceUpdates.asSharedFlow()
 
+    // Flow for device-level stream events such as control connection loss.
+    private val _deviceEvents = MutableSharedFlow<DeviceStreamEvent>(replay = 1)
+    val deviceEvents: SharedFlow<DeviceStreamEvent> = _deviceEvents.asSharedFlow()
+
     // Flow for connection state
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected())
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
@@ -234,7 +238,7 @@ class ObservationStreamClient {
         log.info("Observation stream disconnected")
     }
 
-    private suspend fun handleMessage(message: String) {
+    internal suspend fun handleMessage(message: String) {
         val response = json.decodeFromString(StreamResponse.serializer(), message)
         log.info("Handling message type: ${response.type}")
 
@@ -321,11 +325,31 @@ class ObservationStreamClient {
             }
             "error" -> {
                 log.warn("Observation stream error: ${response.error}")
+                emitDeviceEvent(response)
             }
             else -> {
                 log.warn("Unknown message type: ${response.type}")
             }
         }
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    private suspend fun emitDeviceEvent(response: StreamResponse) {
+        val deviceId = response.deviceId ?: return
+        val error = response.error ?: return
+        if (error != DEVICE_CONNECTION_LOST_ERROR) return
+
+        _hierarchyUpdates.resetReplayCache()
+        _screenshotUpdates.resetReplayCache()
+        _performanceUpdates.resetReplayCache()
+        _deviceEvents.emit(
+            DeviceStreamEvent.DeviceConnectionLost(
+                deviceId = deviceId,
+                timestamp = response.timestamp ?: System.currentTimeMillis(),
+                error = error,
+            )
+        )
+        log.info("Emitted device connection lost event for $deviceId")
     }
 
     /**
@@ -475,3 +499,13 @@ data class PerformanceStreamUpdate(
     val recompositionCount: Int?,
     val recompositionRate: Float?,
 )
+
+sealed class DeviceStreamEvent {
+    data class DeviceConnectionLost(
+        val deviceId: String,
+        val timestamp: Long,
+        val error: String,
+    ) : DeviceStreamEvent()
+}
+
+private const val DEVICE_CONNECTION_LOST_ERROR = "device connection lost"

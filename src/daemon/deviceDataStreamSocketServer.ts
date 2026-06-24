@@ -138,6 +138,7 @@ export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Prom
  * - Server pushes: {"type": "hierarchy_update", "deviceId": "emulator-5554", "timestamp": 123, "data": {...}}
  * - Server pushes: {"type": "screenshot_update", "deviceId": "emulator-5554", "timestamp": 123, "screenshotBase64": "..."}
  * - Server pushes: {"type": "storage_update", "deviceId": "emulator-5554", "timestamp": 123, "storageEvent": {...}}
+ * - Server pushes: {"type": "error", "deviceId": "emulator-5554", "timestamp": 123, "error": "device connection lost"}
  */
 export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   DeviceDataFilter,
@@ -254,6 +255,24 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
     const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
     if (sentCount > 0) {
       logger.debug(`[DeviceDataStream] Pushed storage_update to ${sentCount} subscribers (device: ${deviceId})`);
+    }
+  }
+
+  /**
+   * Notify subscribers that the underlying device control connection was lost.
+   */
+  onDeviceConnectionLost(deviceId: string): void {
+    const message: DeviceDataStreamMessage = {
+      type: "error",
+      success: false,
+      deviceId,
+      timestamp: this.timer.now(),
+      error: "device connection lost",
+    };
+
+    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    if (sentCount > 0) {
+      logger.debug(`[DeviceDataStream] Pushed device connection lost error to ${sentCount} subscribers (device: ${deviceId})`);
     }
   }
 

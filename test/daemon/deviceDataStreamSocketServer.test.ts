@@ -222,4 +222,52 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(0);
     });
   });
+
+  describe("onDeviceConnectionLost", () => {
+    it("pushes a device-scoped error to subscribers for that device", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+      timer.advanceTime(1234);
+
+      server.onDeviceConnectionLost("emulator-5554");
+
+      const msgs = socket.getWrittenMessages<{
+        type: string;
+        success?: boolean;
+        deviceId?: string;
+        timestamp?: number;
+        error?: string;
+      }>();
+      expect(msgs).toEqual([
+        {
+          type: "error",
+          success: false,
+          deviceId: "emulator-5554",
+          timestamp: 1234,
+          error: "device connection lost",
+        },
+      ]);
+    });
+
+    it("pushes device connection errors to all-device subscribers", () => {
+      const { socket } = server.simulateSubscription({});
+
+      server.onDeviceConnectionLost("emulator-5554");
+
+      const msgs = socket.getWrittenMessages<{ type: string; deviceId?: string; error?: string }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0]).toMatchObject({
+        type: "error",
+        deviceId: "emulator-5554",
+        error: "device connection lost",
+      });
+    });
+
+    it("does not push device connection errors to other device subscribers", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5556" });
+
+      server.onDeviceConnectionLost("emulator-5554");
+
+      expect(socket.getWrittenMessages()).toHaveLength(0);
+    });
+  });
 });

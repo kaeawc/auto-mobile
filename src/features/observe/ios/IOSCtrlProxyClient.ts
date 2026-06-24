@@ -591,6 +591,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   protected onConnectionClosed(): void {
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
+    getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();

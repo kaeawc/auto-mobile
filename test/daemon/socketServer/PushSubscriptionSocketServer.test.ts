@@ -354,6 +354,35 @@ describe("PushSubscriptionSocketServer", () => {
       expect(socket.destroyed).toBe(true);
     });
 
+    it("does not refresh lastActivity on a successful write", () => {
+      const { socket, subscriptionId } = server.simulateSubscription({});
+
+      timer.setCurrentTime(1_000);
+      // A successful write proves only that our send buffer accepted the bytes, not that the
+      // peer is alive — so it must not bump lastActivity.
+      server.pushData({ deviceId: "device-1", packageName: "com.app", value: 42 });
+
+      const subscriber = (server as any).subscribers.get(subscriptionId);
+      expect(socket.destroyed).toBe(false);
+      expect(subscriber.lastActivity).toBe(0);
+    });
+
+    it("times out a non-responsive subscriber despite a steady successful-write stream", () => {
+      const { socket } = server.simulateSubscription({});
+
+      // Simulate a self-sustaining keepalive stream: writes keep succeeding every few seconds,
+      // but the peer never sends a pong. Liveness must not be masked by the outbound writes.
+      for (let elapsed = 3_000; elapsed <= 33_000; elapsed += 3_000) {
+        timer.setCurrentTime(elapsed);
+        server.pushData({ deviceId: "device-1", packageName: "com.app", value: elapsed });
+      }
+
+      server.triggerKeepalive();
+
+      expect(server.getSubscriberCount()).toBe(0);
+      expect(socket.destroyed).toBe(true);
+    });
+
     it("does not stack multiple drain listeners on repeated backpressure", () => {
       const { socket, subscriptionId } = server.simulateSubscription({});
       socket.write = () => false;

@@ -80,4 +80,13 @@ describe("daemon file cleanup", () => {
     expect(existsSync(socketPath)).toBe(true);
     expect(existsSync(pidFilePath)).toBe(true);
   });
+
+  test("cleanupDaemonFilesSync skips cleanup when PID file belongs to another process", () => {
+    const { socketPath, pidFilePath } = createTempFiles();
+
+    cleanupDaemonFilesSync({ pidFilePath, socketPaths: [socketPath], expectedPid: 67890 });
+
+    expect(existsSync(socketPath)).toBe(true);
+    expect(existsSync(pidFilePath)).toBe(true);
+  });
 });

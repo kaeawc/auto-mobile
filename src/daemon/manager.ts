@@ -1,5 +1,5 @@
 import { spawn, execSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -493,6 +493,7 @@ export class DaemonManager implements DaemonManagerLike {
       await cleanupDaemonFiles({
         pidFilePath: this.pidFilePath,
         socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: pid,
       });
 
       stderrLog("Daemon stopped");
@@ -505,6 +506,7 @@ export class DaemonManager implements DaemonManagerLike {
         await cleanupDaemonFiles({
           pidFilePath: this.pidFilePath,
           socketPaths: this.cleanupSocketPaths(status.socketPath),
+          expectedPid: pid,
         });
         stderrLog("Daemon was not running (cleaned up stale PID file)");
       } else {
@@ -534,6 +536,7 @@ export class DaemonManager implements DaemonManagerLike {
         await cleanupDaemonFiles({
           pidFilePath: this.pidFilePath,
           socketPaths: this.cleanupSocketPaths(pidData.socketPath),
+          expectedPid: pidData.pid,
         });
         return { running: false };
       }

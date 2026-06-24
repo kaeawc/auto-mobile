@@ -72,6 +72,7 @@ const AUXILIARY_SOCKET_CONFIGS: SocketServerConfig[] = [
 export interface DaemonFileCleanupOptions {
   pidFilePath?: string;
   socketPaths?: string[];
+  expectedPid?: number;
 }
 
 export interface StaleDaemonFileCleanupOptions extends DaemonFileCleanupOptions {
@@ -88,6 +89,10 @@ export function getDaemonSocketPaths(): string[] {
 export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {}): Promise<void> {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
+
+  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
+    return;
+  }
 
   for (const socketPath of socketPaths) {
     if (!existsSync(socketPath)) {
@@ -112,6 +117,10 @@ export async function cleanupDaemonFiles(options: DaemonFileCleanupOptions = {})
 export function cleanupDaemonFilesSync(options: DaemonFileCleanupOptions = {}): void {
   const pidFilePath = options.pidFilePath ?? PID_FILE_PATH;
   const socketPaths = options.socketPaths ?? getDaemonSocketPaths();
+
+  if (!shouldCleanupForExpectedPid(pidFilePath, options.expectedPid)) {
+    return;
+  }
 
   for (const socketPath of socketPaths) {
     if (!existsSync(socketPath)) {
@@ -151,6 +160,14 @@ export function isProcessRunning(pid: number): boolean {
   } catch {
     return false;
   }
+}
+
+function shouldCleanupForExpectedPid(pidFilePath: string, expectedPid: number | undefined): boolean {
+  if (expectedPid === undefined) {
+    return true;
+  }
+  const pidData = readPidFileDataSync(pidFilePath);
+  return pidData?.pid === expectedPid;
 }
 
 export function cleanupStaleDaemonFilesForDeadPidSync(

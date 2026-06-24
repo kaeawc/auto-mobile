@@ -1098,7 +1098,7 @@ export class Daemon {
 
     const cleanupAndExit = (label: string, error: unknown) => {
       logger.error(`${label}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-      cleanupDaemonFilesSync();
+      cleanupDaemonFilesSync({ expectedPid: process.pid });
       logger.close();
       process.exit(1);
     };
@@ -1110,7 +1110,7 @@ export class Daemon {
       shutdown("SIGTERM").catch(error => cleanupAndExit("Error during SIGTERM shutdown", error));
     });
     process.once("exit", () => {
-      cleanupDaemonFilesSync();
+      cleanupDaemonFilesSync({ expectedPid: process.pid });
     });
     process.once("uncaughtException", error => {
       cleanupAndExit("Uncaught exception in daemon", error);
@@ -1181,7 +1181,7 @@ export class Daemon {
       });
     }
 
-    await cleanupDaemonFiles();
+    await cleanupDaemonFiles({ expectedPid: process.pid });
 
     await closeDatabase();
 

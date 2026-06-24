@@ -51,6 +51,7 @@ import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
+import type { BootedDevice } from "../models";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -672,6 +673,40 @@ export class Daemon {
       if (allDevices.length === 0) {
         logger.info("[Daemon] No devices in pool to connect");
       }
+    });
+
+    server.setOnObservationRequested(async ({ deviceId, signal }) => {
+      const pooledDevices = deviceId
+        ? [this.devicePool.getDevice(deviceId)].filter(device => device !== null)
+        : this.devicePool.getAllDevices();
+
+      if (pooledDevices.length === 0) {
+        throw new Error(deviceId ? `Device ${deviceId} is not available` : "No devices are available");
+      }
+
+      const requestStart = this.timer.now();
+      const observations = [];
+      for (const pooledDevice of pooledDevices) {
+        if (signal.aborted) {
+          throw new Error("Observation request was aborted");
+        }
+
+        const bootedDevice: BootedDevice = {
+          deviceId: pooledDevice.id,
+          name: pooledDevice.name,
+          platform: pooledDevice.platform,
+          iosVersion: pooledDevice.iosVersion,
+        };
+        const observeScreen = new RealObserveScreen(bootedDevice);
+        const observation = await observeScreen.execute({
+          skipWaitForFresh: false,
+          minTimestamp: requestStart,
+          signal,
+        });
+        observations.push({ deviceId: pooledDevice.id, observation });
+      }
+
+      return observations;
     });
 
     logger.info("[Daemon] Observation stream callback configured");

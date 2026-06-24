@@ -165,6 +165,47 @@ describe("DeviceDataStreamSocketServer", () => {
       );
     });
 
+    it("pushes healthy hierarchies and reports failures on partial all-device refresh", async () => {
+      server.setOnObservationRequested(async () => [
+        requestedObservation("emulator-5554"),
+        {
+          deviceId: "emulator-5556",
+          observation: {
+            updatedAt: "2026-06-24T00:00:00.000Z",
+            screenSize: { width: 0, height: 0 },
+            systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+            errors: [{ phase: "viewHierarchy", message: "CtrlProxy unavailable" }],
+            error: "CtrlProxy unavailable",
+          },
+        },
+      ]);
+      const { socket } = server.simulateSubscription({});
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "obs-partial",
+        command: "request_observation",
+      }));
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        deviceId?: string;
+        error?: string;
+      }>();
+      // Healthy device still receives its hierarchy_update...
+      expect(msgs).toHaveLength(2);
+      expect(msgs[0].type).toBe("hierarchy_update");
+      expect(msgs[0].deviceId).toBe("emulator-5554");
+      // ...and the failed device is surfaced in the response error.
+      expect(msgs[1].type).toBe("error");
+      expect(msgs[1].id).toBe("obs-partial");
+      expect(msgs[1].success).toBe(false);
+      expect(msgs[1].error).toBe(
+        "Observation request failed for emulator-5556: CtrlProxy unavailable"
+      );
+    });
+
     it("returns error when observation callback returns no devices", async () => {
       server.setOnObservationRequested(async () => []);
       const socket = new FakeSocket();

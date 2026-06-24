@@ -143,7 +143,11 @@ export type OnObservationRequestedCallback = (request: {
  */
 export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Promise<NavigationGraphStreamData | null>;
 
-const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 10_000;
+// iOS observe (ViewHierarchy.getiOSViewHierarchy -> getLatestHierarchy) can
+// legitimately wait up to 15s for a fresh hierarchy. Keep this wrapper timeout
+// above that so slow-but-valid iOS captures are not reported as stream errors
+// before the platform observe path has its allotted time to complete.
+const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 20_000;
 
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
@@ -416,18 +420,32 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       if (observations.length === 0) {
         throw new Error("Observation request did not capture any devices");
       }
-      const hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
 
+      // Push valid hierarchies independently so that, for all-device requests,
+      // healthy devices still receive a refresh even when another device has no
+      // hierarchy (e.g. accessibility/CtrlProxy unavailable). Failures are
+      // collected and surfaced in the response rather than aborting the batch.
+      const failures: string[] = [];
       for (const { deviceId, observation } of observations) {
         const hierarchy = observation.viewHierarchy;
         if (!hierarchy) {
-          throw new Error(this.describeMissingHierarchy(deviceId, observation));
+          failures.push(this.describeMissingHierarchy(deviceId, observation));
+          continue;
         }
-        hierarchyUpdates.push({ deviceId, hierarchy });
+        this.pushHierarchyUpdate(deviceId, hierarchy);
       }
 
-      for (const { deviceId, hierarchy } of hierarchyUpdates) {
-        this.pushHierarchyUpdate(deviceId, hierarchy);
+      if (failures.length > 0) {
+        // Healthy devices already received their hierarchy_update pushes above;
+        // report the per-device failures so the client can display/retry them.
+        const errorResponse: SubscriptionResponse = {
+          id: request.id,
+          type: "error",
+          success: false,
+          error: failures.join("; "),
+        };
+        this.sendJson(socket, errorResponse);
+        return;
       }
 
       const response: SubscriptionResponse = {

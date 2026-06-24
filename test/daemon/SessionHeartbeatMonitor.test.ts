@@ -10,6 +10,14 @@ const AUTOLOCK_ENV_KEYS = [
   "AUTO_MOBILE_DEVICE_POOL_AUTOLOCK",
   "AUTOMOBILE_DEVICE_POOL_TIMEOUT",
   "AUTO_MOBILE_DEVICE_POOL_TIMEOUT",
+  "AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS",
+  "AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+  "AUTO_MOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS",
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
 ] as const;
 
 function clearAutolockEnv(): void {
@@ -60,12 +68,8 @@ describe("SessionHeartbeatMonitor", () => {
       );
       monitor.start();
 
-      // Within grace: interval fires but nothing is reaped.
+      // Past the pre-first-heartbeat grace on the first scan: reaped.
       timer.advanceTime(10_000);
-      expect(reaped).toEqual([]);
-
-      // Past grace (20s) and past the 10s heartbeat window with no activity: reaped.
-      timer.advanceTime(20_000);
       await Promise.resolve();
       expect(reaped).toEqual(["s1"]);
 
@@ -74,23 +78,23 @@ describe("SessionHeartbeatMonitor", () => {
   });
 
   describe("tick reaping decision", () => {
-    it("does not reap a session still within the initial grace period", async () => {
+    it("does not reap a default-heartbeat session still within the pre-first-heartbeat grace period", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 10_000);
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
 
-      timer.advanceTime(15_000); // < 20s grace, no heartbeat yet
+      timer.advanceTime(5_000);
       await monitor.tick();
 
       expect(reaped).toEqual([]);
     });
 
-    it("reaps a stale session after the grace period", async () => {
+    it("reaps a default-heartbeat session shortly after it misses the first heartbeat", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 10_000);
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
 
-      timer.advanceTime(31_000); // past grace and past the 10s heartbeat window
+      timer.advanceTime(5_001);
       await monitor.tick();
 
       expect(reaped).toEqual(["s1"]);
@@ -101,7 +105,7 @@ describe("SessionHeartbeatMonitor", () => {
       const reaped: string[] = [];
       const monitor = new SessionHeartbeatMonitor(sessionManager, () => true, async sid => { reaped.push(sid); }, timer);
 
-      timer.advanceTime(31_000);
+      timer.advanceTime(5_001);
       await monitor.tick();
 
       expect(reaped).toEqual([]);
@@ -116,6 +120,46 @@ describe("SessionHeartbeatMonitor", () => {
       timer.advanceTime(31_000);
       await monitor.tick();
       expect(reaped).toEqual([]);
+    });
+
+    it("uses the configured pre-first-heartbeat grace for default-heartbeat sessions", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 10_000);
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async sid => { reaped.push(sid); },
+        timer,
+        { preFirstHeartbeatGraceMs: 1_000 },
+      );
+
+      timer.advanceTime(1_001);
+      await monitor.tick();
+
+      expect(reaped).toEqual(["s1"]);
+    });
+
+    it("honors environment overrides for the heartbeat monitor timings", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS = "1";
+      process.env.AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS = "2";
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000, 10_000);
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(
+        sessionManager,
+        () => false,
+        async sid => { reaped.push(sid); },
+        timer,
+      );
+
+      monitor.start();
+      timer.advanceTime(1);
+      await Promise.resolve();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(2);
+      await Promise.resolve();
+      expect(reaped).toEqual(["s1"]);
+      monitor.stop();
     });
   });
 

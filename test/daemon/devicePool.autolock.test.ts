@@ -203,13 +203,19 @@ describe("DevicePool autolock", () => {
     });
 
     it("survives the daemon heartbeat watchdog until the idle timeout", async () => {
-      // Mirrors the reaping predicate in daemon.ts startHeartbeatMonitor():
-      //   after the initial grace, a session is cancelled when
-      //   now - lastHeartbeat > heartbeatTimeoutMs (and it has no active executions).
-      const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
+      // Mirrors SessionHeartbeatMonitor: default-heartbeat sessions that never
+      // heartbeat are reaped quickly, while custom-heartbeat sessions use the
+      // normal heartbeat timeout after the initial grace.
+      const PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
+      const CUSTOM_HEARTBEAT_INITIAL_GRACE_MS = 20_000;
       const wouldReap = (createdAt: number, lastHeartbeat: number, heartbeatTimeoutMs: number, now: number, hasReceivedHeartbeat: boolean): boolean => {
-        if (!hasReceivedHeartbeat && now - createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
-          return false;
+        if (!hasReceivedHeartbeat) {
+          if (heartbeatTimeoutMs === SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS) {
+            return now - createdAt > PRE_FIRST_HEARTBEAT_GRACE_MS;
+          }
+          if (now - createdAt < CUSTOM_HEARTBEAT_INITIAL_GRACE_MS) {
+            return false;
+          }
         }
         return now - lastHeartbeat > heartbeatTimeoutMs;
       };
@@ -239,12 +245,13 @@ describe("DevicePool autolock", () => {
 
     it("ongoing interaction keeps an autolocked device alive past the heartbeat window", async () => {
       // Integration: a locked device driven through repeated session resolutions
-      // (createToolExecutionContext -> getOrCreateSession on every tool call) must
-      // not be reaped by the heartbeat watchdog, because each interaction bumps
-      // lastHeartbeat. Mirrors the daemon.ts startHeartbeatMonitor() predicate.
-      const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
+      // (createToolExecutionContext -> getOrCreateSession on every tool call)
+      // must not be reaped by the heartbeat watchdog, because each interaction
+      // bumps lastHeartbeat. Mirrors SessionHeartbeatMonitor for a custom
+      // heartbeat timeout.
+      const CUSTOM_HEARTBEAT_INITIAL_GRACE_MS = 20_000;
       const reapableAt = (session: { createdAt: number; lastHeartbeat: number; heartbeatTimeoutMs: number; hasReceivedHeartbeat: boolean }, now: number): boolean => {
-        if (!session.hasReceivedHeartbeat && now - session.createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
+        if (!session.hasReceivedHeartbeat && now - session.createdAt < CUSTOM_HEARTBEAT_INITIAL_GRACE_MS) {
           return false;
         }
         return now - session.lastHeartbeat > session.heartbeatTimeoutMs;

@@ -51,6 +51,15 @@ export interface Session {
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
 
+export function getDefaultSessionHeartbeatTimeoutMs(): number {
+  const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
+    ?? process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+}
+
 export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
@@ -113,7 +122,7 @@ export class SessionManager {
       cacheData: {},
       lastHeartbeat: now,
       sessionTimeoutMs,
-      heartbeatTimeoutMs: heartbeatTimeoutMs ?? SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+      heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
       hasReceivedHeartbeat: false,
     };
 

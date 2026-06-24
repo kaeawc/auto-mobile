@@ -80,6 +80,7 @@ export class DevicePool {
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
+  private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -88,6 +89,7 @@ export class DevicePool {
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
+  private readonly REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
 
   // Device wait configuration for parallel test execution
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
@@ -200,6 +202,7 @@ export class DevicePool {
             iosVersion: device.iosVersion,
           });
           this.deviceSessionStarts.set(device.deviceId, now);
+          this.refreshMissingDeviceMisses.delete(device.deviceId);
           await this.setDeviceSessionTracking(device.deviceId, now);
           addedCount++;
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
@@ -277,6 +280,7 @@ export class DevicePool {
 
     this.devices.delete(deviceId);
     this.deviceSessionStarts.delete(deviceId);
+    this.refreshMissingDeviceMisses.delete(deviceId);
     if (this.lastReleasedDeviceId === deviceId) {
       this.lastReleasedDeviceId = null;
     }
@@ -289,6 +293,7 @@ export class DevicePool {
 
     for (const device of Array.from(this.devices.values())) {
       if (bootedDeviceIds.has(device.id)) {
+        this.refreshMissingDeviceMisses.delete(device.id);
         continue;
       }
       if (device.sessionId) {
@@ -296,6 +301,17 @@ export class DevicePool {
           `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`
         );
         continue;
+      }
+      if (bootedDeviceIds.size === 0) {
+        const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
+        this.refreshMissingDeviceMisses.set(device.id, misses);
+        logger.warn(
+          `Device ${device.id} missing from empty refresh discovery ` +
+          `(miss ${misses}/${this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`
+        );
+        if (misses < this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {
+          continue;
+        }
       }
 
       await this.removeDevice(device.id);

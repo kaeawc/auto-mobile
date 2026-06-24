@@ -97,7 +97,7 @@ export function registerUtilityTools() {
           await devicePool.releaseDevice(existing.assignedDevice);
         }
         if (!existing || existing.assignedDevice !== args.deviceId) {
-          await sessionManager.createSession(args.sessionUuid, args.deviceId, args.platform);
+          await devicePool.bindOrReuseDeviceSession(args.sessionUuid, args.deviceId, args.platform);
         }
         logger.info(`[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`);
       } else {

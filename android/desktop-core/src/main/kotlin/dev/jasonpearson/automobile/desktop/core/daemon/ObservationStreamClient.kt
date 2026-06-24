@@ -341,6 +341,7 @@ class ObservationStreamClient {
 
         _hierarchyUpdates.resetReplayCache()
         _screenshotUpdates.resetReplayCache()
+        _performanceUpdates.resetReplayCache()
         _deviceEvents.emit(
             DeviceStreamEvent.DeviceConnectionLost(
                 deviceId = deviceId,

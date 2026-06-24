@@ -25,7 +25,7 @@ class ObservationStreamClientTest {
     }
 
     @Test
-    fun `clears replayed hierarchy and screenshot data when device connection is lost`() = runTest {
+    fun `clears replayed hierarchy screenshot and performance data when device connection is lost`() = runTest {
         val client = ObservationStreamClient()
 
         client.handleMessage(
@@ -50,11 +50,31 @@ class ObservationStreamClientTest {
             }
             """.trimIndent()
         )
+        client.handleMessage(
+            """
+            {
+              "type": "performance_update",
+              "deviceId": "emulator-5554",
+              "timestamp": 1002,
+              "performanceData": {
+                "fps": 60.0,
+                "frameTimeMs": 16.67,
+                "jankFrames": 0,
+                "droppedFrames": 0,
+                "memoryUsageMb": 128.0,
+                "cpuUsagePercent": 10.0
+              }
+            }
+            """.trimIndent()
+        )
 
         client.hierarchyUpdates.test {
             assertEquals("emulator-5554", awaitItem().deviceId)
         }
         client.screenshotUpdates.test {
+            assertEquals("emulator-5554", awaitItem().deviceId)
+        }
+        client.performanceUpdates.test {
             assertEquals("emulator-5554", awaitItem().deviceId)
         }
 
@@ -64,6 +84,9 @@ class ObservationStreamClientTest {
             expectNoEvents()
         }
         client.screenshotUpdates.test {
+            expectNoEvents()
+        }
+        client.performanceUpdates.test {
             expectNoEvents()
         }
     }

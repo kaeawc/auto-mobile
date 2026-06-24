@@ -67,6 +67,7 @@ fun LayoutInspectorDashboard(
                 }
                 if (result != null) {
                     dashboardLog.info("Parsed hierarchy: root=${result.first.root.className}, children=${result.first.root.children.size}")
+                    state.updateConnectionStatus(ConnectionStatus.Connected)
                     state.applyHierarchyUpdate(result.first, result.second)
                     dashboardLog.info("Updated state with new hierarchy")
                 } else {
@@ -87,6 +88,7 @@ fun LayoutInspectorDashboard(
                     java.util.Base64.getDecoder().decode(base64)
                 }
                 dashboardLog.info("Decoded screenshot: ${screenshotData.size} bytes")
+                state.updateConnectionStatus(ConnectionStatus.Connected)
                 state.updateScreenshot(
                     data = screenshotData,
                     width = update.screenWidth,

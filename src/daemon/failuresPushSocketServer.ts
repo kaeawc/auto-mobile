@@ -96,6 +96,10 @@ export function getFailuresPushServer(): FailuresPushSocketServer | null {
   return socketServer;
 }
 
+export function getFailuresPushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startFailuresPushSocketServer(): Promise<FailuresPushSocketServer> {
   if (!socketServer) {
     socketServer = new FailuresPushSocketServer();

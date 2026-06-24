@@ -120,6 +120,10 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
 
 let socketServer: TestRecordingSocketServer | null = null;
 
+export function getTestRecordingSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startTestRecordingSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new TestRecordingSocketServer();

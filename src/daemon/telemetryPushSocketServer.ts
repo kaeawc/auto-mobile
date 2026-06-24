@@ -244,6 +244,10 @@ export function getTelemetryPushServer(): TelemetryPushSocketServer | null {
   return socketServer;
 }
 
+export function getTelemetryPushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startTelemetryPushSocketServer(): Promise<TelemetryPushSocketServer> {
   if (!socketServer) {
     socketServer = new TelemetryPushSocketServer();

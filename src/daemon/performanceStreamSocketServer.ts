@@ -112,6 +112,10 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
 
 let socketServer: PerformanceStreamSocketServer | null = null;
 
+export function getPerformanceStreamSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startPerformanceStreamSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new PerformanceStreamSocketServer();

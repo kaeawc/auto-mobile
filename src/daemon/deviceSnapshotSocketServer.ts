@@ -73,6 +73,10 @@ export class DeviceSnapshotSocketServer extends RequestResponseSocketServer<
 
 let socketServer: DeviceSnapshotSocketServer | null = null;
 
+export function getDeviceSnapshotSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startDeviceSnapshotSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new DeviceSnapshotSocketServer();

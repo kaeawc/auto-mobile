@@ -193,6 +193,10 @@ export function getPerformancePushServer(): PerformancePushSocketServer | null {
   return socketServer;
 }
 
+export function getPerformancePushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startPerformancePushSocketServer(): Promise<PerformancePushSocketServer> {
   if (!socketServer) {
     socketServer = new PerformancePushSocketServer();

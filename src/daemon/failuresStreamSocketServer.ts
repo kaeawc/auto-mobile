@@ -291,6 +291,10 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
 
 let socketServer: FailuresStreamSocketServer | null = null;
 
+export function getFailuresStreamSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startFailuresStreamSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new FailuresStreamSocketServer();

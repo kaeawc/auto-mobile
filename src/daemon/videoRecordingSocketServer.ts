@@ -71,6 +71,10 @@ export class VideoRecordingSocketServer extends RequestResponseSocketServer<
 
 let socketServer: VideoRecordingSocketServer | null = null;
 
+export function getVideoRecordingSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startVideoRecordingSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new VideoRecordingSocketServer();

@@ -587,7 +587,10 @@ export class DevicePool {
         const label = device.deviceId ?? device.name;
         logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
         const childProcess = await this.deviceManager.startDevice(device);
-        const ready = await this.deviceManager.waitForDeviceReady(device, undefined, childProcess);
+        const ready = this.withDeviceImageMetadata(
+          await this.deviceManager.waitForDeviceReady(device, undefined, childProcess),
+          device
+        );
         await this.addDevice(ready);
         started++;
       }
@@ -648,7 +651,10 @@ export class DevicePool {
       logger.info(`[DevicePool] Starting ${device.platform} device ${label} for criteria ${this.formatCriteriaSummary(criteria)}`);
       excludedImageIds.add(this.getDeviceImageKey(device));
       const childProcess = await this.deviceManager.startDevice(device);
-      const ready = await this.deviceManager.waitForDeviceReady(device, undefined, childProcess);
+      const ready = this.withDeviceImageMetadata(
+        await this.deviceManager.waitForDeviceReady(device, undefined, childProcess),
+        device
+      );
       await this.addDevice(ready);
       return this.devices.get(ready.deviceId) ?? null;
     } catch (error) {
@@ -1401,6 +1407,17 @@ export class DevicePool {
 
   private getDeviceImageKey(image: DeviceInfo): string {
     return image.deviceId ?? `${image.platform}:${image.name}`;
+  }
+
+  private withDeviceImageMetadata(ready: BootedDevice, image: DeviceInfo): BootedDevice {
+    return {
+      ...ready,
+      iosVersion: ready.iosVersion ?? image.iosVersion,
+      osVersion: ready.osVersion ?? image.osVersion,
+      formFactor: ready.formFactor ?? image.formFactor,
+      screenWidth: ready.screenWidth ?? image.screenWidth,
+      screenHeight: ready.screenHeight ?? image.screenHeight,
+    };
   }
 
   private displayNameFromIosDeviceType(deviceType?: string): string | undefined {

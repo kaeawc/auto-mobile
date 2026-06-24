@@ -46,6 +46,18 @@ describe("DevicePool", () => {
     iosVersion
   });
 
+  class FakeDeviceManagerWithMinimalReadyDevice extends FakeDeviceManager {
+    async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+      const id = device.deviceId ?? device.name;
+      return {
+        name: device.name,
+        platform: device.platform,
+        deviceId: id,
+        source: device.source,
+      };
+    }
+  }
+
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer);
@@ -276,7 +288,7 @@ describe("DevicePool", () => {
         { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Shutdown", isAvailable: true },
         { name: "iPhone 15", platform: "ios", isRunning: false, deviceId: "sim-2", state: "Shutdown", isAvailable: true },
       ];
-      const fakeDeviceManager = new FakeDeviceManager(images);
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
       const retryExecutor = new DefaultRetryExecutor(fakeTimer);
       devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
 

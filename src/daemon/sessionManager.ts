@@ -34,6 +34,7 @@ export interface Session {
   lastHeartbeat: number;       // Timestamp of last heartbeat
   sessionTimeoutMs: number;    // Idle timeout used when extending this session
   heartbeatTimeoutMs: number;  // Heartbeat timeout for this session
+  heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
 }
 
@@ -112,6 +113,7 @@ export class SessionManager {
 
     const now = this.timer.now();
     const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
+    const heartbeatTimeoutSource = heartbeatTimeoutMs === undefined ? "default" : "custom";
     const session: Session = {
       sessionId,
       assignedDevice,
@@ -123,6 +125,7 @@ export class SessionManager {
       lastHeartbeat: now,
       sessionTimeoutMs,
       heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
+      heartbeatTimeoutSource,
       hasReceivedHeartbeat: false,
     };
 

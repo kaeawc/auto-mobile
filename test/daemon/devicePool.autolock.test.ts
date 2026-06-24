@@ -208,9 +208,16 @@ describe("DevicePool autolock", () => {
       // normal heartbeat timeout after the initial grace.
       const PRE_FIRST_HEARTBEAT_GRACE_MS = 5_000;
       const CUSTOM_HEARTBEAT_INITIAL_GRACE_MS = 20_000;
-      const wouldReap = (createdAt: number, lastHeartbeat: number, heartbeatTimeoutMs: number, now: number, hasReceivedHeartbeat: boolean): boolean => {
+      const wouldReap = (
+        createdAt: number,
+        lastHeartbeat: number,
+        heartbeatTimeoutMs: number,
+        heartbeatTimeoutSource: "default" | "custom",
+        now: number,
+        hasReceivedHeartbeat: boolean
+      ): boolean => {
         if (!hasReceivedHeartbeat) {
-          if (heartbeatTimeoutMs === SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS) {
+          if (heartbeatTimeoutSource === "default") {
             return now - createdAt > PRE_FIRST_HEARTBEAT_GRACE_MS;
           }
           if (now - createdAt < CUSTOM_HEARTBEAT_INITIAL_GRACE_MS) {
@@ -229,17 +236,17 @@ describe("DevicePool autolock", () => {
 
       // With the OLD 10s heartbeat timeout the watchdog would have reaped this at ~20s.
       expect(
-        wouldReap(session.createdAt, session.lastHeartbeat, SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS, 20_000, false)
+        wouldReap(session.createdAt, session.lastHeartbeat, SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS, "default", 20_000, false)
       ).toBe(true);
 
       // With the aligned timeout it survives the grace + well past the old window...
       expect(
-        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, 30_000, false)
+        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, session.heartbeatTimeoutSource, 30_000, false)
       ).toBe(false);
 
       // ...and is only reaped once the idle timeout elapses with no activity.
       expect(
-        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, 60_001, false)
+        wouldReap(session.createdAt, session.lastHeartbeat, session.heartbeatTimeoutMs, session.heartbeatTimeoutSource, 60_001, false)
       ).toBe(true);
     });
 

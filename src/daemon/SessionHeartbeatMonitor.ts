@@ -119,7 +119,7 @@ export class SessionHeartbeatMonitor {
       const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
       const ageMs = now - session.createdAt;
       if (!session.hasReceivedHeartbeat) {
-        if (timeoutMs === this.defaultHeartbeatTimeoutMs) {
+        if (session.heartbeatTimeoutSource === "default") {
           if (ageMs > this.preFirstHeartbeatGraceMs) {
             logger.warn(`Session ${session.sessionId} never received first heartbeat, cancelling`);
             await this.reap(session.sessionId);

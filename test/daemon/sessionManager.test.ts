@@ -65,6 +65,15 @@ describe("SessionManager", () => {
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
 
       expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("default");
+    });
+
+    test("should mark explicitly provided heartbeat timeout as custom", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 30_000, 15_000);
+
+      expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("custom");
     });
   });
 

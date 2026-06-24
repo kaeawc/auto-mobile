@@ -6,6 +6,48 @@ import type { DaemonOptions } from "./types";
 import { compareVersions } from "../server/deviceMatcher";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 
+export type VersionMismatchReason =
+  | "autoStartDisabled"
+  | "cooldown"
+  | "daemonNewer"
+  | "nonNumeric"
+  | "restartMismatch";
+
+/**
+ * Raised before connecting when the running daemon and MCP client package
+ * versions differ but the proxy cannot safely reconcile them immediately.
+ */
+export class DaemonVersionMismatchError extends DaemonUnavailableError {
+  readonly clientVersion: string;
+  readonly daemonVersion: string;
+  readonly reason: VersionMismatchReason;
+  readonly retryAfterMs?: number;
+
+  constructor(params: {
+    clientVersion: string;
+    daemonVersion: string;
+    reason: VersionMismatchReason;
+    detail: string;
+    retryAfterMs?: number;
+  }) {
+    const restartCommand = params.clientVersion.length > 0 && params.clientVersion !== "unknown"
+      ? `bunx @kaeawc/auto-mobile@${params.clientVersion} --daemon restart`
+      : "the same installed auto-mobile package";
+    const retryGuidance = params.retryAfterMs !== undefined
+      ? ` Retry after ${params.retryAfterMs}ms or restart the daemon with: ${restartCommand}`
+      : ` Restart the daemon with: ${restartCommand}`;
+    super(
+      `AutoMobile daemon version mismatch: daemon=${params.daemonVersion}, client=${params.clientVersion} ` +
+      `(${params.detail}).${retryGuidance}`
+    );
+    this.name = "DaemonVersionMismatchError";
+    this.clientVersion = params.clientVersion;
+    this.daemonVersion = params.daemonVersion;
+    this.reason = params.reason;
+    this.retryAfterMs = params.retryAfterMs;
+  }
+}
+
 /**
  * Configuration for the DaemonMcpProxy
  */
@@ -161,12 +203,13 @@ export class DaemonMcpProxy {
       : Number.POSITIVE_INFINITY;
 
     if (!this.config.autoStartDaemon) {
-      throw this.versionMismatchError(runningVersion, "auto-start is disabled");
+      throw this.versionMismatchError(runningVersion, "autoStartDisabled", "auto-start is disabled");
     }
 
     if (runningVersion.length > 0 && !Number.isFinite(cmp)) {
       throw this.versionMismatchError(
         runningVersion,
+        "nonNumeric",
         "version comparison is not numeric"
       );
     }
@@ -174,6 +217,7 @@ export class DaemonMcpProxy {
     if (cmp <= 0) {
       throw this.versionMismatchError(
         runningVersion,
+        "daemonNewer",
         "the running daemon is newer than this client"
       );
     }
@@ -186,7 +230,9 @@ export class DaemonMcpProxy {
         );
         throw this.versionMismatchError(
           runningVersion,
-          "restart is in cooldown"
+          "cooldown",
+          "restart is in cooldown",
+          DAEMON_VERSION_RESTART_COOLDOWN_MS - daemonAgeMs
         );
       }
     }
@@ -207,20 +253,27 @@ export class DaemonMcpProxy {
     if (!restartedStatus.running || restartedVersion !== DAEMON_VERSION) {
       throw this.versionMismatchError(
         restartedVersion,
+        "restartMismatch",
         "daemon restart completed but version still differs"
       );
     }
   }
 
-  private versionMismatchError(runningVersion: string, reason: string): DaemonUnavailableError {
+  private versionMismatchError(
+    runningVersion: string,
+    reason: VersionMismatchReason,
+    detail: string,
+    retryAfterMs?: number,
+  ): DaemonVersionMismatchError {
     const daemonVersion = runningVersion.length > 0 ? runningVersion : "unknown";
     const clientVersion = DAEMON_VERSION.trim();
-    const restartCommand = clientVersion.length > 0 && clientVersion !== "unknown"
-      ? `bunx @kaeawc/auto-mobile@${clientVersion} --daemon restart`
-      : "the same installed auto-mobile package";
-    return new DaemonUnavailableError(
-      `AutoMobile daemon version mismatch: daemon=${daemonVersion}, client=${DAEMON_VERSION} (${reason}). Restart the daemon with: ${restartCommand}`
-    );
+    return new DaemonVersionMismatchError({
+      clientVersion,
+      daemonVersion,
+      reason,
+      detail,
+      retryAfterMs,
+    });
   }
 
   /**

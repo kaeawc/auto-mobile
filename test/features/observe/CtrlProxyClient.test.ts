@@ -314,6 +314,76 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("tracks concurrent suppressed hierarchy syncs independently", async function() {
+      const testTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+      const suppressionCount = (): number =>
+        (testClient as unknown as {
+          hierarchyObservationStreamSuppressions: Set<unknown>;
+        }).hierarchyObservationStreamSuppressions.size;
+
+      try {
+        const firstRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+        const secondRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 2);
+
+        expect(suppressionCount()).toBe(2);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: 100,
+            packageName: "com.example",
+            hierarchy: { text: "First sync" },
+          },
+        }));
+
+        expect(suppressionCount()).toBe(1);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: 200,
+            packageName: "com.example",
+            hierarchy: { text: "Second sync" },
+          },
+        }));
+
+        expect(suppressionCount()).toBe(0);
+
+        const [firstResult, secondResult] = await Promise.all([
+          testTimer.resolvePromise(firstRequest),
+          testTimer.resolvePromise(secondRequest),
+        ]);
+        expect(firstResult?.hierarchy).not.toBeNull();
+        expect(secondResult?.hierarchy).not.toBeNull();
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("should handle WebSocket connection failure gracefully", async function() {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)

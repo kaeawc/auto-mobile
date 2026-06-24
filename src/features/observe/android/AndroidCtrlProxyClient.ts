@@ -190,6 +190,10 @@ interface WsConnectedMessage extends WsMessageBase {
   type: "connected";
 }
 
+interface ObservationStreamSuppression {
+  timeoutHandle: NodeJS.Timeout;
+}
+
 interface WsHierarchyUpdateMessage extends WsMessageBase {
   type: "hierarchy_update";
   data: AccessibilityHierarchy;
@@ -623,6 +627,13 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
 
+  requestHierarchySyncWithoutObservationStreamPush(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
+
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
 
   requestSwipe(
@@ -707,6 +718,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
 
+  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
+
   requestInstalledPackages(
     includeSystem?: boolean,
     userId?: number,
@@ -772,6 +785,8 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Screenshot backoff scheduler
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   private cachedScreenDimensions: { width: number; height: number } | null = null;
+  private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
+  private suppressNextScreenshotObservationStreamPush: boolean = false;
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
@@ -1129,6 +1144,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 10000
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncWithoutObservationStreamPush(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    disableAllFiltering: boolean = false,
+    signal?: AbortSignal,
+    timeoutMs: number = 10000
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
+    const suppression: ObservationStreamSuppression = {
+      timeoutHandle: this.timer.setTimeout(() => {
+        this.hierarchyObservationStreamSuppressions.delete(suppression);
+      }, timeoutMs),
+    };
+    this.hierarchyObservationStreamSuppressions.add(suppression);
+    return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult {
@@ -1638,6 +1668,18 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
+  async requestScreenshotWithoutObservationStreamPush(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<ScreenshotResult> {
+    this.suppressNextScreenshotObservationStreamPush = true;
+    try {
+      return await this.requestScreenshot(timeoutMs, perf);
+    } finally {
+      this.suppressNextScreenshotObservationStreamPush = false;
+    }
+  }
+
   async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
     const result = await this.retryExecutor.execute(
       async attempt => {
@@ -1834,7 +1876,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
-        this.pushScreenshotToObservationStream(message.data);
+        const suppressObservationStreamPush = this.suppressNextScreenshotObservationStreamPush;
+        this.suppressNextScreenshotObservationStreamPush = false;
+        if (!suppressObservationStreamPush) {
+          this.pushScreenshotToObservationStream(message.data);
+        } else {
+          logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
+        }
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
           success: true, data: message.data, format: message.format || "jpeg", timestamp: message.timestamp
         });
@@ -2404,11 +2452,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Update cached screen dimensions
     this.updateCachedScreenDimensions(data);
 
-    // Push to observation stream
-    this.pushHierarchyToObservationStream(data);
+    const suppression = this.hierarchyObservationStreamSuppressions.values().next().value;
+    const suppressObservationStreamPush = suppression !== undefined;
+    if (suppression) {
+      this.hierarchyObservationStreamSuppressions.delete(suppression);
+      this.timer.clearTimeout(suppression.timeoutHandle);
+    }
+    if (!suppressObservationStreamPush) {
+      // Push to observation stream
+      this.pushHierarchyToObservationStream(data);
 
-    // Start screenshot backoff
-    this.startScreenshotBackoff();
+      // Start screenshot backoff
+      this.startScreenshotBackoff();
+    } else {
+      logger.debug("[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request");
+    }
 
     // Track foreground package for context and start performance monitoring
     if (data.packageName && data.packageName !== this.lastForegroundPackage) {

@@ -9,7 +9,7 @@ import {
   SocketServerConfig,
   SubscriptionResponse,
 } from "./socketServer/index";
-import type { ViewHierarchyResult } from "../models";
+import type { ObserveResult, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
 
 // NOTE: Keep legacy socket path for backward compatibility with IDE plugin
@@ -121,10 +121,29 @@ interface DeviceDataPush {
 export type OnSubscriberConnectedCallback = (deviceId: string | null) => void;
 
 /**
+ * Observation captured on demand for a stream client.
+ */
+export interface RequestedObservation {
+  deviceId: string;
+  observation: ObserveResult;
+}
+
+/**
+ * Callback invoked when a client requests an immediate observation.
+ */
+export type OnObservationRequestedCallback = (request: {
+  deviceId: string | null;
+  requestId?: string;
+  signal: AbortSignal;
+}) => Promise<RequestedObservation[]>;
+
+/**
  * Callback invoked when a client requests the current navigation graph.
  * Returns the current graph data, or null if no graph is available.
  */
 export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Promise<NavigationGraphStreamData | null>;
+
+const DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS = 10_000;
 
 /**
  * Socket server that streams device data updates (hierarchy, screenshot, storage) to connected IDE plugins.
@@ -144,7 +163,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   DeviceDataPush
 > {
   private onSubscriberConnected: OnSubscriberConnectedCallback | null = null;
+  private onObservationRequested: OnObservationRequestedCallback | null = null;
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
+  private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
   constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "DeviceDataStream");
@@ -156,6 +177,17 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
    */
   setOnSubscriberConnected(callback: OnSubscriberConnectedCallback): void {
     this.onSubscriberConnected = callback;
+  }
+
+  /**
+   * Set a callback to handle on-demand observation requests.
+   */
+  setOnObservationRequested(
+    callback: OnObservationRequestedCallback,
+    timeoutMs: number = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS
+  ): void {
+    this.onObservationRequested = callback;
+    this.observationRequestTimeoutMs = timeoutMs;
   }
 
   /**
@@ -275,14 +307,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
     // Handle request_observation command (not in base class)
     if (request.command === "request_observation") {
-      // This could trigger an immediate observation request
-      // For now, just acknowledge - the caller should use MCP observe tool
-      const response: SubscriptionResponse = {
-        id: request.id,
-        type: "subscription_response",
-        success: true,
-      };
-      this.sendJson(socket, response);
+      await this.handleObservationRequest(socket, request);
       return;
     }
 
@@ -366,6 +391,81 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
 
   protected createPushMessage(data: DeviceDataPush): DeviceDataStreamMessage {
     return data.message;
+  }
+
+  private async handleObservationRequest(
+    socket: Socket,
+    request: { id?: string; deviceId?: string }
+  ): Promise<void> {
+    if (!this.onObservationRequested) {
+      const response: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: "Observation requests are not available",
+      };
+      this.sendJson(socket, response);
+      return;
+    }
+
+    try {
+      const observations = await this.requestObservationWithTimeout({
+        deviceId: request.deviceId ?? null,
+        requestId: request.id,
+      });
+
+      for (const { deviceId, observation } of observations) {
+        if (observation.viewHierarchy) {
+          this.pushHierarchyUpdate(deviceId, observation.viewHierarchy);
+        }
+      }
+
+      const response: SubscriptionResponse = {
+        id: request.id,
+        type: "subscription_response",
+        success: true,
+      };
+      this.sendJson(socket, response);
+    } catch (error) {
+      logger.warn(`[DeviceDataStream] Error handling request_observation: ${error}`);
+      const errorResponse: SubscriptionResponse = {
+        id: request.id,
+        type: "error",
+        success: false,
+        error: error instanceof Error ? error.message : String(error),
+      };
+      this.sendJson(socket, errorResponse);
+    }
+  }
+
+  private async requestObservationWithTimeout(request: {
+    deviceId: string | null;
+    requestId?: string;
+  }): Promise<RequestedObservation[]> {
+    const controller = new AbortController();
+    let timeoutHandle: NodeJS.Timeout | null = null;
+
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutHandle = this.timer.setTimeout(() => {
+        controller.abort();
+        reject(new Error(`Observation request timed out after ${this.observationRequestTimeoutMs}ms`));
+      }, this.observationRequestTimeoutMs);
+    });
+
+    try {
+      return await Promise.race([
+        this.onObservationRequested!({
+          deviceId: request.deviceId,
+          requestId: request.requestId,
+          signal: controller.signal,
+        }),
+        timeoutPromise,
+      ]);
+    } finally {
+      if (timeoutHandle) {
+        this.timer.clearTimeout(timeoutHandle);
+      }
+    }
   }
 }
 

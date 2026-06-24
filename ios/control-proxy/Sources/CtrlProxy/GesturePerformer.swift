@@ -587,16 +587,31 @@ public class GesturePerformer: GesturePerforming {
                 try runOnMainThread {
                     focused.tap()
                 }
-                return isKeyboardVisible(app: app)
+                return waitForKeyboardVisibility(app: app, expected: true)
             case "close":
                 if !isKeyboardVisible(app: app) {
                     return false
                 }
                 try typeKeyboardKey(.escape, app: app)
-                return isKeyboardVisible(app: app)
+                return waitForKeyboardVisibility(app: app, expected: false)
             default:
                 throw GestureError.notSupported("Keyboard action: \(action)")
             }
+        }
+
+        private func waitForKeyboardVisibility(
+            app: XCUIApplication,
+            expected: Bool,
+            timeout: TimeInterval = 1.0,
+            interval: TimeInterval = 0.05
+        ) -> Bool {
+            let deadline = Date().addingTimeInterval(timeout)
+            var visible = isKeyboardVisible(app: app)
+            while visible != expected && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(interval))
+                visible = isKeyboardVisible(app: app)
+            }
+            return visible
         }
 
         private func isKeyboardVisible(app: XCUIApplication) -> Bool {

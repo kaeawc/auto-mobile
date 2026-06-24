@@ -103,10 +103,15 @@ describe("DevicePool", () => {
           getBootedSimulators: async () => {
             simctlBootedCalls++;
             throw new Error("simctl should not be queried");
+          },
+          getBootedSimulatorsChecked: async () => {
+            simctlBootedCalls++;
+            throw new Error("simctl should not be queried");
           }
         } as unknown as SimCtlClient;
         const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice]
+          getBootedDevices: async () => [androidDevice],
+          getBootedDevicesChecked: async () => [androidDevice]
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
           new FakeAdbClient() as unknown as AdbClient,
@@ -137,10 +142,14 @@ describe("DevicePool", () => {
           isAvailable: async () => true,
           getBootedSimulators: async () => {
             throw new Error("host-control simctl unavailable");
+          },
+          getBootedSimulatorsChecked: async () => {
+            throw new Error("host-control simctl unavailable");
           }
         } as unknown as SimCtlClient;
         const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice]
+          getBootedDevices: async () => [androidDevice],
+          getBootedDevicesChecked: async () => [androidDevice]
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
           new FakeAdbClient() as unknown as AdbClient,
@@ -222,6 +231,55 @@ describe("DevicePool", () => {
       expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
       expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
       expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("retains iOS devices across repeated refreshes when iOS discovery keeps failing", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      // Android discovery succeeds, but iOS discovery fails this and every refresh.
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["ios"]);
+
+      // Even past the miss threshold, a device on a platform whose discovery
+      // failed must never be pruned (it may still be running).
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("retains all devices when discovery fails for every platform", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        createBootedDevice("sim-old", "ios", "iPhone 15")
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["android", "ios"]);
+
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getDevice("sim-old")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("prunes iOS devices once iOS discovery succeeds and confirms them gone", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      // iOS discovery now succeeds but reports zero booted simulators.
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>();
+
+      // Genuine empties are tolerated for one refresh, then removed.
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
     });
 
     test("recomputes candidates after refresh prunes all unavailable error devices", async () => {

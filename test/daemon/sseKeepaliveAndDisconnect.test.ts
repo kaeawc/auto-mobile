@@ -132,7 +132,7 @@ describe("disconnect monitor miss counting", () => {
     deviceDisconnectMisses: Map<string, number>,
     bootedDeviceIds: Set<string>,
     candidateDeviceIds: Set<string>,
-    bootedPlatforms: Set<string> = new Set(),
+    succeededPlatforms: Set<string> = new Set(),
     candidatePlatforms: Map<string, string> = new Map(),
     idleCandidateIds: Set<string> = new Set(),
   ): { disconnected: string[]; skippedAdbUnreachable: boolean } => {
@@ -148,11 +148,12 @@ describe("disconnect monitor miss counting", () => {
         continue;
       }
       const platform = candidatePlatforms.get(deviceId);
+      // Idle devices on platforms whose discovery did not succeed this poll are
+      // skipped — a partial/failed discovery cannot confirm they disconnected.
       if (
         platform &&
         idleCandidateIds.has(deviceId) &&
-        bootedDeviceIds.size > 0 &&
-        !bootedPlatforms.has(platform)
+        !succeededPlatforms.has(platform)
       ) {
         deviceDisconnectMisses.delete(deviceId);
         continue;
@@ -216,10 +217,12 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.size).toBe(0);
   });
 
-  test("skips idle candidates from platforms absent in partial discovery", () => {
+  test("skips idle candidates from platforms whose discovery did not succeed", () => {
     const misses = new Map<string, number>();
     misses.set("sim-1", 2);
 
+    // Android discovery succeeded; iOS discovery did not, so the idle iOS
+    // simulator must not be miss-counted toward disconnect.
     const result = runDisconnectPoll(
       misses,
       new Set(["emulator-5554"]),
@@ -232,6 +235,24 @@ describe("disconnect monitor miss counting", () => {
     expect(result.skippedAdbUnreachable).toBe(false);
     expect(result.disconnected).toEqual([]);
     expect(misses.has("sim-1")).toBe(false);
+  });
+
+  test("miss-counts an idle device once its platform discovery succeeds", () => {
+    const misses = new Map<string, number>();
+
+    // iOS discovery succeeded but reported zero simulators, so an idle iOS
+    // device that is genuinely gone should now be miss-counted.
+    const result = runDisconnectPoll(
+      misses,
+      new Set(["emulator-5554"]),
+      new Set(["sim-1"]),
+      new Set(["android", "ios"]),
+      new Map([["sim-1", "ios"]]),
+      new Set(["sim-1"]),
+    );
+
+    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(misses.get("sim-1")).toBe(1);
   });
 
   test("miss count resets after device reappears then starts over", () => {

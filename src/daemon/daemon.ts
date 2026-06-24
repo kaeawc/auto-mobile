@@ -792,9 +792,10 @@ export class Daemon {
           return;
         }
 
-        const bootedDevices = await deviceManager.getBootedDevices("either");
+        const discovery = await deviceManager.getBootedDevicesDetailed("either");
+        const bootedDevices = discovery.devices;
+        const succeededPlatforms = discovery.succeededPlatforms;
         const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
-        const bootedPlatforms = new Set(bootedDevices.map(device => device.platform));
         const activeRecordings = await listActiveVideoRecordings();
 
         const missingByDevice = new Map<string, string[]>();
@@ -803,10 +804,14 @@ export class Daemon {
           candidateDeviceIds.add(recording.deviceId);
         }
         for (const device of this.devicePool.getAllDevices()) {
-          if (device.status === "idle" && bootedDeviceIds.size > 0 && !bootedPlatforms.has(device.platform)) {
+          // Skip idle devices on platforms whose discovery failed or was
+          // unavailable this poll — a partial discovery cannot confirm they
+          // disconnected, so counting misses would risk dropping a healthy
+          // idle device.
+          if (device.status === "idle" && !succeededPlatforms.has(device.platform)) {
             logger.warn(
               `[DisconnectMonitor] Skipping idle ${device.platform} device ${device.id}: ` +
-              "no devices for that platform appeared in a partial discovery result"
+              `${device.platform} discovery did not succeed this poll`
             );
             this.deviceDisconnectMisses.delete(device.id);
             continue;

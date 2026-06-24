@@ -174,8 +174,9 @@ export class DevicePool {
       logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
 
       perf.startOperation("deviceDiscovery");
-      const bootedDevices = await this.deviceManager.getBootedDevices("either");
+      const discovery = await this.deviceManager.getBootedDevicesDetailed("either");
       perf.endOperation("deviceDiscovery");
+      const bootedDevices = discovery.devices;
       const discoveryTime = this.timer.now() - startTime;
       logger.info(`Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`);
 
@@ -186,7 +187,11 @@ export class DevicePool {
       const bootedPlatforms = new Set(bootedDevices.map(device => device.platform));
 
       perf.startOperation("poolUpdate");
-      removedCount = await this.removeDevicesMissingFrom(bootedDeviceIds, bootedPlatforms);
+      removedCount = await this.removeDevicesMissingFrom(
+        bootedDeviceIds,
+        bootedPlatforms,
+        discovery.succeededPlatforms
+      );
 
       for (const device of bootedDevices) {
         const pooledDevice = this.devices.get(device.deviceId);
@@ -292,7 +297,8 @@ export class DevicePool {
 
   private async removeDevicesMissingFrom(
     bootedDeviceIds: Set<string>,
-    bootedPlatforms: Set<Platform>
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>
   ): Promise<number> {
     let removedCount = 0;
 
@@ -307,6 +313,20 @@ export class DevicePool {
         );
         continue;
       }
+      // Discovery for this platform failed or was unavailable this refresh, so
+      // we cannot confirm the device is gone. Retain it rather than pruning a
+      // device that may still be running (e.g. iOS simctl failed while Android
+      // discovery succeeded, or all tooling was transiently unreachable).
+      if (!succeededPlatforms.has(device.platform)) {
+        this.refreshMissingDeviceMisses.delete(device.id);
+        logger.warn(
+          `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`
+        );
+        continue;
+      }
+      // Discovery succeeded but returned no devices for this platform at all.
+      // Tolerate brief reboot/boot races with a small consecutive-miss threshold
+      // before removing.
       if (!bootedPlatforms.has(device.platform)) {
         const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
         this.refreshMissingDeviceMisses.set(device.id, misses);

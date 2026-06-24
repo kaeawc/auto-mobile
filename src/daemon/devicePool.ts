@@ -618,7 +618,7 @@ export class DevicePool {
 
     for (const request of requests) {
       const existing = this.getDevicesMatchingCriteria(request.criteria)
-        .find(device => !reservedDeviceIds.has(device.id));
+        .find(device => device.status !== "error" && !reservedDeviceIds.has(device.id));
       if (existing) {
         reservedDeviceIds.add(existing.id);
         continue;

@@ -2534,8 +2534,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (data: string) => {
           this.pushScreenshotToObservationStream(data);
         },
-        { intervals: [0, 100, 300, 500, 800, 1300] },
-        this.timer
+        { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: 3000 },
+        this.timer,
+        () => {
+          const server = getDeviceDataStreamServer();
+          return !!server && server.getSubscriberCount() > 0;
+        }
       );
     }
     return this.screenshotBackoffScheduler;

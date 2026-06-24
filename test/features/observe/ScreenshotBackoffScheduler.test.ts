@@ -109,7 +109,7 @@ describe("DefaultScreenshotBackoffScheduler", () => {
 
       expect(capturedScreenshots).toHaveLength(6);
       expect(emittedScreenshots).toHaveLength(6);
-      expect(scheduler.isActive()).toBe(false);
+      expect(scheduler.isActive()).toBe(true);
       expect(scheduler.getPendingCount()).toBe(0);
     });
 
@@ -154,6 +154,83 @@ describe("DefaultScreenshotBackoffScheduler", () => {
       // Should have: 1 from first (t=0), 2 from second (t=0, t=100)
       // The t=100 and t=200 from first sequence should be cancelled
       expect(capturedScreenshots).toHaveLength(4); // 1 + 3
+    });
+  });
+
+  describe("keepalive captures", () => {
+    it("emits duplicate screenshots after burst sequence completes", async () => {
+      captureCallback = async () => {
+        capturedScreenshots.push("same-data");
+        return { success: true, data: "same-data" };
+      };
+
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0, 100], keepAliveIntervalMs: 1000 },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(100);
+
+      expect(capturedScreenshots).toHaveLength(2);
+      expect(emittedScreenshots).toEqual(["same-data"]);
+      expect(scheduler.isActive()).toBe(true);
+      expect(scheduler.getPendingCount()).toBe(0);
+
+      await fakeTimer.advanceTimersByTimeAsync(1000);
+      await fakeTimer.advanceTimersByTimeAsync(1000);
+
+      expect(capturedScreenshots).toHaveLength(4);
+      expect(emittedScreenshots).toEqual(["same-data", "same-data", "same-data"]);
+    });
+
+    it("stops keepalive captures when subscribers are no longer active", async () => {
+      let hasSubscribers = true;
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], keepAliveIntervalMs: 1000 },
+        fakeTimer,
+        () => hasSubscribers
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+
+      expect(capturedScreenshots).toHaveLength(1);
+      expect(scheduler.isActive()).toBe(true);
+
+      hasSubscribers = false;
+      await fakeTimer.advanceTimersByTimeAsync(1000);
+
+      expect(capturedScreenshots).toHaveLength(1);
+      expect(scheduler.isActive()).toBe(false);
+    });
+
+    it("resets pending keepalive when a new sequence starts", async () => {
+      const scheduler = new DefaultScreenshotBackoffScheduler(
+        captureCallback,
+        emitCallback,
+        { intervals: [0], keepAliveIntervalMs: 1000 },
+        fakeTimer
+      );
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(500);
+
+      scheduler.startBackoffSequence();
+      await fakeTimer.advanceTimersByTimeAsync(0);
+      await fakeTimer.advanceTimersByTimeAsync(999);
+
+      expect(capturedScreenshots).toHaveLength(2);
+
+      await fakeTimer.advanceTimersByTimeAsync(1);
+
+      expect(capturedScreenshots).toHaveLength(3);
     });
   });
 

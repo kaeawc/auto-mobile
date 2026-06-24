@@ -1550,7 +1550,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           this.pushScreenshotToObservationStream(data, screenWidth, screenHeight);
         },
         undefined, // Use default config
-        this.timer
+        this.timer,
+        () => {
+          const server = getDeviceDataStreamServer();
+          return !!server && server.getSubscriberCount() > 0;
+        }
       );
     }
     return this.screenshotBackoffScheduler;

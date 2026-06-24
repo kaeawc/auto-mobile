@@ -413,11 +413,18 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         deviceId: request.deviceId ?? null,
         requestId: request.id,
       });
+      const hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
 
       for (const { deviceId, observation } of observations) {
-        if (observation.viewHierarchy) {
-          this.pushHierarchyUpdate(deviceId, observation.viewHierarchy);
+        const hierarchy = observation.viewHierarchy;
+        if (!hierarchy) {
+          throw new Error(this.describeMissingHierarchy(deviceId, observation));
         }
+        hierarchyUpdates.push({ deviceId, hierarchy });
+      }
+
+      for (const { deviceId, hierarchy } of hierarchyUpdates) {
+        this.pushHierarchyUpdate(deviceId, hierarchy);
       }
 
       const response: SubscriptionResponse = {
@@ -436,6 +443,13 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
       };
       this.sendJson(socket, errorResponse);
     }
+  }
+
+  private describeMissingHierarchy(deviceId: string, observation: ObserveResult): string {
+    const observationError = observation.error
+      ?? observation.errors?.map(error => error.message).join("; ")
+      ?? "Observation did not include view hierarchy";
+    return `Observation request failed for ${deviceId}: ${observationError}`;
   }
 
   private async requestObservationWithTimeout(request: {

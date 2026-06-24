@@ -131,6 +131,40 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(msgs[0].error).toBe("Observation requests are not available");
     });
 
+    it("returns error when observation has no hierarchy", async () => {
+      server.setOnObservationRequested(async () => [{
+        deviceId: "emulator-5554",
+        observation: {
+          updatedAt: "2026-06-24T00:00:00.000Z",
+          screenSize: { width: 0, height: 0 },
+          systemInsets: { top: 0, right: 0, bottom: 0, left: 0 },
+          errors: [{ phase: "viewHierarchy", message: "Accessibility service unavailable" }],
+          error: "Accessibility service unavailable",
+        },
+      }]);
+      const { socket } = server.simulateSubscription({ deviceId: "emulator-5554" });
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "obs-no-hierarchy",
+        command: "request_observation",
+        deviceId: "emulator-5554",
+      }));
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].id).toBe("obs-no-hierarchy");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].error).toBe(
+        "Observation request failed for emulator-5554: Accessibility service unavailable"
+      );
+    });
+
     it("returns error when observation callback throws", async () => {
       server.setOnObservationRequested(async () => {
         throw new Error("Observe failed");

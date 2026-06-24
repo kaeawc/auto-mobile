@@ -1,7 +1,7 @@
-import sharp from "sharp";
 import { PNG } from "pngjs";
 import { logger } from "../logger";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { loadSharp } from "../image/loadSharp";
 
 // Add dynamic import function for pixelmatch
 async function getPixelmatch() {
@@ -38,6 +38,7 @@ export class ScreenshotComparator {
    */
   static async convertToPng(buffer: Buffer): Promise<Buffer> {
     try {
+      const sharp = await loadSharp();
       return await sharp(buffer).png().toBuffer();
     } catch (error) {
       throw new Error(`Failed to convert image to PNG: ${(error as Error).message}`);
@@ -51,6 +52,7 @@ export class ScreenshotComparator {
    */
   static async getImageDimensions(buffer: Buffer): Promise<{ width: number; height: number }> {
     try {
+      const sharp = await loadSharp();
       const metadata = await sharp(buffer).metadata();
       return {
         width: metadata.width || 0,
@@ -82,6 +84,7 @@ export class ScreenshotComparator {
     logger.debug(`Resizing image from ${width}x${height} to ${targetWidth}x${targetHeight}`);
 
     try {
+      const sharp = await loadSharp();
       return await sharp(buffer)
         .resize(targetWidth, targetHeight, {
           fit: "fill",

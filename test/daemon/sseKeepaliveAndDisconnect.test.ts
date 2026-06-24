@@ -132,6 +132,9 @@ describe("disconnect monitor miss counting", () => {
     deviceDisconnectMisses: Map<string, number>,
     bootedDeviceIds: Set<string>,
     candidateDeviceIds: Set<string>,
+    bootedPlatforms: Set<string> = new Set(),
+    candidatePlatforms: Map<string, string> = new Map(),
+    idleCandidateIds: Set<string> = new Set(),
   ): { disconnected: string[]; skippedAdbUnreachable: boolean } => {
     const disconnected: string[] = [];
 
@@ -141,6 +144,16 @@ describe("disconnect monitor miss counting", () => {
 
     for (const deviceId of candidateDeviceIds) {
       if (bootedDeviceIds.has(deviceId)) {
+        deviceDisconnectMisses.delete(deviceId);
+        continue;
+      }
+      const platform = candidatePlatforms.get(deviceId);
+      if (
+        platform &&
+        idleCandidateIds.has(deviceId) &&
+        bootedDeviceIds.size > 0 &&
+        !bootedPlatforms.has(platform)
+      ) {
         deviceDisconnectMisses.delete(deviceId);
         continue;
       }
@@ -201,6 +214,24 @@ describe("disconnect monitor miss counting", () => {
     expect(result.skippedAdbUnreachable).toBe(true);
     expect(result.disconnected).toEqual([]);
     expect(misses.size).toBe(0);
+  });
+
+  test("skips idle candidates from platforms absent in partial discovery", () => {
+    const misses = new Map<string, number>();
+    misses.set("sim-1", 2);
+
+    const result = runDisconnectPoll(
+      misses,
+      new Set(["emulator-5554"]),
+      new Set(["sim-1"]),
+      new Set(["android"]),
+      new Map([["sim-1", "ios"]]),
+      new Set(["sim-1"]),
+    );
+
+    expect(result.skippedAdbUnreachable).toBe(false);
+    expect(result.disconnected).toEqual([]);
+    expect(misses.has("sim-1")).toBe(false);
   });
 
   test("miss count resets after device reappears then starts over", () => {

@@ -794,6 +794,7 @@ export class Daemon {
 
         const bootedDevices = await deviceManager.getBootedDevices("either");
         const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
+        const bootedPlatforms = new Set(bootedDevices.map(device => device.platform));
         const activeRecordings = await listActiveVideoRecordings();
 
         const missingByDevice = new Map<string, string[]>();
@@ -802,6 +803,14 @@ export class Daemon {
           candidateDeviceIds.add(recording.deviceId);
         }
         for (const device of this.devicePool.getAllDevices()) {
+          if (device.status === "idle" && bootedDeviceIds.size > 0 && !bootedPlatforms.has(device.platform)) {
+            logger.warn(
+              `[DisconnectMonitor] Skipping idle ${device.platform} device ${device.id}: ` +
+              "no devices for that platform appeared in a partial discovery result"
+            );
+            this.deviceDisconnectMisses.delete(device.id);
+            continue;
+          }
           candidateDeviceIds.add(device.id);
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {

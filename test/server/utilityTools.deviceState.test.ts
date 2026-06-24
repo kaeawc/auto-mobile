@@ -80,4 +80,37 @@ describe("device state tools", () => {
 
     sessionManager.stopCleanupTimer();
   });
+
+  test("setActiveDevice rejects devices owned by another live session", async () => {
+    const fakeTimer = new FakeTimer();
+    const sessionManager = new SessionManager(fakeTimer);
+    const devicePool = new DevicePool(
+      sessionManager,
+      "test-daemon-session-id",
+      fakeTimer,
+      new FakeInstalledAppsRepository(),
+      new FakeDeviceManager(),
+      new DefaultRetryExecutor(fakeTimer)
+    );
+    await devicePool.initializeWithDevices([
+      createBootedDevice("sim-a", "ios", "iPhone 15"),
+      createBootedDevice("sim-b", "ios", "iPhone 16"),
+    ]);
+    await devicePool.bindOrReuseDeviceSession("session-a", "sim-a", "ios");
+    await devicePool.bindOrReuseDeviceSession("session-b", "sim-b", "ios");
+    DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+    const setActiveDevice = ToolRegistry.getTool("setActiveDevice");
+    await expect(setActiveDevice!.handler({
+      deviceId: "sim-b",
+      platform: "ios",
+      sessionUuid: "session-a",
+    })).rejects.toThrow(/already assigned to session session-b/);
+
+    expect(sessionManager.getSession("session-a")?.assignedDevice).toBe("sim-a");
+    expect(devicePool.getDevice("sim-a")?.sessionId).toBe("session-a");
+    expect(devicePool.getDevice("sim-b")?.sessionId).toBe("session-b");
+
+    sessionManager.stopCleanupTimer();
+  });
 });

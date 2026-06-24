@@ -183,9 +183,10 @@ export class DevicePool {
       let addedCount = 0;
       let removedCount = 0;
       const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
+      const bootedPlatforms = new Set(bootedDevices.map(device => device.platform));
 
       perf.startOperation("poolUpdate");
-      removedCount = await this.removeDevicesMissingFrom(bootedDeviceIds);
+      removedCount = await this.removeDevicesMissingFrom(bootedDeviceIds, bootedPlatforms);
 
       for (const device of bootedDevices) {
         const pooledDevice = this.devices.get(device.deviceId);
@@ -259,6 +260,7 @@ export class DevicePool {
       iosVersion: device.iosVersion,
     });
     this.deviceSessionStarts.set(device.deviceId, now);
+    this.refreshMissingDeviceMisses.delete(device.deviceId);
     await this.setDeviceSessionTracking(device.deviceId, now);
 
     logger.info(`Added device ${device.deviceId} to pool`);
@@ -288,7 +290,10 @@ export class DevicePool {
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
   }
 
-  private async removeDevicesMissingFrom(bootedDeviceIds: Set<string>): Promise<number> {
+  private async removeDevicesMissingFrom(
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>
+  ): Promise<number> {
     let removedCount = 0;
 
     for (const device of Array.from(this.devices.values())) {
@@ -302,11 +307,11 @@ export class DevicePool {
         );
         continue;
       }
-      if (bootedDeviceIds.size === 0) {
+      if (!bootedPlatforms.has(device.platform)) {
         const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
         this.refreshMissingDeviceMisses.set(device.id, misses);
         logger.warn(
-          `Device ${device.id} missing from empty refresh discovery ` +
+          `Device ${device.id} missing from ${device.platform} refresh discovery ` +
           `(miss ${misses}/${this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`
         );
         if (misses < this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {

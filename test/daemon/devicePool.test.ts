@@ -212,6 +212,18 @@ describe("DevicePool", () => {
       expect(devicePool.getTotalDeviceCount()).toBe(0);
     });
 
+    test("retains devices on first partial platform discovery miss", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
     test("recomputes candidates after refresh prunes all unavailable error devices", async () => {
       await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
       for (let i = 0; i < 5; i++) {
@@ -219,6 +231,7 @@ describe("DevicePool", () => {
       }
       fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
 
+      await devicePool.refreshDevices();
       await expect(devicePool.assignDeviceToSession("session-1", "ios"))
         .rejects.toThrow(/No devices in pool/);
       expect(devicePool.getDevice("sim-old")).toBeNull();

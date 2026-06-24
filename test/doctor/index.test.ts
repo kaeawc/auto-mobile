@@ -1,6 +1,23 @@
 import { describe, expect, test } from "bun:test";
+import { runDoctor } from "../../src/doctor";
 import { formatConsoleOutput, formatJsonOutput } from "../../src/doctor/formatter";
 import type { DoctorReport, CheckResult, DoctorSummary } from "../../src/doctor/types";
+
+async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
+  const original = process.platform;
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true
+  });
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(process, "platform", {
+      value: original,
+      configurable: true
+    });
+  }
+}
 
 function makeCheck(overrides: Partial<CheckResult> & Pick<CheckResult, "name" | "status">): CheckResult {
   return {
@@ -381,5 +398,20 @@ describe("formatJsonOutput", () => {
 
     // JSON.stringify with indent 2 starts object contents at 2-space indent
     expect(json).toContain('  "timestamp"');
+  });
+});
+
+describe("runDoctor", () => {
+  test("explicit iOS doctor on non-darwin returns skipped iOS checks promptly", async () => {
+    await withProcessPlatform("linux", async () => {
+      const startedAt = Date.now();
+      const report = await runDoctor({ ios: true });
+
+      expect(Date.now() - startedAt).toBeLessThan(5000);
+      expect(report.platform).toBe("linux");
+      expect(report.android).toBeUndefined();
+      expect(report.ios?.checks.length).toBeGreaterThan(0);
+      expect(report.ios?.checks.every(check => check.status === "skip")).toBe(true);
+    });
   });
 });

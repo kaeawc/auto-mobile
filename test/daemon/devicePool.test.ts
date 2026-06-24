@@ -6,6 +6,27 @@ import { FakeInstalledAppsRepository } from "../fakes/FakeInstalledAppsRepositor
 import { FakeDeviceManager } from "../fakes/FakeDeviceManager";
 import { BootedDevice, DeviceInfo, Platform } from "../../src/models";
 import { DefaultRetryExecutor } from "../../src/utils/retry/RetryExecutor";
+import { MultiPlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { FakeAdbClient } from "../fakes/FakeAdbClient";
+import type { AdbClient } from "../../src/utils/android-cmdline-tools/AdbClient";
+import type { AndroidEmulatorClient } from "../../src/utils/android-cmdline-tools/AndroidEmulatorClient";
+import type { SimCtlClient } from "../../src/utils/ios-cmdline-tools/SimCtlClient";
+
+async function withProcessPlatform<T>(platform: NodeJS.Platform, fn: () => Promise<T>): Promise<T> {
+  const original = process.platform;
+  Object.defineProperty(process, "platform", {
+    value: platform,
+    configurable: true
+  });
+  try {
+    return await fn();
+  } finally {
+    Object.defineProperty(process, "platform", {
+      value: original,
+      configurable: true
+    });
+  }
+}
 
 describe("DevicePool", () => {
   let devicePool: DevicePool;
@@ -69,6 +90,44 @@ describe("DevicePool", () => {
         expect(device?.status).toBe("idle");
         expect(device?.sessionId).toBeNull();
       }
+    });
+  });
+
+  describe("refreshDevices", () => {
+    test("does not query simctl during Linux Android-only refresh", async () => {
+      await withProcessPlatform("linux", async () => {
+        let simctlBootedCalls = 0;
+        const androidDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
+        const fakeSimctl = {
+          isAvailable: async () => false,
+          getBootedSimulators: async () => {
+            simctlBootedCalls++;
+            throw new Error("simctl should not be queried");
+          }
+        } as unknown as SimCtlClient;
+        const fakeEmulator = {
+          getBootedDevices: async () => [androidDevice]
+        } as unknown as AndroidEmulatorClient;
+        const manager = new MultiPlatformDeviceManager(
+          new FakeAdbClient() as unknown as AdbClient,
+          fakeSimctl,
+          fakeEmulator
+        );
+        const pool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        const added = await pool.refreshDevices();
+
+        expect(added).toBe(1);
+        expect(pool.getDevice("emulator-5554")).not.toBeNull();
+        expect(simctlBootedCalls).toBe(0);
+      });
     });
   });
 

@@ -1077,6 +1077,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionClosed(): void {
+    this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
 
     if (this.hierarchyNavigationDetector) {

@@ -589,6 +589,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected onConnectionClosed(): void {
+    this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
 

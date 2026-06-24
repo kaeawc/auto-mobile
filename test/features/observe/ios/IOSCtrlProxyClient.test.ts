@@ -8,6 +8,7 @@ import {
   WebSocketState
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -109,6 +110,17 @@ describe("IOSCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  describe("connection lifecycle", function() {
+    test("cancels screenshot backoff when the connection closes", function() {
+      const scheduler = new FakeScreenshotBackoffScheduler();
+
+      (ctrlProxyClient as any).screenshotBackoffScheduler = scheduler;
+      (ctrlProxyClient as any).onConnectionClosed();
+
+      expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+    });
+  });
 
   describe("getLatestHierarchy", function() {
     test("should return hierarchy data when WebSocket receives fresh data", async function() {

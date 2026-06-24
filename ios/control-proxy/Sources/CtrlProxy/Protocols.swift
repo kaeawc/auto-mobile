@@ -138,6 +138,9 @@ public protocol GesturePerforming {
     /// Press home button
     func pressHome() throws
 
+    /// Perform app-level back navigation
+    func pressBack() throws
+
     /// Open recent apps (app switcher) via swipe-up-and-hold gesture
     func openRecentApps() throws
 

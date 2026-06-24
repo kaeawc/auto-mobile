@@ -54,7 +54,7 @@ flowchart LR
 | `tapOn` | Coordinate tap | `ACTION_CLICK` on element |
 | `swipeOn` | Single-finger swipe | Two-finger swipe or `ACTION_SCROLL_*` |
 | `inputText` | `ACTION_SET_TEXT` | No change (already accessible) |
-| `pressButton` | Hardware keyevent | Optional `GLOBAL_ACTION_BACK` |
+| `pressButton` | Device/navigation button | Optional `GLOBAL_ACTION_BACK` |
 
 ## Topics
 
@@ -68,4 +68,3 @@ flowchart LR
 |----------|---------------|--------|
 | Android | TalkBack | <kbd>⚠️ Partial</kbd> — detection implemented, tool adaptations in progress |
 | iOS | VoiceOver | <kbd>🚧 Design Only</kbd> — planned |
-

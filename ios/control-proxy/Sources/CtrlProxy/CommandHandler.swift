@@ -105,6 +105,9 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestPressHome.rawValue:
                 return try handlePressHome(request, startTime: startTime)
 
+            case RequestType.requestPressBack.rawValue:
+                return try handlePressBack(request, startTime: startTime)
+
             case RequestType.requestRecentApps.rawValue:
                 return try handleRecentApps(request, startTime: startTime)
 
@@ -447,6 +450,21 @@ public class CommandHandler: CommandHandling {
 
         return WebSocketResponse.success(
             type: ResponseType.pressHomeResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handlePressBack(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handlePressBack")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressBack") {
+            try gesturePerformer.pressBack()
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pressBackResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )
@@ -886,6 +904,8 @@ public class CommandHandler: CommandHandling {
             return ResponseType.selectAllResult.rawValue
         case RequestType.requestPressHome.rawValue:
             return ResponseType.pressHomeResult.rawValue
+        case RequestType.requestPressBack.rawValue:
+            return ResponseType.pressBackResult.rawValue
         case RequestType.requestAction.rawValue:
             return ResponseType.actionResult.rawValue
         case RequestType.requestLaunchApp.rawValue:

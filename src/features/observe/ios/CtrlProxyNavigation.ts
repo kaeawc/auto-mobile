@@ -9,6 +9,7 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
@@ -41,6 +42,25 @@ export class CtrlProxyNavigation {
       cancelScreenshotBackoff: false,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Press home",
+    });
+  }
+
+  /**
+   * Request app-level back navigation.
+   */
+  async requestPressBack(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult> {
+    return sendCommand<CtrlProxyPressBackResult>(this.context, {
+      idPrefix: "pressBack",
+      responseType: "press_back",
+      messageType: "request_press_back",
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Press back",
     });
   }
 

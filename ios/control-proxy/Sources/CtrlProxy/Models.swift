@@ -788,6 +788,7 @@ public enum RequestType: String {
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
     case requestPressHome = "request_press_home"
+    case requestPressBack = "request_press_back"
     case requestRecentApps = "request_recent_apps"
 
     // Node actions
@@ -830,6 +831,7 @@ public enum ResponseType: String {
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
     case pressHomeResult = "press_home_result"
+    case pressBackResult = "press_back_result"
     case recentAppsResult = "recent_apps_result"
     case actionResult = "action_result"
     case launchAppResult = "launch_app_result"

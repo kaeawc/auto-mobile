@@ -292,6 +292,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(RequestType.requestSwipe.rawValue, "request_swipe")
         XCTAssertEqual(RequestType.requestDrag.rawValue, "request_drag")
         XCTAssertEqual(RequestType.requestSetText.rawValue, "request_set_text")
+        XCTAssertEqual(RequestType.requestPressBack.rawValue, "request_press_back")
         XCTAssertEqual(RequestType.requestLaunchApp.rawValue, "request_launch_app")
     }
 
@@ -302,6 +303,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(ResponseType.tapCoordinatesResult.rawValue, "tap_coordinates_result")
         XCTAssertEqual(ResponseType.swipeResult.rawValue, "swipe_result")
         XCTAssertEqual(ResponseType.screenshot.rawValue, "screenshot")
+        XCTAssertEqual(ResponseType.pressBackResult.rawValue, "press_back_result")
         XCTAssertEqual(ResponseType.launchAppResult.rawValue, "launch_app_result")
     }
 

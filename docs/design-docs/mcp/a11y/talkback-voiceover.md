@@ -132,7 +132,7 @@ For scroll-until-visible (`lookFor`), clear accessibility focus before scrolling
 
 **inputText / clearText**: No change needed. Already uses `ACTION_SET_TEXT`, which TalkBack handles correctly.
 
-**pressButton**: Hardware keycodes work the same. Back button may exit TalkBack local context menu instead of navigating back; use `GLOBAL_ACTION_BACK` to bypass when needed.
+**pressButton**: Device and navigation buttons work the same. Back button may exit TalkBack local context menu instead of navigating back; use `GLOBAL_ACTION_BACK` to bypass when needed.
 
 **launchApp / terminateApp / installApp / startDevice / killDevice**: No change needed. App lifecycle and device management are unaffected by TalkBack state.
 

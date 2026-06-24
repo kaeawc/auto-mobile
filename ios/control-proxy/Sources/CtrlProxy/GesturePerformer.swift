@@ -394,6 +394,13 @@ public class GesturePerformer: GesturePerforming {
             return application
         }
 
+        private func resolveNavigationApp() -> XCUIApplication? {
+            if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
+                return XCUIApplication(bundleIdentifier: bundleId)
+            }
+            return application
+        }
+
         public func typeText(text: String) throws {
             guard let app = resolveTextInputApp() else {
                 throw GestureError.noApplication
@@ -760,6 +767,59 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func pressBack() throws {
+            guard let app = resolveNavigationApp() else {
+                throw GestureError.noApplication
+            }
+
+            try runOnMainThread {
+                if self.tapExplicitNavigationBarBackButton(in: app) {
+                    return
+                }
+                try self.swipeFromLeftEdge(in: app)
+            }
+        }
+
+        private func tapExplicitNavigationBarBackButton(in app: XCUIApplication) -> Bool {
+            for navigationBar in app.navigationBars.allElementsBoundByIndex where navigationBar.exists {
+                let midpoint = navigationBar.frame.midX
+                for button in navigationBar.buttons.allElementsBoundByIndex where button.exists && button.isHittable {
+                    if button.frame.midX <= midpoint && self.isExplicitBackButton(button) {
+                        button.tap()
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        private func isExplicitBackButton(_ button: XCUIElement) -> Bool {
+            let candidates = [button.label, button.identifier]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            return candidates.contains { value in
+                value == "back" || value.contains("back button") || value.contains("go back")
+            }
+        }
+
+        private func swipeFromLeftEdge(in app: XCUIApplication) throws {
+            let frame = app.frame
+            guard frame.width > 0, frame.height > 0 else {
+                throw GestureError.gestureFailed("Cannot determine application frame for back gesture")
+            }
+
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: 2, dy: frame.height / 2))
+            let end = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: min(frame.width * 0.75, frame.width - 2), dy: frame.height / 2))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: end,
+                withVelocity: .default,
+                thenHoldForDuration: 0
+            )
+        }
+
         public func openRecentApps() throws {
             try runOnMainThread {
                 let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -899,6 +959,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressHome() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func pressBack() throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

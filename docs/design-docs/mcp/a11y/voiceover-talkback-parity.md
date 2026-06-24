@@ -14,7 +14,7 @@ This document compares iOS VoiceOver and Android TalkBack support in AutoMobile 
 | `tapOn` adaptation | ✅ `ACTION_CLICK` | ✅ Accessibility activation | Transparent to agent |
 | `swipeOn` / scroll adaptation | ✅ `ACTION_SCROLL_FORWARD/BACKWARD` | ✅ Accessibility scroll action | Fallback differs |
 | `inputText` / `clearText` | ✅ Unchanged | ✅ Unchanged | Both use text injection |
-| `pressButton` | ✅ Unchanged | ✅ Unchanged | Hardware keycodes |
+| `pressButton` | ✅ Unchanged | ✅ Unchanged | Device/navigation buttons |
 | `accessibilityState` in observe | ✅ `service: "talkback"` | ✅ `service: "voiceover"` | |
 | `accessibilityFocusedElement` | ✅ Reported | ❌ Not tracked | Gap — see below |
 | Programmatic enable/disable | ✅ Via ADB | ✅ Simulator only | Physical device support deferred |

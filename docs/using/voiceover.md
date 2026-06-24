@@ -52,12 +52,14 @@ AutoMobile queries `UIAccessibility.isVoiceOverRunning` via the CtrlProxy WebSoc
 | `tapOn` | Coordinate-based tap | Accessibility activation on the target element |
 | `swipeOn` / scroll | Single-finger swipe | Accessibility scroll action or three-finger swipe |
 | `inputText` / `clearText` | Text injection | Text injection (unchanged) |
-| `pressButton` | Hardware keycode | Hardware keycode (unchanged; see note below) |
+| `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
 | `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
 
 No tool parameters change. Existing automation scripts work without modification.
 
 **Home button note.** When VoiceOver is active, the home button requires a single press to invoke rather than the swipe gesture used in standard navigation. AutoMobile handles this correctly with `pressButton({ button: "home" })`.
+
+**Back navigation note.** iOS has no hardware back button. AutoMobile maps `pressButton({ button: "back" })` to app-level back navigation through CtrlProxy.
 
 ---
 

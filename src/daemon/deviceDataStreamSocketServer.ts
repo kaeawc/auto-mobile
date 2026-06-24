@@ -413,6 +413,9 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
         deviceId: request.deviceId ?? null,
         requestId: request.id,
       });
+      if (observations.length === 0) {
+        throw new Error("Observation request did not capture any devices");
+      }
       const hierarchyUpdates: Array<{ deviceId: string; hierarchy: ViewHierarchyResult }> = [];
 
       for (const { deviceId, observation } of observations) {

@@ -165,6 +165,28 @@ describe("DeviceDataStreamSocketServer", () => {
       );
     });
 
+    it("returns error when observation callback returns no devices", async () => {
+      server.setOnObservationRequested(async () => []);
+      const socket = new FakeSocket();
+
+      await server.processLineForTest(socket, JSON.stringify({
+        id: "obs-empty",
+        command: "request_observation",
+      }));
+
+      const msgs = socket.getWrittenMessages<{
+        id?: string;
+        type: string;
+        success?: boolean;
+        error?: string;
+      }>();
+      expect(msgs).toHaveLength(1);
+      expect(msgs[0].type).toBe("error");
+      expect(msgs[0].id).toBe("obs-empty");
+      expect(msgs[0].success).toBe(false);
+      expect(msgs[0].error).toBe("Observation request did not capture any devices");
+    });
+
     it("returns error when observation callback throws", async () => {
       server.setOnObservationRequested(async () => {
         throw new Error("Observe failed");

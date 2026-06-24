@@ -37,6 +37,10 @@ import { getDaemonSocketPaths } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import {
+  pushInitialObservationFramesForSubscriber,
+  type ObservationStreamIosClient,
+} from "./observationInitialFrame";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
@@ -619,56 +623,13 @@ export class Daemon {
 
       const allDevices = this.devicePool.getAllDevices();
 
-      // Android: ensure accessibility service WebSocket is connected
-      const androidDevices = allDevices.filter(d => d.platform === "android");
-      for (const pooledDevice of androidDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
-        try {
-          const bootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: pooledDevice.platform as "android",
-          };
-          const client = AndroidCtrlProxyClient.getInstance(bootedDevice, defaultAdbClientFactory);
-          client.ensureConnected().then(connected => {
-            if (connected) {
-              logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);
-            } else {
-              logger.warn(`[Daemon] Failed to connect WebSocket to ${pooledDevice.id}`);
-            }
-          }).catch(error => {
-            logger.warn(`[Daemon] Error connecting WebSocket to ${pooledDevice.id}: ${error}`);
-          });
-        } catch (error) {
-          logger.warn(`[Daemon] Error setting up WebSocket for ${pooledDevice.id}: ${error}`);
-        }
-      }
-
-      // iOS: ensure CtrlProxy is set up and connected
-      const iosDevices = allDevices.filter(d => d.platform === "ios");
-      for (const pooledDevice of iosDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
-        try {
-          const bootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: "ios" as const,
-          };
-          logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${pooledDevice.id}`);
-          const client = IOSCtrlProxyClient.getInstance(bootedDevice, null);
-          client.ensureConnected().then(connected => {
-            if (connected) {
-              logger.info(`[Daemon] CtrlProxy iOS connected to ${pooledDevice.id} for observation stream`);
-            } else {
-              logger.warn(`[Daemon] Failed to connect CtrlProxy iOS to ${pooledDevice.id}`);
-            }
-          }).catch(error => {
-            logger.warn(`[Daemon] Error connecting CtrlProxy iOS to ${pooledDevice.id}: ${error}`);
-          });
-        } catch (error) {
-          logger.warn(`[Daemon] Error setting up CtrlProxy iOS for ${pooledDevice.id}: ${error}`);
-        }
-      }
+      pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
+        streamServer: server,
+        androidClientFactory: device => AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
+        iosClientFactory: device => this.createObservationStreamIosClient(device),
+      }).catch(error => {
+        logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
+      });
 
       if (allDevices.length === 0) {
         logger.info("[Daemon] No devices in pool to connect");
@@ -713,6 +674,21 @@ export class Daemon {
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
+    const client = IOSCtrlProxyClient.getInstance(device);
+    return {
+      ensureConnected: () => client.ensureConnected(),
+      getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
+      requestHierarchySync: async (...args) => {
+        const result = await client.requestHierarchySync(...args);
+        return result ? { hierarchy: result.hierarchy } : null;
+      },
+      convertToViewHierarchyResult: hierarchy =>
+        client.convertToViewHierarchyResult(hierarchy as never),
+      requestScreenshot: (...args) => client.requestScreenshot(...args),
+    };
   }
 
   /**

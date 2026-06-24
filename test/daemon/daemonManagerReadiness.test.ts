@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { createServer, type Server } from "node:net";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -39,6 +40,7 @@ class ProbeClient implements DaemonClientLike {
 
 describe("DaemonManager readiness", () => {
   const tempDirs: string[] = [];
+  const servers: Server[] = [];
 
   function createPaths(): { dir: string; lockPath: string; pidPath: string; socketPath: string } {
     const dir = mkdtempSync(join(tmpdir(), "daemon-readiness-test-"));
@@ -62,7 +64,12 @@ describe("DaemonManager readiness", () => {
     writeFileSync(pidPath, JSON.stringify(pidData), { mode: 0o600 });
   }
 
-  afterEach(() => {
+  afterEach(async () => {
+    await Promise.all(
+      servers.map(server => new Promise<void>(resolve => server.close(() => resolve())))
+    );
+    servers.length = 0;
+
     for (const dir of tempDirs) {
       rmSync(dir, { recursive: true, force: true });
     }
@@ -97,7 +104,7 @@ describe("DaemonManager readiness", () => {
     expect(existsSync(socketPath)).toBe(true);
   });
 
-  test("removes a stale socket and keeps waiting when the PID is alive but connect fails", async () => {
+  test("removes an invalid non-socket path and keeps waiting when the PID is alive", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
@@ -123,5 +130,34 @@ describe("DaemonManager readiness", () => {
     expect(clients[0].connectCallCount).toBe(1);
     expect(clients[0].closeCallCount).toBe(1);
     expect(existsSync(socketPath)).toBe(false);
+  });
+
+  test("does not remove a socket path when a readiness probe fails", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const clients: ProbeClient[] = [];
+    writePidFile(pidPath, socketPath);
+
+    const server = createServer();
+    servers.push(server);
+    await new Promise<void>(resolve => server.listen(socketPath, resolve));
+
+    const manager = new DaemonManager(
+      () => {
+        const client = new ProbeClient(false);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath
+    );
+
+    await expect(manager.waitForReady(250)).resolves.toBe(false);
+    expect(clients).toHaveLength(3);
+    expect(existsSync(socketPath)).toBe(true);
   });
 });

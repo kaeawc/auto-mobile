@@ -1,6 +1,6 @@
 import { spawn, execSync } from "node:child_process";
 import { readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { logger } from "../utils/logger";
@@ -555,7 +555,7 @@ export class DaemonManager implements DaemonManagerLike {
           if (await this.verifyDaemonConnection()) {
             return true;
           }
-          await this.removeStaleSocketFile();
+          await this.removeInvalidSocketPath();
         }
       }
 
@@ -582,16 +582,25 @@ export class DaemonManager implements DaemonManagerLike {
     }
   }
 
-  private async removeStaleSocketFile(): Promise<void> {
+  private async removeInvalidSocketPath(): Promise<void> {
     if (!existsSync(this.socketPath)) {
       return;
     }
 
     try {
-      await unlink(this.socketPath);
-      logger.debug(`Removed stale daemon socket file: ${this.socketPath}`);
+      if (statSync(this.socketPath).isSocket()) {
+        return;
+      }
     } catch (error) {
-      logger.debug(`Failed to remove stale daemon socket file: ${error instanceof Error ? error.message : String(error)}`);
+      logger.debug(`Failed to inspect daemon socket path: ${error instanceof Error ? error.message : String(error)}`);
+      return;
+    }
+
+    try {
+      await unlink(this.socketPath);
+      logger.debug(`Removed invalid daemon socket path: ${this.socketPath}`);
+    } catch (error) {
+      logger.debug(`Failed to remove invalid daemon socket path: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

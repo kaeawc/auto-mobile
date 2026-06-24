@@ -335,6 +335,95 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(errorResponse.success, false)
     }
 
+    func testKeyboardDetectSuccess() {
+        fakeGesturePerformer.setKeyboardOpen(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-detect",
+            action: "detect"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "keyboard_result")
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["detect"])
+    }
+
+    func testKeyboardOpenSuccess() {
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-open",
+            action: "open"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["open"])
+    }
+
+    func testKeyboardOpenFailureWhenKeyboardRemainsClosed() {
+        fakeGesturePerformer.setNextKeyboardResult(false)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-open-failed",
+            action: "open"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.open, false)
+        XCTAssertEqual(response.error, "Keyboard did not open")
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["open"])
+    }
+
+    func testKeyboardCloseSuccess() {
+        fakeGesturePerformer.setKeyboardOpen(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-close",
+            action: "close"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.open, false)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["close"])
+    }
+
+    func testKeyboardCloseFailureWhenKeyboardRemainsOpen() {
+        fakeGesturePerformer.setNextKeyboardResult(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-close-failed",
+            action: "close"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(response.error, "Keyboard did not close")
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["close"])
+    }
+
+    func testKeyboardMissingAction() {
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-missing"
+        )
+
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertEqual(errorResponse.type, "keyboard_result")
+        XCTAssertTrue(errorResponse.error?.contains("action") == true)
+    }
+
     func testClearTextWithoutResourceId() {
         let request = WebSocketRequest(
             type: "request_clear_text",
@@ -484,6 +573,38 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(perfTimings[0].name, "handlePressBack")
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
         XCTAssertEqual(childNames, ["pressBack"])
+    }
+
+    func testPressButtonBackSuccess() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-back",
+            action: "back"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["back"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
+    func testPressButtonHomeSwitchesToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-home",
+            action: "home"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["home"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, ["com.apple.springboard"])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
     func testLaunchAppSuccess() {

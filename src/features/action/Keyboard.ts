@@ -10,6 +10,7 @@ import { DefaultElementFinder } from "../utility/ElementFinder";
 import { ViewHierarchy } from "../observe/ViewHierarchy";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 type KeyboardAction = "open" | "close" | "detect";
 
@@ -79,12 +80,7 @@ export class Keyboard {
 
   async execute(action: KeyboardAction, signal?: AbortSignal): Promise<KeyboardResult> {
     if (this.device.platform === "ios") {
-      return {
-        success: false,
-        open: false,
-        message: "iOS keyboard management is not yet supported",
-        error: "iOS keyboard management is not yet supported"
-      };
+      return this.executeIOS(action);
     }
 
     switch (action) {
@@ -105,6 +101,41 @@ export class Keyboard {
           error: `Unsupported keyboard action: ${action}`
         };
     }
+  }
+
+  private async executeIOS(action: KeyboardAction): Promise<KeyboardResult> {
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    const result = await client.requestKeyboard(action);
+    if (!result.success) {
+      const message = result.error ?? `Failed to ${action} iOS keyboard`;
+      return {
+        success: false,
+        open: result.open,
+        message,
+        error: message
+      };
+    }
+
+    const success = action === "detect"
+      || (action === "open" && result.open)
+      || (action === "close" && !result.open);
+    const message = this.keyboardMessage(action, result.open);
+    return {
+      success,
+      open: result.open,
+      message,
+      ...(success ? {} : { error: message })
+    };
+  }
+
+  private keyboardMessage(action: KeyboardAction, open: boolean): string {
+    if (action === "detect") {
+      return open ? "Keyboard is open" : "Keyboard is closed";
+    }
+    if (action === "open") {
+      return open ? "Keyboard opened" : "Keyboard did not open";
+    }
+    return open ? "Keyboard did not close" : "Keyboard closed";
   }
 
   private async detect(signal?: AbortSignal): Promise<KeyboardResult> {

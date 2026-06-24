@@ -250,6 +250,33 @@ public struct RotateResponse: Codable {
     }
 }
 
+/// Response for keyboard commands with visibility state after the command.
+public struct KeyboardResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let open: Bool
+    public let totalTimeMs: Int64
+    public let error: String?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        open: Bool,
+        totalTimeMs: Int64,
+        error: String? = nil
+    ) {
+        self.type = ResponseType.keyboardResult.rawValue
+        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.open = open
+        self.totalTimeMs = totalTimeMs
+        self.error = error
+    }
+}
+
 /// Performance timing data - hierarchical format matching Android/TypeScript
 public struct PerfTiming: Codable {
     public let name: String
@@ -787,6 +814,8 @@ public enum RequestType: String {
     case requestClearText = "request_clear_text"
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
+    case requestKeyboard = "request_keyboard"
+    case requestPressButton = "request_press_button"
     case requestPressHome = "request_press_home"
     case requestPressBack = "request_press_back"
     case requestRecentApps = "request_recent_apps"
@@ -830,6 +859,8 @@ public enum ResponseType: String {
     case clearTextResult = "clear_text_result"
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
+    case keyboardResult = "keyboard_result"
+    case pressButtonResult = "press_button_result"
     case pressHomeResult = "press_home_result"
     case pressBackResult = "press_back_result"
     case recentAppsResult = "recent_apps_result"

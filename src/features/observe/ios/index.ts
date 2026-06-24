@@ -17,6 +17,7 @@ export { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 export { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 export { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 export { CtrlProxyStorage } from "./CtrlProxyStorage";
+export { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 
 // Types
 export type {
@@ -37,6 +38,7 @@ export type {
   CtrlProxySetTextResult,
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
+  CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyRecentAppsResult,

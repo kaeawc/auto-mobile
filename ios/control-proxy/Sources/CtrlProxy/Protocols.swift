@@ -112,6 +112,10 @@ public protocol GesturePerforming {
     /// Perform IME action (done, next, search, etc.)
     func performImeAction(_ action: String) throws
 
+    /// Open, close, or detect the software keyboard. Returns whether the
+    /// keyboard is visible after the requested action.
+    func keyboard(action: String) throws -> Bool
+
     // MARK: - Clipboard
 
     /// Perform clipboard operation (get, copy, clear, paste)
@@ -140,6 +144,9 @@ public protocol GesturePerforming {
 
     /// Perform app-level back navigation
     func pressBack() throws
+
+    /// Press a named hardware or keyboard-backed button.
+    func pressButton(_ button: String) throws
 
     /// Open recent apps (app switcher) via swipe-up-and-hold gesture
     func openRecentApps() throws

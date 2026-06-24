@@ -111,6 +111,7 @@ export interface WebSocketMessage {
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   success?: boolean;
+  open?: boolean;
   totalTimeMs?: number;
   error?: string;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
@@ -151,6 +152,11 @@ export type CtrlProxyImeActionResult = ActionTimingResult;
 
 /** Select all result from CtrlProxy iOS */
 export type CtrlProxySelectAllResult = BaseResult;
+
+/** Keyboard action result from CtrlProxy iOS */
+export interface CtrlProxyKeyboardResult extends BaseResult {
+  open: boolean;
+}
 
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;

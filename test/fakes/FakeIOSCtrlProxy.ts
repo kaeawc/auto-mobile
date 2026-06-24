@@ -8,7 +8,9 @@ import {
   CtrlProxySetTextResult,
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
+  CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -95,7 +97,10 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   private screenshotRequestCount: number = 0;
   private hierarchyRequestCount: number = 0;
+  private keyboardOpen: boolean = false;
+  private keyboardHistory: Array<{ action: "open" | "close" | "detect" }> = [];
   private pressHomeRequestCount: number = 0;
+  private pressBackRequestCount: number = 0;
   private recentAppsRequestCount: number = 0;
   private rotateHistory: Array<{ orientation: string }> = [];
   private currentOrientation: string = "portrait";
@@ -286,6 +291,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.pressHomeRequestCount;
   }
 
+  getKeyboardHistory(): Array<{ action: "open" | "close" | "detect" }> {
+    return [...this.keyboardHistory];
+  }
+
+  getPressBackRequestCount(): number {
+    return this.pressBackRequestCount;
+  }
+
   getRecentAppsRequestCount(): number {
     return this.recentAppsRequestCount;
   }
@@ -412,6 +425,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.imeActionHistory = [];
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
+    this.keyboardOpen = false;
+    this.keyboardHistory = [];
+    this.pressHomeRequestCount = 0;
+    this.pressBackRequestCount = 0;
+    this.recentAppsRequestCount = 0;
     this.launchAppHistory = [];
     this.rotateHistory = [];
     this.currentOrientation = "portrait";
@@ -728,6 +746,29 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  async requestKeyboard(
+    action: "open" | "close" | "detect",
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyKeyboardResult> {
+    await this.applyDelay("keyboard");
+    this.checkFailure("keyboard");
+
+    this.keyboardHistory.push({ action });
+    if (action === "open") {
+      this.keyboardOpen = true;
+    } else if (action === "close") {
+      this.keyboardOpen = false;
+    }
+
+    return {
+      success: true,
+      open: this.keyboardOpen,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
@@ -735,6 +776,21 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
     this.checkFailure("pressHome");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestPressBack(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult> {
+    this.pressBackRequestCount++;
+    await this.applyDelay("pressBack");
+    this.checkFailure("pressBack");
 
     return {
       success: true,

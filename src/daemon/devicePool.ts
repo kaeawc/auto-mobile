@@ -1410,10 +1410,11 @@ export class DevicePool {
   }
 
   private withDeviceImageMetadata(ready: BootedDevice, image: DeviceInfo): BootedDevice {
+    const imageIosVersion = image.iosVersion ?? image.osVersion ?? this.iosVersionFromRuntime(image.runtime);
     return {
       ...ready,
-      iosVersion: ready.iosVersion ?? image.iosVersion,
-      osVersion: ready.osVersion ?? image.osVersion,
+      iosVersion: ready.iosVersion ?? imageIosVersion,
+      osVersion: ready.osVersion ?? image.osVersion ?? imageIosVersion,
       formFactor: ready.formFactor ?? image.formFactor,
       screenWidth: ready.screenWidth ?? image.screenWidth,
       screenHeight: ready.screenHeight ?? image.screenHeight,

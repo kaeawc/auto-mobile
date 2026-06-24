@@ -55,4 +55,11 @@ describe("version flag", () => {
     expect(hasGlobalVersionFlag(["--version", "--cli", "doctor"])).toBe(true);
     expect(hasGlobalVersionFlag(["-v", "--cli", "doctor"])).toBe(true);
   });
+
+  test("ignores version-like values after the daemon command boundary", () => {
+    expect(hasGlobalVersionFlag(["--daemon", "status", "-v"])).toBe(false);
+    expect(hasGlobalVersionFlag(["--debug", "--daemon", "status", "--version"])).toBe(false);
+    expect(hasGlobalVersionFlag(["--version", "--daemon", "status"])).toBe(true);
+    expect(hasGlobalVersionFlag(["-v", "--daemon", "status"])).toBe(true);
+  });
 });

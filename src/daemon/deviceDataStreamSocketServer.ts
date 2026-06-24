@@ -295,6 +295,31 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
+   * Return true when at least one active subscriber would receive updates for this device.
+   */
+  hasSubscriberForDevice(deviceId: string): boolean {
+    const probe: DeviceDataPush = {
+      message: {
+        type: "screenshot_update",
+        deviceId,
+      },
+      targetDeviceId: deviceId,
+    };
+
+    for (const subscriber of this.subscribers.values()) {
+      if (subscriber.backfilling || subscriber.socket.destroyed) {
+        continue;
+      }
+
+      if (this.matchesFilter(subscriber.filter, probe)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  /**
    * Notify subscribers that the underlying device control connection was lost.
    */
   onDeviceConnectionLost(deviceId: string): void {

@@ -308,12 +308,16 @@ export abstract class PushSubscriptionSocketServer<TFilter, TPushData> extends B
 
       try {
         const result = subscriber.socket.write(json);
-        if (result) {
-          subscriber.lastActivity = this.timer.now();
-        } else {
+        if (!result) {
           // write()=false is not a death signal — wait for drain; truly dead peers get reaped by timeoutMs.
           this.armDrainListener(subscriber);
         }
+        // A successful write only proves our local send buffer accepted the bytes — not that the
+        // peer is alive. Liveness is tracked via inbound pongs (and drain events, which prove the
+        // peer is actually reading), so we deliberately do NOT refresh lastActivity here. Otherwise
+        // a self-sustaining write loop (e.g. screenshot keepalives) would keep refreshing liveness
+        // and mask a subscriber that has stopped responding to pings, preventing it from ever
+        // timing out.
         sentCount++;
       } catch (error) {
         logger.warn(`[${this.serverName}] Failed to send to ${subscriptionId}: ${error}`);

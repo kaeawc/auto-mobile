@@ -589,6 +589,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   protected onConnectionClosed(): void {
+    this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
     getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
@@ -1530,7 +1531,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   private startScreenshotBackoff(): void {
     const server = getDeviceDataStreamServer();
-    if (!server || server.getSubscriberCount() === 0) {
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return;
     }
 
@@ -1551,13 +1552,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           this.pushScreenshotToObservationStream(data, screenWidth, screenHeight);
         },
         undefined, // Use default config
-        this.timer
+        this.timer,
+        () => {
+          const server = getDeviceDataStreamServer();
+          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
+        }
       );
     }
     return this.screenshotBackoffScheduler;
   }
 
   private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
+    const server = getDeviceDataStreamServer();
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
+      return { success: false, error: "No subscribers" };
+    }
+
     try {
       const result = await this.requestScreenshot(5000);
       if (!result.success || !result.data) {

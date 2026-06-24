@@ -23,12 +23,19 @@ type ScreenshotCaptureCallback = () => Promise<ScreenshotCaptureResult>;
 type ScreenshotEmitCallback = (data: string) => void;
 
 /**
+ * Callback to decide whether keepalive screenshots should continue.
+ */
+type ScreenshotKeepAlivePredicate = () => boolean;
+
+/**
  * Interface for screenshot backoff scheduling.
  *
  * On an observability event, captures screenshots at backoff intervals:
  * t=0, t=100, t=300, t=500, t=800, t=1300 ms
+ * then continues low-frequency keepalive captures while subscribers are active.
  *
- * - Skips emitting if screenshot checksum matches previous
+ * - Burst captures skip emitting if screenshot checksum matches previous
+ * - Keepalive captures emit duplicate frames to confirm stream liveness
  * - Cancels pending captures if new activity occurs
  */
 export interface ScreenshotBackoffScheduler {
@@ -63,10 +70,18 @@ interface ScreenshotBackoffConfig {
    * Default: [0, 100, 300, 500, 800, 1300]
    */
   intervals: number[];
+
+  /**
+   * Keepalive interval in milliseconds after the backoff burst completes.
+   * Set to null or undefined to disable keepalive captures.
+   * Default: 3000
+   */
+  keepAliveIntervalMs?: number | null;
 }
 
 const DEFAULT_CONFIG: ScreenshotBackoffConfig = {
   intervals: [0, 100, 300, 500, 800, 1300],
+  keepAliveIntervalMs: 3000,
 };
 
 /**
@@ -83,9 +98,11 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   private timer: Timer;
   private captureCallback: ScreenshotCaptureCallback;
   private emitCallback: ScreenshotEmitCallback;
+  private shouldKeepAlive: ScreenshotKeepAlivePredicate;
   private config: ScreenshotBackoffConfig;
 
   private pendingTimeouts: ReturnType<Timer["setTimeout"]>[] = [];
+  private keepAliveTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private lastEmittedChecksum: string | null = null;
   private sequenceId: number = 0;
 
@@ -93,20 +110,24 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     captureCallback: ScreenshotCaptureCallback,
     emitCallback: ScreenshotEmitCallback,
     config: ScreenshotBackoffConfig = DEFAULT_CONFIG,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    shouldKeepAlive: ScreenshotKeepAlivePredicate = () => true
   ) {
     this.captureCallback = captureCallback;
     this.emitCallback = emitCallback;
-    this.config = config;
+    this.config = {
+      ...DEFAULT_CONFIG,
+      ...config,
+    };
     this.timer = timer;
+    this.shouldKeepAlive = shouldKeepAlive;
   }
 
   startBackoffSequence(): void {
     // Cancel any existing sequence
     this.cancelPendingCaptures();
 
-    // Increment sequence ID to invalidate any in-flight captures from previous sequence
-    this.sequenceId++;
+    // cancelPendingCaptures increments sequenceId to invalidate in-flight captures.
     const currentSequenceId = this.sequenceId;
 
     logger.debug(`[ScreenshotBackoff] Starting backoff sequence ${currentSequenceId} with intervals: ${this.config.intervals.join(", ")}ms`);
@@ -121,6 +142,8 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
   }
 
   cancelPendingCaptures(): void {
+    this.sequenceId++;
+
     if (this.pendingTimeouts.length > 0) {
       logger.debug(`[ScreenshotBackoff] Cancelling ${this.pendingTimeouts.length} pending captures`);
       for (const timeoutId of this.pendingTimeouts) {
@@ -128,10 +151,15 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       }
       this.pendingTimeouts = [];
     }
+    if (this.keepAliveTimeout) {
+      logger.debug("[ScreenshotBackoff] Cancelling keepalive capture");
+      this.timer.clearTimeout(this.keepAliveTimeout);
+      this.keepAliveTimeout = null;
+    }
   }
 
   isActive(): boolean {
-    return this.pendingTimeouts.length > 0;
+    return this.pendingTimeouts.length > 0 || this.keepAliveTimeout !== null;
   }
 
   getPendingCount(): number {
@@ -161,16 +189,50 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
     logger.debug(`[ScreenshotBackoff] Capturing screenshot at t=${interval}ms (sequence ${sequenceId})`);
 
     try {
+      await this.captureAndEmit(sequenceId, `t=${interval}ms`, false);
+    } finally {
+      this.scheduleKeepAliveIfIdle(sequenceId);
+    }
+  }
+
+  private async captureKeepAlive(sequenceId: number): Promise<void> {
+    this.keepAliveTimeout = null;
+
+    if (sequenceId !== this.sequenceId) {
+      logger.debug(`[ScreenshotBackoff] Skipping keepalive capture - sequence ${sequenceId} was superseded by ${this.sequenceId}`);
+      return;
+    }
+
+    if (!this.shouldKeepAlive()) {
+      logger.debug("[ScreenshotBackoff] Stopping keepalive captures - no active subscribers");
+      return;
+    }
+
+    logger.debug(`[ScreenshotBackoff] Capturing keepalive screenshot (sequence ${sequenceId})`);
+
+    try {
+      await this.captureAndEmit(sequenceId, "keepalive", true);
+    } finally {
+      this.scheduleKeepAliveIfIdle(sequenceId);
+    }
+  }
+
+  private async captureAndEmit(
+    sequenceId: number,
+    captureLabel: string,
+    emitDuplicates: boolean
+  ): Promise<void> {
+    try {
       const result = await this.captureCallback();
 
       // Check again if sequence is still valid (capture might have taken time)
       if (sequenceId !== this.sequenceId) {
-        logger.debug(`[ScreenshotBackoff] Discarding capture at ${interval}ms - sequence was cancelled during capture`);
+        logger.debug(`[ScreenshotBackoff] Discarding capture ${captureLabel} - sequence was cancelled during capture`);
         return;
       }
 
       if (!result.success || !result.data) {
-        logger.debug(`[ScreenshotBackoff] Screenshot capture failed at t=${interval}ms: ${result.error}`);
+        logger.debug(`[ScreenshotBackoff] Screenshot capture failed at ${captureLabel}: ${result.error}`);
         return;
       }
 
@@ -178,19 +240,40 @@ export class DefaultScreenshotBackoffScheduler implements ScreenshotBackoffSched
       const checksum = result.checksum || computeChecksum(result.data);
 
       // Skip if same as last emitted
-      if (checksum === this.lastEmittedChecksum) {
-        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at t=${interval}ms (checksum: ${checksum.substring(0, 8)}...)`);
+      if (!emitDuplicates && checksum === this.lastEmittedChecksum) {
+        logger.debug(`[ScreenshotBackoff] Skipping duplicate screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}...)`);
         return;
       }
 
       // Emit the screenshot
-      logger.debug(`[ScreenshotBackoff] Emitting screenshot at t=${interval}ms (checksum: ${checksum.substring(0, 8)}..., size: ${result.data.length})`);
+      logger.debug(`[ScreenshotBackoff] Emitting screenshot at ${captureLabel} (checksum: ${checksum.substring(0, 8)}..., size: ${result.data.length})`);
       this.lastEmittedChecksum = checksum;
       this.emitCallback(result.data);
 
     } catch (error) {
-      logger.warn(`[ScreenshotBackoff] Error capturing screenshot at t=${interval}ms: ${error}`);
+      logger.warn(`[ScreenshotBackoff] Error capturing screenshot at ${captureLabel}: ${error}`);
     }
+  }
+
+  private scheduleKeepAliveIfIdle(sequenceId: number): void {
+    if (sequenceId !== this.sequenceId || this.pendingTimeouts.length > 0 || this.keepAliveTimeout) {
+      return;
+    }
+
+    const keepAliveIntervalMs = this.config.keepAliveIntervalMs;
+    if (keepAliveIntervalMs === null || keepAliveIntervalMs === undefined || keepAliveIntervalMs <= 0) {
+      return;
+    }
+
+    if (!this.shouldKeepAlive()) {
+      logger.debug("[ScreenshotBackoff] Not scheduling keepalive - no active subscribers");
+      return;
+    }
+
+    this.keepAliveTimeout = this.timer.setTimeout(() => {
+      this.captureKeepAlive(sequenceId);
+    }, keepAliveIntervalMs);
+    logger.debug(`[ScreenshotBackoff] Scheduled keepalive capture in ${keepAliveIntervalMs}ms (sequence ${sequenceId})`);
   }
 }
 

@@ -10,6 +10,7 @@ import {
   WebSocketState
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
 
 describe("CtrlProxyPackages (Android)", function() {
   let fakeAdb: FakeAdbExecutor;
@@ -100,6 +101,19 @@ describe("CtrlProxyPackages (Android)", function() {
     }
     throw new Error(`No message of type ${type} in: ${socket.sentMessages.join(", ")}`);
   };
+
+  describe("connection lifecycle", function() {
+    test("cancels screenshot backoff when the connection closes", function() {
+      const { factory } = createCapturingFactory(fakeTimer);
+      const client = AndroidCtrlProxyClient.createForTesting(testDevice, fakeAdb, factory, fakeTimer);
+      const scheduler = new FakeScreenshotBackoffScheduler();
+
+      (client as any).screenshotBackoffScheduler = scheduler;
+      (client as any).onConnectionClosed();
+
+      expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+    });
+  });
 
   describe("requestInstalledPackages", function() {
     test("sends request_installed_packages and resolves on result", async function() {

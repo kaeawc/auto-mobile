@@ -3,10 +3,12 @@ import { randomUUID } from "node:crypto";
 import { createServer, type Server as NetServer } from "node:net";
 import { existsSync } from "node:fs";
 import { unlink } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
+
+const isWindows = platform() === "win32";
 
 function createFakeDaemonState() {
   return {
@@ -42,13 +44,13 @@ describe("UnixSocketServer close", () => {
     }
   });
 
-  test("removes its own socket file on close", async () => {
+  (isWindows ? test.skip : test)("removes its own socket file on close", async () => {
     await server.close();
 
     expect(existsSync(socketPath)).toBe(false);
   });
 
-  test("does not remove a replacement socket at the socket path", async () => {
+  (isWindows ? test.skip : test)("does not remove a replacement socket at the socket path", async () => {
     await unlink(socketPath);
     const replacementServer = await listenOnSocket(socketPath);
 

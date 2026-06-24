@@ -8,7 +8,7 @@ import type { DaemonOptions } from "./daemon/types";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import type { PlanExecutionLockScope } from "./utils/ServerConfig";
 import type { VideoRecordingConfigInput } from "./models";
-import { hasGlobalVersionFlag } from "./cli/versionFlag";
+import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
 
@@ -19,8 +19,9 @@ interface FatalLogger {
 
 let fatalLogger: FatalLogger | undefined;
 
-if (hasGlobalVersionFlag(process.argv.slice(2))) {
-  console.log(getMcpServerVersion());
+const versionOutput = getGlobalVersionOutput(process.argv.slice(2), getMcpServerVersion());
+if (versionOutput !== undefined) {
+  console.log(versionOutput);
   process.exit(0);
 }
 interface ParseLogger {

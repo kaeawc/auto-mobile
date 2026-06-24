@@ -2538,7 +2538,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         this.timer,
         () => {
           const server = getDeviceDataStreamServer();
-          return !!server && server.getSubscriberCount() > 0;
+          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
         }
       );
     }
@@ -2547,7 +2547,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
     const server = getDeviceDataStreamServer();
-    if (!server || server.getSubscriberCount() === 0) {
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return { success: false, error: "No subscribers" };
     }
 
@@ -2620,7 +2620,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private startScreenshotBackoff(): void {
     const server = getDeviceDataStreamServer();
-    if (!server || server.getSubscriberCount() === 0) {
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return;
     }
 

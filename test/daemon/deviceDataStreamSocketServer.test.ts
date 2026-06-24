@@ -222,4 +222,35 @@ describe("DeviceDataStreamSocketServer", () => {
       expect(server.getSubscriberCount()).toBe(0);
     });
   });
+
+  describe("hasSubscriberForDevice", () => {
+    it("returns false when there are no subscribers", () => {
+      expect(server.hasSubscriberForDevice("device-1")).toBe(false);
+    });
+
+    it("returns true for all-device subscribers", () => {
+      server.simulateSubscription({});
+
+      expect(server.hasSubscriberForDevice("device-1")).toBe(true);
+    });
+
+    it("returns true for subscribers targeting the same device", () => {
+      server.simulateSubscription({ deviceId: "device-1" });
+
+      expect(server.hasSubscriberForDevice("device-1")).toBe(true);
+    });
+
+    it("returns false when subscribers target a different device", () => {
+      server.simulateSubscription({ deviceId: "device-2" });
+
+      expect(server.hasSubscriberForDevice("device-1")).toBe(false);
+    });
+
+    it("ignores destroyed subscriber sockets", () => {
+      const { socket } = server.simulateSubscription({ deviceId: "device-1" });
+      socket.destroy();
+
+      expect(server.hasSubscriberForDevice("device-1")).toBe(false);
+    });
+  });
 });

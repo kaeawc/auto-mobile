@@ -92,14 +92,22 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
       return [];
     }
-    return this.simctl.listSimulatorImages();
+    try {
+      return await this.simctl.listSimulatorImages();
+    } catch {
+      return [];
+    }
   }
 
   private async getBootedIosDevicesIfAvailable(): Promise<BootedDevice[]> {
     if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
       return [];
     }
-    return this.simctl.getBootedSimulators();
+    try {
+      return await this.simctl.getBootedSimulators();
+    } catch {
+      return [];
+    }
   }
 
   /**

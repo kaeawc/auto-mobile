@@ -129,6 +129,39 @@ describe("DevicePool", () => {
         expect(simctlBootedCalls).toBe(0);
       });
     });
+
+    test("keeps Android devices when Linux iOS discovery fails after availability", async () => {
+      await withProcessPlatform("linux", async () => {
+        const androidDevice = createBootedDevice("emulator-5554", "android", "Pixel 8");
+        const fakeSimctl = {
+          isAvailable: async () => true,
+          getBootedSimulators: async () => {
+            throw new Error("host-control simctl unavailable");
+          }
+        } as unknown as SimCtlClient;
+        const fakeEmulator = {
+          getBootedDevices: async () => [androidDevice]
+        } as unknown as AndroidEmulatorClient;
+        const manager = new MultiPlatformDeviceManager(
+          new FakeAdbClient() as unknown as AdbClient,
+          fakeSimctl,
+          fakeEmulator
+        );
+        const pool = new DevicePool(
+          sessionManager,
+          "test-daemon-session-id",
+          fakeTimer,
+          fakeAppsRepo,
+          manager,
+          new DefaultRetryExecutor(fakeTimer)
+        );
+
+        const added = await pool.refreshDevices();
+
+        expect(added).toBe(1);
+        expect(pool.getDevice("emulator-5554")).not.toBeNull();
+      });
+    });
   });
 
   describe("assignDeviceToSession", () => {

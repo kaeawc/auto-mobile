@@ -98,6 +98,35 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("getBootedDevices(either) preserves Android results when non-darwin iOS discovery fails after availability", async () => {
+    await withProcessPlatform("linux", async () => {
+      const androidDevice: BootedDevice = {
+        name: "Pixel 8",
+        platform: "android",
+        deviceId: "emulator-5554"
+      };
+      const fakeSimctl = {
+        isAvailable: async () => true,
+        getBootedSimulators: async () => {
+          throw new Error("host-control simctl unavailable");
+        }
+      } as unknown as SimCtlClient;
+      const fakeEmulator = {
+        getBootedDevices: async () => [androidDevice]
+      } as unknown as AndroidEmulatorClient;
+
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        fakeEmulator
+      );
+
+      const devices = await manager.getBootedDevices("either");
+
+      expect(devices).toEqual([androidDevice]);
+    });
+  });
+
   test("listDeviceImages(either) skips iOS image discovery on non-darwin when simctl is unavailable", async () => {
     await withProcessPlatform("linux", async () => {
       let simctlListCalls = 0;
@@ -127,6 +156,35 @@ describe("MultiPlatformDeviceManager", () => {
 
       expect(devices).toEqual([androidImage]);
       expect(simctlListCalls).toBe(0);
+    });
+  });
+
+  test("listDeviceImages(either) preserves Android results when non-darwin iOS image discovery fails after availability", async () => {
+    await withProcessPlatform("linux", async () => {
+      const androidImage: DeviceInfo = {
+        name: "Pixel_8",
+        platform: "android",
+        isRunning: false
+      };
+      const fakeSimctl = {
+        isAvailable: async () => true,
+        listSimulatorImages: async () => {
+          throw new Error("host-control simctl unavailable");
+        }
+      } as unknown as SimCtlClient;
+      const fakeEmulator = {
+        listAvds: async () => [androidImage]
+      } as unknown as AndroidEmulatorClient;
+
+      const manager = new MultiPlatformDeviceManager(
+        new FakeAdbClient() as unknown as AdbClient,
+        fakeSimctl,
+        fakeEmulator
+      );
+
+      const devices = await manager.listDeviceImages("either");
+
+      expect(devices).toEqual([androidImage]);
     });
   });
 });

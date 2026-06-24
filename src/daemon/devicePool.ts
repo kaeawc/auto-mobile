@@ -59,6 +59,27 @@ export interface DeviceAllocationRequest {
   criteria?: DeviceAllocationCriteria;
 }
 
+function sortedBySpecificity(requests: DeviceAllocationRequest[]): DeviceAllocationRequest[] {
+  const score = (criteria?: DeviceAllocationCriteria): number => {
+    if (!criteria) {
+      return 0;
+    }
+    let result = 0;
+    if (criteria.platform) {
+      result += 1;
+    }
+    if (criteria.simulatorType) {
+      result += 1;
+    }
+    if (criteria.iosVersion) {
+      result += 1;
+    }
+    return result;
+  };
+
+  return [...requests].sort((a, b) => score(b.criteria) - score(a.criteria));
+}
+
 /**
  * Device Pool
  *
@@ -423,7 +444,8 @@ export class DevicePool {
    * Assign multiple devices with per-session criteria.
    *
    * This is used when plans specify device definitions (platform/type/version).
-   * iOS allocations are restricted to already-booted simulators.
+   * When no booted device matches a request, a matching shutdown image may be
+   * started before allocation.
    */
   async assignMultipleDevicesByCriteria(
     requests: DeviceAllocationRequest[],
@@ -457,18 +479,23 @@ export class DevicePool {
       await this.refreshDevices();
     }
 
+    const started = await this.startAdditionalDevicesForCriteria(sortedBySpecificity(requests));
+    if (started > 0) {
+      logger.info(`[DevicePool] Started ${started} additional device(s) for criteria-based allocation`);
+    }
+
     for (const request of requests) {
       const candidates = this.getDevicesMatchingCriteria(request.criteria);
       if (candidates.length === 0) {
         const summary = this.formatCriteriaSummary(request.criteria);
         throw new ActionableError(
           `No devices match criteria for session ${request.sessionId}${summary}.\n` +
-          `Ensure the required devices are already booted and available.`
+          `Ensure the required devices are installed, startable, and available.`
         );
       }
     }
 
-    const sortedRequests = [...requests].sort((a, b) => this.scoreCriteria(b.criteria) - this.scoreCriteria(a.criteria));
+    const sortedRequests = sortedBySpecificity(requests);
     let attemptCount = 0;
 
     while (assignments.size < requiredCount) {
@@ -546,34 +573,9 @@ export class DevicePool {
     if (!platform || requiredCount <= 0) {
       return 0;
     }
-    if (platform === "ios") {
-      logger.info("[DevicePool] Skipping auto-start for iOS simulators; only booted simulators are eligible.");
-      return 0;
-    }
 
     try {
-      const availableImages = await this.deviceManager.listDeviceImages(platform);
-      if (availableImages.length === 0) {
-        return 0;
-      }
-
-      const bootedDevices = await this.deviceManager.getBootedDevices(platform);
-      const bootedIds = new Set(bootedDevices.map(device => device.deviceId));
-      const candidates: DeviceInfo[] = [];
-
-      for (const image of availableImages) {
-        if (image.deviceId && bootedIds.has(image.deviceId)) {
-          continue;
-        }
-        const running = image.isRunning === true
-          ? true
-          : await this.deviceManager.isDeviceImageRunning(image);
-        if (running) {
-          continue;
-        }
-        candidates.push(image);
-      }
-
+      const candidates = await this.getStartableDeviceImageCandidates(platform);
       if (candidates.length === 0) {
         return 0;
       }
@@ -584,8 +586,8 @@ export class DevicePool {
       for (const device of toStart) {
         const label = device.deviceId ?? device.name;
         logger.info(`[DevicePool] Starting additional ${device.platform} device ${label}`);
-        await this.deviceManager.startDevice(device);
-        const ready = await this.deviceManager.waitForDeviceReady(device);
+        const childProcess = await this.deviceManager.startDevice(device);
+        const ready = await this.deviceManager.waitForDeviceReady(device, undefined, childProcess);
         await this.addDevice(ready);
         started++;
       }
@@ -595,6 +597,103 @@ export class DevicePool {
       logger.warn(`[DevicePool] Failed to start additional devices: ${error}`);
       return 0;
     }
+  }
+
+  private async startAdditionalDevicesForCriteria(requests: DeviceAllocationRequest[]): Promise<number> {
+    const reservedDeviceIds = new Set<string>();
+    const excludedImageIds = new Set<string>();
+    let started = 0;
+
+    for (const request of requests) {
+      const existing = this.getDevicesMatchingCriteria(request.criteria)
+        .find(device => !reservedDeviceIds.has(device.id));
+      if (existing) {
+        reservedDeviceIds.add(existing.id);
+        continue;
+      }
+
+      const startedDevice = await this.startAdditionalDeviceMatchingCriteria(
+        request.criteria,
+        excludedImageIds
+      );
+      if (startedDevice) {
+        reservedDeviceIds.add(startedDevice.id);
+        started++;
+      }
+    }
+
+    return started;
+  }
+
+  private async startAdditionalDeviceMatchingCriteria(
+    criteria: DeviceAllocationCriteria | undefined,
+    excludedImageIds: Set<string>
+  ): Promise<PooledDevice | null> {
+    if (!criteria?.platform) {
+      return null;
+    }
+
+    try {
+      const candidates = await this.getStartableDeviceImageCandidates(
+        criteria.platform,
+        criteria,
+        excludedImageIds
+      );
+      const device = candidates[0];
+      if (!device) {
+        return null;
+      }
+
+      const label = device.deviceId ?? device.name;
+      logger.info(`[DevicePool] Starting ${device.platform} device ${label} for criteria ${this.formatCriteriaSummary(criteria)}`);
+      excludedImageIds.add(this.getDeviceImageKey(device));
+      const childProcess = await this.deviceManager.startDevice(device);
+      const ready = await this.deviceManager.waitForDeviceReady(device, undefined, childProcess);
+      await this.addDevice(ready);
+      return this.devices.get(ready.deviceId) ?? null;
+    } catch (error) {
+      logger.warn(`[DevicePool] Failed to start device for criteria ${this.formatCriteriaSummary(criteria)}: ${error}`);
+      return null;
+    }
+  }
+
+  private async getStartableDeviceImageCandidates(
+    platform: Platform,
+    criteria?: DeviceAllocationCriteria,
+    excludedImageIds: Set<string> = new Set()
+  ): Promise<DeviceInfo[]> {
+    const availableImages = await this.deviceManager.listDeviceImages(platform);
+    if (availableImages.length === 0) {
+      return [];
+    }
+
+    const bootedDevices = await this.deviceManager.getBootedDevices(platform);
+    const bootedIds = new Set(bootedDevices.map(device => device.deviceId));
+    const candidates: DeviceInfo[] = [];
+
+    for (const image of availableImages) {
+      if (!this.deviceImageMatchesCriteria(image, criteria)) {
+        continue;
+      }
+      if (!this.isStartableDeviceImage(image)) {
+        continue;
+      }
+      if (excludedImageIds.has(this.getDeviceImageKey(image))) {
+        continue;
+      }
+      if (image.deviceId && bootedIds.has(image.deviceId)) {
+        continue;
+      }
+      const running = image.isRunning === true
+        ? true
+        : await this.deviceManager.isDeviceImageRunning(image);
+      if (running) {
+        continue;
+      }
+      candidates.push(image);
+    }
+
+    return candidates;
   }
 
   /**
@@ -1249,21 +1348,72 @@ export class DevicePool {
     });
   }
 
-  private scoreCriteria(criteria?: DeviceAllocationCriteria): number {
-    if (!criteria) {
-      return 0;
+  private deviceImageMatchesCriteria(image: DeviceInfo, criteria?: DeviceAllocationCriteria): boolean {
+    if (criteria?.platform && image.platform !== criteria.platform) {
+      return false;
     }
-    let score = 0;
-    if (criteria.platform) {
-      score += 1;
+
+    const normalizedType = this.normalizeCriteriaValue(criteria?.simulatorType);
+    if (normalizedType) {
+      const imageTypes = [
+        image.name,
+        image.deviceType,
+        this.displayNameFromIosDeviceType(image.deviceType),
+      ]
+        .map(value => this.normalizeCriteriaValue(value))
+        .filter((value): value is string => value !== undefined);
+      if (!imageTypes.includes(normalizedType)) {
+        return false;
+      }
     }
-    if (criteria.simulatorType) {
-      score += 1;
+
+    const normalizedVersion = this.normalizeCriteriaValue(criteria?.iosVersion);
+    if (normalizedVersion) {
+      const imageVersions = [
+        image.iosVersion,
+        image.osVersion,
+        this.iosVersionFromRuntime(image.runtime),
+      ]
+        .map(value => this.normalizeCriteriaValue(value))
+        .filter((value): value is string => value !== undefined);
+      if (!imageVersions.includes(normalizedVersion)) {
+        return false;
+      }
     }
-    if (criteria.iosVersion) {
-      score += 1;
+
+    return true;
+  }
+
+  private isStartableDeviceImage(image: DeviceInfo): boolean {
+    if (image.isAvailable === false) {
+      return false;
     }
-    return score;
+    if (image.platform === "ios") {
+      if (!image.deviceId) {
+        return false;
+      }
+      if (image.state && image.state !== "Shutdown") {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private getDeviceImageKey(image: DeviceInfo): string {
+    return image.deviceId ?? `${image.platform}:${image.name}`;
+  }
+
+  private displayNameFromIosDeviceType(deviceType?: string): string | undefined {
+    if (!deviceType) {
+      return undefined;
+    }
+    const suffix = deviceType.split(".").pop();
+    return suffix?.replace(/-/g, " ");
+  }
+
+  private iosVersionFromRuntime(runtime?: string): string | undefined {
+    const match = runtime?.match(/iOS[-_](\d+(?:[-_]\d+)*)/);
+    return match?.[1].replace(/[-_]/g, ".");
   }
 
   private formatCriteriaSummary(criteria?: DeviceAllocationCriteria): string {

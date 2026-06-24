@@ -82,7 +82,11 @@ export function registerUtilityTools() {
         // Session-scoped: bind the specific requested device to this session
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
-        const pooledDevice = devicePool.getDevice(args.deviceId);
+        let pooledDevice = devicePool.getDevice(args.deviceId);
+        if (!pooledDevice) {
+          await devicePool.refreshDevices();
+          pooledDevice = devicePool.getDevice(args.deviceId);
+        }
         if (!pooledDevice) {
           throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
         }

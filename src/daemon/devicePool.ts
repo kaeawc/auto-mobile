@@ -156,7 +156,9 @@ export class DevicePool {
    * This handles race conditions during daemon startup where device discovery
    * may not have completed before tests begin.
    *
-   * Only adds new devices - does not remove existing devices that may be assigned.
+   * Adds newly booted devices and prunes unassigned devices that are no longer
+   * booted. Assigned devices are kept so active sessions can be cancelled and
+   * released by the disconnect monitor.
    */
   async refreshDevices(): Promise<number> {
     const startTime = this.timer.now();
@@ -177,10 +179,15 @@ export class DevicePool {
 
       const now = this.seedLastUsedAt(this.timer.now());
       let addedCount = 0;
+      let removedCount = 0;
+      const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
 
       perf.startOperation("poolUpdate");
+      removedCount = await this.removeDevicesMissingFrom(bootedDeviceIds);
+
       for (const device of bootedDevices) {
-        if (!this.devices.has(device.deviceId)) {
+        const pooledDevice = this.devices.get(device.deviceId);
+        if (!pooledDevice) {
           this.devices.set(device.deviceId, {
             id: device.deviceId,
             name: device.name,
@@ -196,12 +203,19 @@ export class DevicePool {
           await this.setDeviceSessionTracking(device.deviceId, now);
           addedCount++;
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
+        } else {
+          pooledDevice.name = device.name;
+          pooledDevice.platform = device.platform;
+          pooledDevice.iosVersion = device.iosVersion;
         }
       }
       perf.endOperation("poolUpdate");
 
-      if (addedCount > 0) {
-        logger.info(`Device pool refreshed: added ${addedCount} new devices (total: ${this.devices.size})`);
+      if (addedCount > 0 || removedCount > 0) {
+        logger.info(
+          `Device pool refreshed: added ${addedCount}, removed ${removedCount} ` +
+          `(total: ${this.devices.size})`
+        );
       } else if (bootedDevices.length === 0) {
         logger.warn("No devices found during pool refresh. Is an emulator running?");
         logger.warn("Ensure 'adb devices' returns connected devices in the daemon process environment.");
@@ -263,8 +277,32 @@ export class DevicePool {
 
     this.devices.delete(deviceId);
     this.deviceSessionStarts.delete(deviceId);
+    if (this.lastReleasedDeviceId === deviceId) {
+      this.lastReleasedDeviceId = null;
+    }
     await this.clearDeviceSessionCache(deviceId);
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
+  }
+
+  private async removeDevicesMissingFrom(bootedDeviceIds: Set<string>): Promise<number> {
+    let removedCount = 0;
+
+    for (const device of Array.from(this.devices.values())) {
+      if (bootedDeviceIds.has(device.id)) {
+        continue;
+      }
+      if (device.sessionId) {
+        logger.warn(
+          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`
+        );
+        continue;
+      }
+
+      await this.removeDevice(device.id);
+      removedCount++;
+    }
+
+    return removedCount;
   }
 
   /**
@@ -759,18 +797,20 @@ export class DevicePool {
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
-      if (!device && (this.devices.size === 0 || totalDevices === 0)) {
-        const refreshReason = this.devices.size === 0 ? "empty pool" : "platform pool empty";
+      const busyDevicesBeforeRefresh = candidates.filter(d => d.status === "busy").length;
+      if (!device && (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)) {
+        const refreshReason = this.devices.size === 0
+          ? "empty pool"
+          : totalDevices === 0
+            ? "platform pool empty"
+            : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
         const addedCount = await this.refreshDevices();
         logger.info(`[DEVICE-POOL-DEBUG] Auto-refresh added ${addedCount} devices`);
-        if (addedCount > 0) {
-          // Try again after refresh
-          candidates = this.getDevicesByPlatform(platform);
-          totalDevices = candidates.length;
-          device = candidates.find(d => d.status === "idle");
-          logger.info(`[DEVICE-POOL-DEBUG] After refresh, found idle device = ${device?.id || "none"}`);
-        }
+        candidates = this.getDevicesByPlatform(platform);
+        totalDevices = candidates.length;
+        device = candidates.find(d => d.status === "idle");
+        logger.info(`[DEVICE-POOL-DEBUG] After refresh, found idle device = ${device?.id || "none"}`);
       }
 
       logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: totalDevices = ${totalDevices}`);
@@ -834,16 +874,19 @@ export class DevicePool {
         }
       }
 
-      if (!device && (this.devices.size === 0 || totalDevices === 0)) {
-        const refreshReason = this.devices.size === 0 ? "empty pool" : "criteria pool empty";
+      const busyDevicesBeforeRefresh = candidates.filter(d => d.status === "busy").length;
+      if (!device && (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)) {
+        const refreshReason = this.devices.size === 0
+          ? "empty pool"
+          : totalDevices === 0
+            ? "criteria pool empty"
+            : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
         const addedCount = await this.refreshDevices();
         logger.info(`[DevicePool] Auto-refresh added ${addedCount} devices`);
-        if (addedCount > 0) {
-          candidates = this.getDevicesMatchingCriteria(criteria);
-          totalDevices = candidates.length;
-          device = candidates.find(d => d.status === "idle");
-        }
+        candidates = this.getDevicesMatchingCriteria(criteria);
+        totalDevices = candidates.length;
+        device = candidates.find(d => d.status === "idle");
       }
 
       if (!device) {

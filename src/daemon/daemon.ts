@@ -801,6 +801,9 @@ export class Daemon {
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
         }
+        for (const device of this.devicePool.getAllDevices()) {
+          candidateDeviceIds.add(device.id);
+        }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
         }
@@ -871,6 +874,7 @@ export class Daemon {
             await this.cancelAndReleaseSession(sessionId);
           }
 
+          await this.devicePool.removeDevice(deviceId);
           this.deviceDisconnectMisses.delete(deviceId);
         }
       } catch (error) {

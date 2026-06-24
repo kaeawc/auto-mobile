@@ -162,6 +162,45 @@ describe("DevicePool", () => {
         expect(pool.getDevice("emulator-5554")).not.toBeNull();
       });
     });
+
+    test("removes unassigned devices that are no longer booted", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      await fakeAppsRepo.upsertInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("sim-new")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+      expect(await fakeAppsRepo.listInstalledApps("sim-old")).toEqual([]);
+    });
+
+    test("keeps missing assigned devices until session cleanup releases them", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      await devicePool.assignDeviceToSession("session-1", "ios");
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")?.sessionId).toBe("session-1");
+      expect(devicePool.getDevice("sim-new")?.status).toBe("idle");
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("recomputes candidates after refresh prunes all unavailable error devices", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      for (let i = 0; i < 5; i++) {
+        devicePool.recordDeviceError("sim-old");
+      }
+      fakeDeviceManager.bootedDevices = [];
+
+      await expect(devicePool.assignDeviceToSession("session-1", "ios"))
+        .rejects.toThrow(/No devices in pool/);
+      expect(devicePool.getTotalDeviceCount()).toBe(0);
+    });
   });
 
   describe("assignDeviceToSession", () => {

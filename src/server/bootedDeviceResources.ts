@@ -155,6 +155,30 @@ function getPoolDeviceInfo(devicePool: DevicePool | null, deviceId: string): Poo
   };
 }
 
+function summarizeLivePoolStatus(devices: BootedDeviceInfo[]): PoolStatusSummary {
+  let idle = 0;
+  let assigned = 0;
+  let error = 0;
+
+  for (const device of devices) {
+    if (device.poolStatus === "idle") {
+      idle++;
+    } else if (device.poolStatus === "assigned") {
+      assigned++;
+    } else if (device.poolStatus === "error") {
+      error++;
+    }
+  }
+
+  return {
+    enabled: true,
+    idle,
+    assigned,
+    error,
+    total: idle + assigned + error
+  };
+}
+
 function toDeviceSessionInfo(session: Session): DeviceSessionInfo {
   return {
     sessionId: session.sessionId,
@@ -213,13 +237,12 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
   if (daemonState.isInitialized()) {
     try {
       devicePool = daemonState.getDevicePool();
-      const stats = devicePool.getStats();
       poolStatus = {
         enabled: true,
-        idle: stats.idle,
-        assigned: stats.assigned,
-        error: stats.error,
-        total: stats.total
+        idle: 0,
+        assigned: 0,
+        error: 0,
+        total: 0
       };
     } catch (error) {
       logger.warn(`[BootedDeviceResources] Failed to read device pool status: ${error}`);
@@ -312,6 +335,9 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
 
   const virtualCount = devices.filter(device => device.isVirtual).length;
   const physicalCount = devices.length - virtualCount;
+  if (poolStatus) {
+    poolStatus = summarizeLivePoolStatus(devices);
+  }
 
   return {
     totalCount: devices.length,

@@ -376,6 +376,49 @@ describe("MCP Booted Device Resources", () => {
       sessionManager.stopCleanupTimer();
     });
 
+    test("should not include phantom pool devices in pool status", async function() {
+      fakeDeviceUtils.setBootedDevices("android", []);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer);
+      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const fakeAppsRepo = new FakeInstalledAppsRepository();
+      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      const { client } = fixture.getContext();
+
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile:devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.devices).toHaveLength(0);
+      expect(data.poolStatus).toEqual({
+        enabled: true,
+        idle: 0,
+        assigned: 0,
+        error: 0,
+        total: 0
+      });
+
+      sessionManager.stopCleanupTimer();
+    });
+
     test("should return error for invalid platform", async function() {
       const { client } = fixture.getContext();
 

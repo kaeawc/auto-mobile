@@ -181,6 +181,36 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     }
   });
 
+  test("real PID file exposes socket path map through status", async () => {
+    const sockets = {
+      "control": join(tempDir, "test.sock"),
+      "appearance": join(tempDir, "appearance.sock"),
+      "device-snapshot": join(tempDir, "device-snapshot.sock"),
+      "failures-push": join(tempDir, "failures-push.sock"),
+      "failures-stream": join(tempDir, "failures-stream.sock"),
+      "observation-stream": join(tempDir, "observation-stream.sock"),
+      "performance-push": join(tempDir, "performance-push.sock"),
+      "performance-stream": join(tempDir, "performance-stream.sock"),
+      "telemetry-push": join(tempDir, "telemetry-push.sock"),
+      "test-recording": join(tempDir, "test-recording.sock"),
+      "video-recording": join(tempDir, "video-recording.sock"),
+    };
+    const data: PidFileData = {
+      pid: process.pid,
+      socketPath: sockets.control,
+      sockets,
+      port: 0,
+      startedAt: 1,
+      version: DAEMON_VERSION,
+    };
+    writeFileSync(pidFilePath, JSON.stringify(data));
+
+    const status = await realManager.status();
+
+    expect(status.running).toBe(true);
+    expect(status.sockets).toEqual(sockets);
+  });
+
   test("PID file pointing at a dead PID is treated as not running, no restart attempted", async () => {
     // PID 999999 is virtually never alive; status() should return running:false and unlink
     const data: PidFileData = {

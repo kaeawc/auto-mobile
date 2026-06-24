@@ -395,6 +395,10 @@ export function getDeviceDataStreamServer(): DeviceDataStreamSocketServer | null
   return socketServer;
 }
 
+export function getDeviceDataStreamSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startDeviceDataStreamSocketServer(
   timer: Timer = defaultTimer
 ): Promise<DeviceDataStreamSocketServer> {

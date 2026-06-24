@@ -541,6 +541,7 @@ export class DaemonManager implements DaemonManagerLike {
         pid: pidData.pid,
         port: pidData.port,
         socketPath: pidData.socketPath,
+        sockets: pidData.sockets,
         startedAt: pidData.startedAt,
         version: pidData.version,
       };

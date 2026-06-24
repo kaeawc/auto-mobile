@@ -33,6 +33,7 @@ import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, ge
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
+import { getDaemonSocketPaths } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
@@ -576,6 +577,7 @@ export class Daemon {
     const pidData: PidFileData = {
       pid: process.pid,
       socketPath: SOCKET_PATH,
+      sockets: getDaemonSocketPaths(),
       port: this.port,
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,

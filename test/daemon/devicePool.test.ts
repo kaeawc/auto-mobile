@@ -46,6 +46,18 @@ describe("DevicePool", () => {
     iosVersion
   });
 
+  class FakeDeviceManagerWithMinimalReadyDevice extends FakeDeviceManager {
+    async waitForDeviceReady(device: DeviceInfo): Promise<BootedDevice> {
+      const id = device.deviceId ?? device.name;
+      return {
+        name: device.name,
+        platform: device.platform,
+        deviceId: id,
+        source: device.source,
+      };
+    }
+  }
+
   beforeEach(() => {
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer);
@@ -271,10 +283,283 @@ describe("DevicePool", () => {
   });
 
   describe("assignMultipleDevices", () => {
-    test("should not auto-start iOS simulators when pool is short", async () => {
+    test("should auto-start iOS simulators when pool is short", async () => {
       const images: DeviceInfo[] = [
-        { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1" },
-        { name: "iPhone 15", platform: "ios", isRunning: false, deviceId: "sim-2" },
+        { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Shutdown", isAvailable: true },
+        { name: "iPhone 15", platform: "ios", isRunning: false, deviceId: "sim-2", state: "Shutdown", isAvailable: true },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      const assignments = await devicePool.assignMultipleDevices(["session-a", "session-b"], 1000, "ios");
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(assignments.get("session-b")).toBe("sim-2");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-1", "sim-2"]);
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("should boot shutdown iOS simulator matching allocation criteria", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-wrong-type",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+        },
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-wrong-version",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.4",
+        },
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-unavailable",
+          state: "Unavailable",
+          isAvailable: false,
+          iosVersion: "17.5",
+        },
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManager(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-1"]);
+      expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
+    });
+
+    test("should use osVersion as iOS criteria metadata after booting a shutdown simulator", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          state: "Shutdown",
+          isAvailable: true,
+          osVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
+    });
+
+    test("should use runtime as iOS criteria metadata after booting a shutdown simulator", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          state: "Shutdown",
+          isAvailable: true,
+          runtime: "com.apple.CoreSimulator.SimRuntime.iOS-17-5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(devicePool.getDevice("sim-1")?.iosVersion).toBe("17.5");
+    });
+
+    test("should preserve deviceType matching metadata after booting a custom-named simulator", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "QA Phone",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+          deviceType: "com.apple.CoreSimulator.SimDeviceType.iPhone-15-Pro",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(devicePool.getDevice("sim-1")?.name).toBe("QA Phone");
+      expect(devicePool.getDevice("sim-1")?.simulatorType).toBe("iPhone 15 Pro");
+    });
+
+    test("should boot replacement simulator when matching pooled simulator is in error", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-replacement",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-failed", "ios", "iPhone 15 Pro", "17.5"),
+      ]);
+      for (let i = 0; i < 5; i++) {
+        devicePool.recordDeviceError("sim-failed");
+      }
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-replacement");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-replacement"]);
+      expect(devicePool.getDevice("sim-failed")?.status).toBe("error");
+    });
+
+    test("should recover errored pooled simulator when its own image is rebooted", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-1",
+          state: "Shutdown",
+          isAvailable: true,
+          iosVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManagerWithMinimalReadyDevice(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+      await devicePool.initializeWithDevices([
+        createBootedDevice("sim-1", "ios", "iPhone 15 Pro", "17.5"),
+      ]);
+      for (let i = 0; i < 5; i++) {
+        devicePool.recordDeviceError("sim-1");
+      }
+      expect(devicePool.getDevice("sim-1")?.status).toBe("error");
+
+      const assignments = await devicePool.assignMultipleDevicesByCriteria(
+        [
+          {
+            sessionId: "session-a",
+            criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+          },
+        ],
+        1000
+      );
+
+      expect(assignments.get("session-a")).toBe("sim-1");
+      expect(fakeDeviceManager.startedDevices.map(device => device.deviceId)).toEqual(["sim-1"]);
+      expect(devicePool.getDevice("sim-1")?.status).toBe("busy");
+      expect(devicePool.getDevice("sim-1")?.errorCount).toBe(0);
+    });
+
+    test("should fail criteria allocation without starting unavailable iOS simulators", async () => {
+      const images: DeviceInfo[] = [
+        {
+          name: "iPhone 15 Pro",
+          platform: "ios",
+          isRunning: false,
+          deviceId: "sim-unavailable",
+          state: "Unavailable",
+          isAvailable: false,
+          iosVersion: "17.5",
+        },
+      ];
+      const fakeDeviceManager = new FakeDeviceManager(images);
+      const retryExecutor = new DefaultRetryExecutor(fakeTimer);
+      devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo, fakeDeviceManager, retryExecutor);
+
+      await expect(
+        devicePool.assignMultipleDevicesByCriteria(
+          [
+            {
+              sessionId: "session-a",
+              criteria: { platform: "ios", simulatorType: "iPhone 15 Pro", iosVersion: "17.5" },
+            },
+          ],
+          1000
+        )
+      ).rejects.toThrow(/No devices match criteria/);
+      expect(fakeDeviceManager.startedDevices).toHaveLength(0);
+      expect(devicePool.getTotalDeviceCount()).toBe(0);
+    });
+
+    test("should fail iOS platform allocation without starting unavailable simulators", async () => {
+      const images: DeviceInfo[] = [
+        { name: "iPhone 15 Pro", platform: "ios", isRunning: false, deviceId: "sim-1", state: "Unavailable", isAvailable: false },
       ];
       const fakeDeviceManager = new FakeDeviceManager(images);
       const retryExecutor = new DefaultRetryExecutor(fakeTimer);

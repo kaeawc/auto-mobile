@@ -17,9 +17,9 @@ import {
   DAEMON_PORT_RANGE_END,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { writeFile, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { writeFile } from "node:fs/promises";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
+import { cleanupDaemonFiles, cleanupDaemonFilesSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
 import { closeDatabase, getDatabase } from "../db";
 import { startupBenchmark } from "../utils/startupBenchmark";
@@ -84,6 +84,8 @@ export class Daemon {
   private installedAppsRepository: InstalledAppsStore;
   private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private shutdownHandlersRegistered: boolean = false;
+  private shutdownInProgress: boolean = false;
 
   constructor(
     options: DaemonOptions = {},
@@ -592,16 +594,6 @@ export class Daemon {
   }
 
   /**
-   * Remove PID file
-   */
-  private async removePidFile(): Promise<void> {
-    if (existsSync(PID_FILE_PATH)) {
-      await unlink(PID_FILE_PATH);
-      logger.info(`PID file removed: ${PID_FILE_PATH}`);
-    }
-  }
-
-  /**
    * Set up callback for observation stream to trigger device WebSocket connections.
    * When an IDE plugin subscribes to the observation stream, we need to ensure
    * the WebSocket connections to Android devices are established so that
@@ -1089,14 +1081,43 @@ export class Daemon {
    * Setup graceful shutdown handlers
    */
   private setupShutdownHandlers(): void {
+    if (this.shutdownHandlersRegistered) {
+      return;
+    }
+    this.shutdownHandlersRegistered = true;
+
     const shutdown = async (signal: string) => {
+      if (this.shutdownInProgress) {
+        return;
+      }
+      this.shutdownInProgress = true;
       logger.info(`Received ${signal}, shutting down daemon...`);
       await this.stop();
       process.exit(0);
     };
 
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    const cleanupAndExit = (label: string, error: unknown) => {
+      logger.error(`${label}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      cleanupDaemonFilesSync();
+      logger.close();
+      process.exit(1);
+    };
+
+    process.once("SIGINT", () => {
+      shutdown("SIGINT").catch(error => cleanupAndExit("Error during SIGINT shutdown", error));
+    });
+    process.once("SIGTERM", () => {
+      shutdown("SIGTERM").catch(error => cleanupAndExit("Error during SIGTERM shutdown", error));
+    });
+    process.once("exit", () => {
+      cleanupDaemonFilesSync();
+    });
+    process.once("uncaughtException", error => {
+      cleanupAndExit("Uncaught exception in daemon", error);
+    });
+    process.once("unhandledRejection", reason => {
+      cleanupAndExit("Unhandled rejection in daemon", reason);
+    });
   }
 
   /**
@@ -1160,8 +1181,7 @@ export class Daemon {
       });
     }
 
-    // Remove PID file
-    await this.removePidFile();
+    await cleanupDaemonFiles();
 
     await closeDatabase();
 

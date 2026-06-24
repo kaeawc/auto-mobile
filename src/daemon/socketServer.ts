@@ -700,14 +700,14 @@ export class UnixSocketServer {
     // Clear sessions
     this.sessions.clear();
 
-    // Close server
     if (this.server) {
-      return new Promise(resolve => {
+      await new Promise<void>(resolve => {
         this.server!.close(() => {
           logger.info("Unix socket server closed");
           resolve();
         });
       });
+      this.server = null;
     }
 
     // Remove socket file

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { resolve } from "path";
 import process from "process";
+import { hasGlobalVersionFlag } from "../../src/cli/versionFlag";
 import { defaultTimer } from "../../src/utils/SystemTimer";
 
 const repoRoot = resolve(import.meta.dir, "../..");
@@ -47,4 +48,11 @@ describe("version flag", () => {
       expect(result.stderr).not.toContain("AutoMobile MCP server running on stdio");
     }, VERSION_COMMAND_TIMEOUT_MS + 1_000);
   }
+
+  test("ignores version-like values after the CLI argument boundary", () => {
+    expect(hasGlobalVersionFlag(["--cli", "inputText", "--text", "-v"])).toBe(false);
+    expect(hasGlobalVersionFlag(["--debug", "--cli", "inputText", "--text", "--version"])).toBe(false);
+    expect(hasGlobalVersionFlag(["--version", "--cli", "doctor"])).toBe(true);
+    expect(hasGlobalVersionFlag(["-v", "--cli", "doctor"])).toBe(true);
+  });
 });

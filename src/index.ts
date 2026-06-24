@@ -8,13 +8,18 @@ import type { DaemonOptions } from "./daemon/types";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
 import type { PlanExecutionLockScope } from "./utils/ServerConfig";
 import type { VideoRecordingConfigInput } from "./models";
+import { hasGlobalVersionFlag } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
 
-const hasVersionFlag = (args: string[] = process.argv.slice(2)): boolean =>
-  args.includes("--version") || args.includes("-v");
+interface FatalLogger {
+  error(...args: unknown[]): void;
+  close(): void;
+}
 
-if (hasVersionFlag()) {
+let fatalLogger: FatalLogger | undefined;
+
+if (hasGlobalVersionFlag(process.argv.slice(2))) {
   console.log(getMcpServerVersion());
   process.exit(0);
 }
@@ -324,6 +329,7 @@ async function main() {
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
   const { logger } = await import("./utils/logger");
+  fatalLogger = logger;
   const { runCliCommand } = await import("./cli");
   const { runDaemonCommand } = await import("./daemon/manager");
   const { startDaemon } = await import("./daemon/daemon");
@@ -654,7 +660,7 @@ async function main() {
 
 main().catch(err => {
   console.error("Fatal error in main():", err);
-  logger.error("Fatal error in main():", err);
-  logger.close();
+  fatalLogger?.error("Fatal error in main():", err);
+  fatalLogger?.close();
   process.exit(1);
 });

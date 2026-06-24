@@ -34,6 +34,7 @@ export interface Session {
   lastHeartbeat: number;       // Timestamp of last heartbeat
   sessionTimeoutMs: number;    // Idle timeout used when extending this session
   heartbeatTimeoutMs: number;  // Heartbeat timeout for this session
+  heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
 }
 
@@ -50,6 +51,15 @@ export interface Session {
  * while sharing centralized state in the daemon.
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
+
+export function getDefaultSessionHeartbeatTimeoutMs(): number {
+  const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
+    ?? process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+}
 
 export class SessionManager {
   private sessions: Map<string, Session> = new Map();
@@ -103,6 +113,7 @@ export class SessionManager {
 
     const now = this.timer.now();
     const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
+    const heartbeatTimeoutSource = heartbeatTimeoutMs === undefined ? "default" : "custom";
     const session: Session = {
       sessionId,
       assignedDevice,
@@ -113,7 +124,8 @@ export class SessionManager {
       cacheData: {},
       lastHeartbeat: now,
       sessionTimeoutMs,
-      heartbeatTimeoutMs: heartbeatTimeoutMs ?? SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+      heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
+      heartbeatTimeoutSource,
       hasReceivedHeartbeat: false,
     };
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## [v0.0.37] - 2026-06-24
+### Other
+- No changes.
+
 ## [v0.0.36] - 2026-06-23
 ### Other
 - installApp succeeds but app not present for launchApp/openLink (device resolution incoherence) ([#2387](https://github.com/kaeawc/auto-mobile/issues/2387))

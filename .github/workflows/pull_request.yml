@@ -919,6 +919,12 @@ jobs:
           mkdir -p ci-logs
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-ubuntu-latest.log"
 
+      - name: "Run Bun MCP startup smoke"
+        run: bun run test:startup:bun
+
+      - name: "Run Bun sharp runtime smoke"
+        run: bun run test:sharp:bun
+
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh
 

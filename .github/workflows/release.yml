@@ -119,6 +119,12 @@ jobs:
           NO_COLOR: "1"
         run: turbo run build --force --output-logs=errors-only
 
+      - name: Run Bun MCP startup smoke
+        run: bun run test:startup:bun
+
+      - name: Run Bun sharp runtime smoke
+        run: bun run test:sharp:bun
+
       - name: Create release notes
         id: release_notes
         run: |

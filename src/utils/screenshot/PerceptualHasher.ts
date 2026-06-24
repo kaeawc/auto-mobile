@@ -1,5 +1,5 @@
-import sharp from "sharp";
 import { logger } from "../logger";
+import { loadSharp } from "../image/loadSharp";
 
 export class PerceptualHasher {
   /**
@@ -9,6 +9,7 @@ export class PerceptualHasher {
    */
   static async generatePerceptualHash(buffer: Buffer): Promise<string> {
     try {
+      const sharp = await loadSharp();
       // Resize to small standard size for consistent hashing
       const hashBuffer = await sharp(buffer)
         .resize(8, 8, { fit: "fill", kernel: "nearest" })

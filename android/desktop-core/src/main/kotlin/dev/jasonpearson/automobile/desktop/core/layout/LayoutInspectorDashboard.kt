@@ -20,6 +20,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
 import androidx.compose.material3.MaterialTheme
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.ObservationStreamClient
 import dev.jasonpearson.automobile.desktop.core.datasource.DataSourceMode
 import dev.jasonpearson.automobile.desktop.core.di.LocalAutoMobileGraph
@@ -115,6 +116,16 @@ fun LayoutInspectorDashboard(
         LaunchedEffect(streamClient, gracePeriod) {
             streamClient.connectionState.collect { connectionState ->
                 gracePeriod.onStreamStateChange(connectionState)
+            }
+        }
+        LaunchedEffect(streamClient) {
+            streamClient.deviceEvents.collect { event ->
+                when (event) {
+                    is DeviceStreamEvent.DeviceConnectionLost -> {
+                        dashboardLog.warn("Device connection lost for ${event.deviceId}: ${event.error}")
+                        state.disconnect()
+                    }
+                }
             }
         }
     }
@@ -290,4 +301,3 @@ fun LayoutInspectorDashboard(
         }
     }
 }
-

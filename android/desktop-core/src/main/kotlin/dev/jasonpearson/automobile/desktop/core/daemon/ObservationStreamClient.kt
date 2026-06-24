@@ -333,11 +333,14 @@ class ObservationStreamClient {
         }
     }
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     private suspend fun emitDeviceEvent(response: StreamResponse) {
         val deviceId = response.deviceId ?: return
         val error = response.error ?: return
         if (error != DEVICE_CONNECTION_LOST_ERROR) return
 
+        _hierarchyUpdates.resetReplayCache()
+        _screenshotUpdates.resetReplayCache()
         _deviceEvents.emit(
             DeviceStreamEvent.DeviceConnectionLost(
                 deviceId = deviceId,

@@ -185,10 +185,14 @@ public class FakeGesturePerformer: GesturePerforming {
     private var clearTextHistory: [String?] = []
     private var selectAllCallCount: Int = 0
     private var imeActionHistory: [String] = []
+    private var keyboardHistory: [String] = []
+    private var keyboardOpen = false
+    private var nextKeyboardResult: Bool?
     private var actionHistory: [(action: String, resourceId: String?, label: String?)] = []
     private var screenshotCallCount = 0
     private var pressHomeCallCount = 0
     private var pressBackCallCount = 0
+    private var pressButtonHistory: [String] = []
     private var openRecentAppsCallCount = 0
     private var appLaunchHistory: [String] = []
     private var appTerminateHistory: [String] = []
@@ -249,6 +253,18 @@ public class FakeGesturePerformer: GesturePerforming {
         imeActionHistory
     }
 
+    public func getKeyboardHistory() -> [String] {
+        keyboardHistory
+    }
+
+    public func setKeyboardOpen(_ open: Bool) {
+        keyboardOpen = open
+    }
+
+    public func setNextKeyboardResult(_ open: Bool) {
+        nextKeyboardResult = open
+    }
+
     public func getActionHistory() -> [(action: String, resourceId: String?, label: String?)] {
         actionHistory
     }
@@ -263,6 +279,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getPressBackCallCount() -> Int {
         pressBackCallCount
+    }
+
+    public func getPressButtonHistory() -> [String] {
+        pressButtonHistory
     }
 
     public func getOpenRecentAppsCallCount() -> Int {
@@ -297,9 +317,15 @@ public class FakeGesturePerformer: GesturePerforming {
         clearTextHistory.removeAll()
         selectAllCallCount = 0
         imeActionHistory.removeAll()
+        keyboardHistory.removeAll()
+        keyboardOpen = false
+        nextKeyboardResult = nil
         actionHistory.removeAll()
         screenshotCallCount = 0
         pressHomeCallCount = 0
+        pressBackCallCount = 0
+        pressButtonHistory.removeAll()
+        openRecentAppsCallCount = 0
         appLaunchHistory.removeAll()
         appTerminateHistory.removeAll()
         clipboardHistory.removeAll()
@@ -388,6 +414,25 @@ public class FakeGesturePerformer: GesturePerforming {
         imeActionHistory.append(action)
     }
 
+    public func keyboard(action: String) throws -> Bool {
+        try checkFailure("keyboard")
+        keyboardHistory.append(action)
+        if let result = nextKeyboardResult {
+            nextKeyboardResult = nil
+            keyboardOpen = result
+            return result
+        }
+        switch action {
+        case "open":
+            keyboardOpen = true
+        case "close":
+            keyboardOpen = false
+        default:
+            break
+        }
+        return keyboardOpen
+    }
+
     public func clipboard(action: String, text: String?) throws -> String? {
         try checkFailure("clipboard")
         clipboardHistory.append((action: action, text: text))
@@ -435,6 +480,11 @@ public class FakeGesturePerformer: GesturePerforming {
     public func pressBack() throws {
         try checkFailure("pressBack")
         pressBackCallCount += 1
+    }
+
+    public func pressButton(_ button: String) throws {
+        try checkFailure("pressButton")
+        pressButtonHistory.append(button)
     }
 
     public func openRecentApps() throws {

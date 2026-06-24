@@ -121,19 +121,18 @@ export class PressButton extends BaseVisualChange {
    */
   private async executeiOSButtonPress(button: string): Promise<PressButtonResult> {
     const normalizedButton = button.toLowerCase();
-    if (normalizedButton !== "home" && normalizedButton !== "back") {
+    const supportedButtons = new Set(["home", "back", "recent"]);
+    if (!supportedButtons.has(normalizedButton)) {
       return {
         success: false,
         button,
         keyCode: -1,
-        error: `Unsupported iOS button: ${button}`
+        error: `Unsupported iOS simulator button: ${button}`
       };
     }
 
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = normalizedButton === "home"
-      ? await client.requestPressHome()
-      : await client.requestPressBack();
+    const result = await this.executeiOSNavigationButton(client, normalizedButton);
 
     if (!result.success) {
       return {
@@ -149,5 +148,21 @@ export class PressButton extends BaseVisualChange {
       button,
       keyCode: -1
     };
+  }
+
+  private async executeiOSNavigationButton(
+    client: IOSCtrlProxyClient,
+    button: string
+  ): Promise<{ success: boolean; error?: string }> {
+    switch (button) {
+      case "home":
+        return client.requestPressHome();
+      case "back":
+        return client.requestPressBack();
+      case "recent":
+        return client.requestRecentApps();
+      default:
+        return { success: false, error: `Unsupported iOS button: ${button}` };
+    }
   }
 }

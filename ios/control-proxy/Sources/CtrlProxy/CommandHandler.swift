@@ -102,6 +102,12 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestSelectAll.rawValue:
                 return try handleSelectAll(request, startTime: startTime)
 
+            case RequestType.requestKeyboard.rawValue:
+                return try handleKeyboard(request, startTime: startTime)
+
+            case RequestType.requestPressButton.rawValue:
+                return try handlePressButton(request, startTime: startTime)
+
             case RequestType.requestPressHome.rawValue:
                 return try handlePressHome(request, startTime: startTime)
 
@@ -427,6 +433,69 @@ public class CommandHandler: CommandHandling {
         textInputLog.debug("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.selectAllResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleKeyboard(_ request: WebSocketRequest, startTime: Date) throws -> KeyboardResponse {
+        guard let action = request.action else {
+            throw CommandError.missingParameter("action")
+        }
+
+        perfProvider.serial("handleKeyboard")
+        defer { perfProvider.end() }
+
+        let open = try perfProvider.track("keyboard") {
+            try gesturePerformer.keyboard(action: action)
+        }
+        let success = keyboardActionSucceeded(action: action, open: open)
+
+        return KeyboardResponse(
+            requestId: request.requestId,
+            success: success,
+            open: open,
+            totalTimeMs: totalTimeMs(from: startTime),
+            error: success ? nil : "Keyboard did not \(action.lowercased())"
+        )
+    }
+
+    private func keyboardActionSucceeded(action: String, open: Bool) -> Bool {
+        switch action.lowercased() {
+        case "detect":
+            return true
+        case "open":
+            return open
+        case "close":
+            return !open
+        default:
+            return false
+        }
+    }
+
+    private func handlePressButton(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        guard let button = request.action else {
+            throw CommandError.missingParameter("action")
+        }
+
+        perfProvider.serial("handlePressButton")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressButton") {
+            try gesturePerformer.pressButton(button)
+        }
+
+        if button.lowercased() == "home" || button.lowercased() == "recent" {
+            perfProvider.track("switchForegroundApp") {
+                elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+            }
+            perfProvider.track("updateApplication") {
+                gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+            }
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pressButtonResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )
@@ -902,10 +971,16 @@ public class CommandHandler: CommandHandling {
             return ResponseType.imeActionResult.rawValue
         case RequestType.requestSelectAll.rawValue:
             return ResponseType.selectAllResult.rawValue
+        case RequestType.requestKeyboard.rawValue:
+            return ResponseType.keyboardResult.rawValue
+        case RequestType.requestPressButton.rawValue:
+            return ResponseType.pressButtonResult.rawValue
         case RequestType.requestPressHome.rawValue:
             return ResponseType.pressHomeResult.rawValue
         case RequestType.requestPressBack.rawValue:
             return ResponseType.pressBackResult.rawValue
+        case RequestType.requestRecentApps.rawValue:
+            return ResponseType.recentAppsResult.rawValue
         case RequestType.requestAction.rawValue:
             return ResponseType.actionResult.rawValue
         case RequestType.requestLaunchApp.rawValue:

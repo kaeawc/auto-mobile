@@ -420,6 +420,83 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
+  describe("requestKeyboard", function() {
+    test("should send keyboard request and return open state", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestKeyboard("detect", 5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_keyboard");
+        expect(sentMessage.action).toBe("detect");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "keyboard_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          open: true,
+          totalTimeMs: 20
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+        expect(result.open).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("requestRecentApps", function() {
+    test("should send recent apps request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestRecentApps(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_recent_apps");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "recent_apps_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 15
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("requestLaunchApp", function() {
     test("should send launch app request and return result", async function() {
       const testTimer = fakeTimer;

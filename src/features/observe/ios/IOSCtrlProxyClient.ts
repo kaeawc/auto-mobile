@@ -7,6 +7,7 @@
  *
  * - CtrlProxyGestures: Swipe, tap, drag, pinch operations
  * - CtrlProxyText: setText, clearText, IME actions, select all
+ * - CtrlProxyKeyboard: keyboard open, close, detect
  * - CtrlProxyHierarchy: Hierarchy retrieval, caching, conversion
  * - CtrlProxyScreenshot: Screenshot capture
  * - CtrlProxyNavigation: pressHome, pressBack, launchApp
@@ -98,6 +99,7 @@ import { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 import { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
+import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 
 // Import types
 import type {
@@ -114,6 +116,7 @@ import type {
   CtrlProxySetTextResult,
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
+  CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyRecentAppsResult,
@@ -189,6 +192,11 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestSelectAll(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxySelectAllResult>;
+
+  requestKeyboard(
+    action: "open" | "close" | "detect",
+    timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyKeyboardResult>;
 
   requestClipboard(
     action: "copy" | "paste" | "clear" | "get",
@@ -288,6 +296,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private _clipboard: CtrlProxyClipboard | null = null;
   private _voiceOver: CtrlProxyVoiceOver | null = null;
   private _storage: CtrlProxyStorage | null = null;
+  private _keyboard: CtrlProxyKeyboard | null = null;
 
   // Logging tag for base class
   protected readonly logTag = "IOSCtrlProxyClient";
@@ -540,6 +549,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this._storage = new CtrlProxyStorage(this.createDelegateContext());
     }
     return this._storage;
+  }
+
+  private get keyboard(): CtrlProxyKeyboard {
+    if (!this._keyboard) {
+      this._keyboard = new CtrlProxyKeyboard(this.createDelegateContext());
+    }
+    return this._keyboard;
   }
 
   // ===========================================================================
@@ -958,12 +974,23 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         case "set_text_result":
         case "clear_text_result":
         case "select_all_result":
+        case "press_button_result":
         case "press_home_result":
         case "press_back_result":
         case "recent_apps_result":
         case "launch_app_result":
           result = {
             success: message.success ?? true,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+            perfTiming: message.perfTiming
+          };
+          break;
+
+        case "keyboard_result":
+          result = {
+            success: message.success ?? true,
+            open: message.open ?? false,
             totalTimeMs: message.totalTimeMs ?? 0,
             error: message.error,
             perfTiming: message.perfTiming
@@ -1275,6 +1302,14 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxySelectAllResult> {
     return this.text.requestSelectAll(timeoutMs, perf);
+  }
+
+  async requestKeyboard(
+    action: "open" | "close" | "detect",
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyKeyboardResult> {
+    return this.keyboard.requestKeyboard(action, timeoutMs, perf);
   }
 
   // ===========================================================================

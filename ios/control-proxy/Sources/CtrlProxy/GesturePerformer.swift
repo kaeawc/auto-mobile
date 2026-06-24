@@ -569,6 +569,63 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func keyboard(action: String) throws -> Bool {
+            guard let app = resolveTextInputApp() else {
+                throw GestureError.noApplication
+            }
+
+            switch action.lowercased() {
+            case "detect":
+                return isKeyboardVisible(app: app)
+            case "open":
+                if isKeyboardVisible(app: app) {
+                    return true
+                }
+                guard let focused = resolveFocusedTextElement(app: app) else {
+                    throw GestureError.notSupported("No focused text input to open keyboard")
+                }
+                try runOnMainThread {
+                    focused.tap()
+                }
+                return waitForKeyboardVisibility(app: app, expected: true)
+            case "close":
+                if !isKeyboardVisible(app: app) {
+                    return false
+                }
+                try typeKeyboardKey(.escape, app: app)
+                return waitForKeyboardVisibility(app: app, expected: false)
+            default:
+                throw GestureError.notSupported("Keyboard action: \(action)")
+            }
+        }
+
+        private func waitForKeyboardVisibility(
+            app: XCUIApplication,
+            expected: Bool,
+            timeout: TimeInterval = 1.0,
+            interval: TimeInterval = 0.05
+        ) -> Bool {
+            let deadline = Date().addingTimeInterval(timeout)
+            var visible = isKeyboardVisible(app: app)
+            while visible != expected && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(interval))
+                visible = isKeyboardVisible(app: app)
+            }
+            return visible
+        }
+
+        private func isKeyboardVisible(app: XCUIApplication) -> Bool {
+            return (try? runOnMainThread {
+                app.keyboards.firstMatch.exists || self.springboard.keyboards.firstMatch.exists
+            }) ?? false
+        }
+
+        private func typeKeyboardKey(_ key: XCUIKeyboardKey, app: XCUIApplication) throws {
+            try runOnMainThread {
+                app.typeKey(key, modifierFlags: [])
+            }
+        }
+
         // MARK: - Actions
 
         public func performAction(_ action: String, resourceId: String? = nil, label: String? = nil) throws {
@@ -820,6 +877,21 @@ public class GesturePerformer: GesturePerforming {
             )
         }
 
+        public func pressButton(_ button: String) throws {
+            switch button.lowercased() {
+            case "home":
+                try pressHome()
+            case "recent":
+                try openRecentApps()
+            case "back":
+                try pressBack()
+            case "menu", "power", "volume_up", "volume_down":
+                throw GestureError.notSupported("iOS simulator button: \(button)")
+            default:
+                throw GestureError.notSupported("Button: \(button)")
+            }
+        }
+
         public func openRecentApps() throws {
             try runOnMainThread {
                 let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -938,6 +1010,10 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
+        public func keyboard(action _: String) throws -> Bool {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
         public func performAction(_: String, resourceId _: String?, label _: String?) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
@@ -963,6 +1039,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressBack() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func pressButton(_: String) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

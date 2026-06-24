@@ -100,6 +100,22 @@ describe("SessionHeartbeatMonitor", () => {
       expect(reaped).toEqual(["s1"]);
     });
 
+    it("does not reap a default-heartbeat session with recent activity before its first heartbeat", async () => {
+      await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
+      const reaped: string[] = [];
+      const monitor = new SessionHeartbeatMonitor(sessionManager, () => false, async sid => { reaped.push(sid); }, timer);
+
+      timer.advanceTime(4_000);
+      await sessionManager.getOrCreateSession("s1");
+      timer.advanceTime(2_000);
+      await monitor.tick();
+      expect(reaped).toEqual([]);
+
+      timer.advanceTime(3_001);
+      await monitor.tick();
+      expect(reaped).toEqual(["s1"]);
+    });
+
     it("skips a session with active executions", async () => {
       await sessionManager.createSession("s1", "emulator-5554", "android", 60_000);
       const reaped: string[] = [];

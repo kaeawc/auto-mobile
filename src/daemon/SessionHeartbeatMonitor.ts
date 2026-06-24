@@ -117,15 +117,16 @@ export class SessionHeartbeatMonitor {
         continue;
       }
       const timeoutMs = session.heartbeatTimeoutMs ?? this.defaultHeartbeatTimeoutMs;
-      const ageMs = now - session.createdAt;
       if (!session.hasReceivedHeartbeat) {
+        const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
         if (session.heartbeatTimeoutSource === "default") {
-          if (ageMs > this.preFirstHeartbeatGraceMs) {
+          if (now - lastHeartbeat > this.preFirstHeartbeatGraceMs) {
             logger.warn(`Session ${session.sessionId} never received first heartbeat, cancelling`);
             await this.reap(session.sessionId);
           }
           continue;
         }
+        const ageMs = now - session.createdAt;
         if (ageMs < this.graceMs) {
           continue;
         }

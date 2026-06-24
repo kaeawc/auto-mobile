@@ -76,6 +76,40 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     this.emulator = emulator || new AndroidEmulatorClient();
   }
 
+  private async canDiscoverIosLocallyOrViaHostControl(): Promise<boolean> {
+    if (process.platform === "darwin") {
+      return true;
+    }
+
+    try {
+      return await this.simctl.isAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  private async listIosDeviceImagesIfAvailable(): Promise<DeviceInfo[]> {
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return [];
+    }
+    try {
+      return await this.simctl.listSimulatorImages();
+    } catch {
+      return [];
+    }
+  }
+
+  private async getBootedIosDevicesIfAvailable(): Promise<BootedDevice[]> {
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return [];
+    }
+    try {
+      return await this.simctl.getBootedSimulators();
+    } catch {
+      return [];
+    }
+  }
+
   /**
    * List all available device images
    * @returns Promise with array of device image names
@@ -85,10 +119,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.listAvds();
       case "ios":
-        return this.simctl.listSimulatorImages();
+        return this.listIosDeviceImagesIfAvailable();
       case "either":
         const emulators = await this.emulator.listAvds();
-        const simulators = await this.simctl.listSimulatorImages();
+        const simulators = await this.listIosDeviceImagesIfAvailable();
         return [...emulators, ...simulators];
     }
   }
@@ -103,6 +137,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.isAvdRunning(device.name);
       case "ios":
+        if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+          return false;
+        }
         if (device.deviceId) {
           const booted = await this.simctl.getBootedSimulators();
           return booted.some(simulator => simulator.deviceId === device.deviceId);
@@ -120,10 +157,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.getBootedDevices();
       case "ios":
-        return this.simctl.getBootedSimulators();
+        return this.getBootedIosDevicesIfAvailable();
       case "either":
         const emulators = await this.emulator.getBootedDevices();
-        const simulators = await this.simctl.getBootedSimulators();
+        const simulators = await this.getBootedIosDevicesIfAvailable();
         return [...emulators, ...simulators];
     }
   }

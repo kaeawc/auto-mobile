@@ -248,17 +248,39 @@ describe("iOS doctor checks", () => {
     });
 
     test("skips when not on darwin", async () => {
+      let createSimctlClientCalls = 0;
       const result = await checkSimctlAvailable({
         ...baseDependencies,
-        platform: () => "linux"
+        platform: () => "linux",
+        createSimctlClient: () => {
+          createSimctlClientCalls++;
+          throw new Error("createSimctlClient should not be called on non-darwin");
+        }
       });
 
       expect(result.status).toBe("skip");
       expect(result.message).toContain("requires macOS");
+      expect(createSimctlClientCalls).toBe(0);
     });
   });
 
   describe("checkSimulatorRuntimes", () => {
+    test("skips without creating simctl client when not on darwin", async () => {
+      let createSimctlClientCalls = 0;
+      const result = await checkSimulatorRuntimes({
+        ...baseDependencies,
+        platform: () => "linux",
+        createSimctlClient: () => {
+          createSimctlClientCalls++;
+          throw new Error("createSimctlClient should not be called on non-darwin");
+        }
+      });
+
+      expect(result.status).toBe("skip");
+      expect(result.message).toContain("only available on macOS");
+      expect(createSimctlClientCalls).toBe(0);
+    });
+
     test("fails when no simulator runtimes are available", async () => {
       const result = await checkSimulatorRuntimes({
         ...baseDependencies,
@@ -408,13 +430,19 @@ describe("iOS doctor checks", () => {
     });
 
     test("skips when not on darwin", async () => {
+      let createSimctlClientCalls = 0;
       const result = await checkBootedSimulators({
         ...baseDependencies,
-        platform: () => "linux"
+        platform: () => "linux",
+        createSimctlClient: () => {
+          createSimctlClientCalls++;
+          throw new Error("createSimctlClient should not be called on non-darwin");
+        }
       });
 
       expect(result.status).toBe("skip");
       expect(result.message).toContain("only available on macOS");
+      expect(createSimctlClientCalls).toBe(0);
     });
   });
 });

@@ -4,32 +4,32 @@ import { bootstrapEnvironment } from "./utils/envBootstrap";
 // Run before any other imports that may resolve tool paths at module load time.
 bootstrapEnvironment();
 
-import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
-import { createMcpServer } from "./server";
-import { createProxyMcpServer } from "./server/proxyServer";
-import { logger } from "./utils/logger";
-import { runCliCommand } from "./cli";
-import { runDaemonCommand } from "./daemon/manager";
-import { startDaemon } from "./daemon/daemon";
 import type { DaemonOptions } from "./daemon/types";
-import { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } from "./daemon/videoRecordingSocketServer";
-import { startTestRecordingSocketServer, stopTestRecordingSocketServer } from "./daemon/testRecordingSocketServer";
-import { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } from "./daemon/deviceSnapshotSocketServer";
-import { startAppearanceSocketServer, stopAppearanceSocketServer } from "./daemon/appearanceSocketServer";
-import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "./utils/appearance/AppearanceSyncScheduler";
-import { startHostEmulatorAutoConnect, stopHostEmulatorAutoConnect } from "./utils/hostEmulatorAutoConnect";
-import { FeatureFlagService } from "./features/featureFlags/FeatureFlagService";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";
-import { serverConfig, type PlanExecutionLockScope } from "./utils/ServerConfig";
+import type { PlanExecutionLockScope } from "./utils/ServerConfig";
 import type { VideoRecordingConfigInput } from "./models";
+import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
-import { AndroidCtrlProxyManager } from "./utils/CtrlProxyManager";
-import { IOSCtrlProxyBuilder } from "./utils/IOSCtrlProxyBuilder";
+import { getMcpServerVersion } from "./utils/mcpVersion";
 
-startupBenchmark.mark("processEntry");
+interface FatalLogger {
+  error(...args: unknown[]): void;
+  close(): void;
+}
+
+let fatalLogger: FatalLogger | undefined;
+
+const versionOutput = getGlobalVersionOutput(process.argv.slice(2), getMcpServerVersion());
+if (versionOutput !== undefined) {
+  console.log(versionOutput);
+  process.exit(0);
+}
+interface ParseLogger {
+  warn(message: string): void;
+}
 
 // Parse command line arguments
-function parseArgs(): {
+function parseArgs(log: ParseLogger): {
   cliMode: boolean;
   cliArgs: string[];
   daemonPort: number | undefined;
@@ -135,7 +135,7 @@ function parseArgs(): {
     }
     const parsed = allowFloat ? Number(value) : parseInt(value, 10);
     if (!Number.isFinite(parsed) || parsed <= 0) {
-      logger.warn(`Invalid ${label}: ${value}`);
+      log.warn(`Invalid ${label}: ${value}`);
       return undefined;
     }
     return allowFloat ? parsed : Math.round(parsed);
@@ -149,7 +149,7 @@ function parseArgs(): {
       return;
     }
     if (!allowedQualityPresets.has(value)) {
-      logger.warn(`Invalid video quality preset (${source}): ${value}`);
+      log.warn(`Invalid video quality preset (${source}): ${value}`);
       return;
     }
     videoRecordingDefaults.qualityPreset = value;
@@ -160,7 +160,7 @@ function parseArgs(): {
       return;
     }
     if (!allowedFormats.has(value)) {
-      logger.warn(`Invalid video format (${source}): ${value}`);
+      log.warn(`Invalid video format (${source}): ${value}`);
       return;
     }
     videoRecordingDefaults.format = value;
@@ -223,7 +223,7 @@ function parseArgs(): {
         daemonPort = port;
         i++; // Skip the port argument
       } else {
-        logger.warn(`Invalid port: ${args[i + 1]}`);
+        log.warn(`Invalid port: ${args[i + 1]}`);
         i++; // Skip the invalid argument
       }
     } else if (arg === "--host") {
@@ -232,7 +232,7 @@ function parseArgs(): {
         daemonHost = host;
         i++; // Skip the host argument
       } else {
-        logger.warn(`Invalid host: ${host}`);
+        log.warn(`Invalid host: ${host}`);
         i++; // Skip the invalid argument
       }
     } else if (arg === "--a11y-level") {
@@ -252,7 +252,7 @@ function parseArgs(): {
       if (scope === "global" || scope === "session") {
         planExecutionLockScope = scope;
       } else {
-        logger.warn(`Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`);
+        log.warn(`Invalid plan execution lock scope: ${scope}. Using default: ${planExecutionLockScope}`);
       }
       i++;
     } else if (arg === "--video-quality" || arg === "--video-quality-preset") {
@@ -325,44 +325,67 @@ function parseArgs(): {
   };
 }
 
-process.on("SIGINT", async () => {
-  logger.info("Received SIGINT signal, shutting down");
-  await stopHostEmulatorAutoConnect();
-  await stopVideoRecordingSocketServer();
-  await stopTestRecordingSocketServer();
-  await stopDeviceSnapshotSocketServer();
-  await stopAppearanceSocketServer();
-  stopAppearanceSyncScheduler();
-  await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-  logger.close();
-  process.exit(0);
-});
-
-process.on("SIGTERM", async () => {
-  logger.info("Received SIGTERM signal, shutting down");
-  await stopHostEmulatorAutoConnect();
-  await stopVideoRecordingSocketServer();
-  await stopTestRecordingSocketServer();
-  await stopDeviceSnapshotSocketServer();
-  await stopAppearanceSocketServer();
-  stopAppearanceSyncScheduler();
-  await AndroidCtrlProxyManager.cleanupPrefetchedApk();
-  logger.close();
-  process.exit(0);
-});
-
-process.on("uncaughtException", error => {
-  // Don't exit on uncaught exception, just log them
-  logger.info(`Uncaught exception: ${error.message}`);
-  logger.info(`Trace: ${error.stack}`);
-});
-
-process.on("unhandledRejection", (reason, promise) => {
-  logger.error("Unhandled rejection at:", promise, "reason:", reason);
-  // Don't exit on unhandled rejections, just log them
-});
-
 async function main() {
+  const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
+  const { createMcpServer } = await import("./server");
+  const { createProxyMcpServer } = await import("./server/proxyServer");
+  const { logger } = await import("./utils/logger");
+  fatalLogger = logger;
+  const { runCliCommand } = await import("./cli");
+  const { runDaemonCommand } = await import("./daemon/manager");
+  const { startDaemon } = await import("./daemon/daemon");
+  const videoRecordingSocketServer = await import("./daemon/videoRecordingSocketServer");
+  const testRecordingSocketServer = await import("./daemon/testRecordingSocketServer");
+  const deviceSnapshotSocketServer = await import("./daemon/deviceSnapshotSocketServer");
+  const appearanceSocketServer = await import("./daemon/appearanceSocketServer");
+  const appearanceSyncScheduler = await import("./utils/appearance/AppearanceSyncScheduler");
+  const hostEmulatorAutoConnect = await import("./utils/hostEmulatorAutoConnect");
+  const { FeatureFlagService } = await import("./features/featureFlags/FeatureFlagService");
+  const { serverConfig } = await import("./utils/ServerConfig");
+  const { AndroidCtrlProxyManager } = await import("./utils/CtrlProxyManager");
+  const { IOSCtrlProxyBuilder } = await import("./utils/IOSCtrlProxyBuilder");
+
+  startupBenchmark.mark("processEntry");
+
+  const { startVideoRecordingSocketServer, stopVideoRecordingSocketServer } = videoRecordingSocketServer;
+  const { startTestRecordingSocketServer, stopTestRecordingSocketServer } = testRecordingSocketServer;
+  const { startDeviceSnapshotSocketServer, stopDeviceSnapshotSocketServer } = deviceSnapshotSocketServer;
+  const { startAppearanceSocketServer, stopAppearanceSocketServer } = appearanceSocketServer;
+  const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
+  const { startHostEmulatorAutoConnect, stopHostEmulatorAutoConnect } = hostEmulatorAutoConnect;
+
+  const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
+    logger.info(`Received ${signal} signal, shutting down`);
+    await stopHostEmulatorAutoConnect();
+    await stopVideoRecordingSocketServer();
+    await stopTestRecordingSocketServer();
+    await stopDeviceSnapshotSocketServer();
+    await stopAppearanceSocketServer();
+    stopAppearanceSyncScheduler();
+    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
+    logger.close();
+    process.exit(0);
+  };
+
+  process.on("SIGINT", () => {
+    void shutdown("SIGINT");
+  });
+
+  process.on("SIGTERM", () => {
+    void shutdown("SIGTERM");
+  });
+
+  process.on("uncaughtException", error => {
+    // Don't exit on uncaught exception, just log them
+    logger.info(`Uncaught exception: ${error.message}`);
+    logger.info(`Trace: ${error.stack}`);
+  });
+
+  process.on("unhandledRejection", (reason, promise) => {
+    logger.error("Unhandled rejection at:", promise, "reason:", reason);
+    // Don't exit on unhandled rejections, just log them
+  });
+
   try {
     // Parse command line arguments
     const {
@@ -397,7 +420,7 @@ async function main() {
       noA11yIncludeNotImportantViews,
       noA11yReportViewIds,
       noA11yRetrieveInteractiveWindows,
-    } = parseArgs();
+    } = parseArgs(logger);
 
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
@@ -638,7 +661,7 @@ async function main() {
 
 main().catch(err => {
   console.error("Fatal error in main():", err);
-  logger.error("Fatal error in main():", err);
-  logger.close();
+  fatalLogger?.error("Fatal error in main():", err);
+  fatalLogger?.close();
   process.exit(1);
 });

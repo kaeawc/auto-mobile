@@ -88,6 +88,13 @@ export abstract class BaseSocketServer {
   }
 
   /**
+   * Return the concrete Unix socket path this server was created with.
+   */
+  getSocketPath(): string {
+    return this.socketPath;
+  }
+
+  /**
    * Handle a new connection. Sets up line-based protocol.
    */
   protected handleConnection(socket: Socket): void {

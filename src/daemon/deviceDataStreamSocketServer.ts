@@ -138,6 +138,7 @@ export type OnNavigationGraphRequestedCallback = (appId?: string | null) => Prom
  * - Server pushes: {"type": "hierarchy_update", "deviceId": "emulator-5554", "timestamp": 123, "data": {...}}
  * - Server pushes: {"type": "screenshot_update", "deviceId": "emulator-5554", "timestamp": 123, "screenshotBase64": "..."}
  * - Server pushes: {"type": "storage_update", "deviceId": "emulator-5554", "timestamp": 123, "storageEvent": {...}}
+ * - Server pushes: {"type": "error", "deviceId": "emulator-5554", "timestamp": 123, "error": "device connection lost"}
  */
 export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   DeviceDataFilter,
@@ -283,6 +284,24 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   }
 
   /**
+   * Notify subscribers that the underlying device control connection was lost.
+   */
+  onDeviceConnectionLost(deviceId: string): void {
+    const message: DeviceDataStreamMessage = {
+      type: "error",
+      success: false,
+      deviceId,
+      timestamp: this.timer.now(),
+      error: "device connection lost",
+    };
+
+    const sentCount = this.pushToSubscribers({ message, targetDeviceId: deviceId });
+    if (sentCount > 0) {
+      logger.debug(`[DeviceDataStream] Pushed device connection lost error to ${sentCount} subscribers (device: ${deviceId})`);
+    }
+  }
+
+  /**
    * Override processLine to handle additional commands and the onSubscriberConnected callback.
    */
   protected async processLine(socket: Socket, line: string): Promise<void> {
@@ -399,6 +418,10 @@ let socketServer: DeviceDataStreamSocketServer | null = null;
 
 export function getDeviceDataStreamServer(): DeviceDataStreamSocketServer | null {
   return socketServer;
+}
+
+export function getDeviceDataStreamSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
 }
 
 export async function startDeviceDataStreamSocketServer(

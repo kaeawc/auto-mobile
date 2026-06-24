@@ -11,6 +11,7 @@ import {
   LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_VERSION,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -43,6 +44,46 @@ function resolvePackageRunner(): string | null {
  */
 function stderrLog(message: string): void {
   process.stderr.write(message + "\n");
+}
+
+export interface DaemonLaunchCommand {
+  command: string;
+  args: string[];
+}
+
+function resolvePackageSpecifier(version: string): string {
+  const trimmedVersion = version.trim();
+  if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
+    throw new ActionableError(
+      "Cannot spawn AutoMobile daemon via bunx because the current package version is unknown. Run from an installed auto-mobile binary or set MCP_SERVER_VERSION."
+    );
+  }
+  return `@kaeawc/auto-mobile@${trimmedVersion}`;
+}
+
+export function resolveDaemonLaunchCommand(
+  entryScript: string | undefined = process.argv[1],
+  packageRunner: string | null = resolvePackageRunner(),
+  version: string = DAEMON_VERSION
+): DaemonLaunchCommand {
+  if (entryScript) {
+    return {
+      command: process.execPath,
+      args: [entryScript, "--daemon-mode"],
+    };
+  }
+
+  if (packageRunner) {
+    return {
+      command: packageRunner,
+      args: ["-y", resolvePackageSpecifier(version), "--daemon-mode"],
+    };
+  }
+
+  return {
+    command: "auto-mobile",
+    args: ["--daemon-mode"],
+  };
 }
 
 /**
@@ -294,22 +335,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    const entryScript = process.argv[1];
-    let autoMobileCmd: string;
-    let args: string[];
-    if (entryScript) {
-      autoMobileCmd = process.execPath;
-      args = [entryScript, "--daemon-mode"];
-    } else {
-      const runner = resolvePackageRunner();
-      if (runner) {
-        autoMobileCmd = runner;
-        args = ["-y", "@kaeawc/auto-mobile@latest", "--daemon-mode"];
-      } else {
-        autoMobileCmd = "auto-mobile";
-        args = ["--daemon-mode"];
-      }
-    }
+    const { command: autoMobileCmd, args } = resolveDaemonLaunchCommand();
     if (options.port) {
       args.push("--port", options.port.toString());
     }
@@ -515,6 +541,7 @@ export class DaemonManager implements DaemonManagerLike {
         pid: pidData.pid,
         port: pidData.port,
         socketPath: pidData.socketPath,
+        sockets: pidData.sockets,
         startedAt: pidData.startedAt,
         version: pidData.version,
       };

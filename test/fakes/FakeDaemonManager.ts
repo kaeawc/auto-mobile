@@ -12,6 +12,7 @@ export class FakeDaemonManager implements DaemonManagerLike {
     port: 3000,
     socketPath: "/tmp/test.sock",
   };
+  statusResults: DaemonStatus[] = [];
   startCalled = false;
   startCallCount = 0;
   startOptions: DaemonOptions | undefined;
@@ -22,6 +23,10 @@ export class FakeDaemonManager implements DaemonManagerLike {
   waitForReadyCallCount = 0;
 
   async status(): Promise<DaemonStatus> {
+    const nextStatus = this.statusResults.shift();
+    if (nextStatus) {
+      return nextStatus;
+    }
     return this.statusResult;
   }
 

@@ -2,12 +2,13 @@ import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../../src/daemon/client";
 import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../../src/daemon/constants";
 import type { DaemonOptions, DaemonStatus, PidFileData } from "../../../src/daemon/types";
 import { FakeDaemonClient } from "../../fakes/FakeDaemonClient";
+import { FakeTimer } from "../../fakes/FakeTimer";
 
 /**
  * Integration test: real DaemonManager.status() reading a real PID file written
@@ -22,6 +23,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
   let pidFilePath: string;
   let realManager: DaemonManager;
   let isAvailableSpy: ReturnType<typeof spyOn>;
+  let fakeTimer: FakeTimer;
 
   function writePidFile(fields: { version?: string; startedAt?: number }): void {
     const data: PidFileData = {
@@ -39,6 +41,8 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     pidFilePath = join(tempDir, "test.pid");
     realManager = new DaemonManager(undefined, undefined, undefined, undefined, pidFilePath);
     isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+    fakeTimer = new FakeTimer();
+    fakeTimer.advanceTime(100_000);
   });
 
   afterEach(() => {
@@ -70,6 +74,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       async restart(options?: DaemonOptions) {
         restartCalled = true;
         restartOptions = options;
+        writePidFile({ version: DAEMON_VERSION, startedAt: fakeTimer.now() });
       },
       async waitForReady() {
         return tracker.waitForReadyResult;
@@ -85,6 +90,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
       await proxy.listTools();
@@ -94,17 +100,20 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     }
   });
 
-  test("real PID file with newer version does not trigger restart", async () => {
+  test("real PID file with newer version fails without attaching", async () => {
     writePidFile({ version: "9999.0.0", startedAt: 1 });
     const tracked = makeTracked();
+    const fakeClient = new FakeDaemonClient();
     const proxy = new DaemonMcpProxy({
-      clientFactory: () => new FakeDaemonClient(),
+      clientFactory: () => fakeClient,
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
-      await proxy.listTools();
+      await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
       expect(tracked.restartCalled).toBe(false);
+      expect(fakeClient.isConnected()).toBe(false);
     } finally {
       await proxy.close();
     }
@@ -117,6 +126,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
       await proxy.listTools();
@@ -126,26 +136,29 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
     }
   });
 
-  test("real PID file with older version inside cooldown window does not trigger restart", async () => {
+  test("real PID file with older version inside cooldown window fails without attaching", async () => {
     writePidFile({
       version: "0.0.1",
-      startedAt: Date.now() - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
+      startedAt: fakeTimer.now() - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
     });
     const tracked = makeTracked();
+    const fakeClient = new FakeDaemonClient();
     const proxy = new DaemonMcpProxy({
-      clientFactory: () => new FakeDaemonClient(),
+      clientFactory: () => fakeClient,
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
-      await proxy.listTools();
+      await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
       expect(tracked.restartCalled).toBe(false);
+      expect(fakeClient.isConnected()).toBe(false);
     } finally {
       await proxy.close();
     }
   });
 
-  test("real PID file missing version field does not trigger restart", async () => {
+  test("real PID file missing version field triggers restart", async () => {
     const data = {
       pid: process.pid,
       socketPath: join(tempDir, "test.sock"),
@@ -158,13 +171,44 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
       await proxy.listTools();
-      expect(tracked.restartCalled).toBe(false);
+      expect(tracked.restartCalled).toBe(true);
     } finally {
       await proxy.close();
     }
+  });
+
+  test("real PID file exposes socket path map through status", async () => {
+    const sockets = {
+      "control": join(tempDir, "test.sock"),
+      "appearance": join(tempDir, "appearance.sock"),
+      "device-snapshot": join(tempDir, "device-snapshot.sock"),
+      "failures-push": join(tempDir, "failures-push.sock"),
+      "failures-stream": join(tempDir, "failures-stream.sock"),
+      "observation-stream": join(tempDir, "observation-stream.sock"),
+      "performance-push": join(tempDir, "performance-push.sock"),
+      "performance-stream": join(tempDir, "performance-stream.sock"),
+      "telemetry-push": join(tempDir, "telemetry-push.sock"),
+      "test-recording": join(tempDir, "test-recording.sock"),
+      "video-recording": join(tempDir, "video-recording.sock"),
+    };
+    const data: PidFileData = {
+      pid: process.pid,
+      socketPath: sockets.control,
+      sockets,
+      port: 0,
+      startedAt: 1,
+      version: DAEMON_VERSION,
+    };
+    writeFileSync(pidFilePath, JSON.stringify(data));
+
+    const status = await realManager.status();
+
+    expect(status.running).toBe(true);
+    expect(status.sockets).toEqual(sockets);
   });
 
   test("PID file pointing at a dead PID is treated as not running, no restart attempted", async () => {
@@ -182,6 +226,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       clientFactory: () => new FakeDaemonClient(),
       daemonManager: tracked,
       autoStartDaemon: true,
+      timer: fakeTimer,
     });
     try {
       await proxy.listTools();

@@ -2,17 +2,30 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+const HEARTBEAT_ENV_KEYS = [
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+] as const;
+
+function clearHeartbeatEnv(): void {
+  for (const key of HEARTBEAT_ENV_KEYS) {
+    delete process.env[key];
+  }
+}
+
 describe("SessionManager", () => {
   let sessionManager: SessionManager;
   let fakeTimer: FakeTimer;
 
   beforeEach(() => {
+    clearHeartbeatEnv();
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer);
   });
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
+    clearHeartbeatEnv();
   });
 
   describe("createSession", () => {
@@ -45,6 +58,22 @@ describe("SessionManager", () => {
       const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 5000);
       expect(session.sessionTimeoutMs).toBe(5000);
       expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
+    });
+
+    test("should use configured default heartbeat timeout", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
+
+      expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("default");
+    });
+
+    test("should mark explicitly provided heartbeat timeout as custom", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 30_000, 15_000);
+
+      expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("custom");
     });
   });
 

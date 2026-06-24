@@ -158,6 +158,10 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 
 let socketServer: AppearanceSocketServer | null = null;
 
+export function getAppearanceSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+}
+
 export async function startAppearanceSocketServer(): Promise<void> {
   if (!socketServer) {
     socketServer = new AppearanceSocketServer();

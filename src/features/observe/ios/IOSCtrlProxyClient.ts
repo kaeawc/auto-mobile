@@ -592,6 +592,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
+    getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();

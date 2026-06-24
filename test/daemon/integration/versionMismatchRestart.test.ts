@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach, spyOn } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DaemonMcpProxy } from "../../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../../src/daemon/daemonMcpProxy";
 import { DaemonClient } from "../../../src/daemon/client";
 import { DaemonManager, type DaemonManagerLike } from "../../../src/daemon/manager";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../../src/daemon/constants";
@@ -111,7 +111,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       timer: fakeTimer,
     });
     try {
-      await expect(proxy.listTools()).rejects.toThrow("AutoMobile daemon version mismatch");
+      await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
       expect(tracked.restartCalled).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
     } finally {
@@ -150,7 +150,7 @@ describe("DaemonMcpProxy + real DaemonManager (version-mismatch integration)", (
       timer: fakeTimer,
     });
     try {
-      await expect(proxy.listTools()).rejects.toThrow("restart is in cooldown");
+      await expect(proxy.listTools()).rejects.toThrow(DaemonVersionMismatchError);
       expect(tracked.restartCalled).toBe(false);
       expect(fakeClient.isConnected()).toBe(false);
     } finally {

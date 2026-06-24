@@ -1,5 +1,5 @@
 import { describe, expect, test, spyOn } from "bun:test";
-import { DaemonMcpProxy } from "../../src/daemon/daemonMcpProxy";
+import { DaemonMcpProxy, DaemonVersionMismatchError } from "../../src/daemon/daemonMcpProxy";
 import { DaemonClient, DaemonUnavailableError } from "../../src/daemon/client";
 import { DAEMON_VERSION, DAEMON_VERSION_RESTART_COOLDOWN_MS } from "../../src/daemon/constants";
 import { logger } from "../../src/utils/logger";
@@ -127,6 +127,16 @@ describe("DaemonMcpProxy", () => {
         return { fakeClient, fakeManager, isAvailableSpy, proxy };
       }
 
+      async function expectVersionMismatch(promise: Promise<unknown>): Promise<DaemonVersionMismatchError> {
+        try {
+          await promise;
+        } catch (error) {
+          expect(error).toBeInstanceOf(DaemonVersionMismatchError);
+          return error as DaemonVersionMismatchError;
+        }
+        throw new Error("Expected DaemonVersionMismatchError");
+      }
+
       test("restarts daemon when MCP server version is newer", async () => {
         const { fakeManager, isAvailableSpy, proxy } = makeProxy({
           runningVersion: OLDER_VERSION,
@@ -147,7 +157,10 @@ describe("DaemonMcpProxy", () => {
           startedAt: ANCIENT_TIMESTAMP,
         });
         try {
-          await expect(proxy.listTools()).rejects.toThrow("AutoMobile daemon version mismatch");
+          const error = await expectVersionMismatch(proxy.listTools());
+          expect(error.reason).toBe("daemonNewer");
+          expect(error.daemonVersion).toBe(NEWER_VERSION);
+          expect(error.clientVersion).toBe(DAEMON_VERSION);
           expect(fakeManager.restartCalled).toBe(false);
           expect(fakeClient.isConnected()).toBe(false);
         } finally {
@@ -177,7 +190,9 @@ describe("DaemonMcpProxy", () => {
           startedAt: 100_000 - Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2),
         });
         try {
-          await expect(proxy.listTools()).rejects.toThrow("restart is in cooldown");
+          const error = await expectVersionMismatch(proxy.listTools());
+          expect(error.reason).toBe("cooldown");
+          expect(error.retryAfterMs).toBe(Math.floor(DAEMON_VERSION_RESTART_COOLDOWN_MS / 2));
           expect(fakeManager.restartCalled).toBe(false);
           expect(fakeClient.isConnected()).toBe(false);
           expect(warnSpy).toHaveBeenCalled();
@@ -209,7 +224,8 @@ describe("DaemonMcpProxy", () => {
           autoStartDaemon: false,
         });
         try {
-          await expect(proxy.listTools()).rejects.toThrow("auto-start is disabled");
+          const error = await expectVersionMismatch(proxy.listTools());
+          expect(error.reason).toBe("autoStartDisabled");
           expect(fakeManager.restartCalled).toBe(false);
           expect(fakeClient.isConnected()).toBe(false);
         } finally {

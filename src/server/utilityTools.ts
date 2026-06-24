@@ -82,9 +82,21 @@ export function registerUtilityTools() {
         // Session-scoped: bind the specific requested device to this session
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
-        const pooledDevice = devicePool.getDevice(args.deviceId);
+        let pooledDevice = devicePool.getDevice(args.deviceId);
+        if (!pooledDevice) {
+          await devicePool.refreshDevices();
+          pooledDevice = devicePool.getDevice(args.deviceId);
+        }
         if (!pooledDevice) {
           throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
+        }
+        if (pooledDevice.sessionId && pooledDevice.sessionId !== args.sessionUuid) {
+          const owningSession = sessionManager.getSession(pooledDevice.sessionId);
+          if (owningSession) {
+            throw new ActionableError(
+              `Device '${args.deviceId}' is already assigned to session ${pooledDevice.sessionId}`
+            );
+          }
         }
         // Release any existing session for this sessionUuid before rebinding
         const existing = sessionManager.getSession(args.sessionUuid);
@@ -93,7 +105,12 @@ export function registerUtilityTools() {
           await devicePool.releaseDevice(existing.assignedDevice);
         }
         if (!existing || existing.assignedDevice !== args.deviceId) {
-          await sessionManager.createSession(args.sessionUuid, args.deviceId, args.platform);
+          const boundSession = await devicePool.bindOrReuseDeviceSession(args.sessionUuid, args.deviceId, args.platform);
+          if (boundSession !== args.sessionUuid) {
+            throw new ActionableError(
+              `Device '${args.deviceId}' is already assigned to session ${boundSession}`
+            );
+          }
         }
         logger.info(`[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`);
       } else {

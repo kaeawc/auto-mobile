@@ -674,33 +674,42 @@ export class SimCtlClient implements SimCtl {
    */
   async getBootedSimulators(): Promise<BootedDevice[]> {
     try {
-      const simulatorList = await this.listSimulators();
-      logger.debug(`Found simulator list: ${simulatorList}`);
-      const bootedDevices: BootedDevice[] = [];
-
-      // Extract booted devices from all runtime versions
-      for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-        for (const device of runtimeDevices) {
-          if (device.isAvailable && device.state === "Booted") {
-            const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-            bootedDevices.push({
-              name: device.name,
-              platform: "ios",
-              deviceId: device.udid,
-              iosVersion,
-              osVersion: iosVersion,
-              formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-            } as BootedDevice);
-          }
-        }
-      }
-
-      bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-      return bootedDevices;
+      return await this.getBootedSimulatorsChecked();
     } catch (error) {
       logger.debug(`Failed to get booted iOS devices: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * Like {@link getBootedSimulators} but rethrows discovery failures instead of
+   * swallowing them into an empty list. Callers that must distinguish "no
+   * simulators are booted" from "simctl discovery failed" should use this.
+   */
+  async getBootedSimulatorsChecked(): Promise<BootedDevice[]> {
+    const simulatorList = await this.listSimulators();
+    logger.debug(`Found simulator list: ${simulatorList}`);
+    const bootedDevices: BootedDevice[] = [];
+
+    // Extract booted devices from all runtime versions
+    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
+      for (const device of runtimeDevices) {
+        if (device.isAvailable && device.state === "Booted") {
+          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+          bootedDevices.push({
+            name: device.name,
+            platform: "ios",
+            deviceId: device.udid,
+            iosVersion,
+            osVersion: iosVersion,
+            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+          } as BootedDevice);
+        }
+      }
+    }
+
+    bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    return bootedDevices;
   }
 
   /**

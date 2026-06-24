@@ -115,10 +115,15 @@ describe("DevicePool", () => {
           getBootedSimulators: async () => {
             simctlBootedCalls++;
             throw new Error("simctl should not be queried");
+          },
+          getBootedSimulatorsChecked: async () => {
+            simctlBootedCalls++;
+            throw new Error("simctl should not be queried");
           }
         } as unknown as SimCtlClient;
         const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice]
+          getBootedDevices: async () => [androidDevice],
+          getBootedDevicesChecked: async () => [androidDevice]
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
           new FakeAdbClient() as unknown as AdbClient,
@@ -149,10 +154,14 @@ describe("DevicePool", () => {
           isAvailable: async () => true,
           getBootedSimulators: async () => {
             throw new Error("host-control simctl unavailable");
+          },
+          getBootedSimulatorsChecked: async () => {
+            throw new Error("host-control simctl unavailable");
           }
         } as unknown as SimCtlClient;
         const fakeEmulator = {
-          getBootedDevices: async () => [androidDevice]
+          getBootedDevices: async () => [androidDevice],
+          getBootedDevicesChecked: async () => [androidDevice]
         } as unknown as AndroidEmulatorClient;
         const manager = new MultiPlatformDeviceManager(
           new FakeAdbClient() as unknown as AdbClient,
@@ -173,6 +182,130 @@ describe("DevicePool", () => {
         expect(added).toBe(1);
         expect(pool.getDevice("emulator-5554")).not.toBeNull();
       });
+    });
+
+    test("removes unassigned devices that are no longer booted", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      await fakeAppsRepo.upsertInstalledApp("sim-old", 0, "com.test.app", false, Date.now());
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("sim-new")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+      expect(await fakeAppsRepo.listInstalledApps("sim-old")).toEqual([]);
+    });
+
+    test("keeps missing assigned devices until session cleanup releases them", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      await devicePool.assignDeviceToSession("session-1", "ios");
+      fakeDeviceManager.bootedDevices = [createBootedDevice("sim-new", "ios", "iPhone 16")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")?.sessionId).toBe("session-1");
+      expect(devicePool.getDevice("sim-new")?.status).toBe("idle");
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("retains unassigned devices on first empty discovery", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(0);
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+    });
+
+    test("removes unassigned devices after repeated empty discovery misses", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [];
+
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(0);
+    });
+
+    test("retains devices on first partial platform discovery miss", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+
+      const added = await devicePool.refreshDevices();
+
+      expect(added).toBe(1);
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("retains iOS devices across repeated refreshes when iOS discovery keeps failing", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      // Android discovery succeeds, but iOS discovery fails this and every refresh.
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["ios"]);
+
+      // Even past the miss threshold, a device on a platform whose discovery
+      // failed must never be pruned (it may still be running).
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("retains all devices when discovery fails for every platform", async () => {
+      await devicePool.initializeWithDevices([
+        createBootedDevice("emulator-5554", "android", "Pixel 8"),
+        createBootedDevice("sim-old", "ios", "iPhone 15")
+      ]);
+      fakeDeviceManager.bootedDevices = [];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>(["android", "ios"]);
+
+      await devicePool.refreshDevices();
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getDevice("sim-old")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(2);
+    });
+
+    test("prunes iOS devices once iOS discovery succeeds and confirms them gone", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      // iOS discovery now succeeds but reports zero booted simulators.
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+      fakeDeviceManager.failedPlatforms = new Set<Platform>();
+
+      // Genuine empties are tolerated for one refresh, then removed.
+      await devicePool.refreshDevices();
+      expect(devicePool.getDevice("sim-old")?.status).toBe("idle");
+      await devicePool.refreshDevices();
+
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getDevice("emulator-5554")).not.toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
+    });
+
+    test("recomputes candidates after refresh prunes all unavailable error devices", async () => {
+      await devicePool.initializeWithDevices([createBootedDevice("sim-old", "ios", "iPhone 15")]);
+      for (let i = 0; i < 5; i++) {
+        devicePool.recordDeviceError("sim-old");
+      }
+      fakeDeviceManager.bootedDevices = [createBootedDevice("emulator-5554", "android", "Pixel 8")];
+
+      await devicePool.refreshDevices();
+      await expect(devicePool.assignDeviceToSession("session-1", "ios"))
+        .rejects.toThrow(/No devices in pool/);
+      expect(devicePool.getDevice("sim-old")).toBeNull();
+      expect(devicePool.getTotalDeviceCount()).toBe(1);
     });
   });
 

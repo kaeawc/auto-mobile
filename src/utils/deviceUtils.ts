@@ -1,9 +1,23 @@
 import { ChildProcess } from "child_process";
-import { DeviceInfo, ActionableError, SomePlatform, BootedDevice } from "../models";
+import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
 import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
+import { logger } from "./logger";
+
+/**
+ * Result of a discovery sweep that distinguishes per-platform success.
+ *
+ * `succeededPlatforms` only contains platforms whose discovery tooling was
+ * reachable and completed (even if it found zero devices). A platform absent
+ * from the set had a failed or unavailable discovery this sweep, so its tracked
+ * devices must not be treated as gone (no pruning / disconnect detection).
+ */
+export interface BootedDeviceDiscovery {
+  devices: BootedDevice[];
+  succeededPlatforms: Set<Platform>;
+}
 
 /**
  * Interface for device utility operations
@@ -30,6 +44,16 @@ export interface PlatformDeviceManager {
    * @returns Promise with array of booted device information
    */
   getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]>;
+
+  /**
+   * Get all currently booted devices along with which platforms were
+   * successfully discovered. Unlike {@link getBootedDevices}, a platform whose
+   * discovery tooling failed or was unavailable is reported as un-discovered
+   * rather than collapsing into an empty device list, so callers can avoid
+   * pruning devices on a transient/partial discovery failure.
+   * @param platform - Target platform ("android", "ios", or "either" for both)
+   */
+  getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery>;
 
   /**
    * Start a device (emulator or simulator)
@@ -162,6 +186,50 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
         const emulators = await this.emulator.getBootedDevices();
         const simulators = await this.getBootedIosDevicesIfAvailable();
         return [...emulators, ...simulators];
+    }
+  }
+
+  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    const devices: BootedDevice[] = [];
+    const succeededPlatforms = new Set<Platform>();
+
+    if (platform === "android" || platform === "either") {
+      try {
+        const emulators = await this.emulator.getBootedDevicesChecked();
+        devices.push(...emulators);
+        succeededPlatforms.add("android");
+      } catch (error) {
+        logger.warn(
+          `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`
+        );
+      }
+    }
+
+    if (platform === "ios" || platform === "either") {
+      const ios = await this.discoverBootedIosDevices();
+      if (ios.succeeded) {
+        devices.push(...ios.devices);
+        succeededPlatforms.add("ios");
+      }
+    }
+
+    return { devices, succeededPlatforms };
+  }
+
+  private async discoverBootedIosDevices(): Promise<{ devices: BootedDevice[]; succeeded: boolean }> {
+    // iOS tooling that is genuinely unavailable on this host cannot confirm a
+    // device is gone, so report it as un-discovered rather than empty.
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return { devices: [], succeeded: false };
+    }
+    try {
+      const devices = await this.simctl.getBootedSimulatorsChecked();
+      return { devices, succeeded: true };
+    } catch (error) {
+      logger.warn(
+        `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`
+      );
+      return { devices: [], succeeded: false };
     }
   }
 

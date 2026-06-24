@@ -618,8 +618,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns Promise with array of running emulator info
    */
   async getBootedDevices(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
-    const perf = createGlobalPerformanceTracker();
     try {
+      return await this.getBootedDevicesChecked(onlyEmulators);
+    } catch (error) {
+      logger.debug(`[DeviceListTimeout] Failed to get running emulators: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Like {@link getBootedDevices} but rethrows discovery failures (e.g. adb
+   * unreachable) instead of swallowing them into an empty list. Callers that
+   * must distinguish "no emulators are booted" from "adb discovery failed"
+   * should use this.
+   */
+  async getBootedDevicesChecked(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
+    const perf = createGlobalPerformanceTracker();
+    {
       const adb = this.adbFactory.create(null);
       perf.startOperation("adbDeviceScan");
       const devices = await adb.getBootedAndroidDevices();
@@ -722,9 +737,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("avdNameResolution");
 
       return runningDevices;
-    } catch (error) {
-      logger.debug(`[DeviceListTimeout] Failed to get running emulators: ${error}`);
-      return [];
     }
   }
 

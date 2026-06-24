@@ -107,6 +107,7 @@ export class DevicePool {
   private lastUsedAtMarker = 0;
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
+  private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -115,6 +116,7 @@ export class DevicePool {
 
   // Max consecutive errors before marking device as failed
   private readonly MAX_DEVICE_ERRORS = 5;
+  private readonly REFRESH_MISSING_DEVICE_MISS_THRESHOLD = 2;
 
   // Device wait configuration for parallel test execution
   private readonly DEVICE_WAIT_TIMEOUT_MS = 60000; // 60 seconds max wait
@@ -184,7 +186,9 @@ export class DevicePool {
    * This handles race conditions during daemon startup where device discovery
    * may not have completed before tests begin.
    *
-   * Only adds new devices - does not remove existing devices that may be assigned.
+   * Adds newly booted devices and prunes unassigned devices that are no longer
+   * booted. Assigned devices are kept so active sessions can be cancelled and
+   * released by the disconnect monitor.
    */
   async refreshDevices(): Promise<number> {
     const startTime = this.timer.now();
@@ -198,17 +202,28 @@ export class DevicePool {
       logger.info(`Environment: ANDROID_HOME=${androidHome}, ANDROID_SDK_ROOT=${androidSdkRoot}`);
 
       perf.startOperation("deviceDiscovery");
-      const bootedDevices = await this.deviceManager.getBootedDevices("either");
+      const discovery = await this.deviceManager.getBootedDevicesDetailed("either");
       perf.endOperation("deviceDiscovery");
+      const bootedDevices = discovery.devices;
       const discoveryTime = this.timer.now() - startTime;
       logger.info(`Device discovery completed in ${discoveryTime}ms, found ${bootedDevices.length} devices`);
 
       const now = this.seedLastUsedAt(this.timer.now());
       let addedCount = 0;
+      let removedCount = 0;
+      const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
+      const bootedPlatforms = new Set(bootedDevices.map(device => device.platform));
 
       perf.startOperation("poolUpdate");
+      removedCount = await this.removeDevicesMissingFrom(
+        bootedDeviceIds,
+        bootedPlatforms,
+        discovery.succeededPlatforms
+      );
+
       for (const device of bootedDevices) {
-        if (!this.devices.has(device.deviceId)) {
+        const pooledDevice = this.devices.get(device.deviceId);
+        if (!pooledDevice) {
           this.devices.set(device.deviceId, {
             id: device.deviceId,
             name: device.name,
@@ -222,15 +237,23 @@ export class DevicePool {
             simulatorType: this.getBootedDeviceSimulatorType(device),
           });
           this.deviceSessionStarts.set(device.deviceId, now);
+          this.refreshMissingDeviceMisses.delete(device.deviceId);
           await this.setDeviceSessionTracking(device.deviceId, now);
           addedCount++;
           logger.info(`Added device ${device.deviceId} to pool during refresh`);
+        } else {
+          pooledDevice.name = device.name;
+          pooledDevice.platform = device.platform;
+          pooledDevice.iosVersion = device.iosVersion;
         }
       }
       perf.endOperation("poolUpdate");
 
-      if (addedCount > 0) {
-        logger.info(`Device pool refreshed: added ${addedCount} new devices (total: ${this.devices.size})`);
+      if (addedCount > 0 || removedCount > 0) {
+        logger.info(
+          `Device pool refreshed: added ${addedCount}, removed ${removedCount} ` +
+          `(total: ${this.devices.size})`
+        );
       } else if (bootedDevices.length === 0) {
         logger.warn("No devices found during pool refresh. Is an emulator running?");
         logger.warn("Ensure 'adb devices' returns connected devices in the daemon process environment.");
@@ -284,6 +307,7 @@ export class DevicePool {
       simulatorType: this.getBootedDeviceSimulatorType(device),
     });
     this.deviceSessionStarts.set(device.deviceId, now);
+    this.refreshMissingDeviceMisses.delete(device.deviceId);
     await this.setDeviceSessionTracking(device.deviceId, now);
 
     logger.info(`Added device ${device.deviceId} to pool`);
@@ -305,8 +329,63 @@ export class DevicePool {
 
     this.devices.delete(deviceId);
     this.deviceSessionStarts.delete(deviceId);
+    this.refreshMissingDeviceMisses.delete(deviceId);
+    if (this.lastReleasedDeviceId === deviceId) {
+      this.lastReleasedDeviceId = null;
+    }
     await this.clearDeviceSessionCache(deviceId);
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
+  }
+
+  private async removeDevicesMissingFrom(
+    bootedDeviceIds: Set<string>,
+    bootedPlatforms: Set<Platform>,
+    succeededPlatforms: Set<Platform>
+  ): Promise<number> {
+    let removedCount = 0;
+
+    for (const device of Array.from(this.devices.values())) {
+      if (bootedDeviceIds.has(device.id)) {
+        this.refreshMissingDeviceMisses.delete(device.id);
+        continue;
+      }
+      if (device.sessionId) {
+        logger.warn(
+          `Device ${device.id} is no longer booted but is assigned to session ${device.sessionId}; keeping until session cleanup`
+        );
+        continue;
+      }
+      // Discovery for this platform failed or was unavailable this refresh, so
+      // we cannot confirm the device is gone. Retain it rather than pruning a
+      // device that may still be running (e.g. iOS simctl failed while Android
+      // discovery succeeded, or all tooling was transiently unreachable).
+      if (!succeededPlatforms.has(device.platform)) {
+        this.refreshMissingDeviceMisses.delete(device.id);
+        logger.warn(
+          `Device ${device.id} retained: ${device.platform} discovery did not succeed this refresh`
+        );
+        continue;
+      }
+      // Discovery succeeded but returned no devices for this platform at all.
+      // Tolerate brief reboot/boot races with a small consecutive-miss threshold
+      // before removing.
+      if (!bootedPlatforms.has(device.platform)) {
+        const misses = (this.refreshMissingDeviceMisses.get(device.id) ?? 0) + 1;
+        this.refreshMissingDeviceMisses.set(device.id, misses);
+        logger.warn(
+          `Device ${device.id} missing from ${device.platform} refresh discovery ` +
+          `(miss ${misses}/${this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD}); retaining until confirmed`
+        );
+        if (misses < this.REFRESH_MISSING_DEVICE_MISS_THRESHOLD) {
+          continue;
+        }
+      }
+
+      await this.removeDevice(device.id);
+      removedCount++;
+    }
+
+    return removedCount;
   }
 
   /**
@@ -885,18 +964,20 @@ export class DevicePool {
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
-      if (!device && (this.devices.size === 0 || totalDevices === 0)) {
-        const refreshReason = this.devices.size === 0 ? "empty pool" : "platform pool empty";
+      const busyDevicesBeforeRefresh = candidates.filter(d => d.status === "busy").length;
+      if (!device && (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)) {
+        const refreshReason = this.devices.size === 0
+          ? "empty pool"
+          : totalDevices === 0
+            ? "platform pool empty"
+            : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
         const addedCount = await this.refreshDevices();
         logger.info(`[DEVICE-POOL-DEBUG] Auto-refresh added ${addedCount} devices`);
-        if (addedCount > 0) {
-          // Try again after refresh
-          candidates = this.getDevicesByPlatform(platform);
-          totalDevices = candidates.length;
-          device = candidates.find(d => d.status === "idle");
-          logger.info(`[DEVICE-POOL-DEBUG] After refresh, found idle device = ${device?.id || "none"}`);
-        }
+        candidates = this.getDevicesByPlatform(platform);
+        totalDevices = candidates.length;
+        device = candidates.find(d => d.status === "idle");
+        logger.info(`[DEVICE-POOL-DEBUG] After refresh, found idle device = ${device?.id || "none"}`);
       }
 
       logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: totalDevices = ${totalDevices}`);
@@ -960,16 +1041,19 @@ export class DevicePool {
         }
       }
 
-      if (!device && (this.devices.size === 0 || totalDevices === 0)) {
-        const refreshReason = this.devices.size === 0 ? "empty pool" : "criteria pool empty";
+      const busyDevicesBeforeRefresh = candidates.filter(d => d.status === "busy").length;
+      if (!device && (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)) {
+        const refreshReason = this.devices.size === 0
+          ? "empty pool"
+          : totalDevices === 0
+            ? "criteria pool empty"
+            : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
         const addedCount = await this.refreshDevices();
         logger.info(`[DevicePool] Auto-refresh added ${addedCount} devices`);
-        if (addedCount > 0) {
-          candidates = this.getDevicesMatchingCriteria(criteria);
-          totalDevices = candidates.length;
-          device = candidates.find(d => d.status === "idle");
-        }
+        candidates = this.getDevicesMatchingCriteria(criteria);
+        totalDevices = candidates.length;
+        device = candidates.find(d => d.status === "idle");
       }
 
       if (!device) {

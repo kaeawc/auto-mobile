@@ -4,7 +4,7 @@ import { ResourceRegistry } from "../../../src/server/resourceRegistry";
 import { FakeDeviceUtils } from "../../fakes/FakeDeviceUtils";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { setDeviceManager, BootedDevicesResourceContent } from "../../../src/server/bootedDeviceResources";
-import { BootedDevice } from "../../../src/models";
+import { BootedDevice, Platform } from "../../../src/models";
 import { DaemonState } from "../../../src/daemon/daemonState";
 import { DevicePool } from "../../../src/daemon/devicePool";
 import { SessionManager } from "../../../src/daemon/sessionManager";
@@ -373,6 +373,97 @@ describe("MCP Booted Device Resources", () => {
       expect(idleDevice?.poolStatus).toBe("idle");
 
       // Clean up SessionManager timer to prevent process hang
+      sessionManager.stopCleanupTimer();
+    });
+
+    test("should not include phantom pool devices in pool status", async function() {
+      fakeDeviceUtils.setBootedDevices("android", []);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer);
+      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const fakeAppsRepo = new FakeInstalledAppsRepository();
+      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
+      await devicePool.initializeWithDevices([mockAndroidDevice1]);
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      const { client } = fixture.getContext();
+
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile:devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      expect(data.devices).toHaveLength(0);
+      expect(data.poolStatus).toEqual({
+        enabled: true,
+        idle: 0,
+        assigned: 0,
+        error: 0,
+        total: 0
+      });
+
+      sessionManager.stopCleanupTimer();
+    });
+
+    test("preserves pool stats for a platform whose discovery fails", async function() {
+      // Android discovery succeeds with zero booted devices; iOS discovery fails.
+      fakeDeviceUtils.setBootedDevices("android", []);
+      fakeDeviceUtils.failedPlatforms = new Set<Platform>(["ios"]);
+
+      const fakeTimer = new FakeTimer();
+      fakeTimer.enableAutoAdvance();
+      const sessionManager = new SessionManager(fakeTimer);
+      const { FakeInstalledAppsRepository } = await import("../../fakes/FakeInstalledAppsRepository");
+      const fakeAppsRepo = new FakeInstalledAppsRepository();
+      const devicePool = new DevicePool(sessionManager, "test-daemon-session-id", fakeTimer, fakeAppsRepo);
+      // An idle Android phantom (no longer booted) plus an assigned iOS device.
+      await devicePool.initializeWithDevices([mockAndroidDevice1, mockIosDevice1]);
+      await devicePool.assignDeviceToSession("session-ios", "ios");
+      DaemonState.getInstance().initialize(sessionManager, devicePool);
+
+      const { client } = fixture.getContext();
+
+      const readResourceResponseSchema = z.object({
+        contents: z.array(z.object({
+          uri: z.string(),
+          mimeType: z.string().optional(),
+          text: z.string().optional(),
+          blob: z.string().optional()
+        }))
+      });
+
+      const result = await client.request({
+        method: "resources/read",
+        params: {
+          uri: "automobile:devices/booted"
+        }
+      }, readResourceResponseSchema);
+
+      const data: BootedDevicesResourceContent = JSON.parse(result.contents[0].text!);
+      // The Android phantom is dropped (android discovery succeeded, empty), but
+      // the still-tracked iOS device is preserved because iOS discovery failed.
+      expect(data.poolStatus).toEqual({
+        enabled: true,
+        idle: 0,
+        assigned: 1,
+        error: 0,
+        total: 1
+      });
+
       sessionManager.stopCleanupTimer();
     });
 

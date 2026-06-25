@@ -145,6 +145,13 @@ const pruneOldLogFiles = (): Promise<void> =>
     abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
   });
 
+// Sweep logs abandoned by already-exited processes once at startup. Short-lived
+// agents exit with small logs and never reach the size-based rotation that would
+// otherwise trigger a sweep, so without this their per-PID files would accumulate
+// in the shared logs dir on a busy multi-agent host. Fire-and-forget so it never
+// delays logger initialization; the sweep itself only removes dead-owner files.
+pruneOldLogFiles().catch(() => { /* best-effort startup sweep */ });
+
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
   try {

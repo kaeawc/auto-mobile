@@ -207,6 +207,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // iproxy tunnel state (physical devices)
   private iproxyProcessId: number | null = null;
   private iproxyProcess: ChildProcess | null = null;
+  private iproxyDevicePort: number | null = null;
   private iproxyMonitorInterval: ReturnType<typeof setInterval> | null = null;
   private iproxyRestartTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private iproxyRestartAttempts: number = 0;
@@ -1511,15 +1512,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
       }
 
+      const fixedDevicePort = options.devicePort ?? this.iproxyDevicePort;
       await this.stopIproxyTunnel();
       await this.ensureHostControlServicePortAvailable({
         allowReallocation: options.allowServicePortReallocation ?? true,
       });
+      const devicePort = fixedDevicePort ?? this.servicePort;
 
       const result = await this.hostControl.startIproxy({
         deviceId: this.device.deviceId,
         localPort: this.servicePort,
-        devicePort: options.devicePort ?? this.servicePort
+        devicePort
       });
       if (!result.success || !result.data) {
         throw new Error(result.error || "Failed to start iproxy tunnel via host control");
@@ -1527,6 +1530,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       this.iproxyProcessId = result.data.pid;
       this.iproxyProcess = null;
+      this.iproxyDevicePort = devicePort;
       await this.waitForIproxyStartup();
       return;
     }
@@ -1604,6 +1608,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyProcessId = null;
     this.iproxyProcess = null;
+    this.iproxyDevicePort = null;
     this.iproxyRestartAttempts = 0;
   }
 
@@ -1641,7 +1646,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyRestartTimeout = this.timer.setTimeout(() => {
       this.iproxyRestartTimeout = null;
-      void this.startIproxyTunnel({ allowServicePortReallocation: false }).then(() => {
+      void this.startIproxyTunnel({
+        allowServicePortReallocation: false,
+        devicePort: this.iproxyDevicePort ?? undefined,
+      }).then(() => {
         this.startIproxyMonitoring();
       }).catch(error => {
         if (error instanceof HostControlServicePortUnavailableError) {

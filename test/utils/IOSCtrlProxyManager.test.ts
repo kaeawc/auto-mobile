@@ -318,7 +318,7 @@ describe("IOSCtrlProxyManager", function() {
         devicePort: start.devicePort,
       }))).toEqual([
         { localPort: 8767, devicePort: 8767 },
-        { localPort: 8765, devicePort: 8765 },
+        { localPort: 8765, devicePort: 8767 },
       ]);
     });
 
@@ -382,6 +382,49 @@ describe("IOSCtrlProxyManager", function() {
         { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
       ]);
       expect((manager as unknown as { xcTestProcessId: number }).xcTestProcessId).toBe(1234);
+    });
+
+    test("scheduled host-control iproxy restart preserves the device port for daemon-owned live processes", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => {
+          throw new Error("should not build when an existing host-control process is reused");
+        },
+        getRunnerBinaryPath: async () => null,
+        getExpectedAppHash: () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const { runner, iproxyStarts } = createHostControlRunner({
+        runningCtrlProxyProcesses: [{
+          pid: 1234,
+          port: 8765,
+          deviceId: physicalDevice.deviceId,
+        }],
+      });
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+
+      await (manager as unknown as { startOnDevice: () => Promise<void> }).startOnDevice();
+      (manager as unknown as { iproxyProcessId: null }).iproxyProcessId = null;
+
+      fakeTimer.enableAutoAdvance();
+      (manager as unknown as { scheduleIproxyRestart: () => void }).scheduleIproxyRestart();
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      expect(manager.getServicePort()).toBe(8767);
+      expect(iproxyStarts).toEqual([
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
+      ]);
     });
   });
 

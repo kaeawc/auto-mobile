@@ -239,6 +239,30 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(cache.clearCallCount, 1)
     }
 
+    func testEnrichWithCachedSdkHierarchyDoesNotProbeServerForForeignCache() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.apple.Preferences"))
+        fetcher.setFreshHierarchy(makeSdkHierarchyWithTabBarNode(bundleId: "com.apple.Preferences"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchyWithTabBarNode(bundleId: "dev.jasonpearson.automobile.Playground"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+
+        let enriched = commandHandler.enrichWithCachedSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 0)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
     func testRequestHierarchyFetchesFreshSdkHierarchyOnlyWhenServerBundleMatchesForeground() {
         let fetcher = FakeSdkHierarchyFetcher()
         fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))

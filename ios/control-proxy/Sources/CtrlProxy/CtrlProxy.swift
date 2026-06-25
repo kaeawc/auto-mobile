@@ -75,7 +75,7 @@ public class CtrlProxy {
                         "[CtrlProxy] Hierarchy changed (hash=\(hash), extraction=\(extractionTimeMs)ms), broadcasting"
                     )
                     guard let self else { return }
-                    let enriched = self.commandHandler.enrichWithMatchingSdkHierarchy(hierarchy)
+                    let enriched = self.commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
                     self.server.broadcastHierarchyUpdate(enriched)
                 case .unchanged:
                     // Don't broadcast unchanged results (animation mode)

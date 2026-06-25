@@ -220,6 +220,22 @@ public class CommandHandler: CommandHandling {
         HierarchyMerger.merge(xcuitest: hierarchy, sdk: matchingSdkHierarchy(for: hierarchy))
     }
 
+    func enrichWithCachedSdkHierarchy(_ hierarchy: ViewHierarchy) -> ViewHierarchy {
+        HierarchyMerger.merge(xcuitest: hierarchy, sdk: matchingCachedSdkHierarchy(for: hierarchy))
+    }
+
+    private func matchingCachedSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
+        guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName),
+              let cached = sdkHierarchyCache?.latest else {
+            return nil
+        }
+        guard sdkHierarchy(cached, matches: foregroundBundleId) else {
+            sdkHierarchyCache?.clear()
+            return nil
+        }
+        return cached
+    }
+
     private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
         guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName) else {
             return nil

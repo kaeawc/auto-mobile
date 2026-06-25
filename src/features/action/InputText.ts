@@ -164,13 +164,7 @@ export class InputText extends BaseVisualChange {
 
     const prefixResult = await a11yClient.requestSetText(prefix, undefined, undefined, undefined, false);
     if (!prefixResult.success) {
-      logger.warn(`[InputText] eventLast prefix setText failed: ${prefixResult.error}`);
-      return {
-        success: false,
-        text,
-        error: `Accessibility service setText failed before real key event: ${prefixResult.error}`,
-        method: "eventLast"
-      };
+      return this.setTextFailure(text, "eventLast prefix", "before real key event", prefixResult.error, "eventLast");
     }
 
     await this.executeKeyEventPlan(keyEventPlan);
@@ -178,13 +172,7 @@ export class InputText extends BaseVisualChange {
     if (suffix.length > 0 || dismissKeyboard) {
       const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
       if (!finalResult.success) {
-        logger.warn(`[InputText] eventLast final setText failed: ${finalResult.error}`);
-        return {
-          success: false,
-          text,
-          error: `Accessibility service setText failed after real key event: ${finalResult.error}`,
-          method: "eventLast"
-        };
+        return this.setTextFailure(text, "eventLast final", "after real key event", finalResult.error, "eventLast");
       }
     }
 
@@ -214,13 +202,7 @@ export class InputText extends BaseVisualChange {
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
     const clearResult = await a11yClient.requestSetText("", undefined, undefined, undefined, false);
     if (!clearResult.success) {
-      logger.warn(`[InputText] eventAll initial clear failed: ${clearResult.error}`);
-      return {
-        success: false,
-        text,
-        error: `Accessibility service setText failed before eventAll input: ${clearResult.error}`,
-        method: "eventAll"
-      };
+      return this.setTextFailure(text, "eventAll initial clear", "before eventAll input", clearResult.error, "eventAll");
     }
 
     let targetText = "";
@@ -243,26 +225,14 @@ export class InputText extends BaseVisualChange {
       targetText += unsupportedRun;
       const setTextResult = await a11yClient.requestSetText(targetText, undefined, undefined, undefined, false);
       if (!setTextResult.success) {
-        logger.warn(`[InputText] eventAll setText failed for unsupported text run: ${setTextResult.error}`);
-        return {
-          success: false,
-          text,
-          error: `Accessibility service setText failed during eventAll input: ${setTextResult.error}`,
-          method: "eventAll"
-        };
+        return this.setTextFailure(text, "eventAll unsupported text run", "during eventAll input", setTextResult.error, "eventAll");
       }
     }
 
     if (dismissKeyboard) {
       const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, true);
       if (!finalResult.success) {
-        logger.warn(`[InputText] eventAll final setText failed: ${finalResult.error}`);
-        return {
-          success: false,
-          text,
-          error: `Accessibility service setText failed after eventAll input: ${finalResult.error}`,
-          method: "eventAll"
-        };
+        return this.setTextFailure(text, "eventAll final", "after eventAll input", finalResult.error, "eventAll");
       }
     }
 
@@ -275,6 +245,31 @@ export class InputText extends BaseVisualChange {
       text,
       imeAction,
       method: "eventAll"
+    };
+  }
+
+  /**
+   * Build a uniform failure result for an accessibility setText call that failed
+   * partway through an event-mode input sequence.
+   * @param text - The full text the caller was attempting to input
+   * @param stage - Short label for which setText call failed (used in the warning log)
+   * @param phase - Where in the sequence it failed, e.g. "before real key event"
+   * @param cause - The underlying setText error
+   * @param method - The input mode that was in effect
+   */
+  private setTextFailure(
+    text: string,
+    stage: string,
+    phase: string,
+    cause: string | undefined,
+    method: InputTextMode
+  ): SendTextResult & { method?: InputTextMode } {
+    logger.warn(`[InputText] ${stage} setText failed: ${cause}`);
+    return {
+      success: false,
+      text,
+      error: `Accessibility service setText failed ${phase}: ${cause}`,
+      method
     };
   }
 

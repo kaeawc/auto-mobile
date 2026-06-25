@@ -19,6 +19,32 @@ interface FatalLogger {
 
 let fatalLogger: FatalLogger | undefined;
 
+function logFatal(label: string, error: unknown): void {
+  const message = error instanceof Error ? (error.stack ?? error.message) : String(error);
+  if (fatalLogger) {
+    fatalLogger.error(`${label}: ${message}`);
+  } else {
+    // The file logger isn't loaded yet (crash during startup imports) — fall
+    // back to stderr so the failure is never silently swallowed.
+    console.error(`${label}: ${message}`);
+  }
+}
+
+/**
+ * Install process-level safety-net handlers BEFORE the dynamic imports in main()
+ * run, so a failure during startup is logged rather than lost. This is the
+ * proxy/client process: it logs and continues. The daemon process installs its
+ * own (exit-on-fault) handlers in daemon.ts.
+ */
+function registerProcessSafetyNet(): void {
+  process.on("uncaughtException", error => {
+    logFatal("Uncaught exception", error);
+  });
+  process.on("unhandledRejection", reason => {
+    logFatal("Unhandled rejection", reason);
+  });
+}
+
 const versionOutput = getGlobalVersionOutput(process.argv.slice(2), getMcpServerVersion());
 if (versionOutput !== undefined) {
   console.log(versionOutput);
@@ -326,6 +352,10 @@ function parseArgs(log: ParseLogger): {
 }
 
 async function main() {
+  // Register before any `await import(...)` below so a crash during startup
+  // imports is logged instead of lost.
+  registerProcessSafetyNet();
+
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
@@ -375,16 +405,9 @@ async function main() {
     void shutdown("SIGTERM");
   });
 
-  process.on("uncaughtException", error => {
-    // Don't exit on uncaught exception, just log them
-    logger.info(`Uncaught exception: ${error.message}`);
-    logger.info(`Trace: ${error.stack}`);
-  });
-
-  process.on("unhandledRejection", (reason, promise) => {
-    logger.error("Unhandled rejection at:", promise, "reason:", reason);
-    // Don't exit on unhandled rejections, just log them
-  });
+  // uncaughtException/unhandledRejection are registered at startup via
+  // registerProcessSafetyNet() so failures during the dynamic imports above are
+  // also captured. fatalLogger now points at the file logger.
 
   try {
     // Parse command line arguments

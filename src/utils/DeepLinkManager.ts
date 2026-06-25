@@ -20,26 +20,47 @@ import { quoteSimctlArg } from "./ios-cmdline-tools/iosAppContainer";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 
 /**
- * Runs a host shell command (NOT `xcrun simctl`). Used for `plutil`/`codesign`,
- * which read the `.app` bundle's metadata directly on the host filesystem.
- * Modeled on {@link DeviceAppInspector}'s injected `exec` so the iOS path is
- * fully fakeable in unit tests.
+ * Runs a host program (NOT `xcrun simctl`) **by argv, never via a shell**. Used
+ * for `plutil`/`codesign`, which read the `.app` bundle's metadata directly on
+ * the host filesystem. Passing an argv array (rather than a command string)
+ * means a malicious `.app` path containing shell metacharacters — `$(…)`,
+ * backticks, `;`, … — is handed to the program as a single literal argument and
+ * can never be expanded into host command execution. The optional `stdin` feeds
+ * one program's output into the next without a shell pipe. Modeled on
+ * {@link DeviceAppInspector}'s injected `exec` so the iOS path is fully fakeable
+ * in unit tests.
  */
-export type HostExec = (command: string) => Promise<ExecResult>;
+export type HostExec = (file: string, args: string[], stdin?: string) => Promise<ExecResult>;
 
-const defaultHostExec: HostExec = async command => {
-  const { exec } = await import("child_process");
-  const { promisify } = await import("util");
-  const result = await promisify(exec)(command, { maxBuffer: 16 * 1024 * 1024 });
-  const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
-  const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
-  return {
-    stdout,
-    stderr,
-    toString() { return stdout; },
-    trim() { return stdout.trim(); },
-    includes(searchString: string) { return stdout.includes(searchString); },
-  };
+const makeExecResult = (stdout: string, stderr: string): ExecResult => ({
+  stdout,
+  stderr,
+  toString() { return stdout; },
+  trim() { return stdout.trim(); },
+  includes(searchString: string) { return stdout.includes(searchString); },
+});
+
+const defaultHostExec: HostExec = async (file, args, stdin) => {
+  const { execFile } = await import("child_process");
+  return new Promise<ExecResult>((resolve, reject) => {
+    const child = execFile(
+      file,
+      args,
+      { maxBuffer: 16 * 1024 * 1024 },
+      (error, stdout, stderr) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        const out = typeof stdout === "string" ? stdout : stdout.toString();
+        const err = typeof stderr === "string" ? stderr : stderr.toString();
+        resolve(makeExecResult(out, err));
+      }
+    );
+    if (stdin !== undefined) {
+      child.stdin?.end(stdin);
+    }
+  });
 };
 
 /**
@@ -234,9 +255,12 @@ export class DeepLinkManager implements DeepLinkManager {
         return this.emptyIosResult(bundleId, `App ${bundleId} is not installed on ${udid}`);
       }
 
-      // 2. Info.plist -> JSON via host plutil.
+      // 2. Info.plist -> JSON via host plutil. argv form (no shell): the
+      //    bundle path is a literal argument, so a crafted `.app` name cannot
+      //    inject host commands.
       const plistJson = await this.hostExec(
-        `plutil -convert json -o - -- ${quoteSimctlArg(`${appPath}/Info.plist`)}`
+        "plutil",
+        ["-convert", "json", "-o", "-", "--", `${appPath}/Info.plist`]
       );
       const info = JSON.parse(plistJson.stdout) as IosInfoPlist;
 
@@ -301,8 +325,17 @@ export class DeepLinkManager implements DeepLinkManager {
    */
   private async parseAssociatedDomains(appPath: string): Promise<string[]> {
     try {
+      // Two argv calls (no shell pipe): `codesign` dumps the entitlements plist
+      // to stdout, which is fed to `plutil` via stdin. The bundle path is a
+      // literal argv element, so a crafted `.app` name cannot inject commands.
+      const entsXml = await this.hostExec(
+        "codesign",
+        ["-d", "--entitlements", ":-", appPath]
+      );
       const ents = await this.hostExec(
-        `codesign -d --entitlements :- ${quoteSimctlArg(appPath)} | plutil -convert json -o - -- -`
+        "plutil",
+        ["-convert", "json", "-o", "-", "--", "-"],
+        entsXml.stdout
       );
       const parsed = JSON.parse(ents.stdout) as Record<string, unknown>;
       const domains = parsed["com.apple.developer.associated-domains"];

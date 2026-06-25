@@ -22,13 +22,25 @@ function execResult(stdout: string): ExecResult {
   };
 }
 
-/** A fake host exec that maps command-substring matches to canned stdout. */
+/**
+ * A fake host exec that maps command-substring matches to canned stdout. Calls
+ * are recorded as the reconstructed `file arg arg …` line so substring routing
+ * still works against the argv-based {@link HostExec} signature.
+ *
+ * `plutil` reading from stdin (`… -- -`) echoes the piped content, mirroring the
+ * real `codesign | plutil` conversion where `codesign`'s output is what plutil
+ * re-serializes — so the codesign route can return the canned entitlements JSON.
+ */
 function fakeHostExec(
   routes: Array<{ match: string; stdout?: string; throws?: Error }>
 ): { exec: HostExec; calls: string[] } {
   const calls: string[] = [];
-  const exec: HostExec = async (command: string) => {
+  const exec: HostExec = async (file: string, args: string[], stdin?: string) => {
+    const command = [file, ...args].join(" ");
     calls.push(command);
+    if (file === "plutil" && args[args.length - 1] === "-" && stdin !== undefined) {
+      return execResult(stdin);
+    }
     for (const route of routes) {
       if (command.includes(route.match)) {
         if (route.throws) {
@@ -103,7 +115,7 @@ describe("DeepLinkManager iOS", () => {
       ],
     });
     const { exec } = fakeHostExec([
-      { match: "plutil -convert json -o - -- \"/sim/MyApp.app/Info.plist\"", stdout: infoPlist },
+      { match: "plutil -convert json -o - -- /sim/MyApp.app/Info.plist", stdout: infoPlist },
       { match: "codesign", stdout: entitlements },
     ]);
 

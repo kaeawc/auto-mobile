@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `postNotification` MCP tool is fully implemented. The AutoMobile SDK `AutoMobileNotifications.post()` hook is implemented in `android/auto-mobile-sdk/`. Apps without SDK integration cannot post notifications that appear as the app-under-test (third-party app limitation). See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `postNotification` MCP tool is fully implemented. The AutoMobile SDK `AutoMobileNotifications.post()` hook is implemented in `android/auto-mobile-sdk/`. Apps without SDK integration cannot post notifications that appear as the app-under-test (third-party app limitation). On iOS, `postNotification` delivers a simulated remote push on the **Simulator** via `simctl push` (requires `appId`) — see [iOS simctl integration → Push notifications](../ios/simctl.md#push-notifications). See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Goal
 

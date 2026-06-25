@@ -129,7 +129,7 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["navigateToSchema", navigateToSchema, { targetScreen: "Home" }],
     ["getNavigationGraphSchema", getNavigationGraphSchema, {}],
     ["exploreSchema", exploreSchema, {}],
-    ["postNotificationSchema", postNotificationSchema, { title: "Hi", body: "Test", platform: "ios" }],
+    ["postNotificationSchema", postNotificationSchema, { title: "Hi", body: "Test", appId: "com.example", platform: "ios" }],
     ["getNotificationPolicySchema", getNotificationPolicySchema, { appId: "com.example" }],
     ["setNotificationPolicySchema", setNotificationPolicySchema, { appId: "com.example", policyAccess: true }],
     ["observeSchema", observeSchema, { platform: "ios" }],

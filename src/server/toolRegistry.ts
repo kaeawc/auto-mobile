@@ -25,21 +25,15 @@ import { getMcpRecorder } from "./mcpRecordingManager";
 
 /**
  * The Anthropic API (and many MCP clients) reject tool input schemas that have
- * `anyOf` or `oneOf` at the top level. Zod's `z.union()` produces exactly that.
+ * top-level combinators such as `anyOf`, `oneOf`, or `allOf`. Zod's `z.union()`
+ * produces `anyOf`/`oneOf`.
  * This function flattens union branches into a single `type: "object"` schema
  * by merging all properties from every branch. Required fields are dropped because
  * different branches require different keys.
  *
- * Note: `allOf` is NOT handled here — it has a different semantic (intersection)
- * and would require a different merging strategy (all fields required, not any).
- *
  * Trade-off: the flattened schema loses mutual-exclusivity information, so LLMs may
- * send invalid property combinations. The server-side Zod union still validates at
- * runtime, but the error messages are less clear than a well-structured schema.
- *
- * TODO: Replace top-level z.union() usage with a discriminator field (e.g.
- * `strategy: "text" | "id" | "clickable"`) so schemas are MCP-compliant without
- * needing this lossy flattening step.
+ * send invalid property combinations or omit branch-specific required fields. The
+ * server-side Zod union still validates at runtime.
  */
 export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<string, unknown> {
   const branches = (schema.anyOf ?? schema.oneOf) as Record<string, unknown>[] | undefined;
@@ -57,6 +51,8 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
       for (const [key, value] of Object.entries(props)) {
         if (!mergedProperties[key]) {
           mergedProperties[key] = value;
+        } else {
+          mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value);
         }
       }
     }
@@ -86,6 +82,36 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
   }
 
   return result;
+}
+
+function mergeUnionProperty(existing: unknown, incoming: unknown): unknown {
+  if (!isJsonSchemaObject(existing) || !isJsonSchemaObject(incoming)) {
+    return existing;
+  }
+
+  const existingValues = constOrEnumValues(existing);
+  const incomingValues = constOrEnumValues(incoming);
+  if (existingValues.length === 0 || incomingValues.length === 0) {
+    return existing;
+  }
+
+  const baseSchema = { ...existing };
+  delete baseSchema.const;
+  return {
+    ...baseSchema,
+    enum: [...new Set([...existingValues, ...incomingValues])],
+  };
+}
+
+function constOrEnumValues(schema: Record<string, unknown>): unknown[] {
+  if ("const" in schema) {
+    return [schema.const];
+  }
+  return Array.isArray(schema.enum) ? schema.enum : [];
+}
+
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // Progress notification interface

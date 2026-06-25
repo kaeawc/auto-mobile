@@ -63,6 +63,17 @@ describe("MCP Tools Schema", () => {
     });
   });
 
+  test("should not publish top-level schema combinators", () => {
+    const toolDefinitions = ToolRegistry.getToolDefinitions();
+
+    for (const tool of toolDefinitions) {
+      const schema = tool.inputSchema as any;
+      expect(schema.anyOf, `${tool.name} should not publish top-level anyOf`).toBeUndefined();
+      expect(schema.oneOf, `${tool.name} should not publish top-level oneOf`).toBeUndefined();
+      expect(schema.allOf, `${tool.name} should not publish top-level allOf`).toBeUndefined();
+    }
+  });
+
   test("given a request that matches valid schema, should return a valid response", async function() {
 
     const { client } = fixture.getContext();

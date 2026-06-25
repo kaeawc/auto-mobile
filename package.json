@@ -75,7 +75,7 @@
     "access": "public"
   },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.105.0",
+    "@anthropic-ai/sdk": "^0.106.0",
     "@modelcontextprotocol/sdk": "^1.26.0",
     "adm-zip": "^0.5.16",
     "ajv": "^8.18.0",

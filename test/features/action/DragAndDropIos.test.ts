@@ -160,6 +160,8 @@ describe("DragAndDrop - iOS", () => {
     expect(syncSpy).toHaveBeenCalled();
     expect(cachedSpy).not.toHaveBeenCalled();
     expect(latestSpy).not.toHaveBeenCalled();
+    // Uses the 15s iOS budget (XCUITest extraction can take 5-15s), not the 5s Android value.
+    expect(syncSpy).toHaveBeenCalledWith(undefined, false, undefined, 15000);
   });
 
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {

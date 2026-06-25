@@ -34,6 +34,10 @@ const HOLD_DURATION_MAX_MS = 3000;
 const DROP_DURATION_MS = 100;
 const DRAG_TIMEOUT_BUFFER_MS = 500;
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
+// XCUITest hierarchy extraction is slow (can take 5-15s), so the iOS refresh uses the same
+// 15s budget as CtrlProxyHierarchy.getAccessibilityHierarchy rather than the 5s Android value.
+// A shorter timeout would fall back to the (possibly stale) observe cache on slow screens.
+const IOS_HIERARCHY_REFRESH_TIMEOUT_MS = 15000;
 
 interface DragAndDropDeps {
   visionConfig?: VisionFallbackConfig;
@@ -296,8 +300,10 @@ export class DragAndDrop extends BaseVisualChange {
     // TTL before issuing a fresh request, so a drag started shortly after a navigation/scroll
     // could still resolve against stale coordinates. requestHierarchySync always performs a
     // fresh runner round-trip, guaranteeing the drag endpoints come from a current snapshot.
+    // Use the 15s iOS budget: XCUITest extraction can take 5-15s, and a shorter timeout would
+    // fall back to the stale observe cache on slow screens.
     const client = IOSCtrlProxyClient.getInstance(this.device);
-    const synced = await client.requestHierarchySync(undefined, false, signal, HIERARCHY_REFRESH_TIMEOUT_MS);
+    const synced = await client.requestHierarchySync(undefined, false, signal, IOS_HIERARCHY_REFRESH_TIMEOUT_MS);
     if (!synced?.hierarchy) {
       return null;
     }

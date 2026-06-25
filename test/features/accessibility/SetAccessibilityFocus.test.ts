@@ -124,6 +124,23 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close" }]);
   });
 
+  test("throws when text selector resolves to a resource-id shared by repeated rows", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "text": "Alice", "resource-id": "com.example:id/title", "bounds": bounds(0, 0, 200, 60) } },
+          { $: { "text": "Bob", "resource-id": "com.example:id/title", "bounds": bounds(0, 60, 200, 120) } }
+        ])
+      )
+    );
+    const feature = makeFeature();
+
+    await expect(feature.execute({ action: "set", text: "Bob" })).rejects.toThrow(
+      /shared by 2 elements/
+    );
+    expect(service.calls).toHaveLength(0);
+  });
+
   test("throws when matched element has no resource-id", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

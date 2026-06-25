@@ -110,10 +110,10 @@ export class SetAccessibilityFocus {
 
     const viewHierarchy = await this.getViewHierarchy();
     const matched = this.findElement(viewHierarchy, options);
+    const selector = options.text
+      ? `text "${options.text}"`
+      : `content-desc "${options.contentDesc}"`;
     if (!matched) {
-      const selector = options.text
-        ? `text "${options.text}"`
-        : `content-desc "${options.contentDesc}"`;
       throw new ActionableError(`Element not found for selector: ${selector}`);
     }
 
@@ -123,6 +123,21 @@ export class SetAccessibilityFocus {
         "Matched element has no resource-id; accessibility focus requires one."
       );
     }
+
+    // The CtrlProxy service can only target a node by resource-id, and it focuses the
+    // FIRST node carrying that id. When the resolved id is shared by repeated rows
+    // (e.g. a RecyclerView item id reused per row), focusing it would silently move the
+    // cursor to the wrong row while reporting success. Reject the ambiguity instead.
+    const sharing = this.finder.findElementsByResourceId(viewHierarchy, resourceId);
+    if (sharing.length > 1) {
+      throw new ActionableError(
+        `Selector ${selector} resolved to resource-id "${resourceId}", which is shared by ` +
+          `${sharing.length} elements (e.g. repeated list rows). Accessibility focus targets a ` +
+          `node by resource-id and would focus the first match, not necessarily the one you ` +
+          `selected. Provide a more specific selector or a unique resourceId.`
+      );
+    }
+
     return resourceId;
   }
 

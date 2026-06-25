@@ -113,7 +113,11 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     // limitation we want to make visible rather than have iOS quietly vanish from
     // discovery. We log once and stay resilient (return false) so that mixed
     // Android+iOS Docker setups still discover their Android devices.
-    if (this.simctl.isUnsupportedDockerHostControlMode()) {
+    //
+    // Probe defensively: injected SimCtl fakes in tests may omit this method, and
+    // a missing probe simply means "not the unsupported Docker mode" (the default
+    // for any non-Docker host), so fall through to the normal availability check.
+    if (this.simctl.isUnsupportedDockerHostControlMode?.()) {
       if (!this.loggedDockerIosUnsupported) {
         this.loggedDockerIosUnsupported = true;
         logger.warn(`[DeviceManager] ${DOCKER_IOS_UNSUPPORTED_MESSAGE}`);

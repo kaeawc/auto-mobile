@@ -11,6 +11,15 @@ import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } fro
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
 
+/**
+ * Shared message for the intentionally-unsupported "drive iOS simulator from
+ * inside Docker via host-control" mode. Used by both the hard failure in
+ * executeCommand and by callers (e.g. device discovery) that surface the reason.
+ */
+export const DOCKER_IOS_UNSUPPORTED_MESSAGE =
+  "Driving the iOS simulator from inside Docker (host-control mode) is not " +
+  "supported yet. Run AutoMobile directly on a macOS host for iOS simulator automation.";
+
 export interface AppleDevice {
   udid: string;
   name: string;
@@ -402,11 +411,8 @@ export class SimCtlClient implements SimCtl {
     // simctl runs on the host. Rather than expose that half-working surface, fail
     // fast with a clear message. When the iOS roadmap picks this up, restore the
     // host-control routing that previously lived here.
-    if (this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker()) {
-      throw new ActionableError(
-        "Driving the iOS simulator from inside Docker (host-control mode) is not " +
-        "supported yet. Run AutoMobile directly on a macOS host for iOS simulator automation."
-      );
+    if (this.isUnsupportedDockerHostControlMode()) {
+      throw new ActionableError(DOCKER_IOS_UNSUPPORTED_MESSAGE);
     }
 
     const fullCommand = `xcrun simctl ${command}`;
@@ -469,11 +475,24 @@ export class SimCtlClient implements SimCtl {
     // iOS simulator control is unavailable in Docker host-control mode — it is
     // intentionally unsupported for now (see executeCommand). Report unavailable
     // rather than probing the host so callers fail fast instead of half-working.
-    if (this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker()) {
+    // Callers that need to tell this apart from "simctl is simply absent" should
+    // check isUnsupportedDockerHostControlMode() so they can surface the reason.
+    if (this.isUnsupportedDockerHostControlMode()) {
       return false;
     }
 
     return this.isLocalSimctlAvailable();
+  }
+
+  /**
+   * True when iOS control is being requested from inside a Docker container in
+   * host-control mode, which AutoMobile intentionally does not support yet (see
+   * executeCommand / pushNotification). Exposed so discovery and diagnostics can
+   * distinguish "deliberately unsupported here" from "simctl is absent" and
+   * surface the difference instead of silently reporting no simulators.
+   */
+  isUnsupportedDockerHostControlMode(): boolean {
+    return this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
   }
 
   private async isLocalSimctlAvailable(): Promise<boolean> {

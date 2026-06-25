@@ -12,6 +12,8 @@ import {
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
   DAEMON_VERSION,
+  READINESS_PROBE_MAX_ATTEMPTS,
+  READINESS_PROBE_BACKOFF_MS,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -592,20 +594,35 @@ export class DaemonManager implements DaemonManagerLike {
   }
 
   private async verifyDaemonConnection(): Promise<boolean> {
-    const client = this.createClient();
-    try {
-      await client.connect();
-      return true;
-    } catch (error) {
-      logger.debug(`Daemon socket readiness probe failed: ${error instanceof Error ? error.message : String(error)}`);
-      return false;
-    } finally {
+    // Retry the connect probe before declaring the socket dead. A single failed
+    // probe is not authoritative — a live daemon under load can transiently
+    // refuse a connection. Only a socket that fails every attempt is treated as
+    // stale (which then triggers removeInvalidSocketPath). This is what keeps a
+    // healthy daemon's socket from being unlinked on a flaky probe, the dominant
+    // cause of "devices not found after daemon start/restart".
+    for (let attempt = 1; attempt <= READINESS_PROBE_MAX_ATTEMPTS; attempt++) {
+      const client = this.createClient();
       try {
-        await client.close();
+        await client.connect();
+        return true;
       } catch (error) {
-        logger.debug(`Failed to close daemon readiness probe client: ${error instanceof Error ? error.message : String(error)}`);
+        logger.debug(
+          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${error instanceof Error ? error.message : String(error)}`
+        );
+      } finally {
+        try {
+          await client.close();
+        } catch (error) {
+          logger.debug(`Failed to close daemon readiness probe client: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      if (attempt < READINESS_PROBE_MAX_ATTEMPTS) {
+        await this.timer.sleep(READINESS_PROBE_BACKOFF_MS);
       }
     }
+
+    return false;
   }
 
   /**

@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DaemonManager } from "../../src/daemon/manager";
+import { READINESS_PROBE_MAX_ATTEMPTS } from "../../src/daemon/constants";
 import type { DaemonClientLike } from "../../src/daemon/client";
 import type { PidFileData } from "../../src/daemon/types";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -126,7 +127,9 @@ describe("DaemonManager readiness", () => {
     );
 
     await expect(manager.waitForReady(250)).resolves.toBe(false);
-    expect(clients).toHaveLength(1);
+    // The probe is retried before the socket is treated as dead, so a fully
+    // unreachable socket is probed READINESS_PROBE_MAX_ATTEMPTS times.
+    expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
     expect(clients[0].connectCallCount).toBe(1);
     expect(clients[0].closeCallCount).toBe(1);
     expect(existsSync(socketPath)).toBe(false);
@@ -171,10 +174,45 @@ describe("DaemonManager readiness", () => {
       );
 
       await expect(manager.waitForReady(250)).resolves.toBe(false);
-      expect(clients).toHaveLength(1);
+      expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
       expect(clients[0].connectCallCount).toBe(1);
       expect(clients[0].closeCallCount).toBe(1);
       expect(existsSync(socketPath)).toBe(false);
     }
   );
+
+  // Regression guard for "devices not found after daemon start/restart": a LIVE
+  // daemon can transiently refuse the readiness probe (backlog overflow, slow
+  // first accept after a restart). The probe must retry and recover instead of
+  // unlinking the healthy daemon's socket — otherwise every later client connect
+  // throws "Daemon socket not found" and all device calls fail.
+  test("recovers on a later retry without removing a live daemon's socket", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const clients: ProbeClient[] = [];
+    writePidFile(pidPath, socketPath);
+    writeFileSync(socketPath, "socket placeholder");
+
+    // Fail the first attempts, then accept — simulating a transient blip.
+    let attempt = 0;
+    const manager = new DaemonManager(
+      () => {
+        attempt++;
+        const client = new ProbeClient(attempt >= READINESS_PROBE_MAX_ATTEMPTS);
+        clients.push(client);
+        return client;
+      },
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath
+    );
+
+    await expect(manager.waitForReady(1000)).resolves.toBe(true);
+    expect(clients).toHaveLength(READINESS_PROBE_MAX_ATTEMPTS);
+    // The socket of a daemon that recovered must be preserved.
+    expect(existsSync(socketPath)).toBe(true);
+  });
 });

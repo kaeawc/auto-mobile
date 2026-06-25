@@ -105,6 +105,19 @@ export const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000;
 export const DAEMON_VERSION_RESTART_COOLDOWN_MS = 10000;
 
 /**
+ * Readiness probe retry budget.
+ *
+ * A single failed socket-connect probe is NOT authoritative: a live daemon under
+ * load can transiently refuse a connection (listen backlog overflow, slow first
+ * accept right after a (re)start). The readiness loop must retry a few times
+ * before treating the socket as dead — otherwise it unlinks a healthy daemon's
+ * socket and every subsequent client connect throws "Daemon socket not found",
+ * surfacing to the user as "devices not found after start/restart".
+ */
+export const READINESS_PROBE_MAX_ATTEMPTS = 3;
+export const READINESS_PROBE_BACKOFF_MS = 150;
+
+/**
  * MCP streamable endpoint path
  */
 export const MCP_STREAMABLE_PATH = "/auto-mobile/streamable";

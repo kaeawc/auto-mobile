@@ -72,6 +72,10 @@ export interface DelegateContext {
   timer: Timer;
   /** Ensure the WebSocket connection is established */
   ensureConnected(perf?: PerformanceTracker): Promise<boolean>;
+  /** Return false when a connected service advertises that it cannot handle this wire command. */
+  isCommandSupported?(messageType: string): boolean;
+  /** Build a user-facing error for an advertised unsupported wire command. */
+  unsupportedCommandError?(messageType: string): string;
   /** Cancel any pending screenshot backoff captures */
   cancelScreenshotBackoff(): void;
 }

@@ -296,6 +296,16 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(RequestType.requestLaunchApp.rawValue, "request_launch_app")
     }
 
+    func testConnectedEventAdvertisesSupportedCommands() {
+        let event = ConnectedEvent(id: 7)
+
+        XCTAssertEqual(event.type, "connected")
+        XCTAssertEqual(event.id, 7)
+        XCTAssertEqual(event.supportedCommands, RequestType.allCases.map(\.rawValue).sorted())
+        XCTAssertTrue(event.supportedCommands.contains("request_press_back"))
+        XCTAssertTrue(event.supportedCommands.contains("request_keyboard"))
+    }
+
     // MARK: - ResponseType Tests
 
     func testResponseTypeRawValues() {

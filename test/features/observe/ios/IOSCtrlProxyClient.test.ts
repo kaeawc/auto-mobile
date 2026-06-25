@@ -537,6 +537,41 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("returns a clear skew error when advertised runner capabilities exclude keyboard", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const result = await testClient.requestKeyboard("detect", 5000);
+
+        expect(result.success).toBe(false);
+        expect(result.open).toBe(false);
+        expect(result.error).toContain("does not support request_keyboard");
+        expect(result.error).toContain("out of sync");
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestRecentApps", function() {
@@ -647,6 +682,44 @@ describe("IOSCtrlProxyClient", function() {
         const result = await resultPromise;
         expect(result.success).toBe(true);
         expect(result.totalTimeMs).toBe(80);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rewrites old-runner unknown command responses into an actionable skew error", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestPressBack(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_press_back");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: sentMessage.requestId,
+          error: "Unknown command type: request_press_back",
+          totalTimeMs: 3
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.totalTimeMs).toBe(3);
+        expect(result.error).toContain("rejected request_press_back as unknown");
+        expect(result.error).toContain("likely older than this daemon");
       } finally {
         await testClient.close();
       }

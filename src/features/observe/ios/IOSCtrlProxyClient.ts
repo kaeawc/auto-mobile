@@ -293,6 +293,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: CtrlProxyHierarchy) => void> = new Set();
+  private supportedCommands: Set<string> | null = null;
 
   // Track last foreground bundle for performance monitoring
   private lastForegroundBundleId: string | null = null;
@@ -492,6 +493,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       requestManager: this.requestManager,
       timer: this.timer,
       ensureConnected: perf => this.ensureConnected(perf),
+      isCommandSupported: messageType => this.isCommandSupported(messageType),
+      unsupportedCommandError: messageType => this.buildUnsupportedCommandError(messageType),
       cancelScreenshotBackoff: () => this.cancelScreenshotBackoff(),
     };
   }
@@ -613,6 +616,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.cancelScreenshotBackoff();
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
+    this.supportedCommands = null;
     getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
@@ -951,6 +955,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Handle push messages (no requestId)
     if (type === "connected") {
+      this.supportedCommands = Array.isArray(message.supportedCommands)
+        ? new Set(message.supportedCommands)
+        : null;
       logger.info(`[IOSCtrlProxyClient] Received connected message`);
       return;
     }
@@ -1138,7 +1145,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
             result = {
               success: false,
               totalTimeMs: message.totalTimeMs ?? 0,
-              error: message.error
+              error: this.rewriteUnknownCommandError(message.error)
             };
           } else {
             result = message;
@@ -1185,6 +1192,22 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       }
       return;
     }
+  }
+
+  private isCommandSupported(messageType: string): boolean {
+    return this.supportedCommands === null || this.supportedCommands.has(messageType);
+  }
+
+  private buildUnsupportedCommandError(messageType: string): string {
+    return `iOS CtrlProxy runner does not support ${messageType}. The daemon and runner are out of sync; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.`;
+  }
+
+  private rewriteUnknownCommandError(error: string): string {
+    const match = /^Unknown command type: (.+)$/.exec(error);
+    if (!match) {
+      return error;
+    }
+    return `iOS CtrlProxy runner rejected ${match[1]} as unknown. The runner is likely older than this daemon; rebuild and redeploy the iOS CtrlProxy runner from this source checkout, or run the iOS hot-reload watcher with --manage-ios-runner.`;
   }
 
   /**

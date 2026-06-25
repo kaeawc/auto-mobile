@@ -216,6 +216,8 @@ export interface SendCommandOptions<T> {
   timeoutError?: (timeoutMs: number) => T;
   /** Custom not-connected-error builder for non-BaseResult shapes (e.g. carries `action` or `enabled`). */
   notConnectedError?: () => T;
+  /** Custom unsupported-command builder for non-BaseResult shapes (e.g. carries `open`). */
+  unsupportedCommandError?: (messageType: string, error: string) => T;
   /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
@@ -242,6 +244,20 @@ export async function sendCommand<T>(
       success: false,
       totalTimeMs: 0,
       error: options.notConnectedMessage ?? "Not connected",
+    } as T;
+  }
+
+  if (context.isCommandSupported && !context.isCommandSupported(options.messageType)) {
+    const error = context.unsupportedCommandError
+      ? context.unsupportedCommandError(options.messageType)
+      : `${options.messageType} is not supported by the connected device service`;
+    if (options.unsupportedCommandError) {
+      return options.unsupportedCommandError(options.messageType, error);
+    }
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error,
     } as T;
   }
 

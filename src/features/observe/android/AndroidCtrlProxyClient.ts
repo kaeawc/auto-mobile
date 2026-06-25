@@ -72,6 +72,7 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 
@@ -654,7 +655,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11yPinchResult>;
 
   requestSetText(
-    text: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker, dismissKeyboard?: boolean
+    text: string, options?: SetTextOptions
   ): Promise<A11ySetTextResult>;
 
   requestClearText(
@@ -1223,9 +1224,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestSetText(
-    text: string, resourceId?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), dismissKeyboard: boolean = false
+    text: string, options?: SetTextOptions
   ): Promise<A11ySetTextResult> {
-    return this.text.requestSetText(text, resourceId, timeoutMs, perf, dismissKeyboard);
+    return this.text.requestSetText(text, options);
   }
 
   async requestClearText(

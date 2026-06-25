@@ -44,6 +44,7 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
 import { getPerformanceMonitor } from "../../performance/PerformanceMonitor";
@@ -178,7 +179,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxyPinchResult>;
 
   requestSetText(
-    text: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker, dismissKeyboard?: boolean
+    text: string, options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult>;
 
   requestClearText(
@@ -1283,9 +1284,9 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async requestSetText(
-    text: string, resourceId?: string, timeoutMs: number = 5000, perf?: PerformanceTracker, dismissKeyboard: boolean = false
+    text: string, options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult> {
-    return this.text.requestSetText(text, resourceId, timeoutMs, perf, dismissKeyboard);
+    return this.text.requestSetText(text, options);
   }
 
   async requestClearText(

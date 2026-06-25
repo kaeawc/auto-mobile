@@ -80,7 +80,7 @@ describe("SharedTextDelegate", () => {
       const delegate = new SharedTextDelegate(context);
 
       const { sentMsg } = await callAndResolve(sent, context.requestManager, () =>
-        delegate.requestSetText("hello", "com.app:id/input")
+        delegate.requestSetText("hello", { resourceId: "com.app:id/input" })
       );
 
       expect(sentMsg.resourceId).toBe("com.app:id/input");
@@ -164,7 +164,7 @@ describe("SharedTextDelegate", () => {
       const { context } = createFakeContext({ timer, requestManager });
       const delegate = new SharedTextDelegate(context);
 
-      const promise = delegate.requestSetText("hello", undefined, 100);
+      const promise = delegate.requestSetText("hello", { timeoutMs: 100 });
 
       await Promise.resolve();
       await Promise.resolve();

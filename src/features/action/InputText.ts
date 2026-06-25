@@ -109,7 +109,7 @@ export class InputText extends BaseVisualChange {
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
     // It also natively supports Unicode without needing virtual keyboard
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
+    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
@@ -162,7 +162,7 @@ export class InputText extends BaseVisualChange {
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
 
-    const prefixResult = await a11yClient.requestSetText(prefix, undefined, undefined, undefined, false);
+    const prefixResult = await a11yClient.requestSetText(prefix);
     if (!prefixResult.success) {
       return this.setTextFailure(text, "eventLast prefix", "before real key event", prefixResult.error, "eventLast");
     }
@@ -170,7 +170,7 @@ export class InputText extends BaseVisualChange {
     await this.executeKeyEventPlan(keyEventPlan);
 
     if (suffix.length > 0 || dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventLast final", "after real key event", finalResult.error, "eventLast");
       }
@@ -200,7 +200,7 @@ export class InputText extends BaseVisualChange {
     }
 
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const clearResult = await a11yClient.requestSetText("", undefined, undefined, undefined, false);
+    const clearResult = await a11yClient.requestSetText("");
     if (!clearResult.success) {
       return this.setTextFailure(text, "eventAll initial clear", "before eventAll input", clearResult.error, "eventAll");
     }
@@ -223,14 +223,14 @@ export class InputText extends BaseVisualChange {
       }
 
       targetText += unsupportedRun;
-      const setTextResult = await a11yClient.requestSetText(targetText, undefined, undefined, undefined, false);
+      const setTextResult = await a11yClient.requestSetText(targetText);
       if (!setTextResult.success) {
         return this.setTextFailure(text, "eventAll unsupported text run", "during eventAll input", setTextResult.error, "eventAll");
       }
     }
 
     if (dismissKeyboard) {
-      const finalResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, true);
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
       if (!finalResult.success) {
         return this.setTextFailure(text, "eventAll final", "after eventAll input", finalResult.error, "eventAll");
       }

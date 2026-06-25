@@ -12,6 +12,7 @@ import {
   AndroidPerfTiming,
   AccessibilityHierarchy
 } from "../../src/features/observe/android";
+import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { HighlightOperationResult, HighlightShape, ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
@@ -538,14 +539,12 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
 
   async requestSetText(
     text: string,
-    resourceId?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    options?: SetTextOptions
   ): Promise<A11ySetTextResult> {
     await this.applyDelay("setText");
     this.checkFailure("setText");
 
-    this.setTextHistory.push({ text, resourceId });
+    this.setTextHistory.push({ text, resourceId: options?.resourceId });
 
     return {
       success: true,

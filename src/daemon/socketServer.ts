@@ -1,7 +1,7 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import {
   StreamableHTTPClientTransport,
@@ -67,8 +67,14 @@ const DAEMON_LOOPBACK_STREAMABLE_HTTP_RECONNECTION: StreamableHTTPReconnectionOp
   maxRetries: 0,
 };
 
+interface SocketFileIdentity {
+  dev: number;
+  ino: number;
+}
+
 export class UnixSocketServer {
   private server: NetServer | null = null;
+  private socketFileIdentity: SocketFileIdentity | null = null;
   private sessions: Map<string, SessionContext> = new Map();
   private socketPath: string;
   private mcpEndpoint: string;
@@ -113,6 +119,7 @@ export class UnixSocketServer {
 
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
+        this.socketFileIdentity = this.readSocketFileIdentity();
         logger.info(`Unix socket server listening on ${this.socketPath}`);
         resolve();
       });
@@ -700,19 +707,45 @@ export class UnixSocketServer {
     // Clear sessions
     this.sessions.clear();
 
-    // Close server
-    if (this.server) {
-      return new Promise(resolve => {
+    const ownsSocketPath = this.isOwnedSocketFile();
+
+    if (this.server && (ownsSocketPath || !existsSync(this.socketPath))) {
+      await new Promise<void>(resolve => {
         this.server!.close(() => {
           logger.info("Unix socket server closed");
           resolve();
         });
       });
+      this.server = null;
+    } else if (this.server) {
+      logger.warn(
+        `Unix socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
+      );
+      this.server.unref();
+      this.server = null;
     }
 
-    // Remove socket file
-    if (existsSync(this.socketPath)) {
+    if (ownsSocketPath && existsSync(this.socketPath)) {
       await unlink(this.socketPath);
     }
+    this.socketFileIdentity = null;
+  }
+
+  private readSocketFileIdentity(): SocketFileIdentity | null {
+    try {
+      const stats = statSync(this.socketPath);
+      return { dev: stats.dev, ino: stats.ino };
+    } catch {
+      return null;
+    }
+  }
+
+  private isOwnedSocketFile(): boolean {
+    if (!this.socketFileIdentity || !existsSync(this.socketPath)) {
+      return false;
+    }
+    const currentIdentity = this.readSocketFileIdentity();
+    return currentIdentity?.dev === this.socketFileIdentity.dev &&
+      currentIdentity.ino === this.socketFileIdentity.ino;
   }
 }

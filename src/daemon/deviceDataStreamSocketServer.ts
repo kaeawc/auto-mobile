@@ -1,23 +1,14 @@
-import os from "node:os";
-import path from "node:path";
 import { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import {
   PushSubscriptionSocketServer,
   getSocketPath,
-  SocketServerConfig,
   SubscriptionResponse,
 } from "./socketServer/index";
 import type { ObserveResult, ViewHierarchyResult } from "../models";
 import type { StorageChangedEvent } from "../features/storage/storageTypes";
-
-// NOTE: Keep legacy socket path for backward compatibility with IDE plugin
-// (android/ide-plugin/.../ObservationStreamClient.kt hardcodes this path)
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "observation-stream.sock"),
-  externalPath: "/tmp/auto-mobile-observation-stream.sock",
-};
+import { DEVICE_DATA_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 
 /**
  * Navigation graph summary for streaming to IDE plugins.
@@ -172,7 +163,7 @@ export class DeviceDataStreamSocketServer extends PushSubscriptionSocketServer<
   private onNavigationGraphRequested: OnNavigationGraphRequestedCallback | null = null;
   private observationRequestTimeoutMs = DEFAULT_OBSERVATION_REQUEST_TIMEOUT_MS;
 
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "DeviceDataStream");
   }
 
@@ -556,14 +547,14 @@ export function getDeviceDataStreamServer(): DeviceDataStreamSocketServer | null
 }
 
 export function getDeviceDataStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+  return socketServer?.getSocketPath() ?? getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG);
 }
 
 export async function startDeviceDataStreamSocketServer(
   timer: Timer = defaultTimer
 ): Promise<DeviceDataStreamSocketServer> {
   if (!socketServer) {
-    socketServer = new DeviceDataStreamSocketServer(getSocketPath(SOCKET_CONFIG), timer);
+    socketServer = new DeviceDataStreamSocketServer(getSocketPath(DEVICE_DATA_STREAM_SOCKET_CONFIG), timer);
   }
   if (!socketServer.isListening()) {
     await socketServer.start();

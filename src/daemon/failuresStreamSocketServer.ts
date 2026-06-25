@@ -1,7 +1,5 @@
-import os from "node:os";
-import path from "node:path";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { FailureAnalyticsRepository } from "../db/failureAnalyticsRepository";
 import type {
   FailuresStreamSocketRequest,
@@ -9,11 +7,7 @@ import type {
   DateRangePreset,
   TimeAggregation,
 } from "./failuresStreamSocketTypes";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "failures-stream.sock"),
-  externalPath: "/tmp/auto-mobile-failures-stream.sock",
-};
+import { FAILURES_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 
 const DEFAULT_LIMIT = 100;
 const STREAM_LIMIT_MAX = 500;
@@ -139,7 +133,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
   FailuresStreamSocketRequest,
   FailuresStreamSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(FAILURES_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "FailuresStream");
   }
 
@@ -292,7 +286,7 @@ export class FailuresStreamSocketServer extends RequestResponseSocketServer<
 let socketServer: FailuresStreamSocketServer | null = null;
 
 export function getFailuresStreamSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_STREAM_SOCKET_CONFIG);
 }
 
 export async function startFailuresStreamSocketServer(): Promise<void> {

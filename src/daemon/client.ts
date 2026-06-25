@@ -12,6 +12,11 @@ import {
 import { resolveMcpRequestTimeoutMs } from "./mcpRequestTimeout";
 import { McpTimeoutError } from "./McpTimeoutError";
 import { type Timer, defaultTimer } from "../utils/SystemTimer";
+import {
+  cleanupStaleDaemonFilesForDeadPidSync,
+  getDaemonSocketPaths,
+  type StaleDaemonFileCleanupOptions,
+} from "./daemonFiles";
 
 /**
  * Custom error thrown when daemon is unavailable
@@ -22,6 +27,8 @@ export class DaemonUnavailableError extends Error {
     this.name = "DaemonUnavailableError";
   }
 }
+
+export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {}
 
 /**
  * CLI Client for communicating with the daemon via Unix socket
@@ -45,22 +52,28 @@ export class DaemonClient {
   }> = new Map();
   private buffer: string = "";
   private connected: boolean = false;
+  private recoveryOptions: DaemonClientRecoveryOptions;
 
   constructor(
     socketPath: string = SOCKET_PATH,
     connectionTimeout: number = CONNECTION_TIMEOUT_MS,
     timer: Timer = defaultTimer,
+    recoveryOptions: DaemonClientRecoveryOptions = {},
   ) {
     this.socketPath = socketPath;
     this.connectionTimeout = connectionTimeout;
     this.timer = timer;
+    this.recoveryOptions = recoveryOptions;
   }
 
   /**
    * Check if daemon is available (socket file exists and is connectable).
    * Uses a lightweight raw socket probe — no logging, no DaemonClient overhead.
    */
-  static async isAvailable(socketPath: string = SOCKET_PATH): Promise<boolean> {
+  static async isAvailable(
+    socketPath: string = SOCKET_PATH,
+    recoveryOptions: DaemonClientRecoveryOptions = {}
+  ): Promise<boolean> {
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
@@ -68,6 +81,7 @@ export class DaemonClient {
       try {
         const stats = statSync(socketPath);
         if (!stats.isSocket()) {
+          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
           return false;
         }
       } catch {
@@ -92,10 +106,12 @@ export class DaemonClient {
       socket.on("error", () => {
         defaultTimer.clearTimeout(timeout);
         socket.destroy();
+        DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
         settle(false);
       });
       const timeout = defaultTimer.setTimeout(() => {
         socket.destroy();
+        DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
         settle(false);
       }, 1000);
     });
@@ -109,6 +125,23 @@ export class DaemonClient {
       return;
     }
 
+    try {
+      await this.connectOnce();
+      return;
+    } catch (error) {
+      if (DaemonClient.cleanupStaleSocketIfDaemonDead(this.socketPath, this.recoveryOptions)) {
+        await this.connectOnce();
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async connectOnce(): Promise<void> {
+    if (this.connected) {
+      return;
+    }
+
     if (!existsSync(this.socketPath)) {
       throw new DaemonUnavailableError(
         `Daemon socket not found: ${this.socketPath}`
@@ -116,11 +149,32 @@ export class DaemonClient {
     }
 
     return new Promise((resolve, reject) => {
-      const timeout = this.timer.setTimeout(() => {
+      let settled = false;
+
+      const rejectPendingRequests = (error: Error) => {
+        for (const [, { reject, timeout }] of this.pendingRequests) {
+          this.timer.clearTimeout(timeout);
+          reject(error);
+        }
+        this.pendingRequests.clear();
+      };
+
+      const fail = (error: Error) => {
+        this.timer.clearTimeout(timeout);
+        this.connected = false;
         if (this.socket) {
           this.socket.destroy();
+          this.socket = null;
         }
-        reject(
+        rejectPendingRequests(error);
+        if (!settled) {
+          settled = true;
+          reject(error);
+        }
+      };
+
+      const timeout = this.timer.setTimeout(() => {
+        fail(
           new DaemonUnavailableError(
             `Failed to connect to daemon within ${this.connectionTimeout}ms`
           )
@@ -131,7 +185,10 @@ export class DaemonClient {
         this.timer.clearTimeout(timeout);
         this.connected = true;
         logger.info(`Connected to daemon at ${this.socketPath}`);
-        resolve();
+        if (!settled) {
+          settled = true;
+          resolve();
+        }
       });
 
       this.socket.on("data", data => {
@@ -139,24 +196,28 @@ export class DaemonClient {
       });
 
       this.socket.on("error", error => {
-        this.timer.clearTimeout(timeout);
-        this.connected = false;
         logger.error(`Daemon socket error: ${error.message}`);
-
-        // Reject all pending requests
-        for (const [, { reject, timeout }] of this.pendingRequests) {
-          this.timer.clearTimeout(timeout);
-          reject(error);
-        }
-        this.pendingRequests.clear();
-
-        reject(error);
+        fail(error);
       });
 
       this.socket.on("close", () => {
         this.connected = false;
         logger.info("Daemon socket connection closed");
       });
+    });
+  }
+
+  private static cleanupStaleSocketIfDaemonDead(
+    socketPath: string,
+    recoveryOptions: DaemonClientRecoveryOptions
+  ): boolean {
+    const socketPaths = recoveryOptions.socketPaths ?? (
+      socketPath === SOCKET_PATH ? getDaemonSocketPaths() : [socketPath]
+    );
+
+    return cleanupStaleDaemonFilesForDeadPidSync({
+      ...recoveryOptions,
+      socketPaths,
     });
   }
 

@@ -1,7 +1,5 @@
-import os from "node:os";
-import path from "node:path";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import type { BootedDevice, Platform, SomePlatform } from "../models";
 import {
@@ -13,11 +11,7 @@ import {
   TestRecordingCommand,
   TestRecordingResponse,
 } from "./testRecordingSocketTypes";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "test-recording.sock"),
-  externalPath: "/tmp/auto-mobile-test-recording.sock",
-};
+import { TEST_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 
 const resolveDevice = async (
   deviceId?: string,
@@ -58,7 +52,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
   TestRecordingCommand,
   TestRecordingResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(TEST_RECORDING_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "TestRecording");
   }
 
@@ -121,7 +115,7 @@ export class TestRecordingSocketServer extends RequestResponseSocketServer<
 let socketServer: TestRecordingSocketServer | null = null;
 
 export function getTestRecordingSocketPath(): string {
-  return socketServer?.getSocketPath() ?? getSocketPath(SOCKET_CONFIG);
+  return socketServer?.getSocketPath() ?? getSocketPath(TEST_RECORDING_SOCKET_CONFIG);
 }
 
 export async function startTestRecordingSocketServer(): Promise<void> {

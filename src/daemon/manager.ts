@@ -23,6 +23,7 @@ import {
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { cleanupDaemonFiles } from "./daemonFiles";
 
 /**
  * Check that bunx is available on PATH.
@@ -195,6 +196,14 @@ export class DaemonManager implements DaemonManagerLike {
   getDaemonState(): DaemonStateLike {
     return this.stateProvider();
   }
+
+  private cleanupSocketPaths(primarySocketPath?: string): string[] | undefined {
+    if (this.pidFilePath === PID_FILE_PATH) {
+      return undefined;
+    }
+    return primarySocketPath ? [primarySocketPath] : [];
+  }
+
   /**
    * Find all running auto-mobile daemon processes (including those from other worktrees)
    */
@@ -316,22 +325,7 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     // Clean up stale socket and PID files from previous sessions
-    if (existsSync(this.socketPath)) {
-      logger.debug("Removing stale socket file");
-      try {
-        await unlink(this.socketPath);
-      } catch (error) {
-        logger.warn(`Failed to remove stale socket file: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    if (existsSync(this.pidFilePath)) {
-      logger.debug("Removing stale PID file");
-      try {
-        await unlink(this.pidFilePath);
-      } catch (error) {
-        logger.warn(`Failed to remove stale PID file: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    await cleanupDaemonFiles({ pidFilePath: this.pidFilePath });
 
     stderrLog("Starting AutoMobile daemon...");
 
@@ -496,10 +490,11 @@ export class DaemonManager implements DaemonManagerLike {
         await this.timer.sleep(1000);
       }
 
-      // Clean up stale PID file if it exists
-      if (existsSync(this.pidFilePath)) {
-        await unlink(this.pidFilePath);
-      }
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: pid,
+      });
 
       stderrLog("Daemon stopped");
     } catch (error) {
@@ -508,10 +503,11 @@ export class DaemonManager implements DaemonManagerLike {
         error instanceof Error &&
         (error.message.includes("ESRCH") || error.message.includes("EPERM"))
       ) {
-        // Clean up stale PID file
-        if (existsSync(this.pidFilePath)) {
-          await unlink(this.pidFilePath);
-        }
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(status.socketPath),
+          expectedPid: pid,
+        });
         stderrLog("Daemon was not running (cleaned up stale PID file)");
       } else {
         throw error;
@@ -537,8 +533,11 @@ export class DaemonManager implements DaemonManagerLike {
       const running = this.isProcessRunning(pidData.pid);
 
       if (!running) {
-        // Clean up stale PID file
-        await unlink(this.pidFilePath);
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(pidData.socketPath),
+          expectedPid: pidData.pid,
+        });
         return { running: false };
       }
 

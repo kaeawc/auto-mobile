@@ -111,6 +111,7 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   private hierarchyRequestCount: number = 0;
   private dragResult: A11yDragResult | null = null;
   private pinchResult: A11yPinchResult | null = null;
+  private viewHierarchyResultOverride: ViewHierarchyResult | null = null;
 
   /**
    * Configure hierarchy data to be returned by getAccessibilityHierarchy
@@ -118,6 +119,16 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
    */
   setHierarchyData(hierarchy: AccessibilityHierarchy | null): void {
     this.hierarchyData = hierarchy;
+  }
+
+  /**
+   * Override the ViewHierarchyResult produced by convertToViewHierarchyResult
+   * (and therefore returned by getAccessibilityHierarchy / getLatestHierarchy).
+   * Lets tests assert against a realistic node tree instead of the default stub.
+   * @param result - The view hierarchy result to return, or null to restore default behavior
+   */
+  setViewHierarchyResult(result: ViewHierarchyResult | null): void {
+    this.viewHierarchyResultOverride = result;
   }
 
   /**
@@ -418,6 +429,9 @@ export class FakeCtrlProxy implements AndroidCtrlProxy {
   }
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult {
+    if (this.viewHierarchyResultOverride) {
+      return this.viewHierarchyResultOverride;
+    }
     // Simple conversion - just wrap the hierarchy
     return {
       hierarchy: {

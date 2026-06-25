@@ -11,6 +11,11 @@ import type { VideoRecordingConfigInput } from "./models";
 import { getGlobalVersionOutput } from "./cli/versionFlag";
 import { startupBenchmark } from "./utils/startupBenchmark";
 import { getMcpServerVersion } from "./utils/mcpVersion";
+import {
+  installProcessLifecycleHandlers,
+  setFatalProcessHandler,
+  setProcessShutdownHandler,
+} from "./processLifecycle";
 
 interface FatalLogger {
   error(...args: unknown[]): void;
@@ -30,26 +35,21 @@ function logFatal(label: string, error: unknown): void {
   }
 }
 
-/**
- * Install process-level safety-net handlers BEFORE the dynamic imports in main()
- * run, so a failure during startup is logged rather than lost. This is the
- * proxy/client process: it logs and continues. The daemon process installs its
- * own (exit-on-fault) handlers in daemon.ts.
- */
-function registerProcessSafetyNet(): void {
-  process.on("uncaughtException", error => {
-    logFatal("Uncaught exception", error);
-  });
-  process.on("unhandledRejection", reason => {
-    logFatal("Unhandled rejection", reason);
-  });
-}
-
 const versionOutput = getGlobalVersionOutput(process.argv.slice(2), getMcpServerVersion());
 if (versionOutput !== undefined) {
   console.log(versionOutput);
   process.exit(0);
 }
+
+installProcessLifecycleHandlers();
+setFatalProcessHandler(event => {
+  if (event.type === "uncaughtException") {
+    logFatal("Uncaught exception", event.error);
+    return;
+  }
+  logFatal("Unhandled rejection", event.reason);
+});
+
 interface ParseLogger {
   warn(message: string): void;
 }
@@ -352,10 +352,6 @@ function parseArgs(log: ParseLogger): {
 }
 
 async function main() {
-  // Register before any `await import(...)` below so a crash during startup
-  // imports is logged instead of lost.
-  registerProcessSafetyNet();
-
   const { StdioServerTransport } = await import("@modelcontextprotocol/sdk/server/stdio.js");
   const { createMcpServer } = await import("./server");
   const { createProxyMcpServer } = await import("./server/proxyServer");
@@ -384,7 +380,7 @@ async function main() {
   const { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } = appearanceSyncScheduler;
   const { startHostEmulatorAutoConnect, stopHostEmulatorAutoConnect } = hostEmulatorAutoConnect;
 
-  const shutdown = async (signal: "SIGINT" | "SIGTERM") => {
+  setProcessShutdownHandler(async signal => {
     logger.info(`Received ${signal} signal, shutting down`);
     await stopHostEmulatorAutoConnect();
     await stopVideoRecordingSocketServer();
@@ -394,20 +390,7 @@ async function main() {
     stopAppearanceSyncScheduler();
     await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     logger.close();
-    process.exit(0);
-  };
-
-  process.on("SIGINT", () => {
-    void shutdown("SIGINT");
   });
-
-  process.on("SIGTERM", () => {
-    void shutdown("SIGTERM");
-  });
-
-  // uncaughtException/unhandledRejection are registered at startup via
-  // registerProcessSafetyNet() so failures during the dynamic imports above are
-  // also captured. fatalLogger now points at the file logger.
 
   try {
     // Parse command line arguments

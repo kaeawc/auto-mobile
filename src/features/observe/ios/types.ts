@@ -241,4 +241,6 @@ export interface HierarchyDelegateContext extends DelegateContext {
   getCachedHierarchy(): CtrlProxyCachedHierarchy | null;
   /** Set the cached hierarchy data */
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
+  /** Prevent the response for this request from being forwarded to the observation stream. */
+  suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
 }

@@ -156,6 +156,13 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
 
+  requestHierarchySyncWithoutObservationStreamPush(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null>;
+
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult;
 
   requestSwipe(
@@ -229,6 +236,10 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyScreenshotResult>;
 
+  requestScreenshotWithoutObservationStreamPush(
+    timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyScreenshotResult>;
+
   requestVoiceOverState(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyVoiceOverResult>;
@@ -278,6 +289,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private cachedHierarchy: CtrlProxyCachedHierarchy | null = null;
   private static readonly CACHE_FRESH_TTL_MS = 500;
   private hierarchyNavigationDetector: HierarchyNavigationDetector | null = null;
+  private readonly hierarchyObservationStreamSuppressions: Map<string, NodeJS.Timeout> = new Map();
 
   // Push update callbacks
   private onPushUpdateCallbacks: Set<(hierarchy: CtrlProxyHierarchy) => void> = new Set();
@@ -490,6 +502,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       cacheFreshTtlMs: IOSCtrlProxyClient.CACHE_FRESH_TTL_MS,
       getCachedHierarchy: () => this.cachedHierarchy,
       setCachedHierarchy: h => { this.cachedHierarchy = h; },
+      suppressHierarchyObservationStreamPush: (requestId, timeoutMs) =>
+        this.suppressHierarchyObservationStreamPush(requestId, timeoutMs),
     };
   }
 
@@ -945,7 +959,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       // Push messages (no requestId) are handled in the dedicated push-message branch below
       // to avoid duplicate hierarchy events.
       if (requestId) {
-        this.pushHierarchyToObservationStream(converted);
+        const suppressObservationStreamPush = this.consumeHierarchyObservationStreamSuppression(requestId);
+        if (!suppressObservationStreamPush) {
+          this.pushHierarchyToObservationStream(converted);
+        } else {
+          logger.debug("[IOSCtrlProxyClient] Suppressed hierarchy observation stream push for explicit initial-frame request");
+        }
       }
     }
 
@@ -1231,6 +1250,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
+  async requestHierarchySyncWithoutObservationStreamPush(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs: number = 5000
+  ): Promise<{ hierarchy: CtrlProxyHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
+    return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs, true);
+  }
+
   convertToViewHierarchyResult(hierarchy: CtrlProxyHierarchy): ViewHierarchyResult {
     return this.hierarchy.convertToViewHierarchyResult(hierarchy);
   }
@@ -1373,6 +1401,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     return this.screenshot.requestScreenshot(timeoutMs, perf);
   }
 
+  async requestScreenshotWithoutObservationStreamPush(
+    timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyScreenshotResult> {
+    return this.requestScreenshot(timeoutMs, perf);
+  }
+
   // ===========================================================================
   // Delegated Public Methods - VoiceOver
   // ===========================================================================
@@ -1489,6 +1523,29 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         logger.warn(`[IOSCtrlProxyClient] Push update callback error: ${error}`);
       }
     }
+  }
+
+  private suppressHierarchyObservationStreamPush(requestId: string, timeoutMs: number): void {
+    const existingTimeout = this.hierarchyObservationStreamSuppressions.get(requestId);
+    if (existingTimeout) {
+      this.timer.clearTimeout(existingTimeout);
+    }
+
+    const timeoutHandle = this.timer.setTimeout(() => {
+      this.hierarchyObservationStreamSuppressions.delete(requestId);
+    }, timeoutMs);
+    this.hierarchyObservationStreamSuppressions.set(requestId, timeoutHandle);
+  }
+
+  private consumeHierarchyObservationStreamSuppression(requestId: string): boolean {
+    const timeoutHandle = this.hierarchyObservationStreamSuppressions.get(requestId);
+    if (!timeoutHandle) {
+      return false;
+    }
+
+    this.hierarchyObservationStreamSuppressions.delete(requestId);
+    this.timer.clearTimeout(timeoutHandle);
+    return true;
   }
 
   /**

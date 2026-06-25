@@ -89,6 +89,15 @@ export class CtrlProxyNavigation {
         value: 0,
         rotationPerformed: false,
       }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        totalTimeMs: 0,
+        error,
+        previousOrientation: "",
+        currentOrientation: "",
+        value: 0,
+        rotationPerformed: false,
+      }),
       timeoutError: timeout => ({
         success: false,
         totalTimeMs: timeout,

@@ -107,6 +107,8 @@ export interface WebSocketMessage {
   type: string;
   timestamp?: number;
   requestId?: string;
+  id?: number;
+  supportedCommands?: string[];
   data?: CtrlProxyHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;

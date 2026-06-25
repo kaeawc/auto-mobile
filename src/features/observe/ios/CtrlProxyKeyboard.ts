@@ -32,6 +32,12 @@ export class CtrlProxyKeyboard {
         totalTimeMs: 0,
         error: "Not connected",
       }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        open: false,
+        totalTimeMs: 0,
+        error,
+      }),
       timeoutError: timeout => ({
         success: false,
         open: false,

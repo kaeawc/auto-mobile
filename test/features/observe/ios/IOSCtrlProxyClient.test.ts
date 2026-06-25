@@ -537,6 +537,264 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("returns a clear skew error when advertised runner capabilities exclude keyboard", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const result = await testClient.requestKeyboard("detect", 5000);
+
+        expect(result.success).toBe(false);
+        expect(result.open).toBe(false);
+        expect(result.error).toContain("does not support request_keyboard");
+        expect(result.error).toContain("out of sync");
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("command fallback result shapes", function() {
+    test("preserves required fields for unsupported non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const imeAction = await testClient.requestImeAction("done", 5000);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("does not support request_ime_action");
+
+        const rotate = await testClient.requestRotate("landscape", 5000);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.error).toContain("does not support request_rotate");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 5000);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("does not support request_clipboard");
+
+        const voiceOver = await testClient.requestVoiceOverState(5000);
+        expect(voiceOver.success).toBe(false);
+        expect(voiceOver.enabled).toBe(false);
+        expect(voiceOver.totalTimeMs).toBe(0);
+        expect(voiceOver.error).toContain("does not support get_voiceover_state");
+
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for timed out non-BaseResult command contracts", async function() {
+      const testTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const imeActionPromise = testClient.requestImeAction("done", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        testTimer.advanceTime(100);
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(100);
+        expect(imeAction.error).toContain("IME action timed out");
+
+        const rotatePromise = testClient.requestRotate("landscape", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        testTimer.advanceTime(100);
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(100);
+        expect(rotate.error).toContain("Rotate timed out");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        testTimer.advanceTime(100);
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(100);
+        expect(clipboard.error).toContain("Clipboard operation timed out");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for not-connected non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+
+      try {
+        const imeAction = await testClient.requestImeAction("done", 100);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toBe("Not connected");
+
+        const rotate = await testClient.requestRotate("landscape", 100);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toBe("Not connected");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 100);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toBe("Not connected");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for old-runner unknown command errors", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const keyboardPromise = testClient.requestKeyboard("detect", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        const keyboardMessage = JSON.parse(socket!.sentMessages[0]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: keyboardMessage.requestId,
+          error: "Unknown command type: request_keyboard",
+        }));
+        const keyboard = await keyboardPromise;
+        expect(keyboard.success).toBe(false);
+        expect(keyboard.open).toBe(false);
+        expect(keyboard.totalTimeMs).toBe(0);
+        expect(keyboard.error).toContain("runner is likely older");
+
+        const imeActionPromise = testClient.requestImeAction("done", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        const imeActionMessage = JSON.parse(socket!.sentMessages[1]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: imeActionMessage.requestId,
+          error: "Unknown command type: request_ime_action",
+        }));
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("runner is likely older");
+
+        const rotatePromise = testClient.requestRotate("landscape", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        const rotateMessage = JSON.parse(socket!.sentMessages[2]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: rotateMessage.requestId,
+          error: "Unknown command type: request_rotate",
+        }));
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toContain("runner is likely older");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 4);
+        const clipboardMessage = JSON.parse(socket!.sentMessages[3]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: clipboardMessage.requestId,
+          error: "Unknown command type: request_clipboard",
+        }));
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("runner is likely older");
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestRecentApps", function() {
@@ -647,6 +905,44 @@ describe("IOSCtrlProxyClient", function() {
         const result = await resultPromise;
         expect(result.success).toBe(true);
         expect(result.totalTimeMs).toBe(80);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rewrites old-runner unknown command responses into an actionable skew error", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestPressBack(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_press_back");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: sentMessage.requestId,
+          error: "Unknown command type: request_press_back",
+          totalTimeMs: 3
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.totalTimeMs).toBe(3);
+        expect(result.error).toContain("rejected request_press_back as unknown");
+        expect(result.error).toContain("likely older than this daemon");
       } finally {
         await testClient.close();
       }

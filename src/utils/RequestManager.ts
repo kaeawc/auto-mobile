@@ -11,12 +11,18 @@ interface PendingRequest<T> {
   reject: (error: Error) => void;
   timeoutId: ReturnType<Timer["setTimeout"]>;
   createdAt: number;
+  responseErrorFactory?: ResponseErrorFactory<T>;
 }
 
 /**
  * Default error result factory for timed-out requests.
  */
 type TimeoutErrorFactory<T> = (requestId: string, type: string, timeoutMs: number) => T;
+
+/**
+ * Error result factory for responses that fail before the expected result type is emitted.
+ */
+type ResponseErrorFactory<T> = (error: string, totalTimeMs: number) => T;
 
 /**
  * Manages pending requests with automatic timeout handling.
@@ -60,7 +66,8 @@ export class RequestManager {
     id: string,
     type: string,
     timeoutMs: number,
-    timeoutErrorFactory: TimeoutErrorFactory<T>
+    timeoutErrorFactory: TimeoutErrorFactory<T>,
+    responseErrorFactory?: ResponseErrorFactory<T>
   ): Promise<T> {
     return new Promise<T>((resolve, reject) => {
       // Set up timeout
@@ -80,7 +87,8 @@ export class RequestManager {
         resolve: resolve as (result: unknown) => void,
         reject,
         timeoutId,
-        createdAt: this.timer.now()
+        createdAt: this.timer.now(),
+        responseErrorFactory: responseErrorFactory as ResponseErrorFactory<unknown> | undefined,
       });
 
       logger.debug(`[RequestManager] Registered request: ${type} (id: ${id}, timeout: ${timeoutMs}ms)`);
@@ -109,6 +117,30 @@ export class RequestManager {
     // Resolve the promise
     const duration = this.timer.now() - request.createdAt;
     logger.debug(`[RequestManager] Resolved request: ${request.type} (id: ${id}, duration: ${duration}ms)`);
+    request.resolve(result);
+
+    return true;
+  }
+
+  /**
+   * Resolve a pending request with an error response, preserving request-specific
+   * result shape when the caller registered an error result factory.
+   */
+  resolveError(id: string, error: string, totalTimeMs: number = 0): boolean {
+    const request = this.pending.get(id);
+    if (!request) {
+      logger.debug(`[RequestManager] No pending request found for id: ${id} (may have timed out)`);
+      return false;
+    }
+
+    this.timer.clearTimeout(request.timeoutId);
+    this.pending.delete(id);
+
+    const result = request.responseErrorFactory
+      ? request.responseErrorFactory(error, totalTimeMs)
+      : { success: false, totalTimeMs, error };
+    const duration = this.timer.now() - request.createdAt;
+    logger.debug(`[RequestManager] Resolved errored request: ${request.type} (id: ${id}, duration: ${duration}ms)`);
     request.resolve(result);
 
     return true;

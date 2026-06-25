@@ -766,10 +766,12 @@ public struct PerformanceUpdateResponse: Codable {
 public struct ConnectedEvent: Codable {
     public let type: String
     public let id: Int
+    public let supportedCommands: [String]
 
     public init(id: Int) {
         type = "connected"
         self.id = id
+        supportedCommands = RequestType.allCases.map(\.rawValue).sorted()
     }
 }
 
@@ -796,7 +798,7 @@ public struct VoiceOverStateResponse: Codable {
 
 // MARK: - Request Types (matching Android)
 
-public enum RequestType: String {
+public enum RequestType: String, CaseIterable {
     // View hierarchy
     case requestHierarchy = "request_hierarchy"
     case requestHierarchyIfStale = "request_hierarchy_if_stale"

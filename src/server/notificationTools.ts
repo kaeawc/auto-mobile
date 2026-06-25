@@ -21,8 +21,9 @@ export const postNotificationSchema = addDeviceTargetingToSchema(
     body: z.string().min(1).describe("Notification body"),
     imageType: z.enum(["normal", "bigPicture"]).optional().describe("Notification image type (default: normal)"),
     imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture"),
-    actions: z.array(actionSchema).optional().describe("Action buttons to include"),
-    channelId: z.string().optional().describe("Notification channel ID (Android only)"),
+    actions: z.array(actionSchema).optional().describe("Action buttons to include (Android only)"),
+    channelId: z.string().optional().describe("Notification channel ID (Android); reused as the APNs category on iOS"),
+    appId: z.string().optional().describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
     platform: platformSchema
   })
 );
@@ -50,7 +51,8 @@ export function registerNotificationTools() {
         imageType: args.imageType,
         imagePath: args.imagePath,
         actions: args.actions,
-        channelId: args.channelId
+        channelId: args.channelId,
+        appId: args.appId
       });
 
       const message = result.success
@@ -94,7 +96,8 @@ export function registerNotificationTools() {
 
   ToolRegistry.registerDeviceAware(
     "postNotification",
-    "Post a notification from the app-under-test when AutoMobile SDK hooks are installed.",
+    "Post a notification: on Android, from the app-under-test when AutoMobile SDK hooks are installed; " +
+    "on the iOS Simulator, deliver a simulated remote push to the given bundle id via 'simctl push' (requires appId; physical iOS devices unsupported).",
     postNotificationSchema,
     postNotificationHandler
   );

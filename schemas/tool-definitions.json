@@ -1,7 +1,7 @@
 [
   {
     "name": "biometricAuth",
-    "description": "Simulate biometric authentication (fingerprint) on Android emulators, or inject a deterministic result via the AutoMobile SDK on any device. Supports match/fail/cancel/error actions. The SDK broadcast path requires the app to integrate AutoMobileBiometrics.consumeOverride().",
+    "description": "Simulate biometric authentication on Android emulators (fingerprint) and the iOS Simulator (Touch ID / Face ID via BiometricKit), or inject a deterministic result via the AutoMobile SDK on any Android device. Supports match/fail on both platforms; cancel/error require the AutoMobileBiometrics SDK (Android only). Physical iOS devices are not supported (no public biometric-injection API).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -17,7 +17,7 @@
           "description": "Biometric action: 'match' triggers successful authentication, 'fail' simulates a non-matching biometric, 'cancel' cancels the prompt, 'error' injects a hard error (requires AutoMobileBiometrics SDK integration in the app)."
         },
         "modality": {
-          "description": "Biometric modality (default: 'any'). Currently only 'fingerprint' is reliably supported on Android emulators. 'face' is not consistently supported.",
+          "description": "Biometric modality (default: 'any'). Android emulators reliably support only 'fingerprint'. iOS Simulator supports both: 'fingerprint' -> Touch ID, 'face' -> Face ID, 'any' posts both (the simulator's non-enrolled biometry is a no-op).",
           "type": "string",
           "enum": [
             "any",
@@ -4137,7 +4137,7 @@
   },
   {
     "name": "postNotification",
-    "description": "Post a notification from the app-under-test when AutoMobile SDK hooks are installed.",
+    "description": "Post a notification: on Android, from the app-under-test when AutoMobile SDK hooks are installed; on the iOS Simulator, deliver a simulated remote push to the given bundle id via 'simctl push' (requires appId; physical iOS devices unsupported).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4165,7 +4165,7 @@
           "type": "string"
         },
         "actions": {
-          "description": "Action buttons to include",
+          "description": "Action buttons to include (Android only)",
           "type": "array",
           "items": {
             "type": "object",
@@ -4189,7 +4189,11 @@
           }
         },
         "channelId": {
-          "description": "Notification channel ID (Android only)",
+          "description": "Notification channel ID (Android); reused as the APNs category on iOS",
+          "type": "string"
+        },
+        "appId": {
+          "description": "iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android.",
           "type": "string"
         },
         "platform": {

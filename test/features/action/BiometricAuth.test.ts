@@ -355,7 +355,8 @@ describe("BiometricAuth", () => {
   });
 
   describe("capability detection", () => {
-    test("should reject iOS platform", async () => {
+    test("should reject physical iOS devices (non-simulator UDID)", async () => {
+      // "test-device" is not a simulator UUID, so the iOS path treats it as a physical device.
       const iosDevice = { ...device, platform: "ios" as const };
       const iosBiometricAuth = new BiometricAuth(iosDevice, fakeAdb);
 
@@ -363,7 +364,7 @@ describe("BiometricAuth", () => {
 
       expect(result.success).toBe(false);
       expect(result.supported).toBe(false);
-      expect(result.error).toContain("only supported on Android");
+      expect(result.error).toContain("physical iOS device");
     });
 
     test("should reject emulators without emu finger support", async () => {

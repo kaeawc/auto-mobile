@@ -125,4 +125,15 @@ export class FakeSimCtlClient {
       throw this.openSimulatorAppError;
     }
   }
+
+  private pushNotificationResult: { success: boolean; error?: string } = { success: true };
+
+  setPushNotificationResult(result: { success: boolean; error?: string }): void {
+    this.pushNotificationResult = result;
+  }
+
+  async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
+    this.recordCall("pushNotification", { deviceId, bundleId, payloadJson });
+    return this.pushNotificationResult;
+  }
 }

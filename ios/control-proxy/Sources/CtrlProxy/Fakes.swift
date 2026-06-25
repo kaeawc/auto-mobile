@@ -687,9 +687,11 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private let lock = NSLock()
     private var _cachedHierarchy: SdkViewHierarchy?
     private var _freshHierarchy: SdkViewHierarchy?
+    private var _serverInfo: SdkHierarchyServerInfo?
     private var _isAvailable: Bool = false
     private var _fetchCallCount = 0
     private var _fetchFreshCallCount = 0
+    private var _fetchServerInfoCallCount = 0
     private var _isAvailableCallCount = 0
 
     public init() {}
@@ -714,6 +716,12 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         lock.unlock()
     }
 
+    public func setServerInfo(_ serverInfo: SdkHierarchyServerInfo?) {
+        lock.lock()
+        _serverInfo = serverInfo
+        lock.unlock()
+    }
+
     // MARK: - Assertions
 
     public var fetchCallCount: Int {
@@ -728,6 +736,12 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return _fetchFreshCallCount
     }
 
+    public var fetchServerInfoCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _fetchServerInfoCallCount
+    }
+
     public var isAvailableCallCount: Int {
         lock.lock()
         defer { lock.unlock() }
@@ -738,6 +752,7 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         lock.lock()
         _fetchCallCount = 0
         _fetchFreshCallCount = 0
+        _fetchServerInfoCallCount = 0
         _isAvailableCallCount = 0
         lock.unlock()
     }
@@ -760,10 +775,18 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return result
     }
 
+    public func fetchServerInfo() -> SdkHierarchyServerInfo? {
+        lock.lock()
+        _fetchServerInfoCallCount += 1
+        let result = _serverInfo
+        lock.unlock()
+        return result
+    }
+
     public func isAvailable() -> Bool {
         lock.lock()
         _isAvailableCallCount += 1
-        let result = _isAvailable
+        let result = _serverInfo != nil || _isAvailable
         lock.unlock()
         return result
     }

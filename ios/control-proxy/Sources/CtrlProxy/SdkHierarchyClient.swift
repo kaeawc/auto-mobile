@@ -25,9 +25,15 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return fetchSync(path: "/hierarchy/fresh")
     }
 
+    /// Fetch lightweight SDK server metadata without walking or serializing the view tree.
+    public func fetchServerInfo() -> SdkHierarchyServerInfo? {
+        guard let data = requestSync(path: "/health", session: healthSession) else { return nil }
+        return try? JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
+    }
+
     /// Whether the SDK hierarchy server is reachable.
     public func isAvailable() -> Bool {
-        return requestSync(path: "/health", session: healthSession) != nil
+        return fetchServerInfo() != nil
     }
 
     // MARK: - Private

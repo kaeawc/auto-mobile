@@ -70,6 +70,10 @@ public final class ViewHierarchyTracker: @unchecked Sendable {
         return _latestHierarchy
     }
 
+    var bundleId: String? {
+        AutoMobileSDK.shared.bundleId
+    }
+
     /// Performs a synchronous main-thread walk and returns the result.
     /// Must NOT be called from the main thread (will deadlock).
     public func walkNow() -> SdkViewHierarchy {

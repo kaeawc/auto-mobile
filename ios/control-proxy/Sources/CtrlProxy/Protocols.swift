@@ -222,6 +222,8 @@ public protocol SdkHierarchyFetching {
     func fetchHierarchy() -> SdkViewHierarchy?
     /// Request a fresh hierarchy walk (slower).
     func fetchFreshHierarchy() -> SdkViewHierarchy?
+    /// Fetch lightweight server metadata, including the owning app bundle ID.
+    func fetchServerInfo() -> SdkHierarchyServerInfo?
     /// Whether the SDK hierarchy server is reachable.
     func isAvailable() -> Bool
 }

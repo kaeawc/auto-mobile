@@ -6,7 +6,7 @@ import Network
 /// Serves view hierarchy snapshots to control-proxy on demand.
 ///
 /// Endpoints:
-/// - `GET /health` → `{"status":"ok"}`
+/// - `GET /health` → `{"status":"ok","bundleId":"<sdk app bundle id>"}`
 /// - `GET /hierarchy` → latest cached hierarchy (fast, no main-thread work)
 /// - `GET /hierarchy/fresh` → synchronous main-thread walk (slower but guaranteed fresh)
 final class SdkHierarchyServer: @unchecked Sendable {
@@ -94,11 +94,20 @@ final class SdkHierarchyServer: @unchecked Sendable {
             } else if request.contains("GET /hierarchy") {
                 self.handleCachedHierarchy(connection)
             } else if request.contains("GET /health") {
-                self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+                self.handleHealth(connection)
             } else {
                 self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
             }
         }
+    }
+
+    private func handleHealth(_ connection: NWConnection) {
+        let payload = HealthPayload(status: "ok", bundleId: tracker?.bundleId)
+        guard let data = try? JSONEncoder().encode(payload) else {
+            sendResponse(connection, statusCode: 500, body: Data("{\"error\":\"encode_failed\"}".utf8))
+            return
+        }
+        sendResponse(connection, statusCode: 200, body: data)
     }
 
     private func handleCachedHierarchy(_ connection: NWConnection) {
@@ -152,5 +161,10 @@ final class SdkHierarchyServer: @unchecked Sendable {
             connection.cancel()
         })
     }
+}
+
+private struct HealthPayload: Encodable {
+    let status: String
+    let bundleId: String?
 }
 #endif

@@ -34,15 +34,24 @@ public enum HierarchyMerger {
         var matchedSdkKeyCounts: [LookupKey: Int] = [:]
         collectMatchedKeys(element: xcuitestRoot, lookup: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes, matched: &matchedSdkKeyCounts)
 
-        // Pass 2: inject SDK-only nodes as children of matched parents
+        // Pass 2: inject SDK-only nodes as children of directly matched parents.
+        var injectedParentKeys = Set<LookupKey>()
+        let rootSdkNode = findDirectMatch(
+            className: xcuitestRoot.className,
+            resourceId: xcuitestRoot.resourceId,
+            bounds: xcuitestRoot.bounds,
+            in: lookup,
+            boundsLookup: boundsLookup,
+            identifierLookup: identifierLookup
+        )
         let injectedRoot = injectSdkOnlyNodes(
             element: enrichedRoot,
-            sdkNode: sdkRoot,
+            sdkNode: rootSdkNode,
             lookup: lookup,
             boundsLookup: boundsLookup,
             identifierLookup: identifierLookup,
-            allSdkNodes: allSdkNodes,
-            matchedSdkKeyCounts: matchedSdkKeyCounts
+            matchedSdkKeyCounts: matchedSdkKeyCounts,
+            injectedParentKeys: &injectedParentKeys
         )
 
         return ViewHierarchy(
@@ -138,6 +147,52 @@ public enum HierarchyMerger {
         identifierLookup: [String: SdkViewNode],
         allSdkNodes: [SdkViewNode]
     ) -> SdkViewNode? {
+        if let direct = findDirectMatch(
+            className: className,
+            resourceId: resourceId,
+            bounds: bounds,
+            in: lookup,
+            boundsLookup: boundsLookup,
+            identifierLookup: identifierLookup
+        ) {
+            return direct
+        }
+        // 4. Smallest enclosing SDK node: find the SDK node with smallest area
+        //    that fully contains this element's bounds.
+        if let bounds = bounds {
+            let tol = boundsTolerance
+            var bestNode: SdkViewNode?
+            var bestArea = Int.max
+            for node in allSdkNodes {
+                let nb = node.bounds
+                // Check containment with tolerance
+                if nb.left - tol <= bounds.left &&
+                   nb.top - tol <= bounds.top &&
+                   nb.right + tol >= bounds.right &&
+                   nb.bottom + tol >= bounds.bottom {
+                    let area = nb.width * nb.height
+                    if area < bestArea {
+                        bestArea = area
+                        bestNode = node
+                    }
+                }
+            }
+            return bestNode
+        }
+        return nil
+    }
+
+    /// Find a direct SDK counterpart for an XCUITest element.
+    /// Direct matches are safe to use for SDK-only injection placement; containment
+    /// matches are enrichment-only because broad containers can match many descendants.
+    private static func findDirectMatch(
+        className: String?,
+        resourceId: String?,
+        bounds: ElementBounds?,
+        in lookup: [LookupKey: SdkViewNode],
+        boundsLookup: [BoundsKey: SdkViewNode],
+        identifierLookup: [String: SdkViewNode]
+    ) -> SdkViewNode? {
         if let bounds = bounds {
             // 1. Exact match: className + bounds
             if let className = className {
@@ -162,28 +217,6 @@ public enum HierarchyMerger {
             if let idMatch = identifierLookup[resourceId] {
                 return idMatch
             }
-        }
-        // 4. Smallest enclosing SDK node: find the SDK node with smallest area
-        //    that fully contains this element's bounds
-        if let bounds = bounds {
-            let tol = boundsTolerance
-            var bestNode: SdkViewNode?
-            var bestArea = Int.max
-            for node in allSdkNodes {
-                let nb = node.bounds
-                // Check containment with tolerance
-                if nb.left - tol <= bounds.left &&
-                   nb.top - tol <= bounds.top &&
-                   nb.right + tol >= bounds.right &&
-                   nb.bottom + tol >= bounds.bottom {
-                    let area = nb.width * nb.height
-                    if area < bestArea {
-                        bestArea = area
-                        bestNode = node
-                    }
-                }
-            }
-            return bestNode
         }
         return nil
     }
@@ -303,39 +336,56 @@ public enum HierarchyMerger {
         lookup: [LookupKey: SdkViewNode],
         boundsLookup: [BoundsKey: SdkViewNode],
         identifierLookup: [String: SdkViewNode],
-        allSdkNodes: [SdkViewNode],
-        matchedSdkKeyCounts: [LookupKey: Int]
+        matchedSdkKeyCounts: [LookupKey: Int],
+        injectedParentKeys: inout Set<LookupKey>
     ) -> UIElementInfo {
         // Find the SDK node that corresponds to this XCUITest element
-        let currentSdk = sdkNode ?? findMatch(
+        let currentSdk = sdkNode ?? findDirectMatch(
             className: element.className,
             resourceId: element.resourceId,
             bounds: element.bounds,
             in: lookup,
             boundsLookup: boundsLookup,
-            identifierLookup: identifierLookup,
-            allSdkNodes: allSdkNodes
+            identifierLookup: identifierLookup
         )
 
         // Recurse into existing children, pairing each with its SDK counterpart
-        let processedChildren: [UIElementInfo]? = element.node?.map { child in
-            let childSdk = findMatch(className: child.className, resourceId: child.resourceId, bounds: child.bounds, in: lookup, boundsLookup: boundsLookup, identifierLookup: identifierLookup, allSdkNodes: allSdkNodes)
-            return injectSdkOnlyNodes(
-                element: child,
-                sdkNode: childSdk,
-                lookup: lookup,
-                boundsLookup: boundsLookup,
-                identifierLookup: identifierLookup,
-                allSdkNodes: allSdkNodes,
-                matchedSdkKeyCounts: matchedSdkKeyCounts
-            )
+        let processedChildren: [UIElementInfo]?
+        if let children = element.node {
+            var processed: [UIElementInfo] = []
+            for child in children {
+                let childSdk = findDirectMatch(
+                    className: child.className,
+                    resourceId: child.resourceId,
+                    bounds: child.bounds,
+                    in: lookup,
+                    boundsLookup: boundsLookup,
+                    identifierLookup: identifierLookup
+                )
+                processed.append(
+                    injectSdkOnlyNodes(
+                        element: child,
+                        sdkNode: childSdk,
+                        lookup: lookup,
+                        boundsLookup: boundsLookup,
+                        identifierLookup: identifierLookup,
+                        matchedSdkKeyCounts: matchedSdkKeyCounts,
+                        injectedParentKeys: &injectedParentKeys
+                    )
+                )
+            }
+            processedChildren = processed
+        } else {
+            processedChildren = nil
         }
 
         // Find SDK children of this node that have no XCUITest counterpart.
         // Use a local count to handle identical siblings: if 3 SDK children share
         // a key but only 2 were matched, the 3rd should still be injected.
         var injected: [UIElementInfo] = []
-        if let sdkChildren = currentSdk?.children {
+        if let currentSdk,
+           injectedParentKeys.insert(exactKey(for: currentSdk)).inserted,
+           let sdkChildren = currentSdk.children {
             var localKeyCounts: [LookupKey: Int] = [:]
             for sdkChild in sdkChildren {
                 let childKey = exactKey(for: sdkChild)

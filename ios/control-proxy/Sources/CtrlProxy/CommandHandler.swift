@@ -204,8 +204,7 @@ public class CommandHandler: CommandHandling {
             throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")
         }
 
-        let sdkHierarchy = matchingSdkHierarchy(for: hierarchy)
-        let enriched = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+        let enriched = enrichWithMatchingSdkHierarchy(hierarchy)
 
         // Get accumulated timing for this operation
         let perfTimings = perfProvider.flush()
@@ -215,6 +214,10 @@ public class CommandHandler: CommandHandling {
             data: enriched,
             perfTiming: perfTimings?.first
         )
+    }
+
+    func enrichWithMatchingSdkHierarchy(_ hierarchy: ViewHierarchy) -> ViewHierarchy {
+        HierarchyMerger.merge(xcuitest: hierarchy, sdk: matchingSdkHierarchy(for: hierarchy))
     }
 
     private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
@@ -227,6 +230,7 @@ public class CommandHandler: CommandHandling {
                 return cached
             }
             guard sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+                sdkHierarchyCache?.clear()
                 return nil
             }
         } else if sdkHierarchyClient != nil {
@@ -237,8 +241,10 @@ public class CommandHandler: CommandHandling {
 
         guard let fresh = sdkHierarchyClient?.fetchFreshHierarchy(),
               sdkHierarchy(fresh, matches: foregroundBundleId) else {
+            sdkHierarchyCache?.clear()
             return nil
         }
+        sdkHierarchyCache?.update(fresh)
         return fresh
     }
 

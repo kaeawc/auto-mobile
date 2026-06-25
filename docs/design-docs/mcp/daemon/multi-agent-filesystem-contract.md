@@ -1,4 +1,13 @@
-# Multi-Agent Filesystem & Env Contract (Production)
+# Multi-Agent Filesystem Contract
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
+
+> **Current state:** The filesystem isolation described here is implemented and covered by tests — per-pid logs with multi-process-safe pruning, age-gated screenshot eviction, and temp-tree cache paths. The operational guidance (per-agent `TMPDIR` + shared-daemon discovery) is a deployment recommendation. See the [Status Glossary](../../status-glossary.md) for chip definitions and [Daemon Overview](index.md) for architecture context.
+
+## Overview
+
+This document covers how the filesystem and environment behave when **many agents
+run in parallel against one shared daemon** on a host.
 
 Deployment shape this document targets:
 

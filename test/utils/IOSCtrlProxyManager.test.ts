@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, test } from "bun:test";
-import { IOSCtrlProxyManager } from "../../src/utils/IOSCtrlProxyManager";
+import { IOSCtrlProxyManager, type HostPortAvailabilityChecker } from "../../src/utils/IOSCtrlProxyManager";
 import { BootedDevice } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeIOSCtrlProxyManager } from "../fakes/FakeIOSCtrlProxyManager";
@@ -7,6 +7,75 @@ import { FakeProcessExecutor } from "../fakes/FakeProcessExecutor";
 import { FakeChildProcess } from "../fakes/FakeChildProcess";
 import type { ExecResult } from "../../src/models";
 import { PortManager } from "../../src/utils/PortManager";
+
+class FakeHostPortAvailabilityChecker implements HostPortAvailabilityChecker {
+  public readonly calls: { host: string; port: number }[] = [];
+
+  public constructor(private readonly unavailablePorts: Set<number> = new Set()) {}
+
+  public async isAvailable(host: string, port: number): Promise<boolean> {
+    this.calls.push({ host, port });
+    return !this.unavailablePorts.has(port);
+  }
+}
+
+function createHostControlRunner(options: { runningCtrlProxyPids?: number[] } = {}) {
+  const starts: { deviceId: string; port: number; xctestrunPath?: string }[] = [];
+  const stops: { deviceId?: string; pid?: number }[] = [];
+  const iproxyStarts: { deviceId: string; localPort: number; devicePort?: number }[] = [];
+  const runningCtrlProxyPids = new Set(options.runningCtrlProxyPids ?? []);
+  const runningIproxyPids = new Set<number>();
+  let nextCtrlProxyPid = 1234;
+  let nextIproxyPid = 4321;
+
+  return {
+    starts,
+    stops,
+    iproxyStarts,
+    runner: {
+      shouldUseHostControl: () => true,
+      isRunningInDocker: () => true,
+      isAvailable: async () => true,
+      getHost: () => "host.test",
+      runIdeviceId: async () => ({ success: true, data: { stdout: "" } }),
+      runIdeviceInstaller: async () => ({ success: true, data: { stdout: "" } }),
+      runSimctl: async () => ({ success: true, data: { stdout: "" } }),
+      startIproxy: async (params: { deviceId: string; localPort: number; devicePort?: number }) => {
+        iproxyStarts.push(params);
+        const pid = nextIproxyPid++;
+        runningIproxyPids.add(pid);
+        return { success: true, data: { pid } };
+      },
+      stopIproxy: async (params: { pid?: number }) => {
+        if (params.pid) {
+          runningIproxyPids.delete(params.pid);
+        }
+        return { success: true };
+      },
+      getIproxyStatus: async (params: { pid?: number }) => ({
+        success: true,
+        data: { running: params.pid !== undefined && runningIproxyPids.has(params.pid), pid: params.pid },
+      }),
+      start: async (params: { deviceId: string; port: number; xctestrunPath?: string }) => {
+        starts.push(params);
+        const pid = nextCtrlProxyPid++;
+        runningCtrlProxyPids.add(pid);
+        return { success: true, data: { pid, message: "started" } };
+      },
+      stop: async (params: { deviceId?: string; pid?: number }) => {
+        stops.push(params);
+        if (params.pid) {
+          runningCtrlProxyPids.delete(params.pid);
+        }
+        return { success: true };
+      },
+      status: async (params: { pid?: number }) => ({
+        success: true,
+        data: { running: params.pid !== undefined && runningCtrlProxyPids.has(params.pid), pid: params.pid },
+      }),
+    },
+  };
+}
 
 describe("IOSCtrlProxyManager", function() {
   let testDevice: BootedDevice;
@@ -153,6 +222,55 @@ describe("IOSCtrlProxyManager", function() {
 
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(2);
     });
+
+    test("host-control iproxy skips ports that are busy on the host", async function() {
+      const { runner, iproxyStarts } = createHostControlRunner();
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+
+      await (manager as unknown as { startIproxyTunnel: () => Promise<void> }).startIproxyTunnel();
+
+      expect(checker.calls).toEqual([
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8767 },
+      ]);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(iproxyStarts[0]).toMatchObject({ localPort: 8767, devicePort: 8767 });
+    });
+
+    test("host-control iproxy keeps the service port when reallocation is disabled", async function() {
+      const { runner, iproxyStarts } = createHostControlRunner();
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        undefined,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+
+      await expect(
+        (manager as unknown as {
+          startIproxyTunnel: (options: { allowServicePortReallocation: boolean }) => Promise<void>;
+        }).startIproxyTunnel({ allowServicePortReallocation: false })
+      ).rejects.toThrow("Host control port 8765 is already in use on host.test");
+
+      expect(checker.calls).toEqual([{ host: "host.test", port: 8765 }]);
+      expect(manager.getServicePort()).toBe(8765);
+      expect(iproxyStarts).toEqual([]);
+    });
   });
 
   describe("restart prevention", function() {
@@ -216,6 +334,95 @@ describe("IOSCtrlProxyManager", function() {
       // iproxy should have been (re-)spawned even though CtrlProxy was alive
       expect(fakeExecutor.getSpawnedProcesses().length).toBe(1);
       expect(fakeExecutor.getSpawnedProcesses()[0].command).toBe("iproxy");
+    });
+
+    test("start() restarts live host-control device process before reallocating its busy service port", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => "/tmp/test.xctestrun",
+        getRunnerBinaryPath: async () => null,
+        getExpectedAppHash: () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const { runner, starts, stops, iproxyStarts } = createHostControlRunner({
+        runningCtrlProxyPids: [1234],
+      });
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 1234;
+
+      const originalFetch = globalThis.fetch;
+      globalThis.fetch = async () => new Response("ok");
+      try {
+        fakeTimer.enableAutoAdvance();
+        await manager.start();
+      } finally {
+        globalThis.fetch = originalFetch;
+      }
+
+      expect(stops).toEqual([{ deviceId: physicalDevice.deviceId, pid: 1234 }]);
+      expect(checker.calls).toEqual([
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8767 },
+      ]);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(iproxyStarts).toEqual([
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8767 },
+      ]);
+      expect(starts).toEqual([
+        { deviceId: physicalDevice.deviceId, port: 8767, xctestrunPath: "/tmp/test.xctestrun" },
+      ]);
+    });
+
+    test("scheduled host-control iproxy restart restarts live device process before reallocating busy service port", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => "/tmp/test.xctestrun",
+        getRunnerBinaryPath: async () => null,
+        getExpectedAppHash: () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const { runner, starts, stops, iproxyStarts } = createHostControlRunner({
+        runningCtrlProxyPids: [1234],
+      });
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+      (manager as unknown as { xcTestProcessId: number }).xcTestProcessId = 1234;
+
+      fakeTimer.enableAutoAdvance();
+      (manager as unknown as { scheduleIproxyRestart: () => void }).scheduleIproxyRestart();
+      for (let i = 0; i < 10; i++) {
+        await new Promise(resolve => setImmediate(resolve));
+      }
+
+      expect(stops).toEqual([{ deviceId: physicalDevice.deviceId, pid: 1234 }]);
+      expect(checker.calls).toEqual([
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8767 },
+      ]);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(iproxyStarts).toEqual([
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8767 },
+      ]);
+      expect(starts).toEqual([
+        { deviceId: physicalDevice.deviceId, port: 8767, xctestrunPath: "/tmp/test.xctestrun" },
+      ]);
     });
 
     test("startProcessMonitoring uses the injected timer so tests can control it", function() {
@@ -367,6 +574,34 @@ describe("IOSCtrlProxyManager", function() {
 
       // simctl spawn should never be invoked via processExecutor
       expect(fakeExecutor.wasCommandExecuted("simctl spawn")).toBe(false);
+    });
+
+    test("host-control simulator start skips ports that are busy on the host", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => "/tmp/test.xctestrun",
+        getRunnerBinaryPath: async () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const { runner, starts } = createHostControlRunner();
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+
+      await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+
+      expect(checker.calls).toEqual([
+        { host: "host.test", port: 8765 },
+        { host: "host.test", port: 8767 },
+      ]);
+      expect(manager.getServicePort()).toBe(8767);
+      expect(starts[0]).toMatchObject({ port: 8767, xctestrunPath: "/tmp/test.xctestrun" });
     });
   });
 });

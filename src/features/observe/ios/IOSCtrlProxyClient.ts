@@ -25,7 +25,7 @@ import {
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import { Timer, defaultTimer } from "../../../utils/SystemTimer";
-import { PortManager } from "../../../utils/PortManager";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "../../../utils/PortManager";
 import { requireBootedDevice } from "../../../utils/requireBootedDevice";
 import { shouldUseHostControl, getHostControlHost } from "../../../utils/hostControlClient";
 import { isRunningInDocker } from "../../../utils/dockerEnv";
@@ -299,7 +299,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   // Platform-specific dependencies
   private readonly device: BootedDevice;
-  private readonly port: number;
+  private port: number;
 
   // Delegate instances (lazy initialized)
   private _gestures: CtrlProxyGestures | null = null;
@@ -353,13 +353,20 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   ): IOSCtrlProxyClient {
     requireBootedDevice(device, "IOSCtrlProxyClient.getInstance");
     const resolvedPort = port ?? (
-      device.platform === "ios" ? PortManager.allocate(device.deviceId) : IOSCtrlProxyClient.DEFAULT_PORT
+      device.platform === "ios"
+        ? PortManager.allocate(device.deviceId, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS })
+        : IOSCtrlProxyClient.DEFAULT_PORT
     );
-    const key = `${device.deviceId}:${resolvedPort}`;
-    if (!IOSCtrlProxyClient.instances.has(key)) {
-      IOSCtrlProxyClient.instances.set(key, new IOSCtrlProxyClient(device, resolvedPort));
+    const key = device.deviceId;
+    const existing = IOSCtrlProxyClient.instances.get(key);
+    if (existing) {
+      existing.updatePort(resolvedPort);
+      return existing;
     }
-    return IOSCtrlProxyClient.instances.get(key)!;
+
+    const client = new IOSCtrlProxyClient(device, resolvedPort);
+    IOSCtrlProxyClient.instances.set(key, client);
+    return client;
   }
 
   /**
@@ -443,6 +450,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       const alreadyRunning = await manager.isRunning();
       if (alreadyRunning) {
         logger.info(`[IOSCtrlProxyClient] Service is running but WebSocket failed — transient issue, retrying connection`);
+        this.syncPortFromManager(manager);
         this.connectionAttempts = 0;
         return await super.ensureConnected(perf);
       }
@@ -470,6 +478,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         return false;
       }
 
+      this.syncPortFromManager(manager);
+
       logger.info(`[IOSCtrlProxyClient] Auto-setup succeeded, retrying WebSocket connection`);
       // Reset connection attempts to allow fresh connection attempts
       this.connectionAttempts = 0;
@@ -479,6 +489,26 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       return false;
     } finally {
       this.isAttemptingAutoSetup = false;
+    }
+  }
+
+  private syncPortFromManager(manager: CtrlProxyIosManager): void {
+    this.updatePort(manager.getServicePort());
+  }
+
+  private updatePort(port: number): void {
+    if (port !== this.port) {
+      logger.info(`[IOSCtrlProxyClient] CtrlProxy service port changed from ${this.port} to ${port}`);
+      this.port = port;
+      if (this.ws) {
+        logger.info("[IOSCtrlProxyClient] Closing stale WebSocket after CtrlProxy service port change");
+        const staleSocket = this.ws;
+        this.ws = null;
+        this.stopHealthCheck();
+        this.requestManager.cancelAll(new Error("CtrlProxy service port changed"));
+        staleSocket.removeAllListeners();
+        staleSocket.close();
+      }
     }
   }
 

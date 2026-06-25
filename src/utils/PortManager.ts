@@ -1,5 +1,74 @@
 import { logger } from "./logger";
 
+export const IOS_SDK_HIERARCHY_SERVER_PORT = 8766;
+export const IOS_CTRL_PROXY_RESERVED_PORTS = new Set<number>([
+  // The in-app AutoMobile iOS SDK hierarchy server is fixed on 8766.
+  IOS_SDK_HIERARCHY_SERVER_PORT,
+]);
+
+export interface PortAvailabilityChecker {
+  isPortAvailable(port: number): boolean;
+}
+
+export interface PortAllocationOptions {
+  reservedPorts?: Iterable<number>;
+  availabilityChecker?: PortAvailabilityChecker;
+}
+
+type BunTcpServer = {
+  stop(force?: boolean): void;
+};
+
+type BunRuntime = {
+  listen(options: {
+    hostname: string;
+    port: number;
+    socket: {
+      open(socket: unknown): void;
+      data(socket: unknown, data: unknown): void;
+      drain(socket: unknown): void;
+      close(socket: unknown): void;
+      error(socket: unknown, error: Error): void;
+    };
+  }): BunTcpServer;
+};
+
+const noopSocketHandler = {
+  open(): void {},
+  data(): void {},
+  drain(): void {},
+  close(): void {},
+  error(): void {},
+};
+
+class BunPortAvailabilityChecker implements PortAvailabilityChecker {
+  public isPortAvailable(port: number): boolean {
+    const bun = (globalThis as { Bun?: BunRuntime }).Bun;
+    if (!bun) {
+      return true;
+    }
+
+    const servers: BunTcpServer[] = [];
+    try {
+      for (const hostname of ["127.0.0.1", "::1"]) {
+        servers.push(bun.listen({
+          hostname,
+          port,
+          socket: noopSocketHandler,
+        }));
+      }
+      return true;
+    } catch (error) {
+      logger.debug(`[PortManager] Port ${port} is not available: ${error}`);
+      return false;
+    } finally {
+      for (const server of servers) {
+        server.stop(true);
+      }
+    }
+  }
+}
+
 /**
  * Manages port allocation for multi-device support.
  * Each device gets a unique local port for WebSocket forwarding to avoid conflicts
@@ -11,6 +80,7 @@ export class PortManager {
   private static readonly DEFAULT_MAX_DEVICES = 100;
   private static readonly basePort = PortManager.resolveBasePort();
   private static readonly maxDevices = PortManager.resolveMaxDevices();
+  private static portAvailabilityChecker: PortAvailabilityChecker = new BunPortAvailabilityChecker();
 
   /**
    * Allocate a unique local port for a device.
@@ -19,7 +89,7 @@ export class PortManager {
    * @returns The allocated local port number
    * @throws Error if no ports are available
    */
-  public static allocate(deviceId: string): number {
+  public static allocate(deviceId: string, options: PortAllocationOptions = {}): number {
     // Return existing allocation
     if (this.allocatedPorts.has(deviceId)) {
       return this.allocatedPorts.get(deviceId)!;
@@ -27,18 +97,24 @@ export class PortManager {
 
     // Find next available port
     const usedPorts = new Set(this.allocatedPorts.values());
+    const reservedPorts = new Set(options.reservedPorts ?? []);
+    const availabilityChecker = options.availabilityChecker ?? this.portAvailabilityChecker;
     for (let i = 0; i < this.maxDevices; i++) {
       const port = this.basePort + i;
-      if (!usedPorts.has(port)) {
-        this.allocatedPorts.set(deviceId, port);
-        logger.info(`[PortManager] Allocated port ${port} for device ${deviceId}`);
-        return port;
+      if (usedPorts.has(port) || reservedPorts.has(port)) {
+        continue;
       }
+      if (!availabilityChecker.isPortAvailable(port)) {
+        continue;
+      }
+      this.allocatedPorts.set(deviceId, port);
+      logger.info(`[PortManager] Allocated port ${port} for device ${deviceId}`);
+      return port;
     }
 
     throw new Error(
       `No available ports for device ${deviceId}. ` +
-      `All ${this.maxDevices} ports (${this.basePort}-${this.basePort + this.maxDevices - 1}) are in use.`
+      `All ${this.maxDevices} ports (${this.basePort}-${this.basePort + this.maxDevices - 1}) are in use or reserved.`
     );
   }
 
@@ -100,10 +176,25 @@ export class PortManager {
   }
 
   /**
+   * Override the host-port availability checker.
+   * Should only be used in testing.
+   */
+  public static setPortAvailabilityCheckerForTesting(checker: PortAvailabilityChecker | null): void {
+    this.portAvailabilityChecker = checker ?? new BunPortAvailabilityChecker();
+  }
+
+  /**
    * The base port number (for reference/testing)
    */
   public static getBasePort(): number {
     return this.basePort;
+  }
+
+  /**
+   * The configured port range size (for testing and bounded retry loops).
+   */
+  public static getMaxDevices(): number {
+    return this.maxDevices;
   }
 
   /**

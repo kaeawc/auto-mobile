@@ -200,6 +200,59 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("suppresses observation stream push for explicit hierarchy sync request", async function() {
+      const mockHierarchyData: CtrlProxyHierarchy = {
+        updatedAt: 1750934584218,
+        packageName: "com.example.ios",
+        hierarchy: {
+          text: "Initial frame",
+        },
+      };
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const suppressionIds = (): string[] =>
+        Array.from((testClient as unknown as {
+          hierarchyObservationStreamSuppressions: Map<string, unknown>;
+        }).hierarchyObservationStreamSuppressions.keys());
+
+      try {
+        const resultPromise = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_hierarchy_if_stale");
+        expect(suppressionIds()).toEqual([sentMessage.requestId]);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          requestId: sentMessage.requestId,
+          timestamp: Date.now(),
+          data: mockHierarchyData,
+        }));
+
+        const result = await resultPromise;
+
+        expect(result?.hierarchy.updatedAt).toBe(1750934584218);
+        expect(suppressionIds()).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("should return null hierarchy when not connected", async function() {
       const testTimer = fakeTimer;
 

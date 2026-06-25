@@ -54,14 +54,14 @@ export interface ObservationStreamIosClient {
     skipWaitForFresh?: boolean,
     minTimestamp?: number
   ): Promise<CtrlProxyHierarchyResponse>;
-  requestHierarchySync(
+  requestHierarchySyncWithoutObservationStreamPush(
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
     timeoutMs?: number
   ): Promise<{ hierarchy: unknown } | null>;
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult;
-  requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyScreenshotResult>;
+  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<CtrlProxyScreenshotResult>;
 }
 
 export interface ObservationInitialFrameDependencies {
@@ -198,7 +198,7 @@ async function pushIosInitialObservationFrame(
   const viewHierarchy = client.convertToViewHierarchyResult(hierarchy);
   dependencies.streamServer.pushHierarchyUpdate(device.deviceId, viewHierarchy);
 
-  const screenshot = await client.requestScreenshot(INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS);
+  const screenshot = await client.requestScreenshotWithoutObservationStreamPush(INITIAL_FRAME_SCREENSHOT_TIMEOUT_MS);
   if (screenshot.success && screenshot.data) {
     const dimensions = getIosScreenshotDimensions(viewHierarchy);
     dependencies.streamServer.pushScreenshotUpdate(
@@ -223,7 +223,7 @@ async function getIosInitialHierarchy(
     return hierarchyResponse.hierarchy;
   }
 
-  const syncHierarchy = await client.requestHierarchySync(
+  const syncHierarchy = await client.requestHierarchySyncWithoutObservationStreamPush(
     undefined,
     false,
     undefined,

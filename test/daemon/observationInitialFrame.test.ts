@@ -103,6 +103,8 @@ class FakeAndroidInitialFrameClient implements ObservationStreamAndroidClient {
 
 class FakeIosInitialFrameClient implements ObservationStreamIosClient {
   readonly syncHierarchyCalls: Array<{ timeoutMs?: number }> = [];
+  readonly suppressedSyncHierarchyCalls: Array<{ timeoutMs?: number }> = [];
+  readonly suppressedScreenshotCalls: Array<{ timeoutMs?: number }> = [];
 
   constructor(
     private readonly connected: boolean,
@@ -134,6 +136,16 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
     return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
   }
 
+  async requestHierarchySyncWithoutObservationStreamPush(
+    _perf?: unknown,
+    _disableAllFiltering?: boolean,
+    _signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<{ hierarchy: CtrlProxyHierarchy } | null> {
+    this.suppressedSyncHierarchyCalls.push({ timeoutMs });
+    return this.syncHierarchy ? { hierarchy: this.syncHierarchy } : null;
+  }
+
   convertToViewHierarchyResult(hierarchy: unknown): ViewHierarchyResult {
     const typedHierarchy = hierarchy as CtrlProxyHierarchy;
     return {
@@ -147,6 +159,11 @@ class FakeIosInitialFrameClient implements ObservationStreamIosClient {
   }
 
   async requestScreenshot(): Promise<CtrlProxyScreenshotResult> {
+    return this.screenshot;
+  }
+
+  async requestScreenshotWithoutObservationStreamPush(timeoutMs?: number): Promise<CtrlProxyScreenshotResult> {
+    this.suppressedScreenshotCalls.push({ timeoutMs });
     return this.screenshot;
   }
 }
@@ -307,6 +324,9 @@ describe("pushInitialObservationFramesForSubscriber", () => {
         screenHeight: 2532,
       },
     ]);
+    expect(iosClient.syncHierarchyCalls).toHaveLength(0);
+    expect(iosClient.suppressedSyncHierarchyCalls).toHaveLength(0);
+    expect(iosClient.suppressedScreenshotCalls).toEqual([{ timeoutMs: 3000 }]);
   });
 
   it("captures iOS hierarchy synchronously when the initial cache is empty", async () => {
@@ -332,7 +352,8 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       iosClientFactory: () => iosClient,
     });
 
-    expect(iosClient.syncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
+    expect(iosClient.syncHierarchyCalls).toHaveLength(0);
+    expect(iosClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(987);
     expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({ $: { text: "Cold start" } });
     expect(streamServer.screenshotUpdates[0]).toMatchObject({
@@ -374,7 +395,8 @@ describe("pushInitialObservationFramesForSubscriber", () => {
       iosClientFactory: () => iosClient,
     });
 
-    expect(iosClient.syncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
+    expect(iosClient.syncHierarchyCalls).toHaveLength(0);
+    expect(iosClient.suppressedSyncHierarchyCalls).toEqual([{ timeoutMs: 3000 }]);
     expect(streamServer.hierarchyUpdates[0].hierarchy.updatedAt).toBe(200);
     expect(streamServer.hierarchyUpdates[0].hierarchy.hierarchy.node).toEqual({ $: { text: "Fresh sync" } });
   });

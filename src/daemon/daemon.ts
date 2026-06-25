@@ -673,13 +673,14 @@ export class Daemon {
     return {
       ensureConnected: () => client.ensureConnected(),
       getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
-      requestHierarchySync: async (...args) => {
-        const result = await client.requestHierarchySync(...args);
+      requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
+        const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);
         return result ? { hierarchy: result.hierarchy } : null;
       },
       convertToViewHierarchyResult: hierarchy =>
         client.convertToViewHierarchyResult(hierarchy as never),
-      requestScreenshot: (...args) => client.requestScreenshot(...args),
+      requestScreenshotWithoutObservationStreamPush: (...args) =>
+        client.requestScreenshotWithoutObservationStreamPush(...args),
     };
   }
 

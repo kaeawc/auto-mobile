@@ -153,13 +153,17 @@ export class CtrlProxyHierarchy {
     perf?: PerformanceTracker,
     disableAllFiltering?: boolean,
     signal?: AbortSignal,
-    timeoutMs: number = 5000
+    timeoutMs: number = 5000,
+    suppressObservationStreamPush: boolean = false
   ): Promise<{ hierarchy: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming } | null> {
     if (!await this.context.ensureConnected(perf)) {
       return null;
     }
 
     const requestId = this.context.requestManager.generateId("hierarchy");
+    if (suppressObservationStreamPush) {
+      this.context.suppressHierarchyObservationStreamPush?.(requestId, timeoutMs);
+    }
     const promise = this.context.requestManager.register<{ hierarchy?: XCTestHierarchy; perfTiming?: CtrlProxyPerfTiming }>(
       requestId,
       "hierarchy",

@@ -1,5 +1,280 @@
 [
   {
+    "name": "accessibilityFocus",
+    "description": "Set or clear the Android TalkBack accessibility-focus cursor on a target element (Android only). Provide one selector: resourceId, text, or contentDesc. action defaults to 'set'; pass 'clear' to clear the cursor.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Set (default) or clear the accessibility (TalkBack) focus cursor",
+          "type": "string",
+          "enum": [
+            "set",
+            "clear"
+          ]
+        },
+        "resourceId": {
+          "description": "Resource ID of the target element, e.g. com.example:id/title",
+          "type": "string"
+        },
+        "text": {
+          "description": "Text of the target element (resolved to a resource-id via the element finder)",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Content description of the target element (resolved to a resource-id)",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session UUID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "focusedElement": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerX": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerY": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "checkable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "clickable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focusable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "accessibility-focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "scrollable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "selected": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bounds"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "biometricAuth",
     "description": "Simulate biometric authentication on Android emulators (fingerprint) and the iOS Simulator (Touch ID / Face ID via BiometricKit), or inject a deterministic result via the AutoMobile SDK on any Android device. Supports match/fail on both platforms; cancel/error require the AutoMobileBiometrics SDK (Android only). Physical iOS devices are not supported (no public biometric-injection API).",
     "inputSchema": {

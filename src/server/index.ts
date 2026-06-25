@@ -39,6 +39,7 @@ import { registerDatabaseTools } from "./databaseTools";
 import { registerStorageTools } from "./storageTools";
 import { registerFormTools } from "./formTools";
 import { registerAccessibilityTools } from "./accessibilityTools";
+import { registerAccessibilityFocusTools } from "./accessibilityFocusTools";
 import { registerNetworkTools } from "./networkTools";
 import { getMcpServerVersion } from "../utils/mcpVersion";
 
@@ -184,6 +185,7 @@ export const createMcpServer = (options: McpServerOptions = {}): McpServer => {
   registerStorageTools();
   registerFormTools();
   registerAccessibilityTools();
+  registerAccessibilityFocusTools();
   registerNetworkTools();
   registerDebugTools();
   startupBenchmark.endPhase("toolRegistration");

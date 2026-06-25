@@ -288,12 +288,20 @@ export async function sendCommand<T>(
       totalTimeMs: timeout,
       error: `${label} timed out after ${timeout}ms`,
     } as T);
+  const responseErrorFactory = (error: string, totalTimeMs: number): T => options.unsupportedCommandError
+    ? options.unsupportedCommandError(options.messageType, error)
+    : ({
+      success: false,
+      totalTimeMs,
+      error,
+    } as T);
 
   const promise = context.requestManager.register<T>(
     requestId,
     options.responseType,
     options.timeoutMs,
     timeoutFactory,
+    responseErrorFactory,
   );
 
   const msg = createMessage(options.messageType, requestId, options.params);

@@ -1142,11 +1142,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
         default:
           // Handle error responses
           if (message.error) {
-            result = {
-              success: false,
-              totalTimeMs: message.totalTimeMs ?? 0,
-              error: this.rewriteUnknownCommandError(message.error)
-            };
+            this.requestManager.resolveError(
+              requestId,
+              this.rewriteUnknownCommandError(message.error),
+              message.totalTimeMs ?? 0
+            );
+            return;
           } else {
             result = message;
           }

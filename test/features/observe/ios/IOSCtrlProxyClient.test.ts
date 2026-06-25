@@ -715,6 +715,86 @@ describe("IOSCtrlProxyClient", function() {
         await testClient.close();
       }
     });
+
+    test("preserves required fields for old-runner unknown command errors", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const keyboardPromise = testClient.requestKeyboard("detect", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        const keyboardMessage = JSON.parse(socket!.sentMessages[0]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: keyboardMessage.requestId,
+          error: "Unknown command type: request_keyboard",
+        }));
+        const keyboard = await keyboardPromise;
+        expect(keyboard.success).toBe(false);
+        expect(keyboard.open).toBe(false);
+        expect(keyboard.totalTimeMs).toBe(0);
+        expect(keyboard.error).toContain("runner is likely older");
+
+        const imeActionPromise = testClient.requestImeAction("done", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        const imeActionMessage = JSON.parse(socket!.sentMessages[1]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: imeActionMessage.requestId,
+          error: "Unknown command type: request_ime_action",
+        }));
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("runner is likely older");
+
+        const rotatePromise = testClient.requestRotate("landscape", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        const rotateMessage = JSON.parse(socket!.sentMessages[2]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: rotateMessage.requestId,
+          error: "Unknown command type: request_rotate",
+        }));
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toContain("runner is likely older");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 4);
+        const clipboardMessage = JSON.parse(socket!.sentMessages[3]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: clipboardMessage.requestId,
+          error: "Unknown command type: request_clipboard",
+        }));
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("runner is likely older");
+      } finally {
+        await testClient.close();
+      }
+    });
   });
 
   describe("requestRecentApps", function() {

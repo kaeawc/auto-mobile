@@ -4,6 +4,7 @@ import type { RestoreSnapshotArgs, RestoreSnapshotResult } from "./RestoreSnapsh
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS, terminateAppIfRunning } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import { restoreIosSettings } from "../../utils/ios-cmdline-tools/iosSettings";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
@@ -54,6 +55,11 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
     }
 
     await this.validateSnapshotCompatibility(manifest);
+
+    if (manifest.includeSettings && manifest.iosSettings) {
+      await restoreIosSettings(this.simctl, this.device.deviceId, manifest.iosSettings);
+    }
+
     await this.restoreAppData(snapshotName, manifest);
 
     logger.info(`[iOS] Snapshot '${snapshotName}' restored successfully`);

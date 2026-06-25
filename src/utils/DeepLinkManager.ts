@@ -7,12 +7,40 @@ import {
   DeepLinkInfo,
   IntentChooserResult,
   ViewHierarchyResult,
-  BootedDevice
+  BootedDevice,
+  IosInfoPlist,
+  ExecResult
 } from "../models";
 import type { ElementParser } from "./interfaces/ElementParser";
 import type { ElementGeometry } from "./interfaces/ElementGeometry";
 import { DefaultElementParser } from "../features/utility/ElementParser";
 import { DefaultElementGeometry } from "../features/utility/ElementGeometry";
+import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { quoteSimctlArg } from "./ios-cmdline-tools/iosAppContainer";
+import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
+
+/**
+ * Runs a host shell command (NOT `xcrun simctl`). Used for `plutil`/`codesign`,
+ * which read the `.app` bundle's metadata directly on the host filesystem.
+ * Modeled on {@link DeviceAppInspector}'s injected `exec` so the iOS path is
+ * fully fakeable in unit tests.
+ */
+export type HostExec = (command: string) => Promise<ExecResult>;
+
+const defaultHostExec: HostExec = async command => {
+  const { exec } = await import("child_process");
+  const { promisify } = await import("util");
+  const result = await promisify(exec)(command, { maxBuffer: 16 * 1024 * 1024 });
+  const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
+  const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
+  return {
+    stdout,
+    stderr,
+    toString() { return stdout; },
+    trim() { return stdout.trim(); },
+    includes(searchString: string) { return stdout.includes(searchString); },
+  };
+};
 
 /**
  * Interface for deep link management and intent chooser handling
@@ -54,12 +82,20 @@ export interface DeepLinkManager {
 }
 
 export class DeepLinkManager implements DeepLinkManager {
+  private device: BootedDevice | null;
   private adbUtils: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private parser: ElementParser;
   private geometry: ElementGeometry;
+  private simctl: SimCtlClient;
+  private hostExec: HostExec;
 
-  constructor(device: BootedDevice | null = null, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory) {
+  constructor(
+    device: BootedDevice | null = null,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    simctl: SimCtlClient | null = null,
+    hostExec: HostExec | null = null
+  ) {
     // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
@@ -73,6 +109,9 @@ export class DeepLinkManager implements DeepLinkManager {
       this.adbFactory = defaultAdbClientFactory;
       this.adbUtils = this.adbFactory.create(device);
     }
+    this.device = device;
+    this.simctl = simctl ?? new SimCtlClient(device);
+    this.hostExec = hostExec ?? defaultHostExec;
     this.parser = new DefaultElementParser();
     this.geometry = new DefaultElementGeometry();
   }
@@ -82,6 +121,7 @@ export class DeepLinkManager implements DeepLinkManager {
      * @param deviceId - Device identifier
      */
   setDeviceId(device: BootedDevice): void {
+    this.device = device;
     this.adbUtils = this.adbFactory.create(device);
   }
 
@@ -91,6 +131,21 @@ export class DeepLinkManager implements DeepLinkManager {
      * @returns Promise with deep link information
      */
   async getDeepLinks(appId: string): Promise<DeepLinkResult> {
+    switch (this.device?.platform) {
+      case "ios":
+        return this.getDeepLinksIos(appId);
+      case "android":
+      default:
+        return this.getDeepLinksAndroid(appId);
+    }
+  }
+
+  /**
+     * Android deep-link discovery via `dumpsys package`.
+     * @param appId - The application package ID
+     * @returns Promise with deep link information
+     */
+  private async getDeepLinksAndroid(appId: string): Promise<DeepLinkResult> {
     try {
       logger.info(`[DeepLinkManager] Querying deep links for app: ${appId}`);
 
@@ -138,6 +193,147 @@ export class DeepLinkManager implements DeepLinkManager {
         error: error instanceof Error ? error.message : String(error)
       };
     }
+  }
+
+  /**
+   * iOS deep-link discovery from static bundle metadata. Custom URL schemes come
+   * from the installed `.app`'s `Info.plist` (`CFBundleURLTypes`); universal-link
+   * hosts from the code-signing entitlements (`com.apple.developer.associated-domains`).
+   *
+   * Simulators only — the `.app` bundle is a host filesystem path
+   * (`get_app_container ... app`), so `plutil`/`codesign` read it directly on the
+   * host. Physical devices return an explicit "not yet implemented" failure.
+   * @param bundleId - The iOS bundle identifier
+   * @returns Promise with deep link information
+   */
+  private async getDeepLinksIos(bundleId: string): Promise<DeepLinkResult> {
+    try {
+      const udid = this.device!.deviceId;
+      logger.info(`[DeepLinkManager] Querying iOS deep links for bundle: ${bundleId}`);
+
+      if (!isIosSimulatorUdid(udid)) {
+        return this.emptyIosResult(
+          bundleId,
+          `Physical-device deep-link discovery for ${bundleId} is not yet implemented`
+        );
+      }
+
+      // 1. Resolve the installed .app bundle path (HOST path on the simulator).
+      //    A missing app makes simctl exit non-zero ("No such file or directory");
+      //    treat that as a clean not-installed result, not a raw thrown error.
+      let appPath = "";
+      try {
+        const container = await this.simctl.executeCommand(
+          `get_app_container ${quoteSimctlArg(udid)} ${quoteSimctlArg(bundleId)} app`
+        );
+        appPath = container.stdout.trim();
+      } catch (error) {
+        logger.debug(`[DeepLinkManager] get_app_container failed for ${bundleId}: ${error}`);
+      }
+      if (!appPath) {
+        return this.emptyIosResult(bundleId, `App ${bundleId} is not installed on ${udid}`);
+      }
+
+      // 2. Info.plist -> JSON via host plutil.
+      const plistJson = await this.hostExec(
+        `plutil -convert json -o - -- ${quoteSimctlArg(`${appPath}/Info.plist`)}`
+      );
+      const info = JSON.parse(plistJson.stdout) as IosInfoPlist;
+
+      const schemes = this.parseCFBundleURLSchemes(info);
+      const hosts = await this.parseAssociatedDomains(appPath);
+      const supportedMimeTypes = this.parseDocumentTypes(info);
+
+      return {
+        success: true,
+        appId: bundleId,
+        deepLinks: {
+          schemes,
+          hosts,
+          supportedMimeTypes,
+          intentFilters: this.synthesizeIosIntentFilters(schemes, hosts)
+        },
+        rawOutput: plistJson.stdout
+      };
+    } catch (error) {
+      logger.error(`[DeepLinkManager] Failed to get iOS deep links for ${bundleId}: ${error}`);
+      return this.emptyIosResult(bundleId, error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private emptyIosResult(appId: string, error: string): DeepLinkResult {
+    return {
+      success: false,
+      appId,
+      deepLinks: { schemes: [], hosts: [], intentFilters: [], supportedMimeTypes: [] },
+      error
+    };
+  }
+
+  private parseCFBundleURLSchemes(info: IosInfoPlist): string[] {
+    const out = new Set<string>();
+    for (const urlType of info.CFBundleURLTypes ?? []) {
+      for (const scheme of urlType.CFBundleURLSchemes ?? []) {
+        if (scheme) {
+          out.add(scheme);
+        }
+      }
+    }
+    return Array.from(out);
+  }
+
+  private parseDocumentTypes(info: IosInfoPlist): string[] {
+    const out = new Set<string>();
+    for (const docType of info.CFBundleDocumentTypes ?? []) {
+      for (const contentType of docType.LSItemContentTypes ?? []) {
+        if (contentType) {
+          out.add(contentType);
+        }
+      }
+    }
+    return Array.from(out);
+  }
+
+  /**
+   * Universal-link hosts from the bundle's entitlements (host `codesign` +
+   * `plutil`). Unsigned bundles or bundles without associated domains yield `[]`,
+   * not an error.
+   */
+  private async parseAssociatedDomains(appPath: string): Promise<string[]> {
+    try {
+      const ents = await this.hostExec(
+        `codesign -d --entitlements :- ${quoteSimctlArg(appPath)} | plutil -convert json -o - -- -`
+      );
+      const parsed = JSON.parse(ents.stdout) as Record<string, unknown>;
+      const domains = parsed["com.apple.developer.associated-domains"];
+      if (!Array.isArray(domains)) {
+        return [];
+      }
+      return domains
+        .filter((d): d is string => typeof d === "string" && d.startsWith("applinks:"))
+        .map(d => d.slice("applinks:".length));
+    } catch {
+      return [];
+    }
+  }
+
+  /**
+   * Synthesize cross-platform `IntentFilter` entries from iOS schemes/hosts so the
+   * `DeepLinkResult` shape stays populated for platform-agnostic consumers.
+   */
+  private synthesizeIosIntentFilters(schemes: string[], hosts: string[]): IntentFilter[] {
+    const data = [
+      ...schemes.map(scheme => ({ scheme })),
+      ...hosts.map(host => ({ host }))
+    ];
+    if (data.length === 0) {
+      return [];
+    }
+    return [{
+      action: "android.intent.action.VIEW",
+      category: [],
+      data
+    }];
   }
 
   /**

@@ -69,7 +69,7 @@ describe("CaptureSnapshotIos", () => {
     const metadataJson = await fs.readFile(metadataPath, "utf-8");
     const parsed = JSON.parse(metadataJson) as typeof result.manifest;
 
-    expect(result.manifest.includeSettings).toBe(false);
+    expect(result.manifest.includeSettings).toBe(true);
     expect(result.manifest.deviceType).toBe("com.apple.CoreSimulator.SimDeviceType.iPhone-15");
     expect(result.manifest.osVersion).toBe("17.2");
     expect(parsed.snapshotName).toBe(snapshotName);
@@ -116,5 +116,49 @@ describe("CaptureSnapshotIos", () => {
 
     expect(result.manifest.appDataBackup?.backupMethod).toBe("none");
     expect(result.manifest.appDataBackup?.totalPackages).toBe(0);
+  });
+
+  it("captures iOS settings (locale + UI) into the manifest when includeSettings", async () => {
+    simctl.setCommandResult(
+      `spawn "${device.deviceId}" defaults read ".GlobalPreferences" "AppleLocale"`,
+      "nl_BE\n"
+    );
+    simctl.setCommandResult(`ui "${device.deviceId}" appearance`, "dark\n");
+    simctl.setCommandResult(`ui "${device.deviceId}" content_size`, "large\n");
+
+    const captureSnapshot = new CaptureSnapshotIos(device, simctl as any, store);
+    const result = await captureSnapshot.execute({
+      snapshotName: "with-settings",
+      includeAppData: false,
+      includeSettings: true,
+    });
+
+    expect(result.manifest.includeSettings).toBe(true);
+    expect(result.manifest.iosSettings?.values[".GlobalPreferences/AppleLocale"]).toBe("nl_BE");
+    expect(result.manifest.iosSettings?.ui).toEqual({ appearance: "dark", contentSize: "large" });
+
+    // Manifest survives the round-trip to disk.
+    const pathOptions = { platform: "ios", deviceId: device.deviceId } as const;
+    const metadataJson = await fs.readFile(store.getMetadataPath("with-settings", pathOptions), "utf-8");
+    const parsed = JSON.parse(metadataJson) as typeof result.manifest;
+    expect(parsed.iosSettings?.values[".GlobalPreferences/AppleLocale"]).toBe("nl_BE");
+  });
+
+  it("omits iosSettings and issues no settings commands when includeSettings is false", async () => {
+    const captureSnapshot = new CaptureSnapshotIos(device, simctl as any, store);
+    const result = await captureSnapshot.execute({
+      snapshotName: "no-settings",
+      includeAppData: false,
+      includeSettings: false,
+    });
+
+    expect(result.manifest.includeSettings).toBe(false);
+    expect(result.manifest.iosSettings).toBeUndefined();
+
+    const settingsCommands = simctl
+      .getMethodCalls("executeCommand")
+      .map(call => String(call.command))
+      .filter(cmd => cmd.includes("defaults") || cmd.startsWith("ui "));
+    expect(settingsCommands).toEqual([]);
   });
 });

@@ -1030,6 +1030,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
+    // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
+    // cancels it; without restarting here, a transient drop on a STATIC screen
+    // leaves the live view frozen forever (no UI change to retrigger a capture).
+    // Subscriber-gated and idempotent, so this is a no-op when nobody is
+    // watching and safe to call on every reconnect.
+    this.startScreenshotBackoff();
   }
 
   private syncNetworkStateToDevice(): void {

@@ -588,6 +588,11 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
+
+    // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
+    // cancels it; without restarting here, a transient drop on a STATIC screen
+    // leaves the live view frozen forever. Subscriber-gated and idempotent.
+    this.startScreenshotBackoff();
   }
 
   protected onConnectionClosed(): void {

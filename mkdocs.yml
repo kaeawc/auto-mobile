@@ -108,6 +108,7 @@ nav:
           - 'Daemon':
              - 'Overview': design-docs/mcp/daemon/index.md
              - 'Critical Section': design-docs/mcp/daemon/critical-section.md
+             - 'Multi-Agent Filesystem Contract': design-docs/mcp/daemon/multi-agent-filesystem-contract.md
              - 'Unix Socket API': design-docs/mcp/daemon/unix-socket-api.md
           - 'Multi-device': design-docs/mcp/multi-device.md
           - 'Navigation Graph':

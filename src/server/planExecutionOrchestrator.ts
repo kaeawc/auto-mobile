@@ -220,17 +220,28 @@ export class PlanExecutionOrchestrator {
       );
 
       const plan = await this.preparePlan();
-      const deviceMapping = await this.allocateDevices(plan);
-      const video = await this.startVideoRecording(plan);
 
+      // Enable the plan-execution guard BEFORE allocation. Allocation can
+      // auto-boot a simulator, and the device-disconnect monitor must not prune
+      // a just-booted device out from under it (otherwise allocation fails with
+      // "no devices match criteria"). The finally always clears the guard, even
+      // if allocation or video startup throws.
+      serverConfig.setPlanExecutionActive(true);
+
+      let deviceMapping: Record<string, string> | undefined;
+      let video: VideoState | undefined;
       let result: PlanExecutionResult | undefined;
       let finalizedVideo: FinalizedVideo = { videoFilePaths: [], videoRecordingIds: [] };
 
       try {
+        deviceMapping = await this.allocateDevices(plan);
+        video = await this.startVideoRecording(plan);
         result = await this.runPlan(plan, video);
       } finally {
         serverConfig.setPlanExecutionActive(false);
-        finalizedVideo = await this.finalizeVideo(video);
+        if (video !== undefined) {
+          finalizedVideo = await this.finalizeVideo(video);
+        }
       }
 
       if (!result) {
@@ -494,7 +505,8 @@ export class PlanExecutionOrchestrator {
   private async runPlan(plan: Plan, video: VideoState): Promise<PlanExecutionResult> {
     const planExecutionOptions = this.buildPlanExecutionOptions(video);
     this.perfLog(`Starting plan execution on device ${this.device.deviceId} (${this.device.platform})`);
-    serverConfig.setPlanExecutionActive(true);
+    // Note: the plan-execution guard is enabled earlier in execute(), before
+    // device allocation, so the disconnect monitor is already suppressed here.
     const result = await executePlan(
       plan,
       this.request.startStep,

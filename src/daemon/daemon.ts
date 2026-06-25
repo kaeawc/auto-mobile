@@ -19,7 +19,7 @@ import {
 import { DaemonOptions, PidFileData } from "./types";
 import { writeFile } from "node:fs/promises";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
-import { cleanupDaemonFiles, cleanupDaemonFilesSync } from "./daemonFiles";
+import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
 import { closeDatabase, getDatabase } from "../db";
 import { startupBenchmark } from "../utils/startupBenchmark";
@@ -55,6 +55,11 @@ import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
 import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
+import {
+  installProcessLifecycleHandlers,
+  setFatalProcessHandler,
+  setProcessShutdownHandler,
+} from "../processLifecycle";
 import type { BootedDevice } from "../models";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
@@ -80,6 +85,7 @@ export class Daemon {
   private healthCheckTimer: NodeJS.Timeout | null = null;
   private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private deviceDisconnectTimer: NodeJS.Timeout | null = null;
+  private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
@@ -175,6 +181,7 @@ export class Daemon {
     logger.enableStdoutLogging();
 
     logger.info("Starting AutoMobile daemon...");
+    this.setupShutdownHandlers();
 
     await this.initializeDatabase();
 
@@ -240,9 +247,6 @@ export class Daemon {
     // Verify DaemonState is initialized
     const isInitialized = DaemonState.getInstance().isInitialized();
     logger.info(`DaemonState initialized: ${isInitialized}, device count: ${this.devicePool.getTotalDeviceCount()}`);
-
-    // Setup shutdown handlers
-    this.setupShutdownHandlers();
 
     // Start health check timer (every 30 seconds)
     this.startHealthCheckTimer();
@@ -594,6 +598,7 @@ export class Daemon {
       encoding: "utf-8",
       mode: 0o600,
     });
+    this.pidFileWritten = true;
     logger.info(`PID file written to ${PID_FILE_PATH}`);
   }
 
@@ -1079,6 +1084,7 @@ export class Daemon {
       return;
     }
     this.shutdownHandlersRegistered = true;
+    installProcessLifecycleHandlers();
 
     const shutdown = async (signal: string) => {
       if (this.shutdownInProgress) {
@@ -1087,30 +1093,25 @@ export class Daemon {
       this.shutdownInProgress = true;
       logger.info(`Received ${signal}, shutting down daemon...`);
       await this.stop();
-      process.exit(0);
     };
 
     const cleanupAndExit = (label: string, error: unknown) => {
       logger.error(`${label}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
-      cleanupDaemonFilesSync({ expectedPid: process.pid });
+      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
       logger.close();
       process.exit(1);
     };
 
-    process.once("SIGINT", () => {
-      shutdown("SIGINT").catch(error => cleanupAndExit("Error during SIGINT shutdown", error));
-    });
-    process.once("SIGTERM", () => {
-      shutdown("SIGTERM").catch(error => cleanupAndExit("Error during SIGTERM shutdown", error));
-    });
+    setProcessShutdownHandler(shutdown);
     process.once("exit", () => {
-      cleanupDaemonFilesSync({ expectedPid: process.pid });
+      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
     });
-    process.once("uncaughtException", error => {
-      cleanupAndExit("Uncaught exception in daemon", error);
-    });
-    process.once("unhandledRejection", reason => {
-      cleanupAndExit("Unhandled rejection in daemon", reason);
+    setFatalProcessHandler(event => {
+      if (event.type === "uncaughtException") {
+        cleanupAndExit("Uncaught exception in daemon", event.error);
+        return;
+      }
+      cleanupAndExit("Unhandled rejection in daemon", event.reason);
     });
   }
 
@@ -1175,12 +1176,20 @@ export class Daemon {
       });
     }
 
-    await cleanupDaemonFiles({ expectedPid: process.pid });
+    await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
 
     await closeDatabase();
 
     logger.info("Daemon stopped");
     logger.close();
+  }
+
+  private getDaemonFileCleanupOptions(): { expectedPid?: number } {
+    if (this.pidFileWritten) {
+      return { expectedPid: process.pid };
+    }
+    const pidData = readPidFileDataSync();
+    return pidData && pidData.pid !== process.pid ? { expectedPid: process.pid } : {};
   }
 
   /**

@@ -1,0 +1,157 @@
+import { describe, expect, spyOn, test } from "bun:test";
+import {
+  ProcessLifecycleHandlers,
+  type ProcessLifecycleEventMap,
+  type ProcessLifecycleProcess,
+} from "../src/processLifecycle";
+
+class FakeProcess implements ProcessLifecycleProcess {
+  readonly listeners = new Map<keyof ProcessLifecycleEventMap, Array<(...args: any[]) => void>>();
+  readonly exitCodes: number[] = [];
+
+  on<K extends keyof ProcessLifecycleEventMap>(
+    event: K,
+    listener: (...args: ProcessLifecycleEventMap[K]) => void
+  ): unknown {
+    const eventListeners = this.listeners.get(event) ?? [];
+    eventListeners.push(listener);
+    this.listeners.set(event, eventListeners);
+    return this;
+  }
+
+  exit(code: number = 0): never {
+    this.exitCodes.push(code);
+    return undefined as never;
+  }
+
+  emit<K extends keyof ProcessLifecycleEventMap>(
+    event: K,
+    ...args: ProcessLifecycleEventMap[K]
+  ): void {
+    for (const listener of this.listeners.get(event) ?? []) {
+      listener(...args);
+    }
+  }
+
+  listenerCount(event: keyof ProcessLifecycleEventMap): number {
+    return this.listeners.get(event)?.length ?? 0;
+  }
+}
+
+async function flushMicrotasks(): Promise<void> {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+describe("process lifecycle handlers", () => {
+  test("installs each process listener only once", () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+
+    lifecycle.install();
+    lifecycle.install();
+
+    expect(fakeProcess.listenerCount("SIGINT")).toBe(1);
+    expect(fakeProcess.listenerCount("SIGTERM")).toBe(1);
+    expect(fakeProcess.listenerCount("uncaughtException")).toBe(1);
+    expect(fakeProcess.listenerCount("unhandledRejection")).toBe(1);
+  });
+
+  test("exits cleanly when a startup signal arrives before cleanup is bound", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+
+    lifecycle.install();
+    fakeProcess.emit("SIGINT");
+    await flushMicrotasks();
+
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("awaits the bound shutdown handler before exiting", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const signals: string[] = [];
+    let finishShutdown!: () => void;
+
+    lifecycle.install();
+    lifecycle.setShutdownHandler(async signal => {
+      signals.push(signal);
+      await new Promise<void>(resolve => {
+        finishShutdown = resolve;
+      });
+    });
+
+    fakeProcess.emit("SIGTERM");
+    await flushMicrotasks();
+
+    expect(signals).toEqual(["SIGTERM"]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+
+    finishShutdown();
+    await flushMicrotasks();
+
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("ignores repeated signals while shutdown is already running", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const signals: string[] = [];
+    let finishShutdown!: () => void;
+
+    lifecycle.install();
+    lifecycle.setShutdownHandler(async signal => {
+      signals.push(signal);
+      await new Promise<void>(resolve => {
+        finishShutdown = resolve;
+      });
+    });
+
+    fakeProcess.emit("SIGINT");
+    fakeProcess.emit("SIGTERM");
+    await flushMicrotasks();
+
+    expect(signals).toEqual(["SIGINT"]);
+
+    finishShutdown();
+    await flushMicrotasks();
+
+    expect(fakeProcess.exitCodes).toEqual([0]);
+  });
+
+  test("delegates fatal process events without forcing an exit", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const events: string[] = [];
+    const promise = Promise.resolve();
+
+    lifecycle.install();
+    lifecycle.setFatalProcessHandler(event => {
+      events.push(event.type);
+    });
+
+    fakeProcess.emit("uncaughtException", new Error("boom"));
+    fakeProcess.emit("unhandledRejection", "bad", promise);
+    await flushMicrotasks();
+
+    expect(events).toEqual(["uncaughtException", "unhandledRejection"]);
+    expect(fakeProcess.exitCodes).toEqual([]);
+  });
+
+  test("exits with failure for fatal startup events before a handler is bound", async () => {
+    const fakeProcess = new FakeProcess();
+    const lifecycle = new ProcessLifecycleHandlers(fakeProcess);
+    const consoleError = spyOn(console, "error").mockImplementation(() => {});
+
+    try {
+      lifecycle.install();
+      fakeProcess.emit("uncaughtException", new Error("startup failed"));
+      await flushMicrotasks();
+
+      expect(fakeProcess.exitCodes).toEqual([1]);
+    } finally {
+      consoleError.mockRestore();
+    }
+  });
+});

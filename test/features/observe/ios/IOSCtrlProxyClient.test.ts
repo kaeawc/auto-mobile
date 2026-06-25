@@ -574,6 +574,63 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
+  describe("unsupported command result shapes", function() {
+    test("preserves required fields for non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const imeAction = await testClient.requestImeAction("done", 5000);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("does not support request_ime_action");
+
+        const rotate = await testClient.requestRotate("landscape", 5000);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.error).toContain("does not support request_rotate");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 5000);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("does not support request_clipboard");
+
+        const voiceOver = await testClient.requestVoiceOverState(5000);
+        expect(voiceOver.success).toBe(false);
+        expect(voiceOver.enabled).toBe(false);
+        expect(voiceOver.totalTimeMs).toBe(0);
+        expect(voiceOver.error).toContain("does not support get_voiceover_state");
+
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("requestRecentApps", function() {
     test("should send recent apps request and return result", async function() {
       const testTimer = fakeTimer;

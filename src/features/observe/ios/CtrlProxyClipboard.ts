@@ -45,6 +45,7 @@ export class CtrlProxyClipboard {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, action, totalTimeMs: 0, error: "Not connected" }),
+      unsupportedCommandError: (_messageType, error) => ({ success: false, action, totalTimeMs: 0, error }),
       timeoutError: timeout => ({
         success: false,
         action,

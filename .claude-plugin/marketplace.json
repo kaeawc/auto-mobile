@@ -14,7 +14,7 @@
       "name": "auto-mobile",
       "source": "./",
       "description": "Mobile device automation for Android and iOS - control devices with natural language",
-      "version": "0.0.37",
+      "version": "0.0.38",
       "author": {
         "name": "AutoMobile Contributors",
         "email": "jason.d.pearson@gmail.com"

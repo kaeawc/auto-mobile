@@ -142,6 +142,50 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
   });
 
+  test("throws when a resourceId selector is shared by repeated rows", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "text": "Alice", "resource-id": "com.example:id/title", "bounds": bounds(0, 0, 200, 60) } },
+          { $: { "text": "Bob", "resource-id": "com.example:id/title", "bounds": bounds(0, 60, 200, 120) } }
+        ])
+      )
+    );
+    const feature = makeFeature();
+
+    await expect(feature.execute({ action: "set", resourceId: "com.example:id/title" })).rejects.toThrow(
+      /shared by 2 elements/
+    );
+    expect(service.calls).toHaveLength(0);
+  });
+
+  test("resourceId selector proceeds when the hierarchy cannot be observed", async () => {
+    // No observe result configured -> getViewHierarchy throws; the resourceId guard is
+    // best-effort, so the focus command is still sent.
+    const feature = makeFeature();
+
+    const result = await feature.execute({ action: "set", resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/title" }]);
+  });
+
+  test("resourceId selector proceeds when it is unique in the hierarchy", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          { $: { "text": "Alice", "resource-id": "com.example:id/title", "bounds": bounds(0, 0, 200, 60) } }
+        ])
+      )
+    );
+    const feature = makeFeature();
+
+    const result = await feature.execute({ action: "set", resourceId: "com.example:id/title" });
+
+    expect(result.success).toBe(true);
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/title" }]);
+  });
+
   test("throws when text selector resolves to a resource-id shared by repeated rows", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

@@ -106,6 +106,21 @@ export class SetAccessibilityFocus {
    */
   private async resolveResourceId(options: SetAccessibilityFocusOptions): Promise<string> {
     if (options.resourceId) {
+      // A caller-supplied id is just as exposed to the duplicate-id hazard below: CtrlProxy
+      // focuses the FIRST node carrying it. Guard it too, but best-effort — a resource-id
+      // selector did not previously require an observable hierarchy, so if we can't read
+      // one we fall through and let CtrlProxy resolve the id as before.
+      try {
+        const viewHierarchy = await this.getViewHierarchy();
+        this.assertUniqueResourceId(viewHierarchy, options.resourceId, `resourceId "${options.resourceId}"`);
+      } catch (error) {
+        if (error instanceof ActionableError) {
+          throw error;
+        }
+        logger.warn(
+          `[accessibilityFocus] Could not observe to check resourceId uniqueness; proceeding: ${error}`
+        );
+      }
       return options.resourceId;
     }
 
@@ -125,21 +140,43 @@ export class SetAccessibilityFocus {
       );
     }
 
-    // The CtrlProxy service can only target a node by resource-id, and it focuses the
-    // FIRST node carrying that id. When the resolved id is shared by repeated rows
-    // (e.g. a RecyclerView item id reused per row), focusing it would silently move the
-    // cursor to the wrong row while reporting success. Reject the ambiguity instead.
-    const sharing = this.finder.findElementsByResourceId(viewHierarchy, resourceId);
-    if (sharing.length > 1) {
+    this.assertUniqueResourceId(viewHierarchy, resourceId, `Selector ${selector}`);
+    return resourceId;
+  }
+
+  /**
+   * The CtrlProxy service can only target a node by resource-id, and it focuses the FIRST
+   * node carrying that id. When the id is shared by repeated rows (e.g. a RecyclerView item
+   * id reused per row), focusing it would silently move the cursor to the wrong row while
+   * reporting success. Reject the ambiguity instead.
+   */
+  private assertUniqueResourceId(
+    viewHierarchy: ViewHierarchyResult,
+    resourceId: string,
+    selectorLabel: string
+  ): void {
+    const sharing = this.countMatchingResourceIds(viewHierarchy, resourceId);
+    if (sharing > 1) {
       throw new ActionableError(
-        `Selector ${selector} resolved to resource-id "${resourceId}", which is shared by ` +
-          `${sharing.length} elements (e.g. repeated list rows). Accessibility focus targets a ` +
-          `node by resource-id and would focus the first match, not necessarily the one you ` +
-          `selected. Provide a more specific selector or a unique resourceId.`
+        `${selectorLabel} resolves to resource-id "${resourceId}", which is shared by ` +
+          `${sharing} elements (e.g. repeated list rows). Accessibility focus targets a node ` +
+          `by resource-id and would focus the first match, not necessarily the one you ` +
+          `selected. Provide a more specific selector or a unique target.`
       );
     }
+  }
 
-    return resourceId;
+  /**
+   * Count nodes whose resource-id matches, mirroring CtrlProxy.findNodeByResourceId:
+   * full equality OR a ":id/<id>" suffix, so both short and fully-qualified ids are
+   * counted the same way the service would resolve them.
+   */
+  private countMatchingResourceIds(viewHierarchy: ViewHierarchyResult, resourceId: string): number {
+    const candidates = this.finder.findElementsByResourceId(viewHierarchy, resourceId, undefined, true);
+    return candidates.filter(el => {
+      const rid = el["resource-id"];
+      return typeof rid === "string" && (rid === resourceId || rid.endsWith(`:id/${resourceId}`));
+    }).length;
   }
 
   private async getViewHierarchy(): Promise<ViewHierarchyResult> {

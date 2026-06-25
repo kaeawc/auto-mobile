@@ -7,6 +7,7 @@ import {
   checkAdbVersion,
   checkConnectedDevices,
 } from "../../src/doctor/checks/android";
+import { tmpdir } from "node:os";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
@@ -197,14 +198,15 @@ describe("checkJavaHome", () => {
   });
 
   test("passes when JAVA_HOME is set to a valid path", async () => {
-    // Use a path that is known to exist on the system
-    process.env.JAVA_HOME = "/tmp";
+    // Use a path known to exist on every platform (Windows has no /tmp).
+    const validPath = tmpdir();
+    process.env.JAVA_HOME = validPath;
     try {
       const result = await checkJavaHome();
       expect(result.name).toBe("JAVA_HOME");
       expect(result.status).toBe("pass");
       expect(result.message).toContain("Java home directory found");
-      expect(result.value).toBe("/tmp");
+      expect(result.value).toBe(validPath);
     } finally {
       if (originalJavaHome !== undefined) {
         process.env.JAVA_HOME = originalJavaHome;

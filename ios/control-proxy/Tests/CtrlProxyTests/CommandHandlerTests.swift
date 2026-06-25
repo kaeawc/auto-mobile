@@ -53,7 +53,7 @@ final class CommandHandlerTests: XCTestCase {
         )
     }
 
-    private func makeSdkHierarchy(bundleId: String?) -> SdkViewHierarchy {
+    private func makeSdkHierarchy(bundleId: String?, backgroundColor: String = "#123456FF") -> SdkViewHierarchy {
         SdkViewHierarchy(
             timestamp: 1000,
             bundleId: bundleId,
@@ -63,9 +63,37 @@ final class CommandHandlerTests: XCTestCase {
             root: SdkViewNode(
                 className: "UIView",
                 bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
-                backgroundColor: "#123456FF"
+                backgroundColor: backgroundColor
             )
         )
+    }
+
+    private func makeSdkHierarchyWithTabBarNode(bundleId: String?) -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: bundleId,
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: SdkViewNode(
+                className: "UIView",
+                bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+                children: [
+                    SdkViewNode(
+                        className: "UITabBarButtonLabel",
+                        bounds: SdkBounds(left: 16, top: 740, right: 110, bottom: 770),
+                        accessibilityLabel: "Discover",
+                        isAccessibilityElement: true
+                    )
+                ]
+            )
+        )
+    }
+
+    private func countClassName(_ className: String, in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        let current = element.className == className ? 1 : 0
+        return current + (element.node ?? []).reduce(0) { $0 + countClassName(className, in: $1) }
     }
 
     // MARK: - Hierarchy Request Tests
@@ -185,6 +213,54 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
         XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
         XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
+    func testEnrichWithMatchingSdkHierarchyClearsForeignCacheWhenSdkServerIsDown() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(nil)
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchyWithTabBarNode(bundleId: "dev.jasonpearson.automobile.Playground"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+
+        let enriched = commandHandler.enrichWithMatchingSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
+    func testEnrichWithCachedSdkHierarchyDoesNotProbeServerForForeignCache() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.apple.Preferences"))
+        fetcher.setFreshHierarchy(makeSdkHierarchyWithTabBarNode(bundleId: "com.apple.Preferences"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchyWithTabBarNode(bundleId: "dev.jasonpearson.automobile.Playground"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+
+        let enriched = commandHandler.enrichWithCachedSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 0)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
     }
 
     func testRequestHierarchyFetchesFreshSdkHierarchyOnlyWhenServerBundleMatchesForeground() {
@@ -233,6 +309,37 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
         XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
         XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+    }
+
+    func testRequestHierarchyReplacesForeignCacheWithFreshForegroundHierarchy() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.apple.Preferences"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "com.apple.Preferences", backgroundColor: "#ABCDEF01"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "dev.sdk.app", backgroundColor: "#123456FF"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-replace-cache"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#ABCDEF01")
+        XCTAssertEqual(cache.latest?.bundleId, "com.apple.Preferences")
+        XCTAssertEqual(cache.updateCallCount, 2)
+        XCTAssertEqual(cache.clearCallCount, 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 1)
     }
 
     func testRequestHierarchyError() {

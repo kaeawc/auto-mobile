@@ -74,11 +74,9 @@ public class CtrlProxy {
                     print(
                         "[CtrlProxy] Hierarchy changed (hash=\(hash), extraction=\(extractionTimeMs)ms), broadcasting"
                     )
-                    let enriched = HierarchyMerger.merge(
-                        xcuitest: hierarchy,
-                        sdk: self?.sdkHierarchyCache.latest
-                    )
-                    self?.server.broadcastHierarchyUpdate(enriched)
+                    guard let self else { return }
+                    let enriched = self.commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
+                    self.server.broadcastHierarchyUpdate(enriched)
                 case .unchanged:
                     // Don't broadcast unchanged results (animation mode)
                     break

@@ -10,7 +10,7 @@ import { logger } from "../../../utils/logger";
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import { NoOpPerformanceTracker } from "../../../utils/PerformanceTracker";
 import type { CurrentFocusResult, TraversalOrderResult, Element } from "../../../models";
-import type { DelegateContext, AccessibilityNode } from "./types";
+import type { DelegateContext, AccessibilityNode, A11yActionResult } from "./types";
 import { DefaultElementParser } from "../../utility/ElementParser";
 
 /**
@@ -24,35 +24,128 @@ export class CtrlProxyFocus {
   }
 
   /**
-   * Clear accessibility focus (TalkBack cursor) on the current element.
+   * Clear accessibility focus (TalkBack cursor) on a specific element.
    *
-   * NOT IMPLEMENTED: throws rather than silently no-op'ing so callers fail loudly.
-   * Full implementation (sending a clear-focus command to the Android accessibility
-   * service) is tracked at https://github.com/kaeawc/auto-mobile/issues
+   * Sends the "clear_focus" action over the request_action protocol; the
+   * CtrlProxy AccessibilityService resolves the node by resource-id and performs
+   * ACTION_CLEAR_ACCESSIBILITY_FOCUS on it.
+   *
+   * @param resourceId - Resource ID of the element whose focus should be cleared
+   * @param timeoutMs - Maximum time to wait for the action result in milliseconds
+   * @param perf - Performance tracker for timing
+   * @throws Error if resourceId is empty, the node is not found, or the action fails
    */
-  async clearAccessibilityFocus(): Promise<void> {
-    logger.warn("[CTRL_PROXY] clearAccessibilityFocus() called but is not implemented");
-    throw new Error(
-      "clearAccessibilityFocus() is not implemented. " +
-        "Track progress at https://github.com/kaeawc/auto-mobile/issues"
-    );
+  async clearAccessibilityFocus(
+    resourceId: string,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    if (!resourceId) {
+      throw new Error("clearAccessibilityFocus requires a resource-id");
+    }
+    const result = await this.sendAction("clear_focus", resourceId, timeoutMs, perf);
+    if (!result.success) {
+      throw new Error(result.error ?? `Failed to clear accessibility focus on ${resourceId}`);
+    }
   }
 
   /**
    * Set accessibility focus (TalkBack cursor) on a specific element.
    *
-   * NOT IMPLEMENTED: throws rather than silently no-op'ing so callers fail loudly.
-   * Full implementation (sending a set-focus command to the Android accessibility
-   * service) is tracked at https://github.com/kaeawc/auto-mobile/issues
+   * Sends the "focus" action over the request_action protocol; the CtrlProxy
+   * AccessibilityService resolves the node by resource-id and performs
+   * ACTION_ACCESSIBILITY_FOCUS on it.
    *
    * @param resourceId - Resource ID of the element to focus
+   * @param timeoutMs - Maximum time to wait for the action result in milliseconds
+   * @param perf - Performance tracker for timing
+   * @throws Error if resourceId is empty, the node is not found, or the action fails
    */
-  async setAccessibilityFocus(resourceId: string): Promise<void> {
-    logger.warn(`[CTRL_PROXY] setAccessibilityFocus(${resourceId}) called but is not implemented`);
-    throw new Error(
-      `setAccessibilityFocus(${resourceId}) is not implemented. ` +
-        "Track progress at https://github.com/kaeawc/auto-mobile/issues"
-    );
+  async setAccessibilityFocus(
+    resourceId: string,
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    if (!resourceId) {
+      throw new Error("setAccessibilityFocus requires a resource-id");
+    }
+    const result = await this.sendAction("focus", resourceId, timeoutMs, perf);
+    if (!result.success) {
+      throw new Error(result.error ?? `Failed to set accessibility focus on ${resourceId}`);
+    }
+  }
+
+  /**
+   * Send a node action ("focus" / "clear_focus") to the accessibility service over
+   * the request_action WebSocket protocol and await the action result.
+   *
+   * Mirrors the request/response plumbing used by requestCurrentFocus so the focus
+   * delegate stays self-contained (no dependency on the host client's requestAction).
+   */
+  private async sendAction(
+    action: string,
+    resourceId: string,
+    timeoutMs: number,
+    perf: PerformanceTracker
+  ): Promise<A11yActionResult> {
+    const startTime = this.context.timer.now();
+
+    try {
+      const connected = await perf.track("ensureConnection", () => this.context.ensureConnected(perf));
+      if (!connected) {
+        logger.warn(`[CTRL_PROXY] Failed to establish WebSocket connection for action '${action}'`);
+        return {
+          success: false,
+          action,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: "Failed to connect to accessibility service"
+        };
+      }
+
+      const requestId = this.context.requestManager.generateId("action");
+
+      const actionPromise = this.context.requestManager.register<A11yActionResult>(
+        requestId,
+        "action",
+        timeoutMs,
+        (_id, _type, timeout) => ({
+          success: false,
+          action,
+          totalTimeMs: this.context.timer.now() - startTime,
+          error: `Action timeout after ${timeout}ms`
+        })
+      );
+
+      await perf.track("sendRequest", async () => {
+        const ws = this.context.getWebSocket();
+        if (!ws || ws.readyState !== WebSocket.OPEN) {
+          throw new Error("WebSocket not connected");
+        }
+        const message = JSON.stringify({ type: "request_action", requestId, action, resourceId });
+        ws.send(message);
+        logger.debug(`[CTRL_PROXY] Sent action request (requestId: ${requestId}, action: ${action}, resourceId: ${resourceId})`);
+      });
+
+      const result = await perf.track("waitForAction", () => actionPromise);
+
+      const duration = this.context.timer.now() - startTime;
+      if (result.success) {
+        logger.debug(`[CTRL_PROXY] Action '${action}' completed in ${duration}ms`);
+      } else {
+        logger.warn(`[CTRL_PROXY] Action '${action}' failed after ${duration}ms: ${result.error}`);
+      }
+
+      return result;
+    } catch (error) {
+      const duration = this.context.timer.now() - startTime;
+      logger.warn(`[CTRL_PROXY] Action '${action}' request failed after ${duration}ms: ${error}`);
+      return {
+        success: false,
+        action,
+        totalTimeMs: duration,
+        error: `${error}`
+      };
+    }
   }
 
   /**

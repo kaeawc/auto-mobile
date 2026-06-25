@@ -61,6 +61,7 @@ flowchart LR
 | Document | Description |
 |----------|-------------|
 | [TalkBack/VoiceOver Adaptation](talkback-voiceover.md) | Complete design for screen reader support |
+| [accessibilityFocus tool](../../plat/android/accessibility-focus.md) | Set/clear the Android TalkBack focus cursor on an element (Android only) |
 
 ## Platform Support
 

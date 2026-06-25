@@ -1326,12 +1326,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Focus
   // ===========================================================================
 
-  async clearAccessibilityFocus(): Promise<void> {
-    return this.focus.clearAccessibilityFocus();
+  async clearAccessibilityFocus(
+    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
-  async setAccessibilityFocus(resourceId: string): Promise<void> {
-    return this.focus.setAccessibilityFocus(resourceId);
+  async setAccessibilityFocus(
+    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async requestCurrentFocus(

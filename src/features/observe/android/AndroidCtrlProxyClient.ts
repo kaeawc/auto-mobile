@@ -21,6 +21,7 @@ import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
+  ImeAction,
   ViewHierarchyResult,
   CurrentFocusResult,
   TraversalOrderResult,
@@ -661,7 +662,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11ySetTextResult>;
 
   requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yImeActionResult>;
 
@@ -1234,7 +1235,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11yImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);

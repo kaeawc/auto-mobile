@@ -1,6 +1,6 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, ImeActionResult, ObserveResult } from "../../models";
+import { BootedDevice, ImeAction as ImeActionType, ImeActionResult, ObserveResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxy, AndroidCtrlProxyClient } from "../observe/android";
@@ -24,7 +24,7 @@ export class ImeAction extends BaseVisualChange {
   }
 
   async execute(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeActionType,
     progress?: ProgressCallback
   ): Promise<ImeActionResult> {
     const perf = createGlobalPerformanceTracker();
@@ -83,7 +83,7 @@ export class ImeAction extends BaseVisualChange {
    * Falls back to ADB key events if a11y service is unavailable.
    */
   private async executeAndroidImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeActionType,
     _observeResult: ObserveResult
   ): Promise<ImeActionResult> {
     // Use provided a11y service or get default instance
@@ -107,7 +107,7 @@ export class ImeAction extends BaseVisualChange {
    * instead of moving focus between fields.
    */
   private async executeAdbImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous"
+    action: ImeActionType
   ): Promise<ImeActionResult> {
     logger.info("Executing IME action via ADB", { action });
 
@@ -162,7 +162,7 @@ export class ImeAction extends BaseVisualChange {
    * Execute iOS-specific IME action using CtrlProxy iOS.
    */
   private async executeiOSImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeActionType,
     _observeResult: ObserveResult
   ): Promise<ImeActionResult> {
     try {

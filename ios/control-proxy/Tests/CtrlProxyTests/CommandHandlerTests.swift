@@ -41,6 +41,33 @@ final class CommandHandlerTests: XCTestCase {
         return typed
     }
 
+    private func makeHierarchy(packageName: String?) -> ViewHierarchy {
+        ViewHierarchy(
+            packageName: packageName,
+            hierarchy: UIElementInfo(
+                text: "Root",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+    }
+
+    private func makeSdkHierarchy(bundleId: String?) -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: bundleId,
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: SdkViewNode(
+                className: "UIView",
+                bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+                backgroundColor: "#123456FF"
+            )
+        )
+    }
+
     // MARK: - Hierarchy Request Tests
 
     func testRequestHierarchyIncludesPerfTiming() {
@@ -108,6 +135,104 @@ final class CommandHandlerTests: XCTestCase {
         // Should have extraction as a child
         let extractionChild = perfTiming?.children?.first { $0.name == "extraction" }
         XCTAssertNotNil(extractionChild, "Expected 'extraction' child in perf timing")
+    }
+
+    func testRequestHierarchyMergesCachedSdkHierarchyForForegroundBundle() {
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-match"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.packageName, "com.test.app")
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#123456FF")
+    }
+
+    func testRequestHierarchySkipsCachedSdkHierarchyForDifferentForegroundBundle() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "dev.sdk.app"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "dev.sdk.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-mismatch"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.packageName, "com.apple.Preferences")
+        XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+    }
+
+    func testRequestHierarchyFetchesFreshSdkHierarchyOnlyWhenServerBundleMatchesForeground() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-fresh"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#123456FF")
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 1)
+    }
+
+    func testRequestHierarchyDoesNotFetchFreshSdkHierarchyWhenServerBundleDiffers() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "dev.sdk.app"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "dev.sdk.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-no-fresh"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
     }
 
     func testRequestHierarchyError() {

@@ -204,9 +204,7 @@ public class CommandHandler: CommandHandling {
             throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")
         }
 
-        // Merge with SDK hierarchy: prefer cached (fast), fall back to fresh pull if no cache
-        let sdkHierarchy: SdkViewHierarchy? = sdkHierarchyCache?.latest
-            ?? sdkHierarchyClient?.fetchFreshHierarchy()
+        let sdkHierarchy = matchingSdkHierarchy(for: hierarchy)
         let enriched = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
 
         // Get accumulated timing for this operation
@@ -217,6 +215,50 @@ public class CommandHandler: CommandHandling {
             data: enriched,
             perfTiming: perfTimings?.first
         )
+    }
+
+    private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
+        guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName) else {
+            return nil
+        }
+
+        if let cached = sdkHierarchyCache?.latest {
+            if sdkHierarchy(cached, matches: foregroundBundleId) {
+                return cached
+            }
+            guard sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+                return nil
+            }
+        } else if sdkHierarchyClient != nil {
+            guard sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+                return nil
+            }
+        }
+
+        guard let fresh = sdkHierarchyClient?.fetchFreshHierarchy(),
+              sdkHierarchy(fresh, matches: foregroundBundleId) else {
+            return nil
+        }
+        return fresh
+    }
+
+    private func sdkServerMatchesForegroundBundleId(_ foregroundBundleId: String) -> Bool {
+        guard let serverBundleId = normalizedBundleId(sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {
+            return false
+        }
+        return serverBundleId == foregroundBundleId
+    }
+
+    private func sdkHierarchy(_ sdkHierarchy: SdkViewHierarchy, matches foregroundBundleId: String) -> Bool {
+        normalizedBundleId(sdkHierarchy.bundleId) == foregroundBundleId
+    }
+
+    private func normalizedBundleId(_ bundleId: String?) -> String? {
+        guard let normalized = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalized.isEmpty else {
+            return nil
+        }
+        return normalized
     }
 
     private func handleRequestScreenshot(_ request: WebSocketRequest, startTime _: Date) throws -> ScreenshotResponse {

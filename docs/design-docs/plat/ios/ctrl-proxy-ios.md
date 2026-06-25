@@ -15,6 +15,7 @@ service and focuses on reliable observation delivery.
 - Provide element bounds for touch injection.
 - Emit view hierarchy updates when the UI changes.
 - Track first responder and focus state.
+- Perform coordinate gestures (tap, swipe, drag) via `GesturePerformer`.
 
 ## WebSocket protocol
 
@@ -52,6 +53,18 @@ Server to client response:
   }
 }
 ```
+
+## Gestures
+
+`GesturePerformer` injects coordinate gestures through `XCUICoordinate` anchored on
+SpringBoard: tap, long-press, swipe, and **drag**
+(`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`). The `dragAndDrop` MCP
+tool resolves source/target element centers from the shared view hierarchy and dispatches
+through `IOSCtrlProxyClient.requestDrag()` to this path, reaching parity with the Android
+accessibility-service drag.
+
+> Caveat: on the Simulator the post-drop `thenHoldForDuration:` hold may be a no-op; press
+> and drag are reliable. Verify hold-dependent flows on a physical device.
 
 ## Limitations
 

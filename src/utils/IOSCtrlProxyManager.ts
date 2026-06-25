@@ -91,6 +91,11 @@ interface HostControlCtrlProxyIOSRunner {
   }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number; port?: number } }>;
 }
 
+interface ExternalCtrlProxyProcess {
+  pid: number;
+  port: number;
+}
+
 export interface HostPortAvailabilityChecker {
   isAvailable(host: string, port: number): Promise<boolean>;
 }
@@ -553,10 +558,15 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // before spawning our own to avoid conflicting xcodebuild instances.
       if (this.isSimulator()) {
         perf.startOperation("externalProcessCheck");
-        const hasExternal = await this.isExternalCtrlProxyProcessRunning();
+        const externalProcess = await this.findExternalCtrlProxyProcess();
         perf.endOperation("externalProcessCheck");
-        if (hasExternal) {
-          logger.info("[IOSCtrlProxy] External xcodebuild CtrlProxy process detected, skipping spawn — will wait for health endpoint");
+        if (externalProcess) {
+          logger.info(
+            `[IOSCtrlProxy] External xcodebuild CtrlProxy process detected on port ${externalProcess.port}, skipping spawn`
+          );
+          if (externalProcess.port !== this.servicePort) {
+            this.adoptServicePort(externalProcess.port);
+          }
           // Fall through to health polling below instead of spawning
         } else {
           perf.startOperation("spawnRunner");
@@ -829,6 +839,16 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     });
   }
 
+  private adoptServicePort(port: number): void {
+    if (PortManager.getPort(this.device.deviceId) !== port) {
+      PortManager.reserve(this.device.deviceId, port);
+    }
+    if (this.servicePort !== port) {
+      this.servicePort = port;
+      this.clearCaches();
+    }
+  }
+
   private async ensureHostControlServicePortAvailable(options: { allowReallocation?: boolean } = {}): Promise<void> {
     const allowReallocation = options.allowReallocation ?? true;
     const host = this.hostControl.getHost();
@@ -883,8 +903,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         logger.info(
           `[IOSCtrlProxy] Reusing host-control CtrlProxy process on service port ${existingServicePort}`
         );
-        PortManager.reserve(this.device.deviceId, existingServicePort);
-        this.servicePort = existingServicePort;
+        this.adoptServicePort(existingServicePort);
         this.xcTestProcessId = existingProcess.data.pid ?? null;
         this.xcTestProcess = null;
         return;
@@ -906,8 +925,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
 
       if (typeof result.data.port === "number") {
-        PortManager.reserve(this.device.deviceId, result.data.port);
-        this.servicePort = result.data.port;
+        this.adoptServicePort(result.data.port);
       }
       this.xcTestProcessId = result.data.pid;
       this.xcTestProcess = null;
@@ -1201,9 +1219,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * binary name match to avoid self-matching shell wrappers) then verifies
    * CtrlProxy appears in the process args.
    */
-  private async isExternalCtrlProxyProcessRunning(): Promise<boolean> {
+  private async findExternalCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     if (this.useHostControl()) {
-      return false; // Host-control environments don't have external xcodebuild
+      return null; // Host-control environments don't have external xcodebuild
     }
     try {
       // pgrep -x matches only processes whose binary name is exactly "xcodebuild"
@@ -1212,7 +1230,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       );
       const pids = pgrepOut.trim().split("\n").filter(line => line.length > 0);
       if (pids.length === 0) {
-        return false;
+        return null;
       }
 
       // Filter to PIDs whose args contain CtrlProxy, excluding our tracked PID
@@ -1226,18 +1244,29 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `ps -p ${pid} -o args= 2>/dev/null`
           );
           if (argsOut.includes("CtrlProxy")) {
+            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? IOSCtrlProxyManager.DEFAULT_PORT;
             logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
-            return true;
+            return { pid, port };
           }
         } catch {
           // Process may have exited between pgrep and ps
         }
       }
-      return false;
+      return null;
     } catch {
       // pgrep exits 1 when no process matches
-      return false;
+      return null;
     }
+  }
+
+  private parseCtrlProxyPortFromProcessArgs(args: string): number | null {
+    const match = args.match(/(?:^|\s)(?:SIMCTL_CHILD_)?CTRL_PROXY_IOS_PORT=(\d+)(?:\s|$)/);
+    if (!match) {
+      return null;
+    }
+
+    const port = Number.parseInt(match[1], 10);
+    return Number.isNaN(port) || port <= 0 || port > 65535 ? null : port;
   }
 
   /**

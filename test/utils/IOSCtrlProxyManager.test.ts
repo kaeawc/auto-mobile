@@ -688,6 +688,103 @@ describe("IOSCtrlProxyManager", function() {
       expect(fakeExecutor.wasCommandExecuted("simctl spawn")).toBe(false);
     });
 
+    test("start() adopts the default hot-reload CtrlProxy port before health polling", async function() {
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => {
+            throw new Error("should not build when an external CtrlProxy process is reused");
+          },
+          getRunnerBinaryPath: async () => null,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor
+        );
+        expect(manager.getServicePort()).toBe(8767);
+
+        fakeExecutor.setCommandResponse("http://localhost:8767/health", createExecResult("", ""));
+        fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2468\n", ""));
+        fakeExecutor.setCommandResponse(
+          "ps -p 2468",
+          createExecResult("xcodebuild test CtrlProxyUITests/CtrlProxyUITests/testRunService", "")
+        );
+        fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("ok", ""));
+        fakeTimer.enableAutoAdvance();
+
+        await manager.start();
+
+        expect(manager.getServicePort()).toBe(8765);
+        expect(PortManager.getPort(testDevice.deviceId)).toBe(8765);
+        expect(fakeExecutor.getSpawnedProcesses()).toEqual([]);
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
+    test("start() adopts a custom hot-reload CtrlProxy port from process args", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => {
+          throw new Error("should not build when an external CtrlProxy process is reused");
+        },
+        getRunnerBinaryPath: async () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor
+      );
+
+      fakeExecutor.setCommandResponse("http://localhost:8765/health", createExecResult("", ""));
+      fakeExecutor.setCommandResponse("pgrep -x xcodebuild", createExecResult("2469\n", ""));
+      fakeExecutor.setCommandResponse(
+        "ps -p 2469",
+        createExecResult("xcodebuild test CtrlProxyUITests CTRL_PROXY_IOS_PORT=8790", "")
+      );
+      fakeExecutor.setCommandResponse("http://localhost:8790/health", createExecResult("ok", ""));
+      fakeTimer.enableAutoAdvance();
+
+      await manager.start();
+
+      expect(manager.getServicePort()).toBe(8790);
+      expect(PortManager.getPort(testDevice.deviceId)).toBe(8790);
+      expect(fakeExecutor.getSpawnedProcesses()).toEqual([]);
+    });
+
+    test("startOnSimulator() keeps the reallocated simulator port when spawning", async function() {
+      PortManager.setPortAvailabilityCheckerForTesting({
+        isPortAvailable: (port: number) => port !== 8765,
+      });
+      try {
+        const fakeBuilder = {
+          getXctestrunPath: async () => "/tmp/test.xctestrun",
+          getRunnerBinaryPath: async () => null,
+        } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+        const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+          testDevice,
+          fakeTimer,
+          fakeBuilder,
+          fakeExecutor
+        );
+
+        await (manager as unknown as { startOnSimulator: () => Promise<void> }).startOnSimulator();
+
+        const spawn = fakeExecutor.getSpawnedProcesses()[0];
+        expect(manager.getServicePort()).toBe(8767);
+        expect(spawn.options?.env).toMatchObject({
+          CTRL_PROXY_IOS_PORT: "8767",
+          SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: "8767",
+        });
+      } finally {
+        PortManager.setPortAvailabilityCheckerForTesting(null);
+      }
+    });
+
     test("host-control simulator start skips ports that are busy on the host", async function() {
       const fakeBuilder = {
         getXctestrunPath: async () => "/tmp/test.xctestrun",

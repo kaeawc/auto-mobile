@@ -82,13 +82,13 @@ interface HostControlCtrlProxyIOSRunner {
     xctestrunPath?: string;
     bundleId?: string;
     timeoutSeconds?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { pid: number; message: string } }>;
+  }): Promise<{ success: boolean; error?: string; data?: { pid: number; message: string; port?: number } }>;
   stop(params: { deviceId?: string; pid?: number }): Promise<{ success: boolean; error?: string }>;
   status(params: {
     deviceId?: string;
     pid?: number;
     port?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number } }>;
+  }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number; port?: number } }>;
 }
 
 export interface HostPortAvailabilityChecker {
@@ -155,7 +155,6 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly hostControl: HostControlCtrlProxyIOSRunner;
   private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private hostControlAvailability: Promise<boolean> | null = null;
-  private readonly hostControlUnavailablePorts: Set<number> = new Set();
 
   // Singleton instances per device
   private static instances: Map<string, IOSCtrlProxyManager> = new Map();
@@ -833,21 +832,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private async ensureHostControlServicePortAvailable(options: { allowReallocation?: boolean } = {}): Promise<void> {
     const allowReallocation = options.allowReallocation ?? true;
     const host = this.hostControl.getHost();
+    const unavailablePorts = new Set<number>();
 
     for (let attempt = 0; attempt < PortManager.getMaxDevices(); attempt++) {
       if (await this.hostPortAvailabilityChecker.isAvailable(host, this.servicePort)) {
         return;
       }
 
+      const unavailablePort = this.servicePort;
       logger.warn(
-        `[IOSCtrlProxy] Host control port ${this.servicePort} is already in use on ${host}; reallocating`
+        `[IOSCtrlProxy] Host control port ${unavailablePort} is already in use on ${host}; reallocating`
       );
-      this.hostControlUnavailablePorts.add(this.servicePort);
       if (!allowReallocation) {
-        throw new HostControlServicePortUnavailableError(host, this.servicePort);
+        throw new HostControlServicePortUnavailableError(host, unavailablePort);
       }
+      unavailablePorts.add(unavailablePort);
       PortManager.release(this.device.deviceId);
-      this.servicePort = this.allocateServicePort(this.hostControlUnavailablePorts);
+      this.servicePort = this.allocateServicePort(unavailablePorts);
     }
 
     throw new Error(
@@ -876,6 +877,19 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error("Host control daemon not available for CtrlProxy startup");
       }
 
+      const existingProcess = await this.hostControl.status({ deviceId: this.device.deviceId });
+      const existingServicePort = existingProcess.data?.port;
+      if (existingProcess.success && existingProcess.data?.running && typeof existingServicePort === "number") {
+        logger.info(
+          `[IOSCtrlProxy] Reusing host-control CtrlProxy process on service port ${existingServicePort}`
+        );
+        PortManager.reserve(this.device.deviceId, existingServicePort);
+        this.servicePort = existingServicePort;
+        this.xcTestProcessId = existingProcess.data.pid ?? null;
+        this.xcTestProcess = null;
+        return;
+      }
+
       await this.ensureHostControlServicePortAvailable();
 
       const xctestrunPath = await this.builder.getXctestrunPath("simulator");
@@ -891,6 +905,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Host control failed to start CtrlProxy");
       }
 
+      if (typeof result.data.port === "number") {
+        PortManager.reserve(this.device.deviceId, result.data.port);
+        this.servicePort = result.data.port;
+      }
       this.xcTestProcessId = result.data.pid;
       this.xcTestProcess = null;
       return;
@@ -1250,6 +1268,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error("Host control daemon not available for CtrlProxy startup");
       }
 
+      const existingProcess = await this.hostControl.status({ deviceId: this.device.deviceId });
+      const existingDevicePort = existingProcess.data?.port;
+      if (existingProcess.success && existingProcess.data?.running && typeof existingDevicePort === "number") {
+        logger.info(
+          `[IOSCtrlProxy] Reusing host-control CtrlProxy process on device port ${existingDevicePort}`
+        );
+        this.xcTestProcessId = existingProcess.data.pid ?? null;
+        this.xcTestProcess = null;
+        await this.startIproxyTunnel({ devicePort: existingDevicePort });
+        return;
+      }
+
       const xctestrunPath = await this.builder.getXctestrunPath("device");
       await this.startIproxyTunnel();
       await this.verifyInstalledAppBundle();
@@ -1266,6 +1296,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Host control failed to start CtrlProxy");
       }
 
+      const resultDevicePort = result.data.port;
+      if (typeof resultDevicePort === "number" && resultDevicePort !== this.servicePort) {
+        logger.info(
+          `[IOSCtrlProxy] Host-control CtrlProxy process is listening on device port ${resultDevicePort}; restarting tunnel`
+        );
+        await this.stopIproxyTunnel();
+        await this.startIproxyTunnel({ devicePort: resultDevicePort });
+      }
       this.xcTestProcessId = result.data.pid;
       this.xcTestProcess = null;
       return;
@@ -1419,7 +1457,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return parsed;
   }
 
-  private async startIproxyTunnel(options: { allowServicePortReallocation?: boolean } = {}): Promise<void> {
+  private async startIproxyTunnel(options: {
+    allowServicePortReallocation?: boolean;
+    devicePort?: number;
+  } = {}): Promise<void> {
     if (this.isSimulator()) {
       return;
     }
@@ -1440,7 +1481,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       const result = await this.hostControl.startIproxy({
         deviceId: this.device.deviceId,
         localPort: this.servicePort,
-        devicePort: this.servicePort
+        devicePort: options.devicePort ?? this.servicePort
       });
       if (!result.success || !result.data) {
         throw new Error(result.error || "Failed to start iproxy tunnel via host control");

@@ -93,6 +93,23 @@ describe("PortManager", () => {
     expect(port2).toBe(8765);
   });
 
+  test("should reserve a known port for a device", () => {
+    PortManager.allocate("device-1");
+
+    PortManager.reserve("device-1", 8767);
+
+    expect(PortManager.getPort("device-1")).toBe(8767);
+    expect(PortManager.allocate("device-2")).toBe(8765);
+  });
+
+  test("should reject reserving a port allocated to another device", () => {
+    PortManager.allocate("device-1");
+
+    expect(() => PortManager.reserve("device-2", 8765)).toThrow(
+      "Port 8765 is already allocated to device device-1"
+    );
+  });
+
   test("should reuse released ports in order", () => {
     PortManager.allocate("device-1"); // 8765
     PortManager.allocate("device-2"); // 8766

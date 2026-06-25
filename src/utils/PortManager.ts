@@ -131,6 +131,26 @@ export class PortManager {
   }
 
   /**
+   * Reserve a known port for a device, such as a port owned by an existing
+   * host-control process discovered after this process starts.
+   */
+  public static reserve(deviceId: string, port: number): void {
+    for (const [allocatedDeviceId, allocatedPort] of this.allocatedPorts) {
+      if (allocatedDeviceId !== deviceId && allocatedPort === port) {
+        throw new Error(`Port ${port} is already allocated to device ${allocatedDeviceId}`);
+      }
+    }
+
+    const existingPort = this.allocatedPorts.get(deviceId);
+    if (existingPort === port) {
+      return;
+    }
+
+    this.allocatedPorts.set(deviceId, port);
+    logger.info(`[PortManager] Reserved port ${port} for device ${deviceId}`);
+  }
+
+  /**
    * Get the port allocated to a device, if any.
    * @param deviceId - The device identifier
    * @returns The allocated port or undefined

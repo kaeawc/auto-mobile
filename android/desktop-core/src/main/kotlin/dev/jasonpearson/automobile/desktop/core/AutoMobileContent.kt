@@ -69,6 +69,7 @@ import dev.jasonpearson.automobile.desktop.core.components.Tooltip
 import dev.jasonpearson.automobile.desktop.core.connection.ConnectionState
 import dev.jasonpearson.automobile.desktop.core.daemon.AutoMobileClient
 import dev.jasonpearson.automobile.desktop.core.daemon.DaemonSocketPaths
+import dev.jasonpearson.automobile.desktop.core.daemon.DeviceStreamEvent
 import dev.jasonpearson.automobile.desktop.core.daemon.FailuresPushSocketClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpDaemonClient
 import dev.jasonpearson.automobile.desktop.core.daemon.McpHttpClient
@@ -87,6 +88,7 @@ import dev.jasonpearson.automobile.desktop.core.failures.FakeFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.McpFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.StreamingFailuresDataSource
 import dev.jasonpearson.automobile.desktop.core.failures.TimeAggregation
+import dev.jasonpearson.automobile.desktop.core.layout.ConnectionStatus
 import dev.jasonpearson.automobile.desktop.core.layout.DeviceScreenView
 import dev.jasonpearson.automobile.desktop.core.layout.parseHierarchyFromJson
 import dev.jasonpearson.automobile.desktop.core.layout.rememberLayoutInspectorState
@@ -142,6 +144,20 @@ import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.put
 
 private val LOG = LoggerFactory.getLogger("AutoMobileContent")
+
+internal fun activeDeviceConnectionLostEvent(
+    event: DeviceStreamEvent,
+    activeDeviceId: String?,
+): DeviceStreamEvent.DeviceConnectionLost? {
+  return when (event) {
+    is DeviceStreamEvent.DeviceConnectionLost ->
+        event.takeIf { isActiveDeviceStreamFrame(it.deviceId, activeDeviceId) }
+  }
+}
+
+internal fun isActiveDeviceStreamFrame(deviceId: String?, activeDeviceId: String?): Boolean {
+  return activeDeviceId != null && deviceId == activeDeviceId
+}
 
 // Notification handler is injected via parameter
 
@@ -346,6 +362,14 @@ fun AutoMobileContent(
   var currentTouchLatencyMs by remember { mutableStateOf<Float?>(null) }
   var currentRecompositionRate by remember { mutableStateOf<Float?>(null) }
   var perfUpdateCounter by remember { mutableIntStateOf(0) }
+  fun clearPerformanceMetrics() {
+    currentFps = null
+    currentFrameTimeMs = null
+    currentJankFrames = null
+    currentMemoryMb = null
+    currentTouchLatencyMs = null
+    currentRecompositionRate = null
+  }
 
   // Track failure counts by type for collapsed Failures panel
   var crashCount by remember { mutableIntStateOf(0) }
@@ -646,7 +670,7 @@ fun AutoMobileContent(
 
   // Feed stream data into the shared layout inspector state for live layout mode
   val liveStreamClient = observationStreamClient
-  LaunchedEffect(liveStreamClient, isLiveLayoutMode) {
+  LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.hierarchyUpdates.collect { update ->
       update.data?.let { hierarchyJson ->
@@ -660,11 +684,16 @@ fun AutoMobileContent(
                   )
               parsed to changedIds
             }
-        result?.let { layoutInspectorState.applyHierarchyUpdate(it.first, it.second) }
+        result?.let {
+          if (isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) {
+            layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
+          }
+          layoutInspectorState.applyHierarchyUpdate(it.first, it.second)
+        }
       }
     }
   }
-  LaunchedEffect(liveStreamClient, isLiveLayoutMode) {
+  LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.screenshotUpdates.collect { update ->
       update.screenshotBase64?.let { base64 ->
@@ -672,6 +701,9 @@ fun AutoMobileContent(
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
               java.util.Base64.getDecoder().decode(base64)
             }
+        if (isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) {
+          layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
+        }
         layoutInspectorState.updateScreenshot(
             data = screenshotData,
             width = update.screenWidth,
@@ -868,17 +900,26 @@ fun AutoMobileContent(
     }
   }
 
+  // Device-side CtrlProxy disconnects arrive as stream events while the daemon socket can remain
+  // connected. Clear the production live layout state immediately so the UI cannot keep showing a
+  // stale last frame for the active device.
+  LaunchedEffect(observationStreamClient, activeDeviceId) {
+    val client = observationStreamClient ?: return@LaunchedEffect
+    client.deviceEvents.collect { event ->
+      activeDeviceConnectionLostEvent(event, activeDeviceId)?.let { lostEvent ->
+        LOG.warn("Device connection lost for ${lostEvent.deviceId}: ${lostEvent.error}")
+        layoutInspectorState.disconnect()
+        clearPerformanceMetrics()
+      }
+    }
+  }
+
   // Clear performance metrics when stream disconnects
   LaunchedEffect(observationStreamClient) {
     val client = observationStreamClient ?: return@LaunchedEffect
     client.connectionState.collect { connectionState ->
       if (connectionState is ConnectionState.Disconnected) {
-        currentFps = null
-        currentFrameTimeMs = null
-        currentJankFrames = null
-        currentMemoryMb = null
-        currentTouchLatencyMs = null
-        currentRecompositionRate = null
+        clearPerformanceMetrics()
       }
     }
   }

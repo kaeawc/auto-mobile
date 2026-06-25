@@ -559,13 +559,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (this.isSimulator()) {
         perf.startOperation("externalProcessCheck");
         const externalProcess = await this.findExternalCtrlProxyProcess();
+        const defaultPortIsHealthy = externalProcess === null &&
+          !this.useHostControl() &&
+          this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+          await this.checkHealthEndpointOnPort(IOSCtrlProxyManager.DEFAULT_PORT);
         perf.endOperation("externalProcessCheck");
-        if (externalProcess) {
+        if (externalProcess || defaultPortIsHealthy) {
+          const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
           logger.info(
-            `[IOSCtrlProxy] External xcodebuild CtrlProxy process detected on port ${externalProcess.port}, skipping spawn`
+            `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
           );
-          if (externalProcess.port !== this.servicePort) {
-            this.adoptServicePort(externalProcess.port);
+          if (externalPort !== this.servicePort) {
+            this.adoptServicePort(externalPort);
           }
           // Fall through to health polling below instead of spawning
         } else {
@@ -1446,13 +1451,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async checkHealthEndpoint(): Promise<boolean> {
+    return this.checkHealthEndpointOnPort(this.servicePort);
+  }
+
+  private async checkHealthEndpointOnPort(port: number): Promise<boolean> {
     try {
       const host = this.useHostControl() ? this.hostControl.getHost() : "localhost";
       if (this.useHostControl()) {
         const controller = new AbortController();
         const timeoutId = this.timer.setTimeout(() => controller.abort(), 2000);
         try {
-          const response = await fetch(`http://${host}:${this.servicePort}/health`, {
+          const response = await fetch(`http://${host}:${port}/health`, {
             signal: controller.signal
           });
           const body = await response.text();
@@ -1464,7 +1473,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       // Use curl to check the health endpoint locally
       const { stdout } = await this.processExecutor.exec(
-        `curl -s --max-time 2 http://${host}:${this.servicePort}/health`
+        `curl -s --max-time 2 http://${host}:${port}/health`
       );
       return stdout.includes("ok") || stdout.includes("healthy");
     } catch {

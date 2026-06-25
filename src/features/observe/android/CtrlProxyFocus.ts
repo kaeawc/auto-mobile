@@ -26,27 +26,33 @@ export class CtrlProxyFocus {
   /**
    * Clear accessibility focus (TalkBack cursor) on the current element.
    *
-   * STUB: This is a placeholder implementation. Full implementation is deferred to a future PR.
-   * Currently logs a warning and does nothing.
+   * NOT IMPLEMENTED: throws rather than silently no-op'ing so callers fail loudly.
+   * Full implementation (sending a clear-focus command to the Android accessibility
+   * service) is tracked at https://github.com/kaeawc/auto-mobile/issues
    */
   async clearAccessibilityFocus(): Promise<void> {
-    logger.warn("[CTRL_PROXY] clearAccessibilityFocus() called but not yet implemented (stub)");
-    // TODO: Implement accessibility focus clearing
-    // This should send a command to the Android accessibility service to clear focus
+    logger.warn("[CTRL_PROXY] clearAccessibilityFocus() called but is not implemented");
+    throw new Error(
+      "clearAccessibilityFocus() is not implemented. " +
+        "Track progress at https://github.com/kaeawc/auto-mobile/issues"
+    );
   }
 
   /**
    * Set accessibility focus (TalkBack cursor) on a specific element.
    *
-   * STUB: This is a placeholder implementation. Full implementation is deferred to a future PR.
-   * Currently logs a warning and does nothing.
+   * NOT IMPLEMENTED: throws rather than silently no-op'ing so callers fail loudly.
+   * Full implementation (sending a set-focus command to the Android accessibility
+   * service) is tracked at https://github.com/kaeawc/auto-mobile/issues
    *
    * @param resourceId - Resource ID of the element to focus
    */
   async setAccessibilityFocus(resourceId: string): Promise<void> {
-    logger.warn(`[CTRL_PROXY] setAccessibilityFocus(${resourceId}) called but not yet implemented (stub)`);
-    // TODO: Implement accessibility focus setting
-    // This should send a command to the Android accessibility service to set focus on the element
+    logger.warn(`[CTRL_PROXY] setAccessibilityFocus(${resourceId}) called but is not implemented`);
+    throw new Error(
+      `setAccessibilityFocus(${resourceId}) is not implemented. ` +
+        "Track progress at https://github.com/kaeawc/auto-mobile/issues"
+    );
   }
 
   /**

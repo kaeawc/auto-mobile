@@ -6,6 +6,11 @@ import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
+import {
+  IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
+  iosNotifyutilRegisteredSetCommand,
+  parseNotifyutilState
+} from "../../utils/ios-cmdline-tools/notifyutil";
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error";
@@ -201,8 +206,32 @@ export class BiometricAuth extends BaseVisualChange {
 
     try {
       // Ensure biometry is enrolled before attempting a match.
-      await simctl.executeCommand(`spawn ${udid} notifyutil -s ${keys.enrollment} 1`);
-      await simctl.executeCommand(`spawn ${udid} notifyutil -p ${keys.enrollment}`);
+      const enrollmentResult = await simctl.executeCommand(
+        iosNotifyutilRegisteredSetCommand(udid, keys.enrollment, "1"),
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
+      );
+      if (enrollmentResult.stderr && enrollmentResult.stderr.trim().length > 0) {
+        return {
+          success: false,
+          action: options.action,
+          modality,
+          fingerprintId: options.fingerprintId,
+          errorCode: options.errorCode,
+          supported: true,
+          error: `notifyutil failed: ${enrollmentResult.stderr.trim()}`
+        };
+      }
+      if (parseNotifyutilState(enrollmentResult.stdout ?? "") !== true) {
+        return {
+          success: false,
+          action: options.action,
+          modality,
+          fingerprintId: options.fingerprintId,
+          errorCode: options.errorCode,
+          supported: true,
+          error: "iOS biometric enrollment did not verify: notifyutil did not read back enrolled state."
+        };
+      }
 
       for (const target of targets) {
         const res = await simctl.executeCommand(`spawn ${udid} notifyutil -p ${target}`);

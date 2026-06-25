@@ -58,7 +58,7 @@ describe("DeviceState", () => {
   test("sets iOS simulator Do Not Disturb on with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       "com.apple.donotdisturb.enabled 1\n"
     );
 
@@ -81,16 +81,8 @@ describe("DeviceState", () => {
     expect(result.doNotDisturb?.warning).toBeUndefined();
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -s com.apple.donotdisturb.enabled 1",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -p com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
+        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        timeoutMs: 5000,
       },
     ]);
   });
@@ -98,7 +90,7 @@ describe("DeviceState", () => {
   test("sets iOS simulator Do Not Disturb off with notifyutil best-effort commands", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       "com.apple.donotdisturb.enabled 0\n"
     );
 
@@ -121,25 +113,39 @@ describe("DeviceState", () => {
     expect(result.doNotDisturb?.warning).toBeUndefined();
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -s com.apple.donotdisturb.enabled 0",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -p com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
+        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 0 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        timeoutMs: 5000,
       },
     ]);
+  });
+
+  test("sets iOS simulator Do Not Disturb with a temporary notifyutil registration", async () => {
+    const simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+      "com.apple.donotdisturb.enabled 1\ncom.apple.donotdisturb.enabled\n"
+    );
+
+    const deviceState = new DeviceState(iosSimulator, { simctl });
+    const result = await deviceState.setState({
+      doNotDisturb: { enabled: true },
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.doNotDisturb).toMatchObject({
+      supported: true,
+      enabled: true,
+      requestedMode: "none",
+      appliedMode: "none",
+      verified: true,
+    });
   });
 
   test("reports honest downgrade for iOS simulator priority/alarms (no silent tier claim)", async () => {
     const simctl = new FakeSimCtlClient();
     // notifyutil reads back enabled, but the requested *tier* cannot be applied.
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       "com.apple.donotdisturb.enabled 1\n"
     );
 
@@ -165,16 +171,8 @@ describe("DeviceState", () => {
     // We still posted the binary toggle (a DND state was applied, just not the tier).
     expect(simctl.getMethodCalls("executeCommand")).toEqual([
       {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -s com.apple.donotdisturb.enabled 1",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -p com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
-      },
-      {
-        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
-        timeoutMs: undefined,
+        command: "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
+        timeoutMs: 5000,
       },
     ]);
   });
@@ -184,7 +182,7 @@ describe("DeviceState", () => {
     // notifyutil reads back DISABLED even though we requested an enabled tier:
     // the binary toggle itself did not verify, on top of the tier downgrade.
     simctl.setCommandResult(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -g com.apple.donotdisturb.enabled",
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       "com.apple.donotdisturb.enabled 0\n"
     );
 
@@ -214,7 +212,7 @@ describe("DeviceState", () => {
   test("surfaces simctl errors without throwing out of setState", async () => {
     const simctl = new FakeSimCtlClient();
     simctl.setCommandError(
-      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -s com.apple.donotdisturb.enabled 1",
+      "spawn 12345678-1234-1234-1234-123456789ABC notifyutil -1 com.apple.donotdisturb.enabled -s com.apple.donotdisturb.enabled 1 -g com.apple.donotdisturb.enabled -p com.apple.donotdisturb.enabled",
       new Error("simctl spawn failed")
     );
 

@@ -12,6 +12,7 @@ const TOUCH_MATCH = "com.apple.BiometricKit_Sim.fingerTouch.match";
 const TOUCH_NOMATCH = "com.apple.BiometricKit_Sim.fingerTouch.nomatch";
 const PEARL_MATCH = "com.apple.BiometricKit_Sim.pearl.match";
 const PEARL_NOMATCH = "com.apple.BiometricKit_Sim.pearl.nomatch";
+const ENROLL_COMMAND = `spawn ${SIM_UDID} notifyutil -1 ${ENROLL} -s ${ENROLL} 1 -g ${ENROLL} -p ${ENROLL}`;
 
 describe("BiometricAuth - iOS Simulator", () => {
   let simctl: FakeSimCtlClient;
@@ -25,6 +26,7 @@ describe("BiometricAuth - iOS Simulator", () => {
 
   beforeEach(() => {
     simctl = new FakeSimCtlClient();
+    simctl.setCommandResult(ENROLL_COMMAND, `${ENROLL} 1\n${ENROLL}\n`);
     timer = new FakeTimer();
     timer.enableAutoAdvance();
   });
@@ -36,10 +38,10 @@ describe("BiometricAuth - iOS Simulator", () => {
     expect(result.success).toBe(true);
     expect(result.supported).toBe(true);
     expect(commands()).toEqual([
-      `spawn ${SIM_UDID} notifyutil -s ${ENROLL} 1`,
-      `spawn ${SIM_UDID} notifyutil -p ${ENROLL}`,
+      ENROLL_COMMAND,
       `spawn ${SIM_UDID} notifyutil -p ${TOUCH_MATCH}`,
     ]);
+    expect(simctl.getMethodCalls("executeCommand")[0]?.timeoutMs).toBe(5000);
   });
 
   test("match + face posts pearl.match", async () => {
@@ -116,9 +118,35 @@ describe("BiometricAuth - iOS Simulator", () => {
     expect(result.error).toContain("notifyutil failed");
   });
 
+  test("enrollment notifyutil stderr surfaces as failure", async () => {
+    simctl.setCommandResult(
+      ENROLL_COMMAND,
+      "",
+      "notifyutil: enrollment unavailable"
+    );
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl);
+    const result = await auth.execute({ action: "match", modality: "fingerprint" });
+
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(true);
+    expect(result.error).toContain("notifyutil failed");
+    expect(commands()).toEqual([ENROLL_COMMAND]);
+  });
+
+  test("enrollment readback must verify before posting biometric event", async () => {
+    simctl.setCommandResult(ENROLL_COMMAND, `${ENROLL} 0\n${ENROLL}\n`);
+    const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl);
+    const result = await auth.execute({ action: "match", modality: "fingerprint" });
+
+    expect(result.success).toBe(false);
+    expect(result.supported).toBe(true);
+    expect(result.error).toContain("enrollment did not verify");
+    expect(commands()).toEqual([ENROLL_COMMAND]);
+  });
+
   test("thrown simctl error is caught and reported", async () => {
     simctl.setCommandError(
-      `spawn ${SIM_UDID} notifyutil -s ${ENROLL} 1`,
+      ENROLL_COMMAND,
       new Error("simctl unavailable")
     );
     const auth = new BiometricAuth(makeDevice(SIM_UDID), null, timer, simctl);

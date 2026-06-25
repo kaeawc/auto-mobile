@@ -203,7 +203,19 @@ export function createMessage(
  *   cancelScreenshotBackoff → ensureConnected → register → send → await
  * flow used by WebSocket delegate methods.
  */
-export interface SendCommandOptions<T> {
+type RequiredKeys<T> = {
+  [K in keyof T]-?: object extends Pick<T, K> ? never : K
+}[keyof T];
+
+type RequiredNonBaseResultKeys<T> = Exclude<RequiredKeys<T>, keyof BaseResult>;
+
+type UnsupportedCommandErrorBuilder<T> = (messageType: string, error: string) => T;
+
+type UnsupportedCommandErrorOption<T> = [RequiredNonBaseResultKeys<T>] extends [never]
+  ? { unsupportedCommandError?: UnsupportedCommandErrorBuilder<T> }
+  : { unsupportedCommandError: UnsupportedCommandErrorBuilder<T> };
+
+interface SendCommandBaseOptions<T> {
   idPrefix: string;
   responseType: string;
   messageType: string;
@@ -216,13 +228,13 @@ export interface SendCommandOptions<T> {
   timeoutError?: (timeoutMs: number) => T;
   /** Custom not-connected-error builder for non-BaseResult shapes (e.g. carries `action` or `enabled`). */
   notConnectedError?: () => T;
-  /** Custom unsupported-command builder for non-BaseResult shapes (e.g. carries `open`). */
-  unsupportedCommandError?: (messageType: string, error: string) => T;
   /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
   errorLabel?: string;
 }
+
+export type SendCommandOptions<T> = SendCommandBaseOptions<T> & UnsupportedCommandErrorOption<T>;
 
 export async function sendCommand<T>(
   context: DelegateContext,

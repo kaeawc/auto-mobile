@@ -61,7 +61,10 @@ SpringBoard: tap, long-press, swipe, and **drag**
 (`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`). The `dragAndDrop` MCP
 tool resolves source/target element centers from a freshly-refreshed view hierarchy and
 dispatches through `IOSCtrlProxyClient.requestDrag()` to this path, reaching parity with the
-Android accessibility-service drag.
+Android accessibility-service drag. The refresh uses `requestHierarchySync` to force a fresh
+runner round-trip rather than `getAccessibilityHierarchy`, bypassing the client's (<500ms)
+hierarchy cache so a drag started just after a navigation/scroll can't resolve against a
+stale snapshot.
 
 The XCUICoordinate drag API takes a velocity (points/second) rather than a duration, so
 `GesturePerformer.drag` converts the caller's `dragDurationMs` into the velocity that covers

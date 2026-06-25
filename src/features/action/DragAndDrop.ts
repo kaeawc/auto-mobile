@@ -277,7 +277,7 @@ export class DragAndDrop extends BaseVisualChange {
     // observe. Android refreshes via the accessibility service; iOS via the XCUITest
     // CtrlProxy runner's hierarchy snapshot.
     const refreshed = this.device.platform === "ios"
-      ? await this.refreshIosViewHierarchy()
+      ? await this.refreshIosViewHierarchy(signal)
       : await this.refreshViewHierarchy(signal);
     if (refreshed && !refreshed.hierarchy?.error) {
       return refreshed;
@@ -290,16 +290,18 @@ export class DragAndDrop extends BaseVisualChange {
     return null;
   }
 
-  private async refreshIosViewHierarchy(): Promise<ViewHierarchyResult | null> {
-    // skipWaitForFresh=false forces the runner to return a current snapshot when the
-    // cached hierarchy is stale, instead of resolving against the (possibly old) observe
-    // cache. Mirrors how the iOS observe path sources its hierarchy.
-    return IOSCtrlProxyClient.getInstance(this.device).getAccessibilityHierarchy(
-      undefined,
-      undefined,
-      false,
-      0
-    );
+  private async refreshIosViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
+    // Bypass the IOSCtrlProxyClient hierarchy cache entirely. getAccessibilityHierarchy /
+    // getLatestHierarchy would return any client-cached snapshot younger than its (<500ms)
+    // TTL before issuing a fresh request, so a drag started shortly after a navigation/scroll
+    // could still resolve against stale coordinates. requestHierarchySync always performs a
+    // fresh runner round-trip, guaranteeing the drag endpoints come from a current snapshot.
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    const synced = await client.requestHierarchySync(undefined, false, signal, HIERARCHY_REFRESH_TIMEOUT_MS);
+    if (!synced?.hierarchy) {
+      return null;
+    }
+    return client.convertToViewHierarchyResult(synced.hierarchy);
   }
 
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {

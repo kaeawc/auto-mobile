@@ -143,6 +143,25 @@ describe("DragAndDrop - iOS", () => {
     expect(fakeAndroidClient.getHierarchyRequestCount()).toBe(0);
   });
 
+  test("bypasses the client hierarchy cache via requestHierarchySync", async () => {
+    // requestHierarchySync always does a fresh runner round-trip; the cache-aware
+    // getAccessibilityHierarchy / getLatestHierarchy fast-paths must NOT be used,
+    // otherwise a snapshot younger than the client TTL could resolve stale coordinates.
+    const syncSpy = spyOn(fakeIosClient, "requestHierarchySync");
+    const cachedSpy = spyOn(fakeIosClient, "getAccessibilityHierarchy");
+    const latestSpy = spyOn(fakeIosClient, "getLatestHierarchy");
+    fakeIosClient.setDragResult({ success: true, totalTimeMs: 1, gestureTimeMs: 1 });
+
+    await dragAndDrop.execute({
+      source: { elementId: "source-id" },
+      target: { elementId: "target-id" }
+    });
+
+    expect(syncSpy).toHaveBeenCalled();
+    expect(cachedSpy).not.toHaveBeenCalled();
+    expect(latestSpy).not.toHaveBeenCalled();
+  });
+
   test("drags against the freshly-refreshed hierarchy, not the stale observe cache", async () => {
     // The cached observe places the elements at (50,50)/(250,250); the fresh runner
     // snapshot reports new coordinates after the UI scrolled. The drag must use the fresh ones.

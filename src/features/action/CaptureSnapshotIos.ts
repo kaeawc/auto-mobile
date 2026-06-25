@@ -4,6 +4,7 @@ import type { CaptureSnapshotArgs, CaptureSnapshotResult } from "./CaptureSnapsh
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import { captureIosSettings, type IosSettingsSnapshot } from "../../utils/ios-cmdline-tools/iosSettings";
 import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
@@ -55,8 +56,9 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
     const metadata = await this.getDeviceMetadata();
     const pathOptions = this.getPathOptions();
 
+    let iosSettings: IosSettingsSnapshot | undefined;
     if (includeSettings) {
-      logger.warn("[iOS] includeSettings requested, but settings capture is not supported for iOS app data snapshots");
+      iosSettings = await captureIosSettings(this.simctl, this.device.deviceId);
     }
 
     const appDataBackup = includeAppData
@@ -73,7 +75,8 @@ export class CaptureSnapshotIos implements SnapshotCaptureProvider {
       osVersion: metadata.osVersion,
       snapshotType: "app_data",
       includeAppData,
-      includeSettings: false,
+      includeSettings,
+      ...(iosSettings ? { iosSettings } : {}),
       appDataBackup,
     };
 

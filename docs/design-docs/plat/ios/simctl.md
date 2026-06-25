@@ -17,6 +17,9 @@ system-level simulator behaviors.
 - Live locale and localization changes (see below).
 - Biometric (Touch ID / Face ID) simulation for `biometricAuth` (see below).
 - Simulated push delivery for `postNotification` (see below).
+- Deep-link / URL-scheme discovery from the installed `.app` bundle (see below).
+- Per-app notification authorization read via BulletinBoard (see below).
+- Device settings capture/restore for `deviceSnapshot` (see below).
 
 ## Live locale changes
 
@@ -131,6 +134,122 @@ that needs no AutoMobile iOS SDK — but it does require an explicit `appId` (bu
   and `actions` (need a pre-registered `UNNotificationCategory`) are ignored with a
   `warning` rather than failing.
 
+## Deep-link discovery
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
+
+The `getDeepLinks` MCP tool returns an iOS app's declared deep links. iOS apps declare
+deep links statically in bundle metadata rather than via a runtime resolver, so AutoMobile
+reads them off the installed `.app` bundle on disk. Custom URL schemes and universal-link
+hosts come from two different sources.
+
+### How it works
+
+1. **Resolve the bundle path** — `xcrun simctl get_app_container <udid> <bundleId> app`
+   returns the `.app`'s host filesystem path. A missing app exits non-zero and is reported
+   as a clean "not installed" result.
+2. **URL schemes** — read `<app>/Info.plist` with host `plutil -convert json` and collect
+   `CFBundleURLTypes[].CFBundleURLSchemes[]` (deduplicated). These become the `schemes`
+   field.
+3. **Universal-link hosts** — `codesign -d --entitlements :- <app> | plutil -convert json`
+   surfaces the code-signing entitlements; AutoMobile keeps
+   `com.apple.developer.associated-domains` entries prefixed with `applinks:` and strips the
+   prefix. These become the `hosts` field. Unsigned bundles or bundles without associated
+   domains yield `[]`, not an error.
+4. **Document types** — best-effort `supportedMimeTypes` from
+   `CFBundleDocumentTypes[].LSItemContentTypes[]`.
+5. **Cross-platform shape** — synthesized `intentFilters` (one VIEW filter listing each
+   scheme/host) keep the `DeepLinkResult` shape identical to Android so platform-agnostic
+   callers work unchanged.
+
+`get_app_container` routes through `simctl`; `plutil`/`codesign` are host tools (not
+`simctl` subcommands) and run directly on the host filesystem.
+
+### Limitations
+
+- Simulator only. Physical-device discovery (copying the device-signed bundle off-device
+  via `devicectl`) returns an explicit "not yet implemented" error.
+- iOS has no runtime intent resolver, so only *declared* schemes/domains are reported.
+- `supportedMimeTypes` is best-effort document-type metadata, not a routing guarantee.
+
+## Notification authorization read
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
+
+The `getNotificationPolicy` MCP tool reports per-app notification authorization
+(`UNAuthorizationStatus`) on iOS simulators by reading the BulletinBoard daemon's on-disk
+section info. There is no host-side runtime API for this, so AutoMobile decodes the
+persisted plist.
+
+### How it works
+
+1. **Locate the plist** —
+   `~/Library/Developer/CoreSimulator/Devices/<udid>/data/Library/BulletinBoard/VersionedSectionInfo.plist`.
+2. **Decode the outer plist** — convert it with `plutil -convert xml1` (not `json`: the
+   file embeds `<data>` blobs JSON cannot represent) and extract the base64 `<data>` blob
+   registered under `sectionInfo[<bundleId>]`.
+3. **Decode the nested blob** — each section value is a separate `bplist00`
+   NSKeyedArchiver archive. Because it contains `CFKeyedArchiverUID` refs that
+   `plutil -convert json` rejects, AutoMobile writes the blob to a temp file and converts
+   it with `plutil -convert xml1`, then reads the settings dict scalars
+   (`authorizationStatus`, `alertType`, `lockScreenSetting`, `notificationCenterSetting`,
+   `pushSettings`).
+4. **Map the status** — `authorizationStatus` maps to
+   `notDetermined`/`denied`/`authorized`/`provisional`/`ephemeral`; `allowed` is true only
+   for `authorized` (2). The result uses `method: "ios_bulletinboard_plist"`.
+
+An app with no registered section returns `allowed: null` plus a warning (the app likely
+never requested authorization), not an error. A missing/unreadable plist returns a warning
+rather than throwing.
+
+### Limitations
+
+- Simulator only. Physical devices return `supported: false` (no host-side read API;
+  notification settings are only available to the owning app at runtime via
+  `UNUserNotificationCenter`).
+- Read-only. `setNotificationPolicy` stays unsupported on iOS: there is no public API
+  to write per-app notification authorization, and editing the BulletinBoard plist on
+  disk would not take effect without restarting the daemon.
+- This is per-app *authorization status*, a different concept from Android's DND
+  *policy access* — see [Notifications](../android/notifications.md).
+
+## Device settings snapshot
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
+
+When `deviceSnapshot` is invoked with `includeSettings: true` on an iOS simulator,
+AutoMobile captures and restores a curated allowlist of simulator settings alongside app
+data. (Previously iOS silently dropped settings and hard-coded the manifest to
+`includeSettings: false`.)
+
+### How it works
+
+1. **Capture per-key defaults** — for each `(domain, key)` in the allowlist, run
+   `xcrun simctl spawn <udid> defaults read <domain> <key>` and record the value. The
+   allowlist is scalar-only for now (`{.GlobalPreferences, AppleLocale}`); array-typed keys
+   such as `AppleLanguages` are a follow-up because a plain per-key `defaults write` cannot
+   round-trip them.
+2. **Capture UI state** — `xcrun simctl ui <udid> appearance` and `... content_size` read
+   the device-level light/dark appearance and Dynamic Type size.
+3. **Persist to the manifest** — captured values go into a distinct optional
+   `iosSettings` manifest field (separate from Android's `global/secure/system` triplet,
+   which does not fit `(domain, key)` exports).
+4. **Restore surgically** — on restore (gated on `manifest.includeSettings &&
+   manifest.iosSettings`, identical to Android), each value is re-applied with a per-key
+   `defaults write` (never a whole-domain `defaults import`, so system-managed keys are not
+   clobbered), then `simctl ui appearance`/`content_size` re-apply UI state so it takes
+   effect without a respawn.
+
+Individual key read/write failures are logged and skipped (non-fatal), matching the
+per-package resilience of iOS app-data restore.
+
+### Limitations
+
+- Simulator only; physical-device settings are not reachable via `simctl`.
+- Scalar keys only in the first cut; array-typed and per-app domains are future work.
+- `simctl spawn ... defaults` has no stdin, so whole-domain `defaults export/import` is not
+  used — the per-key allowlist is the deliberate, auditable design.
+
 ## Usage patterns
 
 - Prefer deterministic simulator selection by device identifier.
@@ -147,4 +266,6 @@ that needs no AutoMobile iOS SDK — but it does require an explicit `appId` (bu
 - [CtrlProxy iOS](xctestrunner/index.md) - Touch injection and element queries.
 - [iOS overview](index.md)
 - [Android biometrics](../android/biometrics.md) - The `biometricAuth` Android counterpart.
-- [Android notifications](../android/notifications.md) - The `postNotification` Android counterpart.
+- [Android notifications](../android/notifications.md) - The `postNotification` Android counterpart,
+  and the cross-platform notification policy concept (Android DND policy access vs iOS
+  per-app authorization).

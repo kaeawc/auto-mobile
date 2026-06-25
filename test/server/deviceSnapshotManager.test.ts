@@ -182,6 +182,49 @@ describe("deviceSnapshotManager", () => {
     expect(updated?.lastAccessedAt).toBe(nowIso);
   });
 
+  test("restoreDeviceSnapshot round-trips an iOS manifest carrying iosSettings", async () => {
+    const createdAt = new Date(0).toISOString();
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName: "ios-settings-snapshot",
+      timestamp: createdAt,
+      deviceId: TEST_DEVICE.deviceId,
+      deviceName: TEST_DEVICE.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+        ui: { appearance: "dark", contentSize: "large" },
+      },
+    };
+
+    await repository.insertSnapshot({
+      snapshotName: "ios-settings-snapshot",
+      deviceId: TEST_DEVICE.deviceId,
+      deviceName: TEST_DEVICE.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      createdAt,
+      lastAccessedAt: createdAt,
+      sizeBytes: 0,
+      manifest,
+    });
+
+    // The stored record preserves the optional iosSettings field.
+    const stored = await repository.getSnapshot("ios-settings-snapshot");
+    expect(stored?.manifest.iosSettings).toEqual(manifest.iosSettings);
+
+    const { manifest: returnedManifest } = await restoreDeviceSnapshot(TEST_DEVICE, {
+      snapshotName: "ios-settings-snapshot",
+    });
+
+    expect(returnedManifest.iosSettings).toEqual(manifest.iosSettings);
+    expect(restoreCalls[restoreCalls.length - 1]?.manifest.iosSettings).toEqual(manifest.iosSettings);
+  });
+
   test("restoreDeviceSnapshot migrates legacy manifest when missing from repository", async () => {
     const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "snapshot-manager-legacy-"));
     try {

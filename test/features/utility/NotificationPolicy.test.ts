@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type { BootedDevice } from "../../../src/models";
-import { NotificationPolicy } from "../../../src/features/utility/NotificationPolicy";
+import { NotificationPolicy, type NotificationPolicyAccessState } from "../../../src/features/utility/NotificationPolicy";
+import type { IosNotificationAuthorizationReader } from "../../../src/features/utility/ios/IosNotificationAuthorizationReader";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 
 const androidDevice: BootedDevice = {
@@ -78,5 +79,61 @@ describe("NotificationPolicy", () => {
     expect(result.success).toBe(false);
     expect(result.policyAccess.supported).toBe(false);
     expect(result.error).toContain("iOS does not expose");
+  });
+
+  test("getPolicy on iOS simulator routes to the injected BulletinBoard reader", async () => {
+    const ios: BootedDevice = {
+      name: "iPhone 16",
+      platform: "ios",
+      deviceId: "12345678-1234-1234-1234-123456789ABC",
+    };
+
+    const calls: Array<{ deviceId: string; bundleId: string }> = [];
+    const fakeReader: IosNotificationAuthorizationReader = {
+      read: async (deviceId, bundleId) => {
+        calls.push({ deviceId, bundleId });
+        return {
+          supported: true,
+          method: "ios_bulletinboard_plist",
+          allowed: true,
+          authorizationStatus: "authorized",
+        } as NotificationPolicyAccessState;
+      },
+    };
+
+    const notificationPolicy = new NotificationPolicy(ios, { iosReader: fakeReader });
+    const result = await notificationPolicy.getPolicy("com.apple.MobileSMS");
+
+    expect(result.success).toBe(true);
+    expect(result.platform).toBe("ios");
+    expect(result.policyAccess).toMatchObject({
+      supported: true,
+      method: "ios_bulletinboard_plist",
+      allowed: true,
+      authorizationStatus: "authorized",
+    });
+    expect(calls).toEqual([{ deviceId: ios.deviceId, bundleId: "com.apple.MobileSMS" }]);
+  });
+
+  test("getPolicy on iOS surfaces reader errors as success:false", async () => {
+    const ios: BootedDevice = {
+      name: "iPhone (physical)",
+      platform: "ios",
+      deviceId: "00008110-000A1234567890AB",
+    };
+    const fakeReader: IosNotificationAuthorizationReader = {
+      read: async () => ({
+        supported: false,
+        method: "unsupported",
+        error: "iOS notification authorization can only be read on simulators",
+      }),
+    };
+
+    const notificationPolicy = new NotificationPolicy(ios, { iosReader: fakeReader });
+    const result = await notificationPolicy.getPolicy("com.apple.MobileSMS");
+
+    expect(result.success).toBe(false);
+    expect(result.policyAccess.supported).toBe(false);
+    expect(result.error).toContain("simulators");
   });
 });

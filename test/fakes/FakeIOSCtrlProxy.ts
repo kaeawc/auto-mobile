@@ -24,6 +24,7 @@ import type {
   CtrlProxyVoiceOverActionResult,
   CtrlProxyActionResult,
 } from "../../src/features/observe/ios/types";
+import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
@@ -671,14 +672,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   async requestSetText(
     text: string,
-    resourceId?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult> {
     await this.applyDelay("setText");
     this.checkFailure("setText");
 
-    this.setTextHistory.push({ text, resourceId });
+    this.setTextHistory.push({ text, resourceId: options?.resourceId });
 
     return {
       success: true,

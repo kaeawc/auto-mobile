@@ -17,10 +17,12 @@ interface TestInputText {
 
 type RequestSetText = (
   text: string,
-  resourceId?: string,
-  timeoutMs?: number,
-  perf?: unknown,
-  dismissKeyboard?: boolean
+  options?: {
+    resourceId?: string;
+    timeoutMs?: number;
+    perf?: unknown;
+    dismissKeyboard?: boolean;
+  }
 ) => Promise<{ success: boolean; error?: string; totalTimeMs: number }>;
 
 function testInputText(inputText: InputText): TestInputText {
@@ -92,8 +94,8 @@ describe("InputText", () => {
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
 
-    stubAndroidSetText(async (text, _resourceId, _timeoutMs, _perf, dismissKeyboard) => {
-      setTextCalls.push({ text, dismissKeyboard });
+    stubAndroidSetText(async (text, options) => {
+      setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
       return { success: true, totalTimeMs: 1 };
     });
 
@@ -101,7 +103,7 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(result.method).toBe("eventLast");
-    expect(setTextCalls).toEqual([{ text: "@Jason Pearso", dismissKeyboard: false }]);
+    expect(setTextCalls).toEqual([{ text: "@Jason Pearso", dismissKeyboard: undefined }]);
     expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_N"]);
   });
 
@@ -110,8 +112,8 @@ describe("InputText", () => {
     const inputText = new InputText(androidDevice, factory as AdbClientFactory);
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
 
-    stubAndroidSetText(async (text, _resourceId, _timeoutMs, _perf, dismissKeyboard) => {
-      setTextCalls.push({ text, dismissKeyboard });
+    stubAndroidSetText(async (text, options) => {
+      setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
       return { success: true, totalTimeMs: 1 };
     });
 
@@ -119,7 +121,7 @@ describe("InputText", () => {
 
     expect(result.success).toBe(true);
     expect(setTextCalls).toEqual([
-      { text: "abc de", dismissKeyboard: false },
+      { text: "abc de", dismissKeyboard: undefined },
       { text: "abc def  ", dismissKeyboard: false },
     ]);
     expect(inputCommands(factory)).toEqual(["shell input keyevent KEYCODE_F"]);
@@ -146,8 +148,8 @@ describe("InputText", () => {
     const setTextCalls: Array<{ text: string; dismissKeyboard?: boolean }> = [];
     factory.getFakeClient().setCommandResult("shell getprop ro.build.version.sdk", "30\n");
 
-    stubAndroidSetText(async (text, _resourceId, _timeoutMs, _perf, dismissKeyboard) => {
-      setTextCalls.push({ text, dismissKeyboard });
+    stubAndroidSetText(async (text, options) => {
+      setTextCalls.push({ text, dismissKeyboard: options?.dismissKeyboard });
       return { success: true, totalTimeMs: 1 };
     });
 

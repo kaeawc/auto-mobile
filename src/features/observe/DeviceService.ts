@@ -36,6 +36,23 @@ export interface TextResult extends DeviceOperationResult {
 }
 
 /**
+ * Optional parameters for {@link DeviceService.requestSetText}.
+ */
+export interface SetTextOptions {
+  /** Optional element identifier to target. */
+  resourceId?: string;
+  /** Operation timeout in milliseconds (default 5000). */
+  timeoutMs?: number;
+  /** Optional performance tracker. */
+  perf?: PerformanceTracker;
+  /**
+   * Android-only. Suppresses the soft keyboard via SHOW_MODE_HIDDEN after
+   * setText. Ignored on iOS (no handler on the Swift side).
+   */
+  dismissKeyboard?: boolean;
+}
+
+/**
  * Result for screenshot operations.
  */
 export interface ScreenshotResult extends DeviceOperationResult {
@@ -192,16 +209,11 @@ export interface DeviceService {
   /**
    * Set text in the focused input field.
    * @param text Text to input
-   * @param resourceId Optional element identifier to target
-   * @param timeoutMs Operation timeout in milliseconds
-   * @param perf Optional performance tracker
+   * @param options Optional targeting, timeout, performance, and keyboard options
    */
   requestSetText(
     text: string,
-    resourceId?: string,
-    timeoutMs?: number,
-    perf?: PerformanceTracker,
-    dismissKeyboard?: boolean
+    options?: SetTextOptions
   ): Promise<TextResult>;
 
   /**

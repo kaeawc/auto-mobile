@@ -325,7 +325,7 @@ describe("IOSCtrlProxyClient", function() {
       );
 
       try {
-        const resultPromise = testClient.requestSetText("Hello World", "text_field_1", 5000);
+        const resultPromise = testClient.requestSetText("Hello World", { resourceId: "text_field_1", timeoutMs: 5000 });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);

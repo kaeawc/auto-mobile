@@ -1,5 +1,5 @@
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, SendTextResult } from "../../models";
+import { BootedDevice, ImeAction, SendTextResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
@@ -27,7 +27,7 @@ export class InputText extends BaseVisualChange {
 
   async execute(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
+    imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y"
   ): Promise<SendTextResult & { method?: InputTextMode }> {
@@ -94,7 +94,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
+    imeAction?: ImeAction,
     dismissKeyboard: boolean = false,
     mode: InputTextMode = "a11y"
   ): Promise<SendTextResult & { method?: InputTextMode }> {
@@ -139,7 +139,7 @@ export class InputText extends BaseVisualChange {
 
   private async executeAndroidEventLastTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
+    imeAction?: ImeAction,
     dismissKeyboard: boolean = false
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const split = this.findLastPrintableAsciiNonWhitespace(text);
@@ -202,7 +202,7 @@ export class InputText extends BaseVisualChange {
 
   private async executeAndroidEventAllTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
+    imeAction?: ImeAction,
     dismissKeyboard: boolean = false
   ): Promise<SendTextResult & { method?: InputTextMode }> {
     const chars = Array.from(text);
@@ -410,7 +410,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeiOSTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous"
+    imeAction?: ImeAction
   ): Promise<SendTextResult & { method?: "a11y" }> {
     const startMs = Date.now();
     logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);

@@ -19,6 +19,7 @@ import { getFailureRecorder } from "../../failures/FailureRecorder";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
+  ImeAction,
   ViewHierarchyResult,
 } from "../../../models";
 import { ViewHierarchyQueryOptions } from "../../../models/ViewHierarchyQueryOptions";
@@ -185,7 +186,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   ): Promise<CtrlProxySetTextResult>;
 
   requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyImeActionResult>;
 
@@ -1294,7 +1295,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   }
 
   async requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxyImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);

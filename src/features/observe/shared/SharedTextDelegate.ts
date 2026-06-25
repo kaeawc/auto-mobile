@@ -5,6 +5,7 @@
  */
 
 import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
+import type { ImeAction } from "../../../models";
 import type { DelegateContext, BaseResult, ActionTimingResult } from "./types";
 import { sendCommand } from "../DeviceServiceUtils";
 
@@ -54,7 +55,7 @@ export class SharedTextDelegate {
   }
 
   async requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
   ): Promise<ActionTimingResult> {

@@ -87,16 +87,16 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   /**
    * Create a PlatformDeviceManager instance
    * @param adb - An instance of AdbExecutor for interacting with Android Debug Bridge
-   * @param idb - An instance of SimCtlClient for interacting with iOS simulator controls
+   * @param simctl - An instance of SimCtlClient for interacting with iOS simulator controls
    * @param emulator - An instance of AndroidEmulatorClient for managing Android emulators
    */
   constructor(
     adb: AdbExecutor | null = null,
-    idb: SimCtlClient | null = null,
+    simctl: SimCtlClient | null = null,
     emulator: AndroidEmulatorClient | null = null,
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
-    this.simctl = idb || new SimCtlClient();
+    this.simctl = simctl || new SimCtlClient();
     this.emulator = emulator || new AndroidEmulatorClient();
   }
 

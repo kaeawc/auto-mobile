@@ -82,8 +82,10 @@ BiometricKit Darwin notifications inside the simulator via
 
 ### How it works
 
-1. **Enroll** — `notifyutil -s com.apple.BiometricKit.enrollmentChanged 1` then
-   `-p com.apple.BiometricKit.enrollmentChanged` ensures a biometry is enrolled.
+1. **Enroll** — a registered `notifyutil` set/read/post on
+   `com.apple.BiometricKit.enrollmentChanged` ensures a biometry is enrolled.
+   The registration is required because `notifyutil -s` has no effect when no
+   process has registered the key.
 2. **Match / non-match** — post the key the app's `LAContext` is waiting on:
    - Touch ID: `com.apple.BiometricKit_Sim.fingerTouch.match` / `…nomatch`
    - Face ID: `com.apple.BiometricKit_Sim.pearl.match` / `…nomatch`
@@ -271,9 +273,14 @@ limitation, not a missing wiring detail.
 1. **Binary toggle** — the only lever the simulator exposes is the
    `com.apple.donotdisturb.enabled` Darwin notification, driven via
    `xcrun simctl spawn <udid> notifyutil`:
-   - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value.
+   - `notifyutil -1 com.apple.donotdisturb.enabled ...` creates a temporary
+     registration. This is required because `notifyutil -s` has no effect when
+     no process has registered the key.
+   - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value while
+     the registration is alive.
+   - `notifyutil -g com.apple.donotdisturb.enabled` verifies the registered
+     state in the same invocation.
    - `notifyutil -p com.apple.donotdisturb.enabled` posts it so observers react.
-   - `notifyutil -g com.apple.donotdisturb.enabled` reads it back.
 2. **Honest capability reporting** — every result carries a machine-readable
    `capability` field so callers can branch instead of string-matching warnings:
    - `binary` — simulator: on/off only.
@@ -285,8 +292,9 @@ limitation, not a missing wiring detail.
    `appliedMode: "none"`, a structured `warning`, and `verified: false` (so
    `success` is `false`). The tool never claims a tier it cannot deliver.
 4. **Best effort** — results are `bestEffort: true`. `notifyutil` values are
-   session-scoped, so a separate `-g` read may not reflect a prior `-s`; the
-   readback is advisory, not authoritative.
+   registration-scoped, so the setter verifies inside the registered invocation.
+   A later standalone `-g` read may not reflect a prior `-s`; the readback is
+   advisory, not authoritative.
 
 ### Limitations
 

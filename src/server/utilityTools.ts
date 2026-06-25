@@ -273,8 +273,8 @@ export function registerUtilityTools() {
     "setDeviceState",
     "Set device-level state such as Do Not Disturb. Android supports all four DND modes "
       + "(off/none/priority/alarms) with read-back verification. iOS DND is simulator-only and "
-      + "binary (on/off) via the com.apple.donotdisturb.enabled notifyutil toggle; priority/alarms "
-      + "are applied as plain DND and reported honestly (capability:\"binary\", appliedMode:\"none\", "
+      + "binary (on/off) via a registered com.apple.donotdisturb.enabled notifyutil toggle; "
+      + "priority/alarms are applied as plain DND and reported honestly (capability:\"binary\", appliedMode:\"none\", "
       + "verified:false, warning). Physical iOS devices are unsupported (capability:\"unsupported\") "
       + "because iOS exposes no public API to set Focus/Do Not Disturb.",
     setDeviceStateSchema,

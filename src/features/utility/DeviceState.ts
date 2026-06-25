@@ -5,6 +5,12 @@ import { isIosSimulatorDevice } from "../action/IosSimulatorPermissions";
 import { outputLooksLikeShellFailure } from "../../utils/android-cmdline-tools/shellOutputHeuristics";
 import { AndroidCtrlProxyClient } from "../observe/android/AndroidCtrlProxyClient";
 import { logger } from "../../utils/logger";
+import {
+  IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
+  iosNotifyutilGetCommand,
+  iosNotifyutilRegisteredSetCommand,
+  parseNotifyutilState
+} from "../../utils/ios-cmdline-tools/notifyutil";
 
 export type DoNotDisturbMode = "off" | "none" | "priority" | "alarms";
 
@@ -127,13 +133,28 @@ function parseAndroidZenMode(raw: string): DoNotDisturbState {
   }
 }
 
-function parseNotifyutilState(raw: string): boolean | null {
-  const trimmed = raw.trim();
-  const match = trimmed.match(/([01])\s*$/);
-  if (!match) {
-    return null;
+function iosDndStateFromNotifyutilOutput(raw: string): DoNotDisturbState {
+  const enabled = parseNotifyutilState(raw);
+  if (enabled === null) {
+    return {
+      supported: true,
+      capability: "binary",
+      method: "ios_simulator_notifyutil",
+      bestEffort: true,
+      rawValue: raw,
+      warning: "Could not parse iOS simulator Do Not Disturb notifyutil state",
+    };
   }
-  return match[1] === "1";
+
+  return {
+    supported: true,
+    capability: "binary",
+    enabled,
+    mode: enabled ? "none" : "off",
+    rawValue: enabled ? "1" : "0",
+    method: "ios_simulator_notifyutil",
+    bestEffort: true,
+  };
 }
 
 /**
@@ -305,28 +326,10 @@ export class DeviceState {
 
     try {
       const simctl = this.simctl ?? new SimCtlClient(this.device);
-      const result = await simctl.executeCommand(`spawn ${this.device.deviceId} notifyutil -g ${IOS_DND_NOTIFICATION}`);
-      const enabled = parseNotifyutilState(result.stdout ?? "");
-      if (enabled === null) {
-        return {
-          supported: true,
-          capability: "binary",
-          method: "ios_simulator_notifyutil",
-          bestEffort: true,
-          rawValue: result.stdout,
-          warning: "Could not parse iOS simulator Do Not Disturb notifyutil state",
-        };
-      }
-
-      return {
-        supported: true,
-        capability: "binary",
-        enabled,
-        mode: enabled ? "none" : "off",
-        rawValue: enabled ? "1" : "0",
-        method: "ios_simulator_notifyutil",
-        bestEffort: true,
-      };
+      const result = await simctl.executeCommand(
+        iosNotifyutilGetCommand(this.device.deviceId, IOS_DND_NOTIFICATION)
+      );
+      return iosDndStateFromNotifyutilOutput(result.stdout ?? "");
     } catch (error) {
       return {
         supported: true,
@@ -353,10 +356,12 @@ export class DeviceState {
     }
 
     // Simulator: the only lever is the binary `com.apple.donotdisturb.enabled`
-    // Darwin notification. There is no per-mode (priority/alarms) Darwin
-    // notification analogous to Android's `zen_mode` integer, so `priority`/
-    // `alarms` requests are applied as plain DND ("none") and reported honestly
-    // rather than silently claiming the tier was honored.
+    // Darwin notification. `notifyutil -s` is a no-op unless the key has a
+    // registration, so set/read/post must happen in one registered invocation.
+    // There is no per-mode (priority/alarms) Darwin notification analogous to
+    // Android's `zen_mode` integer, so `priority`/`alarms` requests are applied
+    // as plain DND ("none") and reported honestly rather than silently claiming
+    // the tier was honored.
     const requestedEnabled = requestedMode !== "off";
     const appliedMode: DoNotDisturbMode = requestedEnabled ? "none" : "off";
     const downgraded = requestedMode === "priority" || requestedMode === "alarms";
@@ -364,10 +369,11 @@ export class DeviceState {
     try {
       const simctl = this.simctl ?? new SimCtlClient(this.device);
       const value = requestedEnabled ? "1" : "0";
-      await simctl.executeCommand(`spawn ${this.device.deviceId} notifyutil -s ${IOS_DND_NOTIFICATION} ${value}`);
-      await simctl.executeCommand(`spawn ${this.device.deviceId} notifyutil -p ${IOS_DND_NOTIFICATION}`);
-
-      const state = await this.getIosDoNotDisturb();
+      const writeResult = await simctl.executeCommand(
+        iosNotifyutilRegisteredSetCommand(this.device.deviceId, IOS_DND_NOTIFICATION, value),
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
+      );
+      const state = iosDndStateFromNotifyutilOutput(writeResult.stdout ?? "");
       const stateMatches = state.enabled === requestedEnabled;
       // For priority/alarms we applied *a* DND state but NOT the requested tier,
       // so verified is intentionally false: setState() will then report

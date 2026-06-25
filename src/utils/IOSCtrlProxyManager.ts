@@ -1706,7 +1706,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         const isConnected = await this.isDeviceDetected();
         if (!isConnected) {
           logger.warn(`[IOSCtrlProxy] Device ${this.device.deviceId} not detected, stopping iproxy monitoring`);
-          await this.stopIproxyTunnel();
+          await this.stopIproxyTunnel({ clearDevicePort: true });
           return;
         }
 

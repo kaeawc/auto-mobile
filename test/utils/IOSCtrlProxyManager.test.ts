@@ -434,6 +434,54 @@ describe("IOSCtrlProxyManager", function() {
         { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
       ]);
     });
+
+    test("host-control iproxy monitor clears the device port when the physical device disconnects", async function() {
+      const fakeBuilder = {
+        getXctestrunPath: async () => "/tmp/test.xctestrun",
+        getRunnerBinaryPath: async () => null,
+        getExpectedAppHash: () => null,
+      } as unknown as import("../../src/utils/IOSCtrlProxyBuilder").IOSCtrlProxyBuilder;
+      const { runner, iproxyStarts, starts } = createHostControlRunner({
+        runningCtrlProxyProcesses: [{
+          pid: 1234,
+          port: 8765,
+          deviceId: physicalDevice.deviceId,
+        }],
+      });
+      const checker = new FakeHostPortAvailabilityChecker(new Set([8765]));
+      const manager = IOSCtrlProxyManager.createForTestingWithDeps(
+        physicalDevice,
+        fakeTimer,
+        fakeBuilder,
+        fakeExecutor,
+        undefined,
+        undefined,
+        runner,
+        checker
+      );
+
+      await (manager as unknown as { startOnDevice: () => Promise<void> }).startOnDevice();
+      expect(iproxyStarts).toEqual([
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
+      ]);
+
+      (manager as unknown as { startIproxyMonitoring: () => void }).startIproxyMonitoring();
+      fakeTimer.advanceTime(5000);
+      for (let i = 0; i < 10; i++) {
+        await Promise.resolve();
+      }
+      await runner.stop({ deviceId: physicalDevice.deviceId });
+
+      await (manager as unknown as { startOnDevice: () => Promise<void> }).startOnDevice();
+
+      expect(iproxyStarts).toEqual([
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8765 },
+        { deviceId: physicalDevice.deviceId, localPort: 8767, devicePort: 8767 },
+      ]);
+      expect(starts).toEqual([
+        { deviceId: physicalDevice.deviceId, port: 8767, xctestrunPath: "/tmp/test.xctestrun" },
+      ]);
+    });
   });
 
   describe("restart prevention", function() {

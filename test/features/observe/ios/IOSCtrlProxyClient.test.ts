@@ -120,6 +120,20 @@ describe("IOSCtrlProxyClient", function() {
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
     });
+
+    test("restarts screenshot backoff when the connection (re)establishes", function() {
+      // Regression guard: onConnectionClosed() cancels the keepalive, so a
+      // transient reconnect on a static screen must restart it or the live view
+      // freezes forever. startScreenshotBackoff() is itself subscriber-gated.
+      let backoffStarts = 0;
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+      // Isolate from SDK polling side effects for this unit.
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(backoffStarts).toBe(1);
+    });
   });
 
   describe("getLatestHierarchy", function() {

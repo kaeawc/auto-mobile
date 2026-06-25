@@ -1,5 +1,5 @@
 import { createServer, Server as NetServer, Socket } from "node:net";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { unlink, mkdir } from "node:fs/promises";
 import path from "node:path";
 import { logger } from "../../utils/logger";
@@ -12,6 +12,9 @@ import { DEFAULT_SOCKET_IDLE_TIMEOUT_MS } from "./SocketServerTypes";
  */
 export abstract class BaseSocketServer {
   protected server: NetServer | null = null;
+  // Identity of the socket inode this server created, so close() never unlinks a
+  // socket a successor process has already rebound at the same path.
+  private socketFileIdentity: { dev: number; ino: number } | null = null;
   protected readonly socketPath: string;
   protected readonly timer: Timer;
   protected readonly serverName: string;
@@ -49,6 +52,7 @@ export abstract class BaseSocketServer {
     return new Promise((resolve, reject) => {
       this.server!.listen(this.socketPath, () => {
         logger.info(`[${this.serverName}] Socket listening on ${this.socketPath}`);
+        this.socketFileIdentity = this.readSocketFileIdentity();
         this.onServerStarted();
         resolve();
       });
@@ -70,14 +74,47 @@ export abstract class BaseSocketServer {
       return;
     }
 
-    await new Promise<void>(resolve => {
-      this.server!.close(() => resolve());
-    });
+    // Decide ownership BEFORE closing. A unix-socket server's close() unlinks the
+    // path it listens on, so if a successor process has already rebound this path
+    // (fast restart) we must NOT close — that would remove their socket and sever
+    // live subscribers (e.g. IDE-plugin observation streams). Instead unref and
+    // leave the dead listener for process teardown.
+    const ownsSocketPath = this.isOwnedSocketFile();
+
+    if (ownsSocketPath || !existsSync(this.socketPath)) {
+      await new Promise<void>(resolve => {
+        this.server!.close(() => resolve());
+      });
+    } else {
+      logger.warn(
+        `[${this.serverName}] Socket path ${this.socketPath} no longer belongs to this server; leaving listener for process teardown`
+      );
+      this.server.unref();
+    }
     this.server = null;
 
-    if (existsSync(this.socketPath)) {
+    if (ownsSocketPath && existsSync(this.socketPath)) {
       await unlink(this.socketPath);
     }
+    this.socketFileIdentity = null;
+  }
+
+  private readSocketFileIdentity(): { dev: number; ino: number } | null {
+    try {
+      const stats = statSync(this.socketPath);
+      return { dev: stats.dev, ino: stats.ino };
+    } catch {
+      return null;
+    }
+  }
+
+  private isOwnedSocketFile(): boolean {
+    if (!this.socketFileIdentity || !existsSync(this.socketPath)) {
+      return false;
+    }
+    const currentIdentity = this.readSocketFileIdentity();
+    return currentIdentity?.dev === this.socketFileIdentity.dev &&
+      currentIdentity.ino === this.socketFileIdentity.ino;
   }
 
   /**

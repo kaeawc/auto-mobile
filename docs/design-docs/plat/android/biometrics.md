@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** The `biometricAuth` MCP tool is fully implemented and tested for Android emulators via `adb emu finger touch/remove`. Physical Android devices receive an SDK broadcast override (`supported: "partial"`). Face/iris modalities are not supported. The `AutoMobileBiometrics` SDK hook is <kbd>✅ Implemented</kbd>. See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** The `biometricAuth` MCP tool is fully implemented and tested for Android emulators via `adb emu finger touch/remove`. Physical Android devices receive an SDK broadcast override (`supported: "partial"`). Face/iris modalities are not supported. The `AutoMobileBiometrics` SDK hook is <kbd>✅ Implemented</kbd>. On iOS, `match` / `fail` (Touch ID and Face ID) are supported on the **Simulator** — see [iOS simctl integration → Biometric simulation](../ios/simctl.md#biometric-simulation). See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Goal
 

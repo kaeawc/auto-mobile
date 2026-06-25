@@ -1,5 +1,8 @@
 import { ChildProcess, execFile } from "child_process";
 import { promisify } from "util";
+import { promises as fsPromises } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { isRunningInDocker } from "../dockerEnv";
@@ -215,6 +218,14 @@ export interface SimCtl {
    * @param udid - Optional device UDID to focus
    */
   openSimulatorApp(udid?: string): Promise<void>;
+
+  /**
+   * Deliver a simulated remote push notification to a booted simulator.
+   * @param deviceId - Simulator UDID
+   * @param bundleId - Target app bundle identifier
+   * @param payloadJson - APNs payload JSON (must contain a top-level `aps` key, <=4096 bytes)
+   */
+  pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }>;
 }
 
 interface SimctlHostControlRunner {
@@ -1008,6 +1019,29 @@ export class SimCtlClient implements SimCtl {
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
     const targetDevice = deviceId || this.device?.deviceId || "booted";
     await this.executeCommand(`ui ${targetDevice} appearance ${mode}`);
+  }
+
+  /**
+   * Deliver a simulated remote push to a booted simulator via `simctl push`.
+   * Writes the payload to a temp .apns file because executeCommand cannot stream stdin.
+   */
+  async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
+    const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));
+    const file = join(dir, "payload.apns");
+    try {
+      await fsPromises.writeFile(file, payloadJson, "utf-8");
+      // `xcrun simctl push <udid> <bundleId> <file>`; bundleId may be omitted when the
+      // payload carries "Simulator Target Bundle", but passing it explicitly is harmless.
+      const result = await this.executeCommand(`push ${deviceId} ${bundleId} "${file}"`);
+      if ((result.stderr || "").trim().length > 0) {
+        return { success: false, error: result.stderr.trim() };
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      await fsPromises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   async openSimulatorApp(udid?: string): Promise<void> {

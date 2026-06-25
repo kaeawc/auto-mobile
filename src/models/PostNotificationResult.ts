@@ -4,7 +4,7 @@
 export interface PostNotificationResult {
   success: boolean;
   supported: boolean;
-  method?: "sdk";
+  method?: "sdk" | "simctlPush";
   imageType?: "normal" | "bigPicture";
   appId?: string;
   channelId?: string;

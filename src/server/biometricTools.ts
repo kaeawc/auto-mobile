@@ -17,7 +17,8 @@ export const biometricAuthSchema = addDeviceTargetingToSchema(z.object({
     "'cancel' cancels the prompt, 'error' injects a hard error (requires AutoMobileBiometrics SDK integration in the app)."
   ),
   modality: z.enum(["any", "fingerprint", "face"]).optional().describe(
-    "Biometric modality (default: 'any'). Currently only 'fingerprint' is reliably supported on Android emulators. 'face' is not consistently supported."
+    "Biometric modality (default: 'any'). Android emulators reliably support only 'fingerprint'. iOS Simulator supports both: " +
+    "'fingerprint' -> Touch ID, 'face' -> Face ID, 'any' posts both (the simulator's non-enrolled biometry is a no-op)."
   ),
   fingerprintId: z.number().optional().describe(
     "Fingerprint ID to simulate (default: 1 for 'match'/'error', 2 for 'fail'/'cancel'). Use enrolled ID (typically 1) for match/error, non-enrolled ID (typically 2) for fail/cancel."
@@ -70,8 +71,10 @@ export function registerBiometricTools() {
   // Register the tool
   ToolRegistry.registerDeviceAware(
     "biometricAuth",
-    "Simulate biometric authentication (fingerprint) on Android emulators, or inject a deterministic result via the AutoMobile SDK on any device. " +
-    "Supports match/fail/cancel/error actions. The SDK broadcast path requires the app to integrate AutoMobileBiometrics.consumeOverride().",
+    "Simulate biometric authentication on Android emulators (fingerprint) and the iOS Simulator (Touch ID / Face ID via BiometricKit), " +
+    "or inject a deterministic result via the AutoMobile SDK on any Android device. " +
+    "Supports match/fail on both platforms; cancel/error require the AutoMobileBiometrics SDK (Android only). " +
+    "Physical iOS devices are not supported (no public biometric-injection API).",
     biometricAuthSchema,
     biometricAuthHandler,
     true // Supports progress notifications

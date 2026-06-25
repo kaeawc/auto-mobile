@@ -15,6 +15,8 @@ system-level simulator behaviors.
 - Device discovery and capability reporting.
 - Status bar configuration (demo mode) when supported.
 - Live locale and localization changes (see below).
+- Biometric (Touch ID / Face ID) simulation for `biometricAuth` (see below).
+- Simulated push delivery for `postNotification` (see below).
 
 ## Live locale changes
 
@@ -65,6 +67,70 @@ pick them up immediately.
 - Running apps cache locale at launch. Use the `restartApp` parameter or manually
   relaunch the app for it to pick up new settings.
 
+## Biometric simulation
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
+
+The `biometricAuth` MCP tool simulates Touch ID / Face ID on simulators by posting
+BiometricKit Darwin notifications inside the simulator via
+`xcrun simctl spawn <udid> notifyutil`. This reaches parity with the Android emulator
+`adb emu finger` path (see [Android biometrics](../android/biometrics.md)) for
+`match` / `fail`.
+
+### How it works
+
+1. **Enroll** — `notifyutil -s com.apple.BiometricKit.enrollmentChanged 1` then
+   `-p com.apple.BiometricKit.enrollmentChanged` ensures a biometry is enrolled.
+2. **Match / non-match** — post the key the app's `LAContext` is waiting on:
+   - Touch ID: `com.apple.BiometricKit_Sim.fingerTouch.match` / `…nomatch`
+   - Face ID: `com.apple.BiometricKit_Sim.pearl.match` / `…nomatch`
+
+   `modality: "any"` posts both pairs; the simulator's non-enrolled biometry is a no-op,
+   so the action works regardless of the device's biometry type.
+
+### Action mapping
+
+| MCP `action` | iOS result |
+|--------------|------------|
+| `match` | post `*.match` |
+| `fail` | post `*.nomatch` |
+| `cancel` / `error` | `supported: "partial"` — no simctl equivalent |
+
+### Limitations
+
+- Simulator only. Physical iOS devices have no public biometric-injection API and return
+  `supported: false`.
+- `cancel` / `error` cannot be injected — the notifications carry only match vs non-match.
+  On Android these use the `AutoMobileBiometrics` SDK override, which has no iOS counterpart.
+
+## Push notifications
+
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>📱 Simulator Only</kbd>
+
+The `postNotification` MCP tool delivers a simulated remote push to a target app on a
+booted simulator via `xcrun simctl push <udid> <bundleId> <payload.apns>`. Unlike Android
+(a local notification posted by the in-app SDK; see
+[Android notifications](../android/notifications.md)), this is an OS-routed simulated push
+that needs no AutoMobile iOS SDK — but it does require an explicit `appId` (bundle id).
+
+### How it works
+
+1. Build an APNs payload: `title` / `body` → `aps.alert`, `channelId` → `aps.category`,
+   plus a top-level `"Simulator Target Bundle": <appId>`.
+2. Reject payloads larger than the 4096-byte `simctl push` limit.
+3. Write the payload to a temp `.apns` file and run `simctl push` (the simctl command
+   layer has no stdin, so a file is used rather than `-`).
+
+### Limitations
+
+- Simulator only. `simctl push` cannot target physical devices (no APNs token/server);
+  physical iOS devices return `supported: false`.
+- `appId` is required on iOS — there is no frontmost-bundle resolution like the Android
+  dumpsys path.
+- Rich media is limited: `bigPicture` / `imagePath` (needs a Notification Service Extension)
+  and `actions` (need a pre-registered `UNNotificationCategory`) are ignored with a
+  `warning` rather than failing.
+
 ## Usage patterns
 
 - Prefer deterministic simulator selection by device identifier.
@@ -80,3 +146,5 @@ pick them up immediately.
 
 - [CtrlProxy iOS](xctestrunner/index.md) - Touch injection and element queries.
 - [iOS overview](index.md)
+- [Android biometrics](../android/biometrics.md) - The `biometricAuth` Android counterpart.
+- [Android notifications](../android/notifications.md) - The `postNotification` Android counterpart.

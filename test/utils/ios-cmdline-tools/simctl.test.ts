@@ -95,8 +95,12 @@ describe("Simctl", function() {
     });
   });
 
-  describe("host control routing", function() {
-    test("should report available when host control is enabled in docker", async function() {
+  describe("docker host-control mode (iOS unsupported)", function() {
+    // Driving the iOS simulator from inside Docker is intentionally unsupported
+    // for now (see SimCtlClient.executeCommand). The simctl surface must fail fast
+    // rather than route to the host, where container-local paths (push/install)
+    // would silently break.
+    test("should report unavailable when host control is enabled in docker", async function() {
       mockExecAsync = async (): Promise<ExecResult> => {
         throw new Error("Command not found: xcrun");
       };
@@ -111,11 +115,11 @@ describe("Simctl", function() {
       simctl = new Simctl(null, mockExecAsync, hostControlRunner);
 
       const available = await simctl.isAvailable();
-      expect(available).toBe(true);
+      expect(available).toBe(false);
     });
 
-    test("should execute simctl commands via host control when enabled", async function() {
-      let receivedArgs: string[] = [];
+    test("should fail fast instead of routing simctl to the host", async function() {
+      let hostInvoked = false;
 
       mockExecAsync = async (): Promise<ExecResult> => {
         throw new Error("Local simctl should not be invoked");
@@ -124,17 +128,17 @@ describe("Simctl", function() {
       const hostControlRunner = {
         isAvailable: async () => true,
         isRunningInDocker: () => true,
-        runSimctl: async (args: string[]) => {
-          receivedArgs = args;
+        runSimctl: async () => {
+          hostInvoked = true;
           return createExecResult("command executed", "");
         },
         shouldUseHostControl: () => true
       };
 
       simctl = new Simctl(mockDevice, mockExecAsync, hostControlRunner);
-      await simctl.executeCommand("list devices");
 
-      expect(receivedArgs).toEqual(["list", "devices"]);
+      await expect(simctl.executeCommand("list devices")).rejects.toThrow(/not supported yet/i);
+      expect(hostInvoked).toBe(false);
     });
   });
 

@@ -63,7 +63,7 @@ ${lines.join("\n")}
 }
 
 /** Fake deps: maps the outer path to canned plutil-xml; nested blobs matched by temp path. */
-function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
+function fakeDeps(opts: { outer?: string | Error; nested?: string; hostControl?: boolean }): {
   deps: BulletinBoardReaderDeps;
   plutilPaths: string[];
 } {
@@ -86,6 +86,7 @@ function fakeDeps(opts: { outer?: string | Error; nested?: string }): {
     },
     rmTemp: async () => {},
     deviceDataRoot: (udid: string) => `/fake/CoreSimulator/Devices/${udid}`,
+    isHostControlMode: () => opts.hostControl ?? false,
   };
   return { deps, plutilPaths };
 }
@@ -148,7 +149,7 @@ describe("BulletinBoardAuthorizationReader", () => {
     });
   });
 
-  test("provisional app (Home-like) maps to provisional, not allowed", async () => {
+  test("provisional app (Home-like) maps to provisional and is allowed", async () => {
     const b64 = Buffer.from("bplist00").toString("base64");
     const { deps } = fakeDeps({
       outer: outerXml({ "com.apple.Home": b64 }),
@@ -163,11 +164,41 @@ describe("BulletinBoardAuthorizationReader", () => {
     const reader = new BulletinBoardAuthorizationReader(deps);
     const result = await reader.read(SIM_UDID, "com.apple.Home");
 
+    // Provisional (quiet) authorization still delivers notifications, so `allowed`
+    // is true; callers wanting full authorization check `authorizationStatus`.
     expect(result.authorizationStatus).toBe("provisional");
-    expect(result.allowed).toBe(false);
+    expect(result.allowed).toBe(true);
     expect(result.alerts).toBe(false);
     expect(result.lockScreen).toBe(false);
     expect(result.notificationCenter).toBe(true);
+  });
+
+  test("ephemeral app (App Clip) maps to ephemeral and is allowed", async () => {
+    const b64 = Buffer.from("bplist00").toString("base64");
+    const { deps } = fakeDeps({
+      outer: outerXml({ "com.example.clip": b64 }),
+      nested: nestedXml({ authorizationStatus: 4 }),
+    });
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const result = await reader.read(SIM_UDID, "com.example.clip");
+
+    expect(result.authorizationStatus).toBe("ephemeral");
+    expect(result.allowed).toBe(true);
+  });
+
+  test("host-control mode returns explicit unsupported, not a misleading unknown", async () => {
+    const { deps, plutilPaths } = fakeDeps({
+      outer: outerXml({ "com.apple.MobileSMS": "QUJD" }),
+      hostControl: true,
+    });
+    const reader = new BulletinBoardAuthorizationReader(deps);
+    const result = await reader.read(SIM_UDID, "com.apple.MobileSMS");
+
+    expect(result.supported).toBe(false);
+    expect(result.method).toBe("unsupported");
+    expect(result.error).toContain("host control");
+    // No host plutil read attempted in this environment.
+    expect(plutilPaths).toHaveLength(0);
   });
 
   test("denied app maps to denied + allowed false", async () => {

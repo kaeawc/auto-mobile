@@ -171,6 +171,9 @@ hosts come from two different sources.
   via `devicectl`) returns an explicit "not yet implemented" error.
 - iOS has no runtime intent resolver, so only *declared* schemes/domains are reported.
 - `supportedMimeTypes` is best-effort document-type metadata, not a routing guarantee.
+- Unsupported under host control (Docker/external-emulator mode): `get_app_container`
+  resolves to a macOS host path, but `plutil`/`codesign` run inside the container, so the
+  call returns an explicit unsupported error instead of a misleading failure.
 
 ## Notification authorization read
 
@@ -195,8 +198,10 @@ persisted plist.
    (`authorizationStatus`, `alertType`, `lockScreenSetting`, `notificationCenterSetting`,
    `pushSettings`).
 4. **Map the status** — `authorizationStatus` maps to
-   `notDetermined`/`denied`/`authorized`/`provisional`/`ephemeral`; `allowed` is true only
-   for `authorized` (2). The result uses `method: "ios_bulletinboard_plist"`.
+   `notDetermined`/`denied`/`authorized`/`provisional`/`ephemeral`; `allowed` is true for
+   any delivery-capable status — `authorized` (2), `provisional` (3, quiet delivery) and
+   `ephemeral` (4, App Clips). Callers needing strict full authorization check
+   `authorizationStatus === "authorized"`. The result uses `method: "ios_bulletinboard_plist"`.
 
 An app with no registered section returns `allowed: null` plus a warning (the app likely
 never requested authorization), not an error. A missing/unreadable plist returns a warning
@@ -212,6 +217,9 @@ rather than throwing.
   disk would not take effect without restarting the daemon.
 - This is per-app *authorization status*, a different concept from Android's DND
   *policy access* — see [Notifications](../android/notifications.md).
+- Unsupported under host control (Docker/external-emulator mode): the BulletinBoard plist
+  lives on the macOS host but `plutil` runs inside the container, so the read returns an
+  explicit `supported: false` rather than reporting every app as unknown.
 
 ## Device settings snapshot
 

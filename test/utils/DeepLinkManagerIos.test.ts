@@ -184,6 +184,21 @@ describe("DeepLinkManager iOS", () => {
     expect(result.deepLinks.schemes).toEqual([]);
   });
 
+  test("host-control mode returns explicit unsupported without shelling out", async () => {
+    const simctl = new FakeSimCtlClient();
+    const { exec, calls } = fakeHostExec([]);
+
+    // hostControlGate = () => true simulates Docker/external-emulator mode.
+    const manager = new DeepLinkManager(iosDevice, null, simctl as any, exec, () => true);
+    const result = await manager.getDeepLinks("com.example.myapp");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("host control");
+    // No get_app_container or host plutil/codesign attempted in this environment.
+    expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
+    expect(calls).toHaveLength(0);
+  });
+
   test("physical-device UDID returns explicit not-yet-implemented error", async () => {
     const simctl = new FakeSimCtlClient();
     const { exec, calls } = fakeHostExec([]);

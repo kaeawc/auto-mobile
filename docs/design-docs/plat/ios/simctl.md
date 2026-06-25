@@ -250,6 +250,51 @@ per-package resilience of iOS app-data restore.
 - `simctl spawn ... defaults` has no stdin, so whole-domain `defaults export/import` is not
   used — the per-key allowlist is the deliberate, auditable design.
 
+## Do Not Disturb (setDeviceState)
+
+<kbd>✅ Implemented</kbd> <kbd>📱 Simulator Only</kbd>
+
+The `setDeviceState` / `getDeviceState` MCP tools control Do Not Disturb. On iOS,
+DND is **simulator-only and binary** (on/off) — this is a hard platform
+limitation, not a missing wiring detail.
+
+### How it works
+
+1. **Binary toggle** — the only lever the simulator exposes is the
+   `com.apple.donotdisturb.enabled` Darwin notification, driven via
+   `xcrun simctl spawn <udid> notifyutil`:
+   - `notifyutil -s com.apple.donotdisturb.enabled <0|1>` sets the value.
+   - `notifyutil -p com.apple.donotdisturb.enabled` posts it so observers react.
+   - `notifyutil -g com.apple.donotdisturb.enabled` reads it back.
+2. **Honest capability reporting** — every result carries a machine-readable
+   `capability` field so callers can branch instead of string-matching warnings:
+   - `binary` — simulator: on/off only.
+   - `unsupported` — physical device: DND cannot be set at all.
+   - (`full` is reserved for Android, where all four `zen_mode` tiers are
+     distinct, persisted, and verified.)
+3. **No silent downgrade** — a `priority` or `alarms` request applies plain DND
+   and reports it honestly: `requestedMode: "priority"|"alarms"`,
+   `appliedMode: "none"`, a structured `warning`, and `verified: false` (so
+   `success` is `false`). The tool never claims a tier it cannot deliver.
+4. **Best effort** — results are `bestEffort: true`. `notifyutil` values are
+   session-scoped, so a separate `-g` read may not reflect a prior `-s`; the
+   readback is advisory, not authoritative.
+
+### Limitations
+
+- **Simulator only.** Physical iOS devices return `supported: false`,
+  `capability: "unsupported"`, and a specific error: iOS exposes **no public
+  API** to enable/disable Focus or Do Not Disturb (only the read-only Focus
+  Filter API), and Apple's device tooling (`devicectl`, XCUITest) ships no
+  DND/Focus setter.
+- **Binary, not per-mode.** Since iOS 15, DND lives inside the private **Focus**
+  framework. There is no per-mode (priority vs. alarms-only) Darwin notification
+  analogous to Android's `zen_mode` integer, so iOS cannot be mapped to the
+  Android four-mode model.
+- **No cosmetic fallback.** `simctl status_bar override` exposes
+  `time`/`dataNetwork`/`wifi*`/`cellular*`/`battery*`/`operatorName` — no DND
+  flag — so even a status-bar-only indicator is unavailable.
+
 ## Usage patterns
 
 - Prefer deterministic simulator selection by device identifier.

@@ -402,11 +402,36 @@ export const rotateSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }));
 
-export const clipboardSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["copy", "paste", "clear", "get"]).describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
-  text: z.string().optional().describe("Text to copy (required for 'copy' action)"),
-  platform: platformSchema
-}));
+const clipboardTextRequiredMessage = "text is required when action is copy";
+const optionalClipboardTextSchema = z.string().min(1).optional().describe("Text to copy (required for 'copy' action)");
+const clipboardPlatformSchema = {
+  platform: platformSchema,
+};
+
+export const clipboardSchema = z.discriminatedUnion("action", [
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("copy").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: z.string({ error: clipboardTextRequiredMessage })
+      .min(1, clipboardTextRequiredMessage)
+      .describe("Text to copy (required for 'copy' action)"),
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("paste").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("clear").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("get").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  }))
+]);
 
 // ============================================================================
 // Tool Registration

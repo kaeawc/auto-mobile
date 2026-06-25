@@ -2,7 +2,7 @@ import { z } from "zod";
 import { ToolRegistry } from "./toolRegistry";
 import { ActionableError, BootedDevice, Platform } from "../models";
 import { createJSONToolResponse } from "../utils/toolUtils";
-import { addDeviceTargetingToSchema, platformSchema } from "./toolSchemaHelpers";
+import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { PostNotification, PostNotificationOptions } from "../features/utility/PostNotification";
 import { NotificationPolicy } from "../features/utility/NotificationPolicy";
 
@@ -10,23 +10,36 @@ export interface PostNotificationArgs extends PostNotificationOptions {
   platform: Platform;
 }
 
+const iosAppIdRequiredMessage = "appId is required when platform is ios";
+
 const actionSchema = z.object({
   label: z.string().min(1).describe("Action label"),
   actionId: z.string().min(1).describe("Action identifier")
 });
 
-export const postNotificationSchema = addDeviceTargetingToSchema(
-  z.object({
-    title: z.string().min(1).describe("Notification title"),
-    body: z.string().min(1).describe("Notification body"),
-    imageType: z.enum(["normal", "bigPicture"]).optional().describe("Notification image type (default: normal)"),
-    imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture"),
-    actions: z.array(actionSchema).optional().describe("Action buttons to include (Android only)"),
-    channelId: z.string().optional().describe("Notification channel ID (Android); reused as the APNs category on iOS"),
-    appId: z.string().optional().describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
-    platform: platformSchema
-  })
-);
+const postNotificationCommonShape = {
+  title: z.string().min(1).describe("Notification title"),
+  body: z.string().min(1).describe("Notification body"),
+  imageType: z.enum(["normal", "bigPicture"]).optional().describe("Notification image type (default: normal)"),
+  imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture"),
+  actions: z.array(actionSchema).optional().describe("Action buttons to include (Android only)"),
+  channelId: z.string().optional().describe("Notification channel ID (Android); reused as the APNs category on iOS"),
+};
+
+export const postNotificationSchema = z.discriminatedUnion("platform", [
+  addDeviceTargetingToSchema(z.object({
+    ...postNotificationCommonShape,
+    appId: z.string({ error: iosAppIdRequiredMessage })
+      .min(1, iosAppIdRequiredMessage)
+      .describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
+    platform: z.literal("ios").describe("Target platform")
+  })),
+  addDeviceTargetingToSchema(z.object({
+    ...postNotificationCommonShape,
+    appId: z.string().min(1).optional().describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
+    platform: z.literal("android").describe("Target platform")
+  }))
+]);
 
 export const getNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
   appId: z.string().min(1).describe("App package ID or bundle identifier"),

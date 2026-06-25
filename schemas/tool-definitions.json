@@ -464,17 +464,18 @@
       "properties": {
         "action": {
           "type": "string",
+          "description": "Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content",
           "enum": [
             "copy",
             "paste",
             "clear",
             "get"
-          ],
-          "description": "Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"
+          ]
         },
         "text": {
-          "description": "Text to copy (required for 'copy' action)",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "description": "Text to copy (required for 'copy' action)"
         },
         "platform": {
           "type": "string",
@@ -580,15 +581,16 @@
       "properties": {
         "action": {
           "type": "string",
+          "description": "Action to perform",
           "enum": [
             "capture",
             "restore"
-          ],
-          "description": "Action to perform"
+          ]
         },
         "snapshotName": {
           "description": "Name for the snapshot",
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "includeAppData": {
           "description": "Include app data directories in snapshot",
@@ -4468,16 +4470,17 @@
           "type": "string"
         },
         "appId": {
-          "description": "iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android.",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "description": "iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."
         },
         "platform": {
           "type": "string",
+          "description": "Target platform",
           "enum": [
-            "android",
-            "ios"
-          ],
-          "description": "Target platform"
+            "ios",
+            "android"
+          ]
         },
         "sessionUuid": {
           "description": "Session UUID",

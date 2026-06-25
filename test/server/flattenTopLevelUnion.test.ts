@@ -98,4 +98,43 @@ describe("flattenTopLevelUnion", () => {
     expect(result.type).toBe("object");
     expect((result.properties as any).x).toEqual({ type: "string" });
   });
+
+  test("keeps discriminator branches flattened without top-level combinators", () => {
+    const schema = {
+      oneOf: [
+        {
+          type: "object",
+          properties: {
+            platform: { type: "string", const: "ios", description: "Target platform" },
+            title: { type: "string" },
+            appId: { type: "string" },
+          },
+          required: ["platform", "title", "appId"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            platform: { type: "string", const: "android", description: "Target platform" },
+            title: { type: "string" },
+            appId: { type: "string" },
+          },
+          required: ["platform", "title"],
+          additionalProperties: false,
+        },
+      ],
+    };
+
+    const result = flattenTopLevelUnion(schema);
+
+    expect(result.type).toBe("object");
+    expect(result.oneOf).toBeUndefined();
+    expect(result.allOf).toBeUndefined();
+    expect((result.properties as any).platform).toEqual({
+      type: "string",
+      description: "Target platform",
+      enum: ["ios", "android"],
+    });
+    expect(result.required).toEqual(["platform", "title"]);
+  });
 });

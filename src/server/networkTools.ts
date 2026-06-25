@@ -22,6 +22,14 @@ const simulateErrorsSchema = z.object({
   limit: z.number().int().positive().optional().describe("Max errors to inject. Omit for unlimited"),
   durationSeconds: z.number().positive().optional().describe("How long to simulate errors. Required unless cancel is true"),
   cancel: z.boolean().optional().describe("Set to true to cancel active simulation"),
+}).superRefine((value, ctx) => {
+  if (value.cancel !== true && value.durationSeconds === undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["durationSeconds"],
+      message: "durationSeconds is required unless cancel is true",
+    });
+  }
 });
 
 const networkSchema = addDeviceTargetingToSchema(

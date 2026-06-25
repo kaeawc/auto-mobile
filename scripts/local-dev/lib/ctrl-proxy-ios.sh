@@ -193,6 +193,7 @@ start_ctrl_proxy_ios() {
       -destination "id=${simulator_id}"
       -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService
       "CTRL_PROXY_IOS_PORT=${port}"
+      "AUTOMOBILE_DEVICE_ID=${simulator_id}"
     )
   else
     log_info "Starting CtrlProxy iOS (xcodebuild test)..."
@@ -203,6 +204,7 @@ start_ctrl_proxy_ios() {
       -destination "id=${simulator_id}"
       -only-testing:CtrlProxyUITests/CtrlProxyUITests/testRunService
       "CTRL_PROXY_IOS_PORT=${port}"
+      "AUTOMOBILE_DEVICE_ID=${simulator_id}"
     )
   fi
 

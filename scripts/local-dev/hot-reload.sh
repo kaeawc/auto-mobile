@@ -22,11 +22,16 @@
 #   --once               Build all components once and exit
 #   --poll-interval <s>  File watch interval (default: 2)
 #   --timeout <m>        Background watcher timeout in minutes (default: 60)
+#   --manage-ios-runner  Let the watcher own the CtrlProxy iOS runner lifecycle
+#                        (start/stop/restart). Off by default — the MCP daemon
+#                        solely owns the runner so the two don't race on :8765.
 #   --help               Show help
 #
 # Environment:
 #   ANDROID_SERIAL       ADB device id override
 #   CTRL_PROXY_IOS_PORT   Override CtrlProxy iOS port (default: 8765)
+#   HOT_RELOAD_MANAGE_IOS_RUNNER  Set to "true" to make the watcher own the
+#                        CtrlProxy iOS runner (same as --manage-ios-runner).
 
 set -euo pipefail
 
@@ -62,6 +67,11 @@ SIMULATOR_ID=""
 RUN_ONCE=false
 POLL_INTERVAL=2
 TIMEOUT_MINUTES=60
+# By default the MCP daemon's ensureCtrlProxy solely owns the CtrlProxy iOS
+# runner. The watcher only rebuilds iOS source and nudges the daemon to reload.
+# Set HOT_RELOAD_MANAGE_IOS_RUNNER=true (or pass --manage-ios-runner) to restore
+# the legacy behavior where the watcher starts/stops/restarts the runner itself.
+MANAGE_IOS_RUNNER="${HOT_RELOAD_MANAGE_IOS_RUNNER:-false}"
 
 # Runtime state
 DESKTOP_APP_ENABLED=false
@@ -100,11 +110,16 @@ Options:
   --once               Build all components once and exit
   --poll-interval <s>  File watch interval (default: 2)
   --timeout <m>        Background watcher timeout in minutes (default: 60)
+  --manage-ios-runner  Let the watcher own the CtrlProxy iOS runner lifecycle.
+                       Off by default — the MCP daemon solely owns the runner so
+                       the two don't race on port 8765. The watcher still
+                       rebuilds iOS source and reloads the daemon to apply it.
   --help               Show this help text
 
 Environment variables:
   ANDROID_SERIAL       ADB device id override
   CTRL_PROXY_IOS_PORT   Override CtrlProxy iOS port (default: 8765)
+  HOT_RELOAD_MANAGE_IOS_RUNNER  "true" => same as --manage-ios-runner
 EOF
 }
 
@@ -145,16 +160,20 @@ kill_previous() {
   fi
 
   # Kill any orphaned xcodebuild.*test.*CtrlProxy that may
-  # have been left behind when a watcher was SIGKILL'd
-  pids=$(pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true)
-  if [[ -n "${pids}" ]]; then
-    log_info "Killing orphaned CtrlProxy iOS xcodebuild processes: ${pids}"
-    echo "${pids}" | xargs kill 2>/dev/null || true
-    sleep 2
+  # have been left behind when a watcher was SIGKILL'd.
+  # Only do this when the watcher owns the runner — otherwise these processes
+  # belong to the MCP daemon and killing them would interfere with it.
+  if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
     pids=$(pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true)
     if [[ -n "${pids}" ]]; then
-      log_warn "Force killing orphaned xcodebuild processes..."
-      echo "${pids}" | xargs kill -9 2>/dev/null || true
+      log_info "Killing orphaned CtrlProxy iOS xcodebuild processes: ${pids}"
+      echo "${pids}" | xargs kill 2>/dev/null || true
+      sleep 2
+      pids=$(pgrep -f "xcodebuild.*test.*CtrlProxy" 2>/dev/null || true)
+      if [[ -n "${pids}" ]]; then
+        log_warn "Force killing orphaned xcodebuild processes..."
+        echo "${pids}" | xargs kill -9 2>/dev/null || true
+      fi
     fi
   fi
 }
@@ -410,6 +429,13 @@ unified_watch_loop() {
 
   log_info "Starting unified watch loop (poll interval ${poll_interval}s)..."
   log_info "Watching: Desktop app=$(bool_str ${DESKTOP_APP_ENABLED}), Android=$(bool_str ${ANDROID_ENABLED}), iOS=$(bool_str ${IOS_ENABLED}), TypeScript=true"
+  if [[ "${IOS_ENABLED}" == "true" ]]; then
+    if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
+      log_info "iOS CtrlProxy runner owner: watcher (--manage-ios-runner)"
+    else
+      log_info "iOS CtrlProxy runner owner: MCP daemon (watcher only rebuilds + reloads daemon)"
+    fi
+  fi
 
   # Initialize hashes
   if [[ "${DESKTOP_APP_ENABLED}" == "true" ]]; then
@@ -558,25 +584,39 @@ unified_watch_loop() {
           if [[ -n "${ios_checksum}" ]]; then
             log_info "[iOS] Build hash: ${ios_checksum:0:16}..."
           fi
+          # When the daemon owns the runner, a fresh build only takes effect
+          # after the daemon relaunches it. Reload the daemon so it picks up the
+          # new CtrlProxy iOS build without the watcher touching the runner.
+          if [[ "${MANAGE_IOS_RUNNER}" != "true" ]]; then
+            log_info "[iOS] Daemon owns the runner; reloading daemon to pick up the new build."
+            reload_mcp_daemon
+            IOS_NEEDS_RESTART=false
+          fi
         else
           log_warn "[iOS] Build failed; waiting for next change."
         fi
       fi
 
-      # Check if CtrlProxy iOS process died
-      if [[ -n "${XCODEBUILD_PID}" ]] && ! kill -0 "${XCODEBUILD_PID}" 2>/dev/null; then
-        log_warn "[iOS] CtrlProxy iOS process exited."
-        XCODEBUILD_PID=""
-        CTRL_PROXY_SIMULATOR=""
-        IOS_NEEDS_RESTART=true
-      fi
+      # Runner lifecycle is only managed here when explicitly requested via
+      # --manage-ios-runner. By default the MCP daemon's ensureCtrlProxy solely
+      # owns the CtrlProxy iOS runner, so starting/stopping/restarting it from
+      # the watcher would race the daemon on port 8765.
+      if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
+        # Check if CtrlProxy iOS process died
+        if [[ -n "${XCODEBUILD_PID}" ]] && ! kill -0 "${XCODEBUILD_PID}" 2>/dev/null; then
+          log_warn "[iOS] CtrlProxy iOS process exited."
+          XCODEBUILD_PID=""
+          CTRL_PROXY_SIMULATOR=""
+          IOS_NEEDS_RESTART=true
+        fi
 
-      # Restart if needed
-      if [[ "${IOS_NEEDS_RESTART}" == "true" ]] && [[ -n "${LAST_SIMULATOR}" ]]; then
-        stop_ctrl_proxy_ios
-        start_ctrl_proxy_ios "${LAST_SIMULATOR}"
-        CTRL_PROXY_SIMULATOR="${LAST_SIMULATOR}"
-        IOS_NEEDS_RESTART=false
+        # Restart if needed
+        if [[ "${IOS_NEEDS_RESTART}" == "true" ]] && [[ -n "${LAST_SIMULATOR}" ]]; then
+          stop_ctrl_proxy_ios
+          start_ctrl_proxy_ios "${LAST_SIMULATOR}"
+          CTRL_PROXY_SIMULATOR="${LAST_SIMULATOR}"
+          IOS_NEEDS_RESTART=false
+        fi
       fi
     fi
 
@@ -649,6 +689,10 @@ while [[ $# -gt 0 ]]; do
       fi
       TIMEOUT_MINUTES="$2"
       shift 2
+      ;;
+    --manage-ios-runner)
+      MANAGE_IOS_RUNNER=true
+      shift
       ;;
     --help|-h)
       usage
@@ -730,7 +774,11 @@ WATCHER_LOG="${PROJECT_ROOT}/scratch/hot-reload.log"
   watcher_cleanup() {
     log_info "Watcher stopping..."
     stop_desktop_app
-    stop_ctrl_proxy_ios
+    # Only stop the CtrlProxy iOS runner if the watcher owns it. When the daemon
+    # owns it (default), stopping here would kill the daemon's runner.
+    if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
+      stop_ctrl_proxy_ios
+    fi
     rm -f "${PID_FILE}"
   }
   trap watcher_cleanup EXIT TERM INT HUP
@@ -738,13 +786,19 @@ WATCHER_LOG="${PROJECT_ROOT}/scratch/hot-reload.log"
   WATCHER_START_TIME=$(date +%s)
   MAX_DURATION=$(( TIMEOUT_MINUTES * 60 ))
 
-  # Start initial iOS CtrlProxy if simulator available
+  # Start initial iOS CtrlProxy only when the watcher owns the runner. By
+  # default the MCP daemon owns it, so we just record the current simulator for
+  # change detection and leave the runner to the daemon.
   if [[ "${IOS_ENABLED}" == "true" ]]; then
     initial_simulator="$(get_current_simulator)"
     if [[ -n "${initial_simulator}" ]]; then
-      start_ctrl_proxy_ios "${initial_simulator}"
       LAST_SIMULATOR="${initial_simulator}"
-      CTRL_PROXY_SIMULATOR="${initial_simulator}"
+      if [[ "${MANAGE_IOS_RUNNER}" == "true" ]]; then
+        start_ctrl_proxy_ios "${initial_simulator}"
+        CTRL_PROXY_SIMULATOR="${initial_simulator}"
+      else
+        log_info "[iOS] Daemon owns the CtrlProxy runner; watcher will not start it."
+      fi
     fi
   fi
 

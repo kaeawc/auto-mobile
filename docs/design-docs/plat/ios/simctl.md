@@ -207,8 +207,9 @@ rather than throwing.
 - Simulator only. Physical devices return `supported: false` (no host-side read API;
   notification settings are only available to the owning app at runtime via
   `UNUserNotificationCenter`).
-- Read-only. `setNotificationPolicy` stays unsupported on iOS (writing would require
-  reloading the BulletinBoard daemon caches or `applesimutils --setPermissions`).
+- Read-only. `setNotificationPolicy` stays unsupported on iOS: there is no public API
+  to write per-app notification authorization, and editing the BulletinBoard plist on
+  disk would not take effect without restarting the daemon.
 - This is per-app *authorization status*, a different concept from Android's DND
   *policy access* — see [Notifications](../android/notifications.md).
 

@@ -10,12 +10,16 @@ import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/Performa
 import { IOSCtrlProxyClient } from "./ios";
 import type { ScreenSize } from "./interfaces/ScreenSize";
 import { parseBounds } from "../../utils/bounds";
+import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 
 export class GetScreenSize implements ScreenSize {
   private adb: AdbExecutor;
   private readonly device: BootedDevice;
   private static memoryCache = new Map<string, ScreenSize>();
-  private static cacheDir = path.join(process.cwd(), ".cache", "screen-size");
+  // Cache under the shared temp tree, not process.cwd(): the working directory
+  // varies per stdio client and may be read-only in production, which would make
+  // this on-disk cache fail or land in unpredictable places.
+  private static cacheDir = path.join(getTempDir(TEMP_SUBDIRS.CACHE), "screen-size");
 
   /**
    * Create a GetScreenSize instance

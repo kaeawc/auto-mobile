@@ -3,7 +3,9 @@
  */
 import fs from "fs";
 import path from "path";
-import { ensureDirExists, statAsync, renameAsync, readdirAsync, unlinkAsync } from "./io";
+import { ensureDirExists, statAsync, renameAsync } from "./io";
+import { getTempDir, TEMP_SUBDIRS } from "./tempDir";
+import { pruneLogFiles } from "./logPruner";
 
 /**
  * Interface for logger functionality
@@ -101,8 +103,10 @@ let currentLogLevel: LogLevel = LogLevel.INFO;
 // Flag to control whether to also log to STDOUT (in addition to files)
 let logToStdout = false;
 
-// Create logs directory if it doesn't exist
-const logsDir = path.join("/tmp/auto-mobile/logs");
+// Create logs directory if it doesn't exist. Use getTempDir so the location
+// honors TMPDIR and matches the rest of the auto-mobile temp tree (rather than a
+// hardcoded /tmp path that can diverge from where other processes look).
+const logsDir = getTempDir(TEMP_SUBDIRS.LOGS);
 if (!fs.existsSync(logsDir)) {
   fs.mkdirSync(logsDir, { recursive: true });
 }
@@ -110,30 +114,36 @@ ensureDirExists(logsDir).catch(err => {
   console.error("Failed to create logs directory:", err);
 });
 
-// Log file path
-const logFilePath = path.join(logsDir, `server.log`);
+// Per-process log file. On a shared host many auto-mobile processes (one stdio
+// proxy per agent + the daemon) run in parallel and previously all appended to a
+// single `server.log`, interleaving and corrupting each other's output and
+// racing on rotation. Keying the filename by PID gives each process its own file
+// and clean per-process attribution.
+const ownLogPrefix = `server-${process.pid}`;
+const logFilePath = path.join(logsDir, `${ownLogPrefix}.log`);
 let logStream = fs.createWriteStream(logFilePath, { flags: "a" });
 
 // Maximum log file size (10MB)
 const MAX_LOG_SIZE = 10 * 1024 * 1024;
 
-// Maximum number of log files to keep (including the active one)
+// Maximum number of THIS process's log files to keep (including the active one)
 const MAX_LOG_FILES = 10;
 
-// Remove oldest log files when the count exceeds MAX_LOG_FILES
-const pruneOldLogFiles = async (): Promise<void> => {
-  const entries = await readdirAsync(logsDir);
-  const logFiles = entries.filter(f => f.endsWith(".log")).sort();
+// Abandoned logs from other (exited) processes are swept once they are older
+// than this, so the directory doesn't grow without bound on a busy multi-agent
+// host. A live process's active log has a recent mtime and is never touched.
+const ABANDONED_LOG_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
-  if (logFiles.length <= MAX_LOG_FILES) {return;}
-
-  // Sort alphabetically — server.log sorts last, server-<timestamp>.log files
-  // sort chronologically. Delete the oldest until we're at the limit.
-  const toDelete = logFiles.slice(0, logFiles.length - MAX_LOG_FILES);
-  for (const file of toDelete) {
-    await unlinkAsync(path.join(logsDir, file));
-  }
-};
+// Remove old log files. Only ever deletes (a) this process's own rotated backups
+// beyond the cap, and (b) other processes' logs that are stale by mtime — never
+// another live process's current file. See logPruner.ts.
+const pruneOldLogFiles = (): Promise<void> =>
+  pruneLogFiles({
+    dir: logsDir,
+    ownPrefix: ownLogPrefix,
+    maxOwnFiles: MAX_LOG_FILES,
+    abandonedMaxAgeMs: ABANDONED_LOG_MAX_AGE_MS,
+  });
 
 // Function to check log file size and rotate if necessary
 const checkAndRotateLog = async (): Promise<void> => {
@@ -144,9 +154,10 @@ const checkAndRotateLog = async (): Promise<void> => {
         // Close current stream
         logStream.end();
 
-        // Create backup filename with timestamp
+        // Create backup filename with timestamp, scoped to this process's PID so
+        // rotation never collides with another process's files.
         const timestamp = new Date().toISOString().replace(/:/g, "-");
-        const backupPath = path.join(logsDir, `server-${timestamp}.log`);
+        const backupPath = path.join(logsDir, `${ownLogPrefix}-${timestamp}.log`);
 
         // Check if file still exists right before rename to avoid race condition
         if (fs.existsSync(logFilePath)) {

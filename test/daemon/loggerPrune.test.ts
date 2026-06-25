@@ -2,23 +2,15 @@ import { describe, expect, test, afterEach } from "bun:test";
 import { mkdtempSync, writeFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { readdirAsync, unlinkAsync } from "../../src/utils/io";
+import { pruneLogFiles } from "../../src/utils/logPruner";
 
 /**
- * Replicate the pruning algorithm from logger.ts to test it directly.
- * The actual function is module-scoped, so we mirror its logic here.
+ * Tests the REAL prune used by logger.ts (src/utils/logPruner.ts), which is
+ * multi-process safe: it caps only the current process's own files and sweeps
+ * other processes' files only when they are stale by mtime — never deleting
+ * another live process's current file.
  */
-async function pruneOldLogFiles(logsDir: string, maxLogFiles: number): Promise<void> {
-  const entries = await readdirAsync(logsDir);
-  const logFiles = entries.filter(f => f.endsWith(".log")).sort();
-  if (logFiles.length <= maxLogFiles) { return; }
-  const toDelete = logFiles.slice(0, logFiles.length - maxLogFiles);
-  for (const file of toDelete) {
-    await unlinkAsync(join(logsDir, file));
-  }
-}
-
-describe("Log file pruning", () => {
+describe("pruneLogFiles", () => {
   const tempDirs: string[] = [];
 
   function createTempLogsDir(): string {
@@ -37,87 +29,92 @@ describe("Log file pruning", () => {
     tempDirs.length = 0;
   });
 
-  test("deletes all excess log files in a single pass (no cap)", async () => {
+  test("caps this process's own files and preserves the active server-<pid>.log", async () => {
     const logsDir = createTempLogsDir();
-
-    for (let i = 0; i < 25; i++) {
-      const name = `server-2026-04-01T${String(i).padStart(2, "0")}-00-00.000Z.log`;
-      writeFileSync(join(logsDir, name), "log content");
+    for (let i = 0; i < 15; i++) {
+      writeFileSync(join(logsDir, `server-111-2026-04-01T${String(i).padStart(2, "0")}.log`), "x");
     }
+    writeFileSync(join(logsDir, "server-111.log"), "active");
 
-    await pruneOldLogFiles(logsDir, 10);
+    await pruneLogFiles({ dir: logsDir, ownPrefix: "server-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12 });
 
     const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log"));
     expect(remaining.length).toBe(10);
+    // "server-111.log" sorts after "server-111-..." so the active file survives.
+    expect(remaining).toContain("server-111.log");
   });
 
-  test("no-op when file count is at or below limit", async () => {
+  test("never deletes another live process's recent files", async () => {
     const logsDir = createTempLogsDir();
-
-    for (let i = 0; i < 10; i++) {
-      writeFileSync(join(logsDir, `server-${i}.log`), "content");
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(logsDir, `server-222-${i}.log`), "x");
     }
+    const baseNow = Date.now();
 
-    await pruneOldLogFiles(logsDir, 10);
+    // Our own prefix has no files; the other process's files are recent.
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "server-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 60_000,
+      now: baseNow,
+    });
 
-    const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log"));
-    expect(remaining.length).toBe(10);
+    const remaining = readdirSync(logsDir).filter(f => f.startsWith("server-222"));
+    expect(remaining.length).toBe(5);
   });
 
-  test("no-op when directory is empty", async () => {
+  test("sweeps another process's stale files (by mtime)", async () => {
     const logsDir = createTempLogsDir();
-    await pruneOldLogFiles(logsDir, 10);
-    const remaining = readdirSync(logsDir);
+    for (let i = 0; i < 5; i++) {
+      writeFileSync(join(logsDir, `server-222-${i}.log`), "x");
+    }
+    const baseNow = Date.now();
+
+    // Advance the injected clock past the abandonment age.
+    await pruneLogFiles({
+      dir: logsDir,
+      ownPrefix: "server-111",
+      maxOwnFiles: 10,
+      abandonedMaxAgeMs: 1_000,
+      now: baseNow + 60_000,
+    });
+
+    const remaining = readdirSync(logsDir).filter(f => f.startsWith("server-222"));
     expect(remaining.length).toBe(0);
   });
 
-  test("handles large excess (simulates crash-loop scenario)", async () => {
+  test("no-op when own count is at or below the cap", async () => {
     const logsDir = createTempLogsDir();
-
-    // Simulate 100 rotated files from a crash loop
-    for (let i = 0; i < 100; i++) {
-      const ts = String(i).padStart(3, "0");
-      writeFileSync(join(logsDir, `server-2026-04-01T17-20-${ts}.log`), "x");
+    for (let i = 0; i < 10; i++) {
+      writeFileSync(join(logsDir, `server-111-${i}.log`), "x");
     }
 
-    await pruneOldLogFiles(logsDir, 10);
+    await pruneLogFiles({ dir: logsDir, ownPrefix: "server-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12 });
 
-    const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log"));
-    expect(remaining.length).toBe(10);
+    expect(readdirSync(logsDir).filter(f => f.endsWith(".log")).length).toBe(10);
   });
 
-  test("preserves server.log (sorts last alphabetically)", async () => {
+  test("no-op (no throw) when directory is empty or missing", async () => {
     const logsDir = createTempLogsDir();
+    await pruneLogFiles({ dir: logsDir, ownPrefix: "server-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1000 });
+    expect(readdirSync(logsDir).length).toBe(0);
 
-    // Create timestamped files + active server.log
-    for (let i = 0; i < 12; i++) {
-      writeFileSync(join(logsDir, `server-2026-04-01T${String(i).padStart(2, "0")}.log`), "x");
-    }
-    writeFileSync(join(logsDir, "server.log"), "active log");
-
-    await pruneOldLogFiles(logsDir, 10);
-
-    const remaining = readdirSync(logsDir).filter(f => f.endsWith(".log")).sort();
-    expect(remaining.length).toBe(10);
-    // server.log sorts last and should be preserved
-    expect(remaining).toContain("server.log");
+    await pruneLogFiles({ dir: join(logsDir, "does-not-exist"), ownPrefix: "server-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1000 });
   });
 
   test("ignores non-log files", async () => {
     const logsDir = createTempLogsDir();
-
     for (let i = 0; i < 15; i++) {
-      writeFileSync(join(logsDir, `server-${i}.log`), "x");
+      writeFileSync(join(logsDir, `server-111-${i}.log`), "x");
     }
     writeFileSync(join(logsDir, "config.json"), "not a log");
     writeFileSync(join(logsDir, "notes.txt"), "not a log");
 
-    await pruneOldLogFiles(logsDir, 10);
+    await pruneLogFiles({ dir: logsDir, ownPrefix: "server-111", maxOwnFiles: 10, abandonedMaxAgeMs: 1e12 });
 
     const allFiles = readdirSync(logsDir);
-    const logFiles = allFiles.filter(f => f.endsWith(".log"));
-    expect(logFiles.length).toBe(10);
-    // Non-log files should be untouched
+    expect(allFiles.filter(f => f.endsWith(".log")).length).toBe(10);
     expect(allFiles).toContain("config.json");
     expect(allFiles).toContain("notes.txt");
   });

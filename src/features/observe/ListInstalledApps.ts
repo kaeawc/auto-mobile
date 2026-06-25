@@ -61,7 +61,7 @@ export class ListInstalledApps {
     try {
       switch (this.device.platform) {
         case "ios":
-          // iOS device - use idb to get installed apps
+          // iOS: list installed apps via simctl
           const apps = await this.simctl.listApps();
           return apps.map((app: any) => app.bundleId);
         case "android":

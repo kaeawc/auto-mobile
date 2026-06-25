@@ -21,6 +21,7 @@ import {
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import type { ObserveScreen } from "../observe/interfaces/ObserveScreen";
 import { DefaultElementFinder } from "../utility/ElementFinder";
+import { normalizeQuotes } from "../utility/TextMatcher";
 import { RealObserveScreen } from "../observe/ObserveScreen";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
@@ -160,8 +161,23 @@ export class SetAccessibilityFocus {
       return this.finder.findElementByText(viewHierarchy, options.text, undefined, false, false);
     }
     if (options.contentDesc) {
-      // content-desc is matched through the text finder (it inspects content-desc too).
-      return this.finder.findElementByText(viewHierarchy, options.contentDesc, undefined, false, false);
+      // The text finder matches BOTH visible text and content-desc, so a text label that
+      // happens to equal the content-desc (e.g. a "Close" label next to a "Close" icon)
+      // could win. Restrict to nodes whose content-desc actually matches the selector.
+      const target = normalizeQuotes(options.contentDesc).toLowerCase();
+      const candidates = this.finder.findElementsByText(
+        viewHierarchy,
+        options.contentDesc,
+        undefined,
+        false,
+        false
+      );
+      return (
+        candidates.find(el => {
+          const desc = el["content-desc"];
+          return typeof desc === "string" && normalizeQuotes(desc).toLowerCase() === target;
+        }) ?? null
+      );
     }
     return null;
   }

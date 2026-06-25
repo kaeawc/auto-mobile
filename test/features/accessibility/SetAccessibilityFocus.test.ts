@@ -124,6 +124,24 @@ describe("SetAccessibilityFocus", () => {
     expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close" }]);
   });
 
+  test("contentDesc selector only matches content-desc, not a same-text label", async () => {
+    observeScreen.setObserveResult(
+      makeObserveResult(
+        makeViewHierarchy([
+          // A visible text label "Close" — must NOT win for a contentDesc selector.
+          { $: { "text": "Close", "resource-id": "com.example:id/close_label", "bounds": bounds(0, 0, 80, 40) } },
+          // The icon whose content-desc is "Close" — the intended target.
+          { $: { "content-desc": "Close", "resource-id": "com.example:id/close_icon", "bounds": bounds(90, 0, 130, 40) } }
+        ])
+      )
+    );
+    const feature = makeFeature();
+
+    await feature.execute({ action: "set", contentDesc: "Close" });
+
+    expect(service.calls).toEqual([{ method: "set", resourceId: "com.example:id/close_icon" }]);
+  });
+
   test("throws when text selector resolves to a resource-id shared by repeated rows", async () => {
     observeScreen.setObserveResult(
       makeObserveResult(

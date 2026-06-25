@@ -209,13 +209,23 @@ type RequiredKeys<T> = {
 
 type RequiredNonBaseResultKeys<T> = Exclude<RequiredKeys<T>, keyof BaseResult>;
 
+type NotConnectedErrorBuilder<T> = () => T;
+type TimeoutErrorBuilder<T> = (timeoutMs: number) => T;
 type UnsupportedCommandErrorBuilder<T> = (messageType: string, error: string) => T;
 
-type UnsupportedCommandErrorOption<T> = [RequiredNonBaseResultKeys<T>] extends [never]
-  ? { unsupportedCommandError?: UnsupportedCommandErrorBuilder<T> }
-  : { unsupportedCommandError: UnsupportedCommandErrorBuilder<T> };
+type CommandFallbackBuilders<T> = [RequiredNonBaseResultKeys<T>] extends [never]
+  ? {
+    notConnectedError?: NotConnectedErrorBuilder<T>;
+    timeoutError?: TimeoutErrorBuilder<T>;
+    unsupportedCommandError?: UnsupportedCommandErrorBuilder<T>;
+  }
+  : {
+    notConnectedError: NotConnectedErrorBuilder<T>;
+    timeoutError: TimeoutErrorBuilder<T>;
+    unsupportedCommandError: UnsupportedCommandErrorBuilder<T>;
+  };
 
-interface SendCommandBaseOptions<T> {
+interface SendCommandBaseOptions {
   idPrefix: string;
   responseType: string;
   messageType: string;
@@ -224,17 +234,13 @@ interface SendCommandBaseOptions<T> {
   perf?: PerformanceTracker;
   /** Defaults to true. Set false for endpoints that should not interrupt screenshot backoff. */
   cancelScreenshotBackoff?: boolean;
-  /** Custom timeout-error builder. Defaults to `{success:false, totalTimeMs, error: "<errorLabel> timed out after <ms>ms"}`. */
-  timeoutError?: (timeoutMs: number) => T;
-  /** Custom not-connected-error builder for non-BaseResult shapes (e.g. carries `action` or `enabled`). */
-  notConnectedError?: () => T;
   /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
   errorLabel?: string;
 }
 
-export type SendCommandOptions<T> = SendCommandBaseOptions<T> & UnsupportedCommandErrorOption<T>;
+export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
 
 export async function sendCommand<T>(
   context: DelegateContext,

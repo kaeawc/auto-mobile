@@ -574,8 +574,8 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
-  describe("unsupported command result shapes", function() {
-    test("preserves required fields for non-BaseResult command contracts", async function() {
+  describe("command fallback result shapes", function() {
+    test("preserves required fields for unsupported non-BaseResult command contracts", async function() {
       const testTimer = fakeTimer;
 
       const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
@@ -625,6 +625,92 @@ describe("IOSCtrlProxyClient", function() {
         expect(voiceOver.error).toContain("does not support get_voiceover_state");
 
         expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for timed out non-BaseResult command contracts", async function() {
+      const testTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const imeActionPromise = testClient.requestImeAction("done", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        testTimer.advanceTime(100);
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(100);
+        expect(imeAction.error).toContain("IME action timed out");
+
+        const rotatePromise = testClient.requestRotate("landscape", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        testTimer.advanceTime(100);
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(100);
+        expect(rotate.error).toContain("Rotate timed out");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        testTimer.advanceTime(100);
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(100);
+        expect(clipboard.error).toContain("Clipboard operation timed out");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for not-connected non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+
+      try {
+        const imeAction = await testClient.requestImeAction("done", 100);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toBe("Not connected");
+
+        const rotate = await testClient.requestRotate("landscape", 100);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toBe("Not connected");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 100);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toBe("Not connected");
       } finally {
         await testClient.close();
       }

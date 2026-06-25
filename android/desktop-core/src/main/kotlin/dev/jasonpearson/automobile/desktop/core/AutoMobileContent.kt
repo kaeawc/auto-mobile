@@ -673,6 +673,7 @@ fun AutoMobileContent(
   LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.hierarchyUpdates.collect { update ->
+      if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       update.data?.let { hierarchyJson ->
         val result =
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -685,9 +686,7 @@ fun AutoMobileContent(
               parsed to changedIds
             }
         result?.let {
-          if (isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) {
-            layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
-          }
+          layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
           layoutInspectorState.applyHierarchyUpdate(it.first, it.second)
         }
       }
@@ -696,14 +695,13 @@ fun AutoMobileContent(
   LaunchedEffect(liveStreamClient, isLiveLayoutMode, activeDeviceId) {
     if (!isLiveLayoutMode || liveStreamClient == null) return@LaunchedEffect
     liveStreamClient.screenshotUpdates.collect { update ->
+      if (!isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) return@collect
       update.screenshotBase64?.let { base64 ->
         val screenshotData =
             kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
               java.util.Base64.getDecoder().decode(base64)
             }
-        if (isActiveDeviceStreamFrame(update.deviceId, activeDeviceId)) {
-          layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
-        }
+        layoutInspectorState.updateConnectionStatus(ConnectionStatus.Connected)
         layoutInspectorState.updateScreenshot(
             data = screenshotData,
             width = update.screenWidth,

@@ -337,7 +337,7 @@ public class GesturePerformer: GesturePerforming {
             startX: Double, startY: Double,
             endX: Double, endY: Double,
             pressDuration: TimeInterval,
-            dragDuration _: TimeInterval,
+            dragDuration: TimeInterval,
             holdDuration: TimeInterval
         )
             throws
@@ -352,11 +352,21 @@ public class GesturePerformer: GesturePerforming {
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: endX, dy: endY))
 
+                // XCUICoordinate's drag API takes a velocity (points/second), not a duration,
+                // so honor the caller's dragDuration by converting it into the velocity that
+                // covers the source→target distance in that time. This gives iOS the same
+                // drag-speed control Android has. Fall back to .default when the duration or
+                // distance is non-positive (avoids divide-by-zero / infinite velocity).
+                let distance = hypot(endX - startX, endY - startY)
+                let velocity: XCUIGestureVelocity = (dragDuration > 0 && distance > 0)
+                    ? XCUIGestureVelocity(distance / dragDuration)
+                    : .default
+
                 // Press, drag, and hold
                 startCoordinate.press(
                     forDuration: pressDuration,
                     thenDragTo: endCoordinate,
-                    withVelocity: .default,
+                    withVelocity: velocity,
                     thenHoldForDuration: holdDuration
                 )
             }

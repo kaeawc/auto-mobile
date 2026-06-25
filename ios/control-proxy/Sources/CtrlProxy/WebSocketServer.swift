@@ -413,10 +413,24 @@ class WebSocketConnection {
     }
 
     private func handleHealthCheck() {
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
+        var payload: [String: String] = ["status": "ok"]
+        if let deviceId = Self.currentDeviceId() {
+            payload["deviceId"] = deviceId
+        }
+
+        let body = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
+            ?? Data(#"{"status":"ok"}"#.utf8)
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n"
+        var response = Data(header.utf8)
+        response.append(body)
+        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
             self?.connection.cancel()
         })
+    }
+
+    private static func currentDeviceId() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["AUTOMOBILE_DEVICE_ID"] ?? environment["SIMULATOR_UDID"]
     }
 
     private func handleSdkEventsPost(_ request: String) {

@@ -82,6 +82,79 @@ describe("IOSCtrlProxyClient auto-setup", function() {
     await client.close();
   });
 
+  test("retries on manager port when already-running service moved ports", async function() {
+    fakeManager.setRunning(true);
+    fakeManager.setServicePort(8767);
+    const urls: string[] = [];
+    let callCount = 0;
+    const wsFactory = (url: string) => {
+      urls.push(url);
+      callCount++;
+      if (callCount === 1) {
+        return createInstantFailureWebSocketFactory(fakeTimer)(url);
+      }
+      return createSuccessWebSocketFactory(fakeTimer)(url);
+    };
+
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      wsFactory,
+      fakeTimer,
+      createManagerFactory()
+    );
+
+    const result = await client.ensureConnected();
+
+    expect(result).toBe(true);
+    expect(fakeManager.wasMethodCalled("setup:force=true")).toBe(false);
+    expect(urls).toEqual([
+      "ws://localhost:8765/ws",
+      "ws://localhost:8767/ws",
+    ]);
+
+    await client.close();
+  });
+
+  test("getInstance reuses the device singleton when the service port changes", async function() {
+    const client = IOSCtrlProxyClient.getInstance(testDevice, 8765);
+    const sameClient = IOSCtrlProxyClient.getInstance(testDevice, 8767);
+
+    expect(sameClient).toBe(client);
+    expect((sameClient as unknown as { getWebSocketUrl: () => string }).getWebSocketUrl()).toBe(
+      "ws://localhost:8767/ws"
+    );
+
+    await client.close();
+  });
+
+  test("port changes force the next connection to use the new WebSocket URL", async function() {
+    const urls: string[] = [];
+    const wsFactory = (url: string) => {
+      urls.push(url);
+      return createSuccessWebSocketFactory(fakeTimer)(url);
+    };
+    const client = IOSCtrlProxyClient.createForTesting(
+      testDevice,
+      serverPort,
+      wsFactory,
+      fakeTimer,
+      createManagerFactory()
+    );
+
+    expect(await client.ensureConnected()).toBe(true);
+
+    (client as unknown as { updatePort: (port: number) => void }).updatePort(8767);
+
+    expect(await client.ensureConnected()).toBe(true);
+    expect(urls).toEqual([
+      "ws://localhost:8765/ws",
+      "ws://localhost:8767/ws",
+    ]);
+
+    await client.close();
+  });
+
   test("no auto-setup when already connected", async function() {
     const client = IOSCtrlProxyClient.createForTesting(
       testDevice,

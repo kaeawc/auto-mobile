@@ -1,14 +1,36 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { PortManager } from "../../src/utils/PortManager";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager, type PortAvailabilityChecker } from "../../src/utils/PortManager";
+
+class FakePortAvailabilityChecker implements PortAvailabilityChecker {
+  public readonly checkedPorts: number[] = [];
+
+  public constructor(private readonly unavailablePorts: Set<number> = new Set()) {}
+
+  public isPortAvailable(port: number): boolean {
+    this.checkedPorts.push(port);
+    return !this.unavailablePorts.has(port);
+  }
+}
+
+function expectedAllocatedPort(index: number): number {
+  return 8765 + index;
+}
+
+function expectedIosAllocatedPort(index: number): number {
+  const port = expectedAllocatedPort(index);
+  return port >= 8766 ? port + 1 : port;
+}
 
 describe("PortManager", () => {
   beforeEach(() => {
+    PortManager.setPortAvailabilityCheckerForTesting(new FakePortAvailabilityChecker());
     // Reset before each test to ensure clean state (other tests may allocate ports)
     PortManager.reset();
   });
 
   afterEach(() => {
     PortManager.reset();
+    PortManager.setPortAvailabilityCheckerForTesting(null);
   });
 
   test("should allocate unique ports for different devices", () => {
@@ -19,6 +41,35 @@ describe("PortManager", () => {
     expect(port1).toBe(8765);
     expect(port2).toBe(8766);
     expect(port3).toBe(8767);
+  });
+
+  test("should reserve the iOS SDK hierarchy server port when requested", () => {
+    const port1 = PortManager.allocate("device-1", { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+    const port2 = PortManager.allocate("device-2", { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+
+    expect(port1).toBe(8765);
+    expect(port2).toBe(8767);
+    expect([...PortManager.getAllocations().values()]).not.toContain(8766);
+  });
+
+  test("should skip ports unavailable on the host OS", () => {
+    const checker = new FakePortAvailabilityChecker(new Set([8765, 8766]));
+    PortManager.setPortAvailabilityCheckerForTesting(checker);
+
+    const port = PortManager.allocate("device-1");
+
+    expect(port).toBe(8767);
+    expect(checker.checkedPorts).toEqual([8765, 8766, 8767]);
+  });
+
+  test("should combine scoped reserved ports with unavailable host ports", () => {
+    const checker = new FakePortAvailabilityChecker(new Set([8765, 8767]));
+    PortManager.setPortAvailabilityCheckerForTesting(checker);
+
+    const port = PortManager.allocate("device-1", { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+
+    expect(port).toBe(8768);
+    expect(checker.checkedPorts).toEqual([8765, 8767, 8768]);
   });
 
   test("should return same port for same device", () => {
@@ -40,6 +91,23 @@ describe("PortManager", () => {
     // Device-2 should get the released port
     const port2 = PortManager.allocate("device-2");
     expect(port2).toBe(8765);
+  });
+
+  test("should reserve a known port for a device", () => {
+    PortManager.allocate("device-1");
+
+    PortManager.reserve("device-1", 8767);
+
+    expect(PortManager.getPort("device-1")).toBe(8767);
+    expect(PortManager.allocate("device-2")).toBe(8765);
+  });
+
+  test("should reject reserving a port allocated to another device", () => {
+    PortManager.allocate("device-1");
+
+    expect(() => PortManager.reserve("device-2", 8765)).toThrow(
+      "Port 8765 is already allocated to device device-1"
+    );
   });
 
   test("should reuse released ports in order", () => {
@@ -101,6 +169,7 @@ describe("PortManager", () => {
 
   test("should expose base port and device port constants", () => {
     expect(PortManager.getBasePort()).toBe(8765);
+    expect(PortManager.getMaxDevices()).toBe(100);
     expect(PortManager.DEVICE_PORT).toBe(8765);
   });
 
@@ -114,7 +183,16 @@ describe("PortManager", () => {
     // Allocate 50 devices (well under 100 limit)
     for (let i = 0; i < 50; i++) {
       const port = PortManager.allocate(`device-${i}`);
-      expect(port).toBe(8765 + i);
+      expect(port).toBe(expectedAllocatedPort(i));
+    }
+
+    expect(PortManager.getAllocatedCount()).toBe(50);
+  });
+
+  test("should support many iOS devices while skipping reserved ports", () => {
+    for (let i = 0; i < 50; i++) {
+      const port = PortManager.allocate(`ios-device-${i}`, { reservedPorts: IOS_CTRL_PROXY_RESERVED_PORTS });
+      expect(port).toBe(expectedIosAllocatedPort(i));
     }
 
     expect(PortManager.getAllocatedCount()).toBe(50);

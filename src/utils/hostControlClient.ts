@@ -504,7 +504,7 @@ export async function startCtrlProxyIOS(params: {
   xctestrunPath?: string;
   bundleId?: string;
   timeoutSeconds?: number;
-}): Promise<HostControlResult<{ pid: number; message: string }>> {
+}): Promise<HostControlResult<{ pid: number; message: string; port?: number }>> {
   return sendCommand("xctest-start", params);
 }
 

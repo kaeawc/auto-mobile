@@ -5,12 +5,13 @@ import { NoOpPerformanceTracker, createGlobalPerformanceTracker, type Performanc
 import { Timer, defaultTimer } from "./SystemTimer";
 import { IOSCtrlProxyBuilder, type CtrlProxyIosBuildResult } from "./IOSCtrlProxyBuilder";
 import { type ChildProcess } from "child_process";
-import { PortManager } from "./PortManager";
+import { IOS_CTRL_PROXY_RESERVED_PORTS, PortManager } from "./PortManager";
 import { DefaultProcessExecutor, type ProcessExecutor } from "./ProcessExecutor";
 import { XcodeSigningManager } from "./ios-cmdline-tools/XcodeSigning";
 import { DeviceAppInspector } from "./ios-cmdline-tools/DeviceAppInspector";
 import { isIosSimulatorUdid } from "./ios-cmdline-tools/iosDeviceType";
 import { isRunningInDocker } from "./dockerEnv";
+import { createConnection } from "node:net";
 import {
   getHostControlHost,
   getCtrlProxyIOSStatus,
@@ -81,13 +82,57 @@ interface HostControlCtrlProxyIOSRunner {
     xctestrunPath?: string;
     bundleId?: string;
     timeoutSeconds?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { pid: number; message: string } }>;
+  }): Promise<{ success: boolean; error?: string; data?: { pid: number; message: string; port?: number } }>;
   stop(params: { deviceId?: string; pid?: number }): Promise<{ success: boolean; error?: string }>;
   status(params: {
     deviceId?: string;
     pid?: number;
     port?: number;
-  }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number } }>;
+  }): Promise<{ success: boolean; error?: string; data?: { running: boolean; pid?: number; port?: number } }>;
+}
+
+interface ExternalCtrlProxyProcess {
+  pid: number;
+  port: number;
+}
+
+export interface HostPortAvailabilityChecker {
+  isAvailable(host: string, port: number): Promise<boolean>;
+}
+
+class TcpHostPortAvailabilityChecker implements HostPortAvailabilityChecker {
+  private static readonly CONNECT_TIMEOUT_MS = 1000;
+
+  public isAvailable(host: string, port: number): Promise<boolean> {
+    return new Promise(resolve => {
+      const socket = createConnection({ host, port });
+      let settled = false;
+
+      const finish = (available: boolean) => {
+        if (settled) {
+          return;
+        }
+        settled = true;
+        socket.destroy();
+        resolve(available);
+      };
+
+      socket.setTimeout(TcpHostPortAvailabilityChecker.CONNECT_TIMEOUT_MS);
+      socket.once("connect", () => finish(false));
+      socket.once("timeout", () => finish(false));
+      socket.once("error", error => {
+        const code = (error as NodeJS.ErrnoException).code;
+        finish(code === "ECONNREFUSED");
+      });
+    });
+  }
+}
+
+class HostControlServicePortUnavailableError extends Error {
+  constructor(host: string, port: number) {
+    super(`Host control port ${port} is already in use on ${host}`);
+    this.name = "HostControlServicePortUnavailableError";
+  }
 }
 
 /**
@@ -113,6 +158,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   private readonly signingManager: XcodeSigningManager;
   private readonly appInspector: DeviceAppInspector;
   private readonly hostControl: HostControlCtrlProxyIOSRunner;
+  private readonly hostPortAvailabilityChecker: HostPortAvailabilityChecker;
   private hostControlAvailability: Promise<boolean> | null = null;
 
   // Singleton instances per device
@@ -161,6 +207,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   // iproxy tunnel state (physical devices)
   private iproxyProcessId: number | null = null;
   private iproxyProcess: ChildProcess | null = null;
+  private iproxyDevicePort: number | null = null;
   private iproxyMonitorInterval: ReturnType<typeof setInterval> | null = null;
   private iproxyRestartTimeout: ReturnType<Timer["setTimeout"]> | null = null;
   private iproxyRestartAttempts: number = 0;
@@ -189,15 +236,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
     signingManager: XcodeSigningManager = new XcodeSigningManager(),
     appInspector: DeviceAppInspector = new DeviceAppInspector(),
-    hostControlRunner?: HostControlCtrlProxyIOSRunner
+    hostControlRunner?: HostControlCtrlProxyIOSRunner,
+    hostPortAvailabilityChecker: HostPortAvailabilityChecker = new TcpHostPortAvailabilityChecker()
   ) {
     this.device = device;
     this.timer = timer;
-    this.servicePort = PortManager.allocate(device.deviceId);
+    this.servicePort = this.allocateServicePort();
     this.builder = builder || IOSCtrlProxyBuilder.getInstance();
     this.processExecutor = processExecutor;
     this.signingManager = signingManager;
     this.appInspector = appInspector;
+    this.hostPortAvailabilityChecker = hostPortAvailabilityChecker;
     this.hostControl = hostControlRunner || {
       shouldUseHostControl,
       isRunningInDocker,
@@ -246,7 +295,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     processExecutor: ProcessExecutor,
     signingManager?: XcodeSigningManager,
     appInspector?: DeviceAppInspector,
-    hostControlRunner?: HostControlCtrlProxyIOSRunner
+    hostControlRunner?: HostControlCtrlProxyIOSRunner,
+    hostPortAvailabilityChecker?: HostPortAvailabilityChecker
   ): IOSCtrlProxyManager {
     return new IOSCtrlProxyManager(
       device,
@@ -255,7 +305,8 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       processExecutor,
       signingManager,
       appInspector,
-      hostControlRunner
+      hostControlRunner,
+      hostPortAvailabilityChecker
     );
   }
 
@@ -461,6 +512,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     perf.startOperation("processAliveCheck");
     const isAlive = await this.isCtrlProxyProcessAlive();
     perf.endOperation("processAliveCheck");
+    let restartedAliveProcess = false;
     if (isAlive) {
       logger.info("[IOSCtrlProxy] CtrlProxy process is alive, skipping start");
       // On physical devices the iproxy tunnel may have been stopped independently
@@ -469,39 +521,72 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       // self-heals the connection when it is not.
       if (!this.isSimulator()) {
         perf.startOperation("iproxyTunnel");
-        await this.startIproxyTunnel();
-        perf.endOperation("iproxyTunnel");
-        this.startIproxyMonitoring();
+        try {
+          await this.startIproxyTunnel({ allowServicePortReallocation: false });
+        } catch (error) {
+          perf.endOperation("iproxyTunnel");
+          if (!(error instanceof HostControlServicePortUnavailableError)) {
+            throw error;
+          }
+          logger.warn(
+            "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available; restarting"
+          );
+          perf.startOperation("spawnRunner");
+          await this.restartDeviceProcessAfterHostPortCollision();
+          perf.endOperation("spawnRunner");
+          restartedAliveProcess = true;
+        }
+        if (!restartedAliveProcess) {
+          perf.endOperation("iproxyTunnel");
+          this.startIproxyMonitoring();
+        }
       }
-      return;
+      if (!restartedAliveProcess) {
+        return;
+      }
     }
 
-    perf.startOperation("runningCheck");
-    const alreadyRunning = await this.isRunning();
-    perf.endOperation("runningCheck");
-    if (alreadyRunning) {
-      logger.info("[IOSCtrlProxy] Service is already running");
-      return;
-    }
+    if (!restartedAliveProcess) {
+      perf.startOperation("runningCheck");
+      const alreadyRunning = await this.isRunning();
+      perf.endOperation("runningCheck");
+      if (alreadyRunning) {
+        logger.info("[IOSCtrlProxy] Service is already running");
+        return;
+      }
 
-    // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
-    // before spawning our own to avoid conflicting xcodebuild instances.
-    if (this.isSimulator()) {
-      perf.startOperation("externalProcessCheck");
-      const hasExternal = await this.isExternalCtrlProxyProcessRunning();
-      perf.endOperation("externalProcessCheck");
-      if (hasExternal) {
-        logger.info("[IOSCtrlProxy] External xcodebuild CtrlProxy process detected, skipping spawn — will wait for health endpoint");
-        // Fall through to health polling below instead of spawning
+      // Check for externally-managed xcodebuild processes (e.g. hot-reload script)
+      // before spawning our own to avoid conflicting xcodebuild instances.
+      if (this.isSimulator()) {
+        perf.startOperation("externalProcessCheck");
+        const externalProcess = await this.findExternalCtrlProxyProcess();
+        const defaultPortIsHealthyForDevice = externalProcess === null &&
+          !this.useHostControl() &&
+          this.servicePort !== IOSCtrlProxyManager.DEFAULT_PORT &&
+          await this.checkHealthEndpointOnPortForDevice(
+            IOSCtrlProxyManager.DEFAULT_PORT,
+            this.device.deviceId
+          );
+        perf.endOperation("externalProcessCheck");
+        if (externalProcess || defaultPortIsHealthyForDevice) {
+          const externalPort = externalProcess?.port ?? IOSCtrlProxyManager.DEFAULT_PORT;
+          logger.info(
+            `[IOSCtrlProxy] External CtrlProxy process detected on port ${externalPort}, skipping spawn`
+          );
+          if (externalPort !== this.servicePort) {
+            this.adoptServicePort(externalPort);
+          }
+          // Fall through to health polling below instead of spawning
+        } else {
+          perf.startOperation("spawnRunner");
+          await this.startOnSimulator();
+          perf.endOperation("spawnRunner");
+        }
       } else {
         perf.startOperation("spawnRunner");
-        await this.startOnSimulator();
+        await this.startOnDevice();
         perf.endOperation("spawnRunner");
       }
-    } else {
-      perf.startOperation("spawnRunner");
-      await this.startOnDevice();
-      perf.endOperation("spawnRunner");
     }
 
     // Wait for HTTP health endpoint to be ready
@@ -562,7 +647,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       }
 
       if (!this.isSimulator()) {
-        await this.stopIproxyTunnel();
+        await this.stopIproxyTunnel({ clearDevicePort: true });
       }
 
       this.xcTestProcessId = null;
@@ -579,7 +664,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     this.stopProcessMonitoring();
 
     // Stop iproxy tunnel if running
-    await this.stopIproxyTunnel();
+    await this.stopIproxyTunnel({ clearDevicePort: true });
 
     if (this.xcTestProcessId) {
       try {
@@ -754,11 +839,63 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
   }
 
+  private allocateServicePort(additionalReservedPorts: Iterable<number> = []): number {
+    return PortManager.allocate(this.device.deviceId, {
+      reservedPorts: [
+        ...IOS_CTRL_PROXY_RESERVED_PORTS,
+        ...additionalReservedPorts,
+      ],
+    });
+  }
+
+  private adoptServicePort(port: number): void {
+    if (PortManager.getPort(this.device.deviceId) !== port) {
+      PortManager.reserve(this.device.deviceId, port);
+    }
+    if (this.servicePort !== port) {
+      this.servicePort = port;
+      this.clearCaches();
+    }
+  }
+
+  private async ensureHostControlServicePortAvailable(options: { allowReallocation?: boolean } = {}): Promise<void> {
+    const allowReallocation = options.allowReallocation ?? true;
+    const host = this.hostControl.getHost();
+    const unavailablePorts = new Set<number>();
+
+    for (let attempt = 0; attempt < PortManager.getMaxDevices(); attempt++) {
+      if (await this.hostPortAvailabilityChecker.isAvailable(host, this.servicePort)) {
+        return;
+      }
+
+      const unavailablePort = this.servicePort;
+      logger.warn(
+        `[IOSCtrlProxy] Host control port ${unavailablePort} is already in use on ${host}; reallocating`
+      );
+      if (!allowReallocation) {
+        throw new HostControlServicePortUnavailableError(host, unavailablePort);
+      }
+      unavailablePorts.add(unavailablePort);
+      PortManager.release(this.device.deviceId);
+      this.servicePort = this.allocateServicePort(unavailablePorts);
+    }
+
+    throw new Error(
+      `No host-control iOS CtrlProxy ports are available for device ${this.device.deviceId}.`
+    );
+  }
+
   private async isHostControlAvailable(): Promise<boolean> {
     if (!this.hostControlAvailability) {
       this.hostControlAvailability = this.hostControl.isAvailable();
     }
     return this.hostControlAvailability;
+  }
+
+  private async restartDeviceProcessAfterHostPortCollision(): Promise<void> {
+    await this.stop();
+    this.isStopping = false;
+    await this.startOnDevice();
   }
 
   private async startOnSimulator(): Promise<void> {
@@ -768,6 +905,20 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       if (!await this.isHostControlAvailable()) {
         throw new Error("Host control daemon not available for CtrlProxy startup");
       }
+
+      const existingProcess = await this.hostControl.status({ deviceId: this.device.deviceId });
+      const existingServicePort = existingProcess.data?.port;
+      if (existingProcess.success && existingProcess.data?.running && typeof existingServicePort === "number") {
+        logger.info(
+          `[IOSCtrlProxy] Reusing host-control CtrlProxy process on service port ${existingServicePort}`
+        );
+        this.adoptServicePort(existingServicePort);
+        this.xcTestProcessId = existingProcess.data.pid ?? null;
+        this.xcTestProcess = null;
+        return;
+      }
+
+      await this.ensureHostControlServicePortAvailable();
 
       const xctestrunPath = await this.builder.getXctestrunPath("simulator");
       const bundleId = this.resolveTargetBundleId();
@@ -782,6 +933,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Host control failed to start CtrlProxy");
       }
 
+      if (typeof result.data.port === "number") {
+        this.adoptServicePort(result.data.port);
+      }
       this.xcTestProcessId = result.data.pid;
       this.xcTestProcess = null;
       return;
@@ -804,8 +958,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     const childEnv: Record<string, string> = {
       CTRL_PROXY_IOS_PORT: String(this.servicePort),
       CTRL_PROXY_IOS_TIMEOUT: timeout,
+      AUTOMOBILE_DEVICE_ID: this.device.deviceId,
       SIMCTL_CHILD_CTRL_PROXY_IOS_PORT: String(this.servicePort),
       SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT: timeout,
+      SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID: this.device.deviceId,
     };
     if (bundleId) {
       childEnv.CTRL_PROXY_IOS_BUNDLE_ID = bundleId;
@@ -1074,9 +1230,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
    * binary name match to avoid self-matching shell wrappers) then verifies
    * CtrlProxy appears in the process args.
    */
-  private async isExternalCtrlProxyProcessRunning(): Promise<boolean> {
+  private async findExternalCtrlProxyProcess(): Promise<ExternalCtrlProxyProcess | null> {
     if (this.useHostControl()) {
-      return false; // Host-control environments don't have external xcodebuild
+      return null; // Host-control environments don't have external xcodebuild
     }
     try {
       // pgrep -x matches only processes whose binary name is exactly "xcodebuild"
@@ -1085,7 +1241,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
       );
       const pids = pgrepOut.trim().split("\n").filter(line => line.length > 0);
       if (pids.length === 0) {
-        return false;
+        return null;
       }
 
       // Filter to PIDs whose args contain CtrlProxy, excluding our tracked PID
@@ -1099,18 +1255,32 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
             `ps -p ${pid} -o args= 2>/dev/null`
           );
           if (argsOut.includes("CtrlProxy")) {
+            if (!argsOut.includes(`id=${this.device.deviceId}`)) {
+              continue;
+            }
+            const port = this.parseCtrlProxyPortFromProcessArgs(argsOut) ?? IOSCtrlProxyManager.DEFAULT_PORT;
             logger.info(`[IOSCtrlProxy] Found external xcodebuild CtrlProxy process: ${pid}`);
-            return true;
+            return { pid, port };
           }
         } catch {
           // Process may have exited between pgrep and ps
         }
       }
-      return false;
+      return null;
     } catch {
       // pgrep exits 1 when no process matches
-      return false;
+      return null;
     }
+  }
+
+  private parseCtrlProxyPortFromProcessArgs(args: string): number | null {
+    const match = args.match(/(?:^|\s)(?:SIMCTL_CHILD_)?CTRL_PROXY_IOS_PORT=(\d+)(?:\s|$)/);
+    if (!match) {
+      return null;
+    }
+
+    const port = Number.parseInt(match[1], 10);
+    return Number.isNaN(port) || port <= 0 || port > 65535 ? null : port;
   }
 
   /**
@@ -1141,6 +1311,18 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error("Host control daemon not available for CtrlProxy startup");
       }
 
+      const existingProcess = await this.hostControl.status({ deviceId: this.device.deviceId });
+      const existingDevicePort = existingProcess.data?.port;
+      if (existingProcess.success && existingProcess.data?.running && typeof existingDevicePort === "number") {
+        logger.info(
+          `[IOSCtrlProxy] Reusing host-control CtrlProxy process on device port ${existingDevicePort}`
+        );
+        this.xcTestProcessId = existingProcess.data.pid ?? null;
+        this.xcTestProcess = null;
+        await this.startIproxyTunnel({ devicePort: existingDevicePort });
+        return;
+      }
+
       const xctestrunPath = await this.builder.getXctestrunPath("device");
       await this.startIproxyTunnel();
       await this.verifyInstalledAppBundle();
@@ -1157,6 +1339,14 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         throw new Error(result.error || "Host control failed to start CtrlProxy");
       }
 
+      const resultDevicePort = result.data.port;
+      if (typeof resultDevicePort === "number" && resultDevicePort !== this.servicePort) {
+        logger.info(
+          `[IOSCtrlProxy] Host-control CtrlProxy process is listening on device port ${resultDevicePort}; restarting tunnel`
+        );
+        await this.stopIproxyTunnel();
+        await this.startIproxyTunnel({ devicePort: resultDevicePort });
+      }
       this.xcTestProcessId = result.data.pid;
       this.xcTestProcess = null;
       return;
@@ -1270,17 +1460,39 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
   }
 
   private async checkHealthEndpoint(): Promise<boolean> {
+    return this.checkHealthEndpointOnPort(this.servicePort);
+  }
+
+  private async checkHealthEndpointOnPort(port: number): Promise<boolean> {
+    const body = await this.readHealthEndpointBodyOnPort(port);
+    return body !== null && (body.includes("ok") || body.includes("healthy"));
+  }
+
+  private async checkHealthEndpointOnPortForDevice(port: number, deviceId: string): Promise<boolean> {
+    const body = await this.readHealthEndpointBodyOnPort(port);
+    if (body === null) {
+      return false;
+    }
+
+    try {
+      const health = JSON.parse(body) as { status?: unknown; deviceId?: unknown };
+      return health.status === "ok" && health.deviceId === deviceId;
+    } catch {
+      return false;
+    }
+  }
+
+  private async readHealthEndpointBodyOnPort(port: number): Promise<string | null> {
     try {
       const host = this.useHostControl() ? this.hostControl.getHost() : "localhost";
       if (this.useHostControl()) {
         const controller = new AbortController();
         const timeoutId = this.timer.setTimeout(() => controller.abort(), 2000);
         try {
-          const response = await fetch(`http://${host}:${this.servicePort}/health`, {
+          const response = await fetch(`http://${host}:${port}/health`, {
             signal: controller.signal
           });
-          const body = await response.text();
-          return body.includes("ok") || body.includes("healthy");
+          return await response.text();
         } finally {
           this.timer.clearTimeout(timeoutId);
         }
@@ -1288,11 +1500,11 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       // Use curl to check the health endpoint locally
       const { stdout } = await this.processExecutor.exec(
-        `curl -s --max-time 2 http://${host}:${this.servicePort}/health`
+        `curl -s --max-time 2 http://${host}:${port}/health`
       );
-      return stdout.includes("ok") || stdout.includes("healthy");
+      return stdout;
     } catch {
-      return false;
+      return null;
     }
   }
 
@@ -1310,7 +1522,10 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     return parsed;
   }
 
-  private async startIproxyTunnel(): Promise<void> {
+  private async startIproxyTunnel(options: {
+    allowServicePortReallocation?: boolean;
+    devicePort?: number;
+  } = {}): Promise<void> {
     if (this.isSimulator()) {
       return;
     }
@@ -1323,12 +1538,17 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
         }
       }
 
+      const fixedDevicePort = options.devicePort ?? this.iproxyDevicePort;
       await this.stopIproxyTunnel();
+      await this.ensureHostControlServicePortAvailable({
+        allowReallocation: options.allowServicePortReallocation ?? true,
+      });
+      const devicePort = fixedDevicePort ?? this.servicePort;
 
       const result = await this.hostControl.startIproxy({
         deviceId: this.device.deviceId,
         localPort: this.servicePort,
-        devicePort: this.servicePort
+        devicePort
       });
       if (!result.success || !result.data) {
         throw new Error(result.error || "Failed to start iproxy tunnel via host control");
@@ -1336,6 +1556,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
       this.iproxyProcessId = result.data.pid;
       this.iproxyProcess = null;
+      this.iproxyDevicePort = devicePort;
       await this.waitForIproxyStartup();
       return;
     }
@@ -1382,7 +1603,7 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
     await this.waitForIproxyStartup();
   }
 
-  private async stopIproxyTunnel(): Promise<void> {
+  private async stopIproxyTunnel(options: { clearDevicePort?: boolean } = {}): Promise<void> {
     this.stopIproxyMonitoring();
 
     if (this.iproxyRestartTimeout) {
@@ -1413,6 +1634,9 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyProcessId = null;
     this.iproxyProcess = null;
+    if (options.clearDevicePort) {
+      this.iproxyDevicePort = null;
+    }
     this.iproxyRestartAttempts = 0;
   }
 
@@ -1450,9 +1674,23 @@ export class IOSCtrlProxyManager implements CtrlProxyIosManager {
 
     this.iproxyRestartTimeout = this.timer.setTimeout(() => {
       this.iproxyRestartTimeout = null;
-      void this.startIproxyTunnel().then(() => {
+      void this.startIproxyTunnel({
+        allowServicePortReallocation: false,
+        devicePort: this.iproxyDevicePort ?? undefined,
+      }).then(() => {
         this.startIproxyMonitoring();
       }).catch(error => {
+        if (error instanceof HostControlServicePortUnavailableError) {
+          logger.warn(
+            "[IOSCtrlProxy] Existing CtrlProxy process uses a host port that is no longer available during iproxy restart; restarting"
+          );
+          void this.restartDeviceProcessAfterHostPortCollision().then(() => {
+            this.startIproxyMonitoring();
+          }).catch(restartError => {
+            logger.warn(`[IOSCtrlProxy] Failed to restart CtrlProxy after iproxy port collision: ${restartError instanceof Error ? restartError.message : String(restartError)}`);
+          });
+          return;
+        }
         logger.warn(`[IOSCtrlProxy] Failed to restart iproxy: ${error instanceof Error ? error.message : String(error)}`);
       });
     }, delay);

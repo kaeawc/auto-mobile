@@ -2,6 +2,8 @@ import * as os from "os";
 import * as path from "path";
 import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 import { logger } from "../../../utils/logger";
+import { shouldUseHostControl } from "../../../utils/hostControlClient";
+import { isRunningInDocker } from "../../../utils/dockerEnv";
 import type { NotificationPolicyAccessState } from "../NotificationPolicy";
 
 /**
@@ -43,6 +45,13 @@ export interface BulletinBoardReaderDeps {
   rmTemp(path: string): Promise<void>;
   /** Absolute path of a simulator device root (…/CoreSimulator/Devices/<udid>). */
   deviceDataRoot(udid: string): string;
+  /**
+   * True when running in Docker/external-emulator host-control mode. There the
+   * CoreSimulator BulletinBoard plist lives on the macOS host and host `plutil`
+   * is not reachable from inside the container, so the read must be gated as
+   * unsupported rather than silently reporting every app as unknown.
+   */
+  isHostControlMode(): boolean;
 }
 
 /**
@@ -96,6 +105,16 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
       };
     }
 
+    if (this.deps.isHostControlMode()) {
+      return {
+        supported: false,
+        method: "unsupported",
+        error:
+          "iOS notification authorization cannot be read under host control (Docker/external-emulator mode): " +
+          "the CoreSimulator BulletinBoard plist is on the macOS host and host plutil is unreachable from the container",
+      };
+    }
+
     const path = `${this.deps.deviceDataRoot(deviceId)}/data/Library/BulletinBoard/VersionedSectionInfo.plist`;
 
     let outerXml: string;
@@ -128,10 +147,19 @@ export class BulletinBoardAuthorizationReader implements IosNotificationAuthoriz
         ? UN_AUTH[settings.authorizationStatus]
         : undefined;
 
+    // iOS still delivers notifications for authorized (2), provisional (3, quiet
+    // delivery) and ephemeral (4, App Clips), so all three count as "allowed".
+    // Callers needing strict full authorization can check
+    // `authorizationStatus === "authorized"`.
+    const allowed =
+      settings.authorizationStatus !== undefined &&
+      settings.authorizationStatus >= 2 &&
+      settings.authorizationStatus <= 4;
+
     return {
       supported: true,
       method: "ios_bulletinboard_plist",
-      allowed: settings.authorizationStatus === 2,
+      allowed,
       authorizationStatus: status,
       lockScreen: settings.lockScreenSetting === 2,
       notificationCenter: settings.notificationCenterSetting === 2,
@@ -183,5 +211,6 @@ export function defaultBulletinBoardReader(): IosNotificationAuthorizationReader
     },
     deviceDataRoot: udid =>
       path.join(os.homedir(), "Library/Developer/CoreSimulator/Devices", udid),
+    isHostControlMode: () => shouldUseHostControl() && isRunningInDocker(),
   });
 }

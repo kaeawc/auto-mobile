@@ -836,7 +836,14 @@ public class GesturePerformer: GesturePerforming {
 
         public func shake() throws {
             try runOnMainThread {
-                XCUIDevice.shared.shake()
+                let notificationName = CFNotificationName("com.apple.UIKit.SimulatorShake" as CFString)
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    notificationName,
+                    nil,
+                    nil,
+                    true
+                )
             }
         }
 

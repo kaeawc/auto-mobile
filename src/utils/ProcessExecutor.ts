@@ -38,6 +38,10 @@ export function shellCommandForPlatform(
 
 const execAsync: ExecAsync = async (command, options) => {
   const shellCommand = shellCommandForPlatform(command);
+  // Intentionally shell-based: existing callers rely on pipes, redirects,
+  // and compound commands. Use HostCommandExecutor for argv-safe execution.
+  // codeql[js/shell-command-injection-from-environment] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
+  // codeql[js/indirect-command-line-injection] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
   const { stdout, stderr } = await execFileAsync(shellCommand.file, shellCommand.args, options);
   return { stdout, stderr };
 };
@@ -57,10 +61,6 @@ const createExecResult = (stdout: string | Buffer, stderr: string | Buffer): Exe
 export class DefaultProcessExecutor implements ProcessExecutor {
   async exec(command: string, options: ProcessExecOptions = {}): Promise<ExecResult> {
     try {
-      // Intentionally shell-based: existing callers rely on pipes, redirects,
-      // and compound commands. Use HostCommandExecutor for argv-safe execution.
-      // codeql[js/shell-command-injection-from-environment] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
-      // codeql[js/indirect-command-line-injection] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
       const { stdout, stderr } = await execAsync(command, {
         timeout: options.timeoutMs,
         maxBuffer: options.maxBuffer,

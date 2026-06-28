@@ -304,7 +304,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     try {
       const before = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
       const appleLocale = this.toAppleLocale(languageTag);
-      const language = this.toAppleLanguage(languageTag);
+      const language = this.selectAppleLanguage(languageTag, before.supportedLanguages);
 
       await this.lockdownLocaleClient.setLanguage(this.device.deviceId, language, appleLocale);
 
@@ -394,7 +394,25 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     return languageTag.replace(/-/g, "_");
   }
 
-  private toAppleLanguage(languageTag: string): string {
-    return languageTag.split(/[-_]/)[0] ?? languageTag;
+  private selectAppleLanguage(languageTag: string, supportedLanguages?: string[]): string {
+    const candidates = this.buildAppleLanguages(languageTag);
+    if (!supportedLanguages || supportedLanguages.length === 0) {
+      return candidates[0] ?? languageTag;
+    }
+
+    const supportedByNormalizedTag = new Map(
+      supportedLanguages.map(language => [this.normalizeLanguageTag(language), language])
+    );
+    for (const candidate of candidates) {
+      const supported = supportedByNormalizedTag.get(this.normalizeLanguageTag(candidate));
+      if (supported) {
+        return supported;
+      }
+    }
+    return candidates[0] ?? languageTag;
+  }
+
+  private normalizeLanguageTag(languageTag: string): string {
+    return languageTag.replace(/_/g, "-").toLowerCase();
   }
 }

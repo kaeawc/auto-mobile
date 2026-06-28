@@ -134,9 +134,9 @@ export class CommandLineLockdownLocaleClient implements LockdownLocaleClient {
     await this.processExecutor.exec(
       [
         "pymobiledevice3",
-        "--udid", quoteShell(udid),
         "lockdown",
         command,
+        "--udid", quoteShell(udid),
         quoteShell(value),
       ].join(" "),
       { timeoutMs: LOCKDOWN_COMMAND_TIMEOUT_MS }

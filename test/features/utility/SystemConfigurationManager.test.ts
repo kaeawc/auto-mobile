@@ -137,6 +137,7 @@ describe("SystemConfigurationManager", () => {
 
     test("sets locale on physical iOS device through lockdown", async () => {
       const lockdown = new FakeLockdownLocaleClient();
+      lockdown.languageConfig = { language: "en", locale: "en_US", supportedLanguages: ["ja"] };
       lockdown.setLanguageConfigAfterWrite = { language: "ja", locale: "ja_JP" };
       const mgr = new SystemConfigurationManager(IOS_PHYSICAL, fakeAdbFactory, fakeExec, fakeTimer, lockdown);
       const result = await mgr.setLocale("ja-JP");

@@ -229,6 +229,38 @@ describe("SystemConfigurationAdapter", () => {
       expect(exec.getExecutedCommands()).toHaveLength(0);
     });
 
+    it("preserves the best supported script-specific language for physical locale changes", async () => {
+      const lockdown = new FakeLockdownLocaleClient();
+      lockdown.languageConfig = {
+        language: "en",
+        locale: "en_US",
+        supportedLanguages: ["zh-Hans", "zh-Hant", "zh"],
+      };
+      lockdown.setLanguageConfigAfterWrite = { language: "zh-Hant", locale: "zh_Hant_TW" };
+      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
+
+      const result = await adapter.setLocale("zh-Hant-TW", {});
+
+      expect(result.success).toBe(true);
+      expect(lockdown.setLanguageCalls).toEqual([
+        { udid: iosPhysical.deviceId, language: "zh-Hant", locale: "zh_Hant_TW" },
+      ]);
+    });
+
+    it("uses the full requested language tag when physical supported languages are unavailable", async () => {
+      const lockdown = new FakeLockdownLocaleClient();
+      lockdown.languageConfig = { language: "en", locale: "en_US" };
+      lockdown.setLanguageConfigAfterWrite = { language: "pt-BR", locale: "pt_BR" };
+      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
+
+      const result = await adapter.setLocale("pt-BR", {});
+
+      expect(result.success).toBe(true);
+      expect(lockdown.setLanguageCalls).toEqual([
+        { udid: iosPhysical.deviceId, language: "pt-BR", locale: "pt_BR" },
+      ]);
+    });
+
     it("returns a verification error when physical locale read-back does not match", async () => {
       const lockdown = new FakeLockdownLocaleClient();
       lockdown.setLanguageConfigAfterWrite = { language: "fr", locale: "fr_FR" };
@@ -355,9 +387,10 @@ describe("SystemConfigurationAdapter", () => {
 
       const commands = exec.getExecutedCommands();
       expect(commands[0]).toContain("idevicepair");
-      expect(exec.wasCommandExecuted("pymobiledevice3 --udid")).toBe(true);
-      expect(exec.wasCommandExecuted("lockdown language 'ja'")).toBe(true);
-      expect(exec.wasCommandExecuted("lockdown locale 'ja_JP'")).toBe(true);
+      expect(exec.wasCommandExecuted("pymobiledevice3 lockdown language --udid")).toBe(true);
+      expect(exec.wasCommandExecuted("pymobiledevice3 lockdown locale --udid")).toBe(true);
+      expect(exec.wasCommandExecuted("--udid '00008130-001234567890abcd' 'ja'")).toBe(true);
+      expect(exec.wasCommandExecuted("--udid '00008130-001234567890abcd' 'ja_JP'")).toBe(true);
     });
 
     it("returns an actionable error when no lockdown setter command is installed", async () => {

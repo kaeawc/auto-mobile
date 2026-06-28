@@ -11,6 +11,7 @@ import os from "os";
 import AdmZip from "adm-zip";
 
 import { FakeAccessibilityDetector } from "../fakes/FakeAccessibilityDetector";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 
 describe("CtrlProxyManager", function() {
   let accessibilityServiceClient: AndroidCtrlProxyManager;
@@ -21,12 +22,14 @@ describe("CtrlProxyManager", function() {
   let originalSkipChecksumEnv: string | undefined;
   let originalSkipDownloadEnv: string | undefined;
   let originalSkipShaEnv: string | undefined;
+  let originalLaunchCwdEnv: string | undefined;
 
   beforeEach(function() {
     originalApkPathEnv = process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     originalSkipChecksumEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM;
     originalSkipDownloadEnv = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
     originalSkipShaEnv = process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
+    originalLaunchCwdEnv = process.env[DAEMON_LAUNCH_CWD_ENV];
     // Create fake ADB instance
     fakeAdb = new FakeAdbExecutor();
     fakeAdbFactory = { create: () => fakeAdb };
@@ -68,6 +71,11 @@ describe("CtrlProxyManager", function() {
       delete process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK;
     } else {
       process.env.AUTO_MOBILE_ACCESSIBILITY_SERVICE_SHA_SKIP_CHECK = originalSkipShaEnv;
+    }
+    if (originalLaunchCwdEnv === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwdEnv;
     }
   });
   describe("isInstalled", function() {
@@ -482,6 +490,28 @@ describe("CtrlProxyManager", function() {
       const apkPath = await accessibilityServiceClient.downloadApk();
       const stats = await fs.stat(apkPath);
       expect(stats.size).toBeGreaterThan(10000);
+    });
+
+    test("should resolve relative local APK override from daemon launch cwd", async function() {
+      const launchCwd = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-launch-cwd-"));
+      const localApkPath = path.join(launchCwd, "build", "control-proxy-debug.apk");
+      await fs.mkdir(path.dirname(localApkPath), { recursive: true });
+
+      const zip = new AdmZip();
+      zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      zip.writeZip(localApkPath);
+
+      process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = path.join("build", "control-proxy-debug.apk");
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+
+      const apkPath = await accessibilityServiceClient.downloadApk();
+      const stats = await fs.stat(apkPath);
+      expect(stats.size).toBeGreaterThan(10000);
+
+      await accessibilityServiceClient.cleanupApk(apkPath);
+      await fs.rm(launchCwd, { recursive: true, force: true });
     });
 
     test("should download remote APK and verify checksum via injected utilities", async function() {

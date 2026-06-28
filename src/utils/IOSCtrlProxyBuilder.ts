@@ -18,6 +18,7 @@ import {
   type CtrlProxyIosBundleDownloader
 } from "./IOSCtrlProxyBundleDownloader";
 import { hashAppBundle } from "./ios-cmdline-tools/AppBundleHasher";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
  * Result of CtrlProxy download/install
@@ -574,7 +575,9 @@ export class IOSCtrlProxyBuilder {
   private getBundlePathOverride(): string | null {
     const override = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH?.trim()
       || process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH?.trim();
-    return override && override.length > 0 ? override : null;
+    return override && override.length > 0
+      ? resolvePathFromDaemonLaunchWorkingDirectory(override)
+      : null;
   }
 
   private getExpectedChecksum(): string {

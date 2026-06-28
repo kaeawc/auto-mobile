@@ -1,12 +1,19 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { BugReport } from "../../../src/features/debug/BugReport";
 import type { BootedDevice, Element, ElementBounds } from "../../../src/models";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
 import { FakeElementParser } from "../../fakes/FakeElementParser";
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
 describe("BugReport", () => {
+  const tempDirs: string[] = [];
+  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+
   const device: BootedDevice = {
     deviceId: "test-device",
     platform: "android",
@@ -35,6 +42,18 @@ describe("BugReport", () => {
 
   const executeReport = (bugReport: BugReport) =>
     bugReport.execute();
+
+  afterEach(() => {
+    if (originalLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
+    }
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
+  });
 
   describe("getHierarchy", () => {
     test("sets elementCount to number of elements with valid bounds", async () => {
@@ -251,6 +270,23 @@ describe("BugReport", () => {
       for (const call of logcatCalls) {
         expect(call.command).toContain("-t 0");
       }
+    });
+  });
+
+  describe("saveDir", () => {
+    test("resolves relative saveDir from daemon launch cwd", async () => {
+      const launchCwd = mkdtempSync(path.join(tmpdir(), "auto-mobile-bug-launch-cwd-"));
+      tempDirs.push(launchCwd);
+      process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+      const { bugReport, elementParser, viewHierarchy } = setup();
+      viewHierarchy.configureHierarchy({ hierarchy: {} });
+      elementParser.nextRootNodes = [];
+      elementParser.nextFlattenedElements = [];
+
+      const result = await bugReport.execute({ saveDir: "reports" });
+
+      expect(result.savedTo).toBe(path.join(launchCwd, "reports", `${result.reportId}.json`));
+      expect(existsSync(result.savedTo!)).toBe(true);
     });
   });
 });

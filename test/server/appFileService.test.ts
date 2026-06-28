@@ -75,4 +75,53 @@ describe("AppFileService", () => {
     expect(adbFactory.getFakeClient().getLastCommand()).toContain("find");
     expect(adbFactory.getFakeClient().getLastCommand()).toContain("files");
   });
+
+  test("rejects Android app IDs that could escape external storage app paths", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+    });
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+
+    await expect(service.putFile(device, {
+      appId: "../other.app",
+      container: "externalFiles",
+      contentText: "hello",
+      destinationPath: "fixtures/welcome.txt",
+    })).rejects.toThrow("appId must not contain path separators or traversal segments");
+
+    expect(adbFactory.getFakeClient().getAllCommands()).toEqual([]);
+  });
+
+  test("uses an expanded ADB maxBuffer when reading Android app files as base64", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+    });
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+
+    await (service as any).readAndroidFile(device, "com.example.app", "documents", "screenshots/home.png");
+    await (service as any).readAndroidFile(device, "com.example.app", "externalFiles", "screenshots/home.png");
+
+    const calls = adbFactory.getFakeClient().getCommandCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.command).toContain("shell run-as 'com.example.app' base64");
+    expect(calls[0]?.maxBuffer).toBeGreaterThan(1024 * 1024);
+    expect(calls[1]?.command).toContain("shell base64 '/sdcard/Android/data/com.example.app/files/screenshots/home.png'");
+    expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
+  });
 });

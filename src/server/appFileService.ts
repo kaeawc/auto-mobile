@@ -40,6 +40,8 @@ const defaultDependencies: AppFileServiceDependencies = {
   simctlFactory: device => new SimCtlClient(device),
 };
 
+const ANDROID_APP_FILE_READ_MAX_BUFFER = 64 * 1024 * 1024;
+
 let appFileService: AppFileService | null = null;
 
 export function getAppFileService(): AppFileService {
@@ -231,11 +233,16 @@ class DefaultAppFileService implements AppFileService {
     }
 
     const stdout = target.kind === "external"
-      ? (await adb.executeCommand(`shell base64 ${shellQuote(target.absolutePath)}`, undefined, undefined, true)).stdout
+      ? (await adb.executeCommand(
+        `shell base64 ${shellQuote(target.absolutePath)}`,
+        undefined,
+        ANDROID_APP_FILE_READ_MAX_BUFFER,
+        true
+      )).stdout
       : (await adb.executeCommand(
         `shell run-as ${shellQuote(appId)} base64 ${shellQuote(target.relativePath)}`,
         undefined,
-        undefined,
+        ANDROID_APP_FILE_READ_MAX_BUFFER,
         true
       )).stdout;
     const blob = stdout.replace(/\s+/g, "");
@@ -345,6 +352,7 @@ type AndroidTarget =
 
 function resolveAndroidTarget(appId: string, container: AppFileContainer, path: string): AndroidTarget {
   const safePath = normalizeAppFileRelativePath(path);
+  validateAndroidAppIdForPath(appId);
   switch (container) {
     case "documents":
       return { kind: "runAs", relativePath: posix.join("files", safePath) };
@@ -356,6 +364,18 @@ function resolveAndroidTarget(appId: string, container: AppFileContainer, path: 
       return { kind: "external", absolutePath: `/sdcard/Android/data/${appId}/files/${safePath}` };
     case "library":
       return { kind: "unsupported", message: "library is not supported for Android app containers. Use documents, cache, tmp, or externalFiles." };
+  }
+}
+
+function validateAndroidAppIdForPath(appId: string): void {
+  const segments = appId.split(".");
+  if (
+    appId.length === 0 ||
+    appId.includes("/") ||
+    appId.includes("\\") ||
+    segments.some(segment => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new ActionableError("appId must not contain path separators or traversal segments.");
   }
 }
 

@@ -132,13 +132,17 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
     }
   }
 
-  private async listIosDeviceImagesIfAvailable(): Promise<DeviceInfo[]> {
+  private async listIosDeviceImagesIfAvailable(options: { swallowDiscoveryErrors: boolean }): Promise<DeviceInfo[]> {
     if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
       return [];
     }
     try {
       return await this.simctl.listSimulatorImages();
-    } catch {
+    } catch (error) {
+      logger.warn(`[DeviceManager] iOS simulator image discovery failed: ${error}`);
+      if (!options.swallowDiscoveryErrors) {
+        throw error;
+      }
       return [];
     }
   }
@@ -163,10 +167,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.listAvds();
       case "ios":
-        return this.listIosDeviceImagesIfAvailable();
+        return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
         const emulators = await this.emulator.listAvds();
-        const simulators = await this.listIosDeviceImagesIfAvailable();
+        const simulators = await this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: true });
         return [...emulators, ...simulators];
     }
   }

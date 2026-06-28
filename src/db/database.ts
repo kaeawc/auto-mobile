@@ -11,6 +11,12 @@ type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 
 let bunDatabaseConstructor: BunDatabaseConstructor | null = null;
 
+export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
+
+interface SqlitePragmaDatabase {
+  exec(sql: string): unknown;
+}
+
 function isBunRuntime(): boolean {
   return typeof (process.versions as Record<string, string> | undefined)?.bun === "string";
 }
@@ -26,6 +32,17 @@ function resolveBunDatabaseConstructor(): BunDatabaseConstructor {
   }
 
   return bunDatabaseConstructor;
+}
+
+export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
+  // Wait for transient writer locks instead of failing immediately with SQLITE_BUSY
+  sqliteDb.exec(`PRAGMA busy_timeout = ${SQLITE_BUSY_TIMEOUT_MS};`);
+
+  // Enable WAL mode for better concurrent read performance
+  sqliteDb.exec("PRAGMA journal_mode = WAL;");
+
+  // Enable foreign key enforcement for cascade deletes
+  sqliteDb.exec("PRAGMA foreign_keys = ON;");
 }
 
 // Database file location (defaults to ~/.auto-mobile/auto-mobile.db)
@@ -57,12 +74,7 @@ export function getDatabase(): Kysely<DatabaseSchema> {
     // Use Bun's built-in SQLite
     const BunDatabaseConstructor = resolveBunDatabaseConstructor();
     const sqliteDb = new BunDatabaseConstructor(DB_PATH);
-
-    // Enable WAL mode for better concurrent read performance
-    sqliteDb.exec("PRAGMA journal_mode = WAL;");
-
-    // Enable foreign key enforcement for cascade deletes
-    sqliteDb.exec("PRAGMA foreign_keys = ON;");
+    configureSqliteDatabase(sqliteDb);
 
     dbInstance = new Kysely<DatabaseSchema>({
       dialect: new BunSqliteDialect({

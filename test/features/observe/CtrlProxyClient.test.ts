@@ -13,6 +13,7 @@ import {
 } from "../../fakes/FakeWebSocket";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -131,6 +132,31 @@ describe("AndroidCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  describe("connection lifecycle", function() {
+    test("notifies the observation stream when the WebSocket connection closes", function() {
+      const lostDeviceIds: string[] = [];
+      const notifier: DeviceConnectionLostNotifier = {
+        onDeviceConnectionLost: deviceId => {
+          lostDeviceIds.push(deviceId);
+        },
+      };
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        notifier
+      );
+
+      (testClient as any).onConnectionClosed();
+
+      expect(lostDeviceIds).toEqual(["test-device"]);
+    });
+  });
 
   describe("getLatestHierarchy", function() {
     test("should return hierarchy data when WebSocket receives fresh data", async function() {

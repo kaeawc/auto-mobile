@@ -44,6 +44,10 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import {
+  observationStreamDeviceConnectionLostNotifier,
+  type DeviceConnectionLostNotifier,
+} from "../DeviceConnectionLostNotifier";
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { getDeviceDataStreamServer, PerformanceStreamData } from "../../../daemon/deviceDataStreamSocketServer";
@@ -328,6 +332,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // Auto-setup on connection failure
   private readonly serviceManagerFactory: ServiceManagerFactory;
   private readonly bootedDeviceLister: BootedDeviceLister;
+  private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
   private isAttemptingAutoSetup: boolean = false;
 
   private constructor(
@@ -336,13 +341,15 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     wsFactory: WebSocketFactory = defaultWebSocketFactory,
     timer: Timer = defaultTimer,
     serviceManagerFactory: ServiceManagerFactory = defaultServiceManagerFactory,
-    bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister
+    bootedDeviceLister: BootedDeviceLister = defaultBootedDeviceLister,
+    deviceConnectionLostNotifier: DeviceConnectionLostNotifier = observationStreamDeviceConnectionLostNotifier
   ) {
     super(timer, wsFactory);
     this.device = device;
     this.port = port;
     this.serviceManagerFactory = serviceManagerFactory;
     this.bootedDeviceLister = bootedDeviceLister;
+    this.deviceConnectionLostNotifier = deviceConnectionLostNotifier;
   }
 
   /**
@@ -402,12 +409,21 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     wsFactory: WebSocketFactory,
     timer: Timer,
     serviceManagerFactory: ServiceManagerFactory = noOpServiceManagerFactory,
-    bootedDeviceLister?: BootedDeviceLister
+    bootedDeviceLister?: BootedDeviceLister,
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
   ): IOSCtrlProxyClient {
     // Default test lister always reports the device as booted so existing tests
     // are unaffected. Tests that verify boot-check behavior supply their own lister.
     const lister = bootedDeviceLister ?? (async () => [device]);
-    return new IOSCtrlProxyClient(device, port, wsFactory, timer, serviceManagerFactory, lister);
+    return new IOSCtrlProxyClient(
+      device,
+      port,
+      wsFactory,
+      timer,
+      serviceManagerFactory,
+      lister,
+      deviceConnectionLostNotifier
+    );
   }
 
   /**
@@ -647,7 +663,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.stopSdkEventPolling();
     this.cachedHierarchy = null;
     this.supportedCommands = null;
-    getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
+    this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();

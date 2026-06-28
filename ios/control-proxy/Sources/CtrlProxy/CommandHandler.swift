@@ -305,6 +305,13 @@ public class CommandHandler: CommandHandling {
         return serverBundleId == foregroundBundleId
     }
 
+    private func sdkServerMatchesTrackedForegroundApp() -> Bool {
+        guard let foregroundBundleId = normalizedBundleId(elementLocator.foregroundBundleId) else {
+            return false
+        }
+        return sdkServerMatchesForegroundBundleId(foregroundBundleId)
+    }
+
     private func sdkHierarchy(_ sdkHierarchy: SdkViewHierarchy, matches foregroundBundleId: String) -> Bool {
         normalizedBundleId(sdkHierarchy.bundleId) == foregroundBundleId
     }
@@ -901,7 +908,9 @@ public class CommandHandler: CommandHandling {
             )
         }
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
-        if sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true {
+        if sdkHierarchyClient != nil,
+           sdkServerMatchesTrackedForegroundApp(),
+           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true {
             return WebSocketResponse.success(
                 type: ResponseType.highlightResponse.rawValue,
                 requestId: request.requestId,

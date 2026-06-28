@@ -1490,6 +1490,8 @@ final class CommandHandlerTests: XCTestCase {
         let highlightManager = FakeHighlightOverlayManager()
         let sdkClient = FakeSdkHierarchyFetcher()
         sdkClient.addHighlightResult = true
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
@@ -1518,10 +1520,45 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertTrue(highlightManager.showCalls.isEmpty)
     }
 
+    func testAddHighlightFallsBackWithoutPostingWhenSdkBridgeTargetsDifferentBundle() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = true
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 0)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+    }
+
     func testAddHighlightFallsBackToRunnerOverlayWhenSdkBridgeUnavailable() {
         let highlightManager = FakeHighlightOverlayManager()
         let sdkClient = FakeSdkHierarchyFetcher()
         sdkClient.addHighlightResult = false
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
@@ -1553,6 +1590,8 @@ final class CommandHandlerTests: XCTestCase {
         highlightManager.showResult = false
         let sdkClient = FakeSdkHierarchyFetcher()
         sdkClient.addHighlightResult = false
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,

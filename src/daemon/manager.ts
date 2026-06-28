@@ -54,6 +54,68 @@ export interface DaemonLaunchCommand {
   args: string[];
 }
 
+export interface DaemonProcessRecord {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+export interface DaemonProcessFinder {
+  findDaemonProcesses(): DaemonProcessRecord[];
+}
+
+export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+type ProcessTableCommandRunner = (
+  command: string,
+  options: { encoding: "utf-8"; maxBuffer: number }
+) => string;
+
+function isAutoMobileDaemonCommand(command: string): boolean {
+  return command.includes("--daemon-mode") &&
+    (command.includes("auto-mobile") || command.includes("dist/src/index.js"));
+}
+
+function isShellCommandWrapper(command: string): boolean {
+  const executable = command.trim().split(/\s+/, 1)[0] ?? "";
+  return /(^|\/)(?:ba|da|z)?sh$/.test(executable) && command.includes(" -c ");
+}
+
+export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const command = match[3];
+
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !isAutoMobileDaemonCommand(command)) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command });
+  }
+
+  return records;
+}
+
+export class PsDaemonProcessFinder implements DaemonProcessFinder {
+  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+
+  findDaemonProcesses(): DaemonProcessRecord[] {
+    const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
+      encoding: "utf-8",
+      maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+    });
+    return parseDaemonProcessTable(psOutput);
+  }
+}
+
 function resolvePackageSpecifier(version: string): string {
   const trimmedVersion = version.trim();
   if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
@@ -116,6 +178,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly lockFilePath: string;
   private readonly pidFilePath: string;
   private readonly socketPath: string;
+  private readonly processFinder: DaemonProcessFinder;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -123,13 +186,15 @@ export class DaemonManager implements DaemonManagerLike {
     timer: Timer = defaultTimer,
     lockFilePath: string = LOCK_FILE_PATH,
     pidFilePath: string = PID_FILE_PATH,
-    socketPath: string = SOCKET_PATH
+    socketPath: string = SOCKET_PATH,
+    processFinder: DaemonProcessFinder = new PsDaemonProcessFinder()
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = lockFilePath;
     this.pidFilePath = pidFilePath;
     this.socketPath = socketPath;
+    this.processFinder = processFinder;
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
@@ -211,31 +276,40 @@ export class DaemonManager implements DaemonManagerLike {
    */
   findAllDaemonProcesses(): number[] {
     try {
-      // Use ps to find all auto-mobile daemon processes for current user
-      const psOutput = execSync(
-        `ps aux | grep -E "auto-mobile.*--daemon-mode|dist/src/index.js --daemon-mode" | grep -v grep`,
-        { encoding: "utf-8" }
-      );
-
-      const pids: number[] = [];
-      const lines = psOutput.trim().split("\n").filter(line => line.trim());
-
-      for (const line of lines) {
-        // Parse PID from ps output (second column)
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 2) {
-          const pid = parseInt(parts[1], 10);
-          if (!isNaN(pid) && pid !== process.pid) {
-            pids.push(pid);
-          }
-        }
-      }
-
-      return pids;
+      return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
     } catch (error) {
       // No matching processes found or command failed
       return [];
     }
+  }
+
+  findOtherDaemonProcesses(activeDaemonPid: number | undefined): number[] {
+    return this.findAllDaemonProcesses().filter(pid => pid !== activeDaemonPid);
+  }
+
+  private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
+    const wrapperPids = new Set<number>();
+    const childPpids = new Set(records.map(record => record.ppid));
+
+    for (const record of records) {
+      if (isShellCommandWrapper(record.command) && childPpids.has(record.pid)) {
+        wrapperPids.add(record.pid);
+      }
+    }
+
+    const pids: number[] = [];
+    const seen = new Set<number>();
+
+    for (const record of records) {
+      if (record.pid === process.pid || wrapperPids.has(record.pid) || seen.has(record.pid)) {
+        continue;
+      }
+
+      pids.push(record.pid);
+      seen.add(record.pid);
+    }
+
+    return pids;
   }
 
   /**
@@ -816,7 +890,7 @@ export async function runDaemonCommand(
           );
 
           // Check for other daemon processes (exclude current daemon)
-          const otherDaemons = manager.findAllDaemonProcesses().filter(pid => pid !== status.pid);
+          const otherDaemons = manager.findOtherDaemonProcesses(status.pid);
           if (otherDaemons.length > 0) {
             console.log(
               `\n⚠️  WARNING: Found ${otherDaemons.length} other daemon process(es) from other worktrees:`

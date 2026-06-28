@@ -1,5 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { DaemonManager, parseDaemonProcessTable, resolveDaemonLaunchCommand, runDaemonCommand } from "../../src/daemon/manager";
+import {
+  DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+  DaemonManager,
+  parseDaemonProcessTable,
+  PsDaemonProcessFinder,
+  resolveDaemonLaunchCommand,
+  runDaemonCommand
+} from "../../src/daemon/manager";
 import type { DaemonProcessFinder, DaemonProcessRecord } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
@@ -95,6 +102,35 @@ describe("Daemon manager process detection", () => {
         command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
       },
     ]);
+  });
+
+  test("uses an expanded buffer when reading the full process table", () => {
+    const calls: Array<{
+      command: string;
+      options: { encoding: "utf-8"; maxBuffer: number };
+    }> = [];
+    const finder = new PsDaemonProcessFinder((command, options) => {
+      calls.push({ command, options });
+      return "20 1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode";
+    });
+
+    expect(finder.findDaemonProcesses()).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+    ]);
+    expect(calls).toEqual([
+      {
+        command: "ps -eo pid=,ppid=,command=",
+        options: {
+          encoding: "utf-8",
+          maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+        },
+      },
+    ]);
+    expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
   });
 
   function managerWithProcesses(records: DaemonProcessRecord[]): DaemonManager {

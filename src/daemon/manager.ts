@@ -64,6 +64,13 @@ export interface DaemonProcessFinder {
   findDaemonProcesses(): DaemonProcessRecord[];
 }
 
+export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+type ProcessTableCommandRunner = (
+  command: string,
+  options: { encoding: "utf-8"; maxBuffer: number }
+) => string;
+
 function isAutoMobileDaemonCommand(command: string): boolean {
   return command.includes("--daemon-mode") &&
     (command.includes("auto-mobile") || command.includes("dist/src/index.js"));
@@ -97,9 +104,14 @@ export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[]
   return records;
 }
 
-class PsDaemonProcessFinder implements DaemonProcessFinder {
+export class PsDaemonProcessFinder implements DaemonProcessFinder {
+  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+
   findDaemonProcesses(): DaemonProcessRecord[] {
-    const psOutput = execSync("ps -eo pid=,ppid=,command=", { encoding: "utf-8" });
+    const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
+      encoding: "utf-8",
+      maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+    });
     return parseDaemonProcessTable(psOutput);
   }
 }

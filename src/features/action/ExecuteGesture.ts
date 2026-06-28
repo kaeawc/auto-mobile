@@ -347,7 +347,7 @@ export class ExecuteGesture extends BaseVisualChange {
     for (let index = 0; index < fingers.length; index++) {
       const points = fingers[index].points;
       if (points.length < 2) {
-        return null;
+        throw new Error("iOS multi-finger gestures require at least two points per finger");
       }
       if (points.length !== 2) {
         throw new Error("iOS multi-finger gestures only support two-point swipes");

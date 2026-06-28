@@ -140,4 +140,28 @@ describe("ExecuteGesture", () => {
     ], 300)).rejects.toThrow("iOS multi-finger gestures only support horizontally spaced parallel swipes");
     expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
   });
+
+  test("rejects under-specified iOS multi-finger paths", async () => {
+    const fakeClient = new FakeIOSCtrlProxy();
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+
+    const gesture = new ExecuteGesture(iosDevice, null);
+
+    await expect(gesture.execute([
+      {
+        finger: 0,
+        points: [
+          { x: 100, y: 600 },
+        ],
+      },
+      {
+        finger: 1,
+        points: [
+          { x: 130, y: 600 },
+          { x: 130, y: 200 },
+        ],
+      },
+    ], 300)).rejects.toThrow("iOS multi-finger gestures require at least two points per finger");
+    expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
+  });
 });

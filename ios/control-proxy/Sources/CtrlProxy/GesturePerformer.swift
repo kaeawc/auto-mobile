@@ -834,6 +834,12 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func shake() throws {
+            try runOnMainThread {
+                XCUIDevice.shared.shake()
+            }
+        }
+
         public func pressBack() throws {
             guard let app = resolveNavigationApp() else {
                 throw GestureError.noApplication
@@ -1049,6 +1055,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressBack() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func shake() throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

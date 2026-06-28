@@ -820,6 +820,7 @@ public enum RequestType: String, CaseIterable {
     case requestPressButton = "request_press_button"
     case requestPressHome = "request_press_home"
     case requestPressBack = "request_press_back"
+    case requestShake = "request_shake"
     case requestRecentApps = "request_recent_apps"
 
     // Node actions
@@ -865,6 +866,7 @@ public enum ResponseType: String {
     case pressButtonResult = "press_button_result"
     case pressHomeResult = "press_home_result"
     case pressBackResult = "press_back_result"
+    case shakeResult = "shake_result"
     case recentAppsResult = "recent_apps_result"
     case actionResult = "action_result"
     case launchAppResult = "launch_app_result"

@@ -834,6 +834,43 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
+  describe("requestShake", function() {
+    test("should send shake request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestShake(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_shake");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "shake_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 15
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("requestLaunchApp", function() {
     test("should send launch app request and return result", async function() {
       const testTimer = fakeTimer;

@@ -145,6 +145,9 @@ public protocol GesturePerforming {
     /// Perform app-level back navigation
     func pressBack() throws
 
+    /// Generate a synthetic shake motion event.
+    func shake() throws
+
     /// Press a named hardware or keyboard-backed button.
     func pressButton(_ button: String) throws
 

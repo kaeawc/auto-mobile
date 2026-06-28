@@ -124,8 +124,8 @@ export {
 // ============================================================================
 
 export const shakeSchema = addDeviceTargetingToSchema(z.object({
-  duration: z.number().optional().describe("Shake duration in ms (default: 1000)"),
-  intensity: z.number().optional().describe("Shake acceleration intensity (default: 100)"),
+  duration: z.number().optional().describe("Shake duration in ms (default: 1000). On iOS Simulator this contributes to the runner timeout budget."),
+  intensity: z.number().optional().describe("Shake acceleration intensity (default: 100). Ignored on iOS Simulator because XCTest shake has no intensity parameter."),
   platform: platformSchema
 }));
 
@@ -864,7 +864,9 @@ export function registerInteractionTools() {
       }, progress);
 
       return createJSONToolResponse({
-        message: `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`,
+        message: result.success
+          ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
+          : `Failed to shake device: ${result.error ?? "unknown error"}`,
         observation: result.observation,
         ...result
       });
@@ -1090,7 +1092,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "shake",
-    "Shake device",
+    "Shake device. iOS support is Simulator-only; physical iOS devices are not supported by XCTest.",
     shakeSchema,
     shakeHandler,
     true // Supports progress notifications

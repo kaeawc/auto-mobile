@@ -5,6 +5,7 @@ import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 export class PressButton extends BaseVisualChange {
   constructor(device: BootedDevice, adb: AdbClient | null = null) {
@@ -67,6 +68,8 @@ export class PressButton extends BaseVisualChange {
 
   // Buttons that can be handled via accessibility service global actions
   private static readonly GLOBAL_ACTION_BUTTONS = new Set(["back", "home", "recent"]);
+  private static readonly IOS_NAVIGATION_BUTTONS = new Set(["home", "back", "recent"]);
+  private static readonly IOS_HARDWARE_BUTTONS = new Set(["volume_up", "volume_down", "power"]);
 
   /**
    * Execute Android-specific button press.
@@ -121,32 +124,65 @@ export class PressButton extends BaseVisualChange {
    */
   private async executeiOSButtonPress(button: string): Promise<PressButtonResult> {
     const normalizedButton = button.toLowerCase();
-    const supportedButtons = new Set(["home", "back", "recent"]);
-    if (!supportedButtons.has(normalizedButton)) {
+    if (PressButton.IOS_NAVIGATION_BUTTONS.has(normalizedButton)) {
+      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const result = await this.executeiOSNavigationButton(client, normalizedButton);
+
+      if (!result.success) {
+        return {
+          success: false,
+          button,
+          keyCode: -1,
+          error: result.error ?? `Failed to press iOS ${normalizedButton} button`
+        };
+      }
+
       return {
-        success: false,
+        success: true,
         button,
-        keyCode: -1,
-        error: `Unsupported iOS simulator button: ${button}`
+        keyCode: -1
       };
     }
 
-    const client = IOSCtrlProxyClient.getInstance(this.device);
-    const result = await this.executeiOSNavigationButton(client, normalizedButton);
+    if (PressButton.IOS_HARDWARE_BUTTONS.has(normalizedButton)) {
+      if (isIosSimulatorUdid(this.device.deviceId)) {
+        return {
+          success: false,
+          button,
+          keyCode: -1,
+          error: `iOS button "${button}" is unavailable on the iOS simulator (physical device only)`
+        };
+      }
 
-    if (!result.success) {
+      const client = IOSCtrlProxyClient.getInstance(this.device);
+      const result = await client.requestPressButton(normalizedButton);
+
+      if (!result.success) {
+        return {
+          success: false,
+          button,
+          keyCode: -1,
+          error: result.error ?? `iOS hardware button "${button}" is not supported on this device`
+        };
+      }
+
+      return { success: true, button, keyCode: -1 };
+    }
+
+    if (normalizedButton === "menu") {
       return {
         success: false,
         button,
         keyCode: -1,
-        error: result.error ?? `Failed to press iOS ${normalizedButton} button`
+        error: "iOS has no menu hardware button"
       };
     }
 
     return {
-      success: true,
+      success: false,
       button,
-      keyCode: -1
+      keyCode: -1,
+      error: `Unsupported iOS button: ${button}`
     };
   }
 

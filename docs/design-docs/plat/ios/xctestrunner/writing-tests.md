@@ -269,9 +269,12 @@ Presses a device or navigation button.
 ```
 
 !!! note "Supported iOS buttons"
-    The iOS runtime supports `button: home` and `button: back`. `back` performs app-level
-    navigation through CtrlProxy because iOS has no hardware back button. Other values are
-    rejected with "Unsupported iOS button" at execution time.
+    The iOS runtime supports `button: home`, `button: back`, and `button: recent`.
+    `back` performs app-level navigation through CtrlProxy because iOS has no hardware
+    back button. On physical iOS devices, `volume_up`, `volume_down`, and `power` are
+    routed through hardware-button support. On iOS simulators, those hardware buttons
+    return an explicit "unavailable on the iOS simulator" error. `menu` has no iOS
+    hardware analogue and is unsupported.
 
 ### `terminateApp`
 

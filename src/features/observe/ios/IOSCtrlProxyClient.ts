@@ -126,6 +126,7 @@ import type {
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -228,6 +229,10 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
   requestShake(
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<CtrlProxyShakeResult>;
+
+  requestPressButton(
+    button: string, timeoutMs?: number, perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult>;
 
   requestRecentApps(
     timeoutMs?: number, perf?: PerformanceTracker
@@ -1475,6 +1480,12 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     timeoutMs: number = 5000, perf?: PerformanceTracker
   ): Promise<CtrlProxyShakeResult> {
     return this.navigation.requestShake(timeoutMs, perf);
+  }
+
+  async requestPressButton(
+    button: string, timeoutMs: number = 5000, perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult> {
+    return this.navigation.requestPressButton(button, timeoutMs, perf);
   }
 
   async requestRecentApps(

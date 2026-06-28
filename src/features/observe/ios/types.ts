@@ -169,6 +169,9 @@ export type CtrlProxyPressBackResult = BaseResult;
 /** Shake result from CtrlProxy iOS */
 export type CtrlProxyShakeResult = BaseResult;
 
+/** Generic press button result from CtrlProxy iOS */
+export type CtrlProxyPressButtonResult = BaseResult;
+
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {
   previousOrientation: string;

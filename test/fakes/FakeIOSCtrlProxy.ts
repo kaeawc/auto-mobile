@@ -12,6 +12,7 @@ import {
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -817,6 +818,21 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.shakeTimeoutHistory.push(timeoutMs);
     await this.applyDelay("shake");
     this.checkFailure("shake");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestPressButton(
+    button: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult> {
+    await this.applyDelay("pressButton");
+    this.checkFailure("pressButton");
 
     return {
       success: true,

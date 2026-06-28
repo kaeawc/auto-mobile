@@ -821,12 +821,26 @@ class ToolRegistryClass {
   // Get tools in MCP format
   getToolDefinitions() {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
-    return this.getAllTools().map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
-      ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
-    }));
+    return this.getAllTools().map(tool => {
+      const definition: {
+        name: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        outputSchema?: Record<string, unknown>;
+        _meta?: { "anthropic/alwaysLoad": true };
+      } = {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
+        ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
+      };
+
+      if (tool.outputSchema) {
+        definition.outputSchema = flattenTopLevelUnion(toJSONSchema(tool.outputSchema));
+      }
+
+      return definition;
+    });
   }
 
   // Get a map of all schema

@@ -12,7 +12,7 @@
   "plugins": [
     {
       "name": "auto-mobile",
-      "source": "./",
+      "source": "./.claude-plugin",
       "description": "Mobile device automation for Android and iOS - control devices with natural language",
       "version": "0.0.38",
       "author": {

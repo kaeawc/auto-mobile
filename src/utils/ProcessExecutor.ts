@@ -1,6 +1,7 @@
 import { exec, spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
+import { wrapCommandError } from "./CommandError";
 
 export interface ProcessExecOptions {
   timeoutMs?: number;
@@ -38,12 +39,21 @@ const createExecResult = (stdout: string | Buffer, stderr: string | Buffer): Exe
 
 export class DefaultProcessExecutor implements ProcessExecutor {
   async exec(command: string, options: ProcessExecOptions = {}): Promise<ExecResult> {
-    const { stdout, stderr } = await execAsync(command, {
-      timeout: options.timeoutMs,
-      maxBuffer: options.maxBuffer,
-      cwd: options.cwd
-    });
-    return createExecResult(stdout, stderr);
+    try {
+      // Intentionally shell-based: existing callers rely on pipes, redirects,
+      // and compound commands. Use HostCommandExecutor for argv-safe execution.
+      const { stdout, stderr } = await execAsync(command, {
+        timeout: options.timeoutMs,
+        maxBuffer: options.maxBuffer,
+        cwd: options.cwd
+      });
+      return createExecResult(stdout, stderr);
+    } catch (error) {
+      throw wrapCommandError(error, {
+        command,
+        cwd: options.cwd,
+      });
+    }
   }
 
   spawn(command: string, args: string[], options?: SpawnOptions): ChildProcess {

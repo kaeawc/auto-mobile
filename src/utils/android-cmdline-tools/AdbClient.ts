@@ -9,6 +9,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { wrapCommandError } from "../CommandError";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -511,7 +512,12 @@ export class AdbClient implements AdbExecutor {
         settled = true;
         cleanup();
         if (error) {
-          reject(error);
+          reject(wrapCommandError(error, {
+            command: file,
+            args,
+            stdout,
+            stderr,
+          }));
           return;
         }
         resolve({

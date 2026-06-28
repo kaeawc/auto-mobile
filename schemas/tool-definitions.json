@@ -506,7 +506,22 @@
         "action",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "copy"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "text"
+        ]
+      }
     }
   },
   {
@@ -659,7 +674,22 @@
       "required": [
         "action"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "restore"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "snapshotName"
+        ]
+      }
     }
   },
   {
@@ -4504,7 +4534,22 @@
         "body",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "ios"
+          }
+        },
+        "required": [
+          "platform"
+        ]
+      },
+      "then": {
+        "required": [
+          "appId"
+        ]
+      }
     }
   },
   {

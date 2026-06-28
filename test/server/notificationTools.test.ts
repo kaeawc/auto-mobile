@@ -70,4 +70,23 @@ describe("notification tools", () => {
     expect(schema.oneOf).toBeUndefined();
     expect(schema.allOf).toBeUndefined();
   });
+
+  test("generated tool definition conditionally requires appId on iOS", () => {
+    const toolDefinition = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "postNotification");
+
+    expect(toolDefinition).toBeDefined();
+    const schema = toolDefinition!.inputSchema as any;
+    expect(schema.required).toEqual(["title", "body", "platform"]);
+    expect(schema.if).toEqual({
+      properties: {
+        platform: { const: "ios" },
+      },
+      required: ["platform"],
+    });
+    expect(schema.then).toEqual({
+      required: ["appId"],
+    });
+    expect(schema.required).not.toContain("appId");
+  });
 });

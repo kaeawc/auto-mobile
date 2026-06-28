@@ -107,6 +107,7 @@ tasks.withType<Test> {
           .file("outputs/apk/debug/control-proxy-debug.apk")
   environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", accessibilityApk.get().asFile.absolutePath)
   systemProperty("automobile.ctrl.proxy.apk.path", accessibilityApk.get().asFile.absolutePath)
+  systemProperty("automobile.daemon.package.version", version.toString())
   systemProperty("automobile.daemon.force.restart", "true")
   systemProperty("automobile.daemon.local.project.path", rootProject.rootDir.parentFile.absolutePath)
 
@@ -115,5 +116,14 @@ tasks.withType<Test> {
     showStandardStreams = true
     // Show detailed test events
     events("passed", "skipped", "failed", "standardOut", "standardError")
+  }
+}
+
+tasks.named<Jar>("jar") {
+  manifest {
+    attributes(
+        "Implementation-Title" to project.property("POM_ARTIFACT_ID").toString(),
+        "Implementation-Version" to version.toString(),
+    )
   }
 }

@@ -101,7 +101,7 @@ If the package is missing, the service cannot supply hierarchy to **`observe`** 
 
 ### 2.3 Daemon vs CtrlProxy
 
-The **daemon** (Node/Bun) version and the **CtrlProxy** APK should come from the **same release or same git revision** when possible. Mixing **`@kaeawc/auto-mobile@latest`** with a **cached** or **manually downloaded** CtrlProxy APK is a common source of subtle mismatches.
+The **daemon** (Node/Bun) version and the **CtrlProxy** APK should come from the **same release or same git revision** when possible. Mixing an unpinned daemon package with a **cached** or **manually downloaded** CtrlProxy APK is a common source of subtle mismatches.
 
 ---
 
@@ -138,7 +138,7 @@ bun "${AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH}/dist/src/index.js" --daemon start -
 **Published package (matches `bunx` / `npx` fallback):**
 
 ```bash
-bunx @kaeawc/auto-mobile@latest --daemon start --no-ui-perf-mode
+bunx @kaeawc/auto-mobile@<version> --daemon start --no-ui-perf-mode
 ```
 
 2. Run Gradle tests as usual.

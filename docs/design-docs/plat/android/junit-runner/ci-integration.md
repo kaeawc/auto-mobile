@@ -489,7 +489,7 @@ replace the `adb wait-for-device` block with a step that starts your emulator. E
 
 Use this when you need a **fixed or unreleased** AutoMobile build (for example a daemon **loopback / `ConnectionRefused`** fix) **before** it appears on npm as `@kaeawc/auto-mobile`.
 
-The JUnit runner can start the daemon from a **local checkout** instead of `bunx @kaeawc/auto-mobile@latest` when **`dist/src/index.js`** exists in that tree.
+The JUnit runner can start the daemon from a **local checkout** instead of the package fallback when **`dist/src/index.js`** exists in that tree.
 
 **Branch with the loopback fix (until merge + npm release):** clone **`https://github.com/kaeawc/auto-mobile.git`** at **`ryebread/connection_refused_in_ci_fix`**. After that lands on **`main`** and is published, switch the clone to **`--branch main`** (or drop this section and use npm only).
 
@@ -560,7 +560,7 @@ No change to test code is required if you already use the AutoMobile JUnit runne
 
 ### 5. After the fix is published
 
-Remove the env var / system property and rely on **`bunx @kaeawc/auto-mobile@latest`** again, or pin **`@kaeawc/auto-mobile@<version>`** in your process once you upgrade.
+Remove the local-checkout env var / system property and rely on the package fallback once you upgrade. Pin the daemon package with **`AUTOMOBILE_VERSION`**, **`AUTOMOBILE_DAEMON_PACKAGE_VERSION`**, or Gradle **`automobile.daemon.package.version`** when CI must use an exact release.
 
 ---
 

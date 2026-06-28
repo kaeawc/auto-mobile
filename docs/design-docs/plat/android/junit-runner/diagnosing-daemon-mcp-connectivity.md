@@ -78,7 +78,7 @@ The **IPv4 loopback default** and related fixes live in this repo’s **`dist/`*
 2. In that checkout run **`bun install`** (if needed) and **`bun run build`** so **`dist/src/index.js`** exists.
 3. Point the JUnit runner at that tree with **`AUTOMOBILE_DAEMON_LOCAL_PROJECT_PATH`** or Gradle **`automobile.daemon.local.project.path`** (documented in **`android/junit-runner/src/main/kotlin/dev/jasonpearson/automobile/junit/README.md`** in this repo).
 
-The runner will then start **`bun <path>/dist/src/index.js --daemon …`** instead of **`bunx @kaeawc/auto-mobile@latest`**.
+The runner will then start **`bun <path>/dist/src/index.js --daemon …`** instead of the package fallback.
 
 **Released package without upgrading:** there is **no** supported env-only workaround for **`ConnectionRefused`** on **`localhost`** today; fixing it requires a build that defaults the daemon HTTP host to **`127.0.0.1`** (or passing **`--host 127.0.0.1`** through **`--daemon start`/`restart`** on a version whose entrypoint forwards **`--host`** to **`--daemon-mode`**).
 

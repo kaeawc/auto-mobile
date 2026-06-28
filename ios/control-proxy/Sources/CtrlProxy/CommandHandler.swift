@@ -164,6 +164,10 @@ public class CommandHandler: CommandHandling {
             case RequestType.clearPreferences.rawValue:
                 return try handleClearPreferences(request, startTime: startTime)
 
+            // Network mocking
+            case RequestType.setNetworkMockRules.rawValue:
+                return try handleSetNetworkMockRules(request, startTime: startTime)
+
             default:
                 return WebSocketResponse.error(
                     type: "error",
@@ -180,6 +184,25 @@ public class CommandHandler: CommandHandling {
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
+    }
+
+    // MARK: - Network Mocking
+
+    private func handleSetNetworkMockRules(
+        _ request: WebSocketRequest,
+        startTime: Date
+    )
+        throws -> SetNetworkMockRulesResponse
+    {
+        guard let rules = request.rules else {
+            throw CommandError.missingParameter("rules")
+        }
+        let ok = sdkHierarchyClient?.setMockRules(rules) ?? false
+        return SetNetworkMockRulesResponse(
+            requestId: request.requestId,
+            ok: ok,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
     }
 
     // MARK: - View Hierarchy
@@ -1067,6 +1090,8 @@ public class CommandHandler: CommandHandling {
             return ResponseType.removePreferenceResult.rawValue
         case RequestType.clearPreferences.rawValue:
             return ResponseType.clearPreferencesResult.rawValue
+        case RequestType.setNetworkMockRules.rawValue:
+            return ResponseType.setNetworkMockRulesResult.rawValue
         default:
             return "error"
         }

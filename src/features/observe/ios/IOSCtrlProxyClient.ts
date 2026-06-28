@@ -633,6 +633,8 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     this.isRequestingServiceRestart = false;
     logger.info(`[IOSCtrlProxyClient] Connection established, reset failure counter`);
 
+    this.syncNetworkMockRulesToDevice();
+
     // Start polling for SDK events from the CtrlProxy HTTP endpoint
     this.startSdkEventPolling();
 
@@ -640,6 +642,35 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     // cancels it; without restarting here, a transient drop on a STATIC screen
     // leaves the live view frozen forever. Subscriber-gated and idempotent.
     this.startScreenshotBackoff();
+  }
+
+  private syncNetworkMockRulesToDevice(): void {
+    if (!serverConfig.isNetworkMockableEnabled()) {
+      return;
+    }
+
+    try {
+      const { NetworkState } = require("../../../server/NetworkState");
+      const state = NetworkState.getInstance();
+
+      // Always sync mock rules on reconnect. Sending an empty list clears
+      // stale rules that may linger in the iOS SDK after a CtrlProxy restart.
+      const rules = Array.from(state.getMocks().values()).map((r: any) => ({
+        mockId: r.mockId,
+        host: r.host,
+        path: r.path,
+        method: r.method,
+        limit: r.limit,
+        remaining: r.limit,
+        statusCode: r.statusCode,
+        responseHeaders: r.responseHeaders,
+        responseBody: r.responseBody,
+        contentType: r.contentType,
+      }));
+      this.sendMessage(JSON.stringify({ type: "set_network_mock_rules", rules }));
+    } catch (e) {
+      logger.debug(`[IOSCtrlProxyClient] Failed to sync network mock rules on reconnect: ${e}`);
+    }
   }
 
   protected onConnectionClosed(): void {

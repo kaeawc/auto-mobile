@@ -6,14 +6,15 @@ import { fileURLToPath } from "url";
 import { logger } from "../utils/logger";
 import type { Timer } from "../utils/SystemTimer";
 import { defaultTimer } from "../utils/SystemTimer";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 const DISABLED_RECOVERY_VALUES = new Set(["0", "false", "no", "off"]);
 
-function resolveMigrationFolder(): string {
+export function resolveMigrationFolder(): string {
   // @deprecated AUTO_MOBILE_MIGRATIONS_DIR - use AUTOMOBILE_MIGRATIONS_DIR instead
   const envPath = process.env.AUTOMOBILE_MIGRATIONS_DIR ?? process.env.AUTO_MOBILE_MIGRATIONS_DIR;
   if (envPath) {
-    return path.resolve(envPath);
+    return resolvePathFromDaemonLaunchWorkingDirectory(envPath);
   }
 
   const moduleDir = path.dirname(fileURLToPath(import.meta.url));

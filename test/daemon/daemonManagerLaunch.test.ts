@@ -81,12 +81,16 @@ describe("DaemonManager launch", () => {
     process.chdir(spawnerCwd);
 
     let capturedEnv: NodeJS.ProcessEnv | undefined;
-    const spawnDaemon = ((_command: string, _args: string[], options: SpawnOptions) => {
-      capturedEnv = options.env;
-      return {
-        unref() {},
-      } as ChildProcess;
-    }) as typeof import("node:child_process").spawn;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], options: SpawnOptions) => {
+        capturedEnv = options.env;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
 
     let statusCallCount = 0;
     class TestDaemonManager extends DaemonManager {
@@ -110,7 +114,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
       undefined,
-      spawnDaemon
+      processSpawner
     );
 
     await manager.start();

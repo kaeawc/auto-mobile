@@ -9,6 +9,7 @@ import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType"
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import path from "path";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 interface PostNotificationAction {
   label: string;
@@ -391,7 +392,7 @@ export class PostNotification {
       return null;
     }
 
-    return path.resolve(imagePath);
+    return resolvePathFromDaemonLaunchWorkingDirectory(imagePath);
   }
 
   private async getActiveAppId(): Promise<string | null> {

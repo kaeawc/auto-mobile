@@ -391,7 +391,7 @@ The SDK uses protocol + fake pattern throughout for testability:
 | Notifications | `AutoMobileNotifications` | `AutoMobileNotifications` | Platform notification APIs |
 | OS events | `AutoMobileOsEvents` | `AutoMobileOsEvents` | Lifecycle, battery, connectivity |
 | Broadcast / System events | `AutoMobileBroadcastInterceptor` | `AutoMobileNotificationObserver` | BroadcastReceiver vs NotificationCenter |
-| Network mock rules | `NetworkMockRuleStore` | -- | Android only |
+| Network mock rules | `NetworkMockRuleStore` | `NetworkMockRuleStore` | iOS requires sessions to register `AutoMobileNetwork.shared.protocolClass()` |
 
 ## See also
 

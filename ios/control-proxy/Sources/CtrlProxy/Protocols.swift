@@ -226,6 +226,8 @@ public protocol SdkHierarchyFetching {
     func fetchServerInfo() -> SdkHierarchyServerInfo?
     /// Whether the SDK hierarchy server is reachable.
     func isAvailable() -> Bool
+    /// Replace network mock rules in the in-app SDK.
+    func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool
 }
 
 /// Protocol for accessing the cached SDK hierarchy.

@@ -9,6 +9,7 @@ import { serverConfig } from "../utils/ServerConfig";
 import { ActionableError } from "../models";
 import { defaultTimer } from "../utils/SystemTimer";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
 import type { BootedDevice } from "../utils/deviceUtils";
 import { logger } from "../utils/logger";
 
@@ -116,9 +117,11 @@ const getNetworkGraphSchema = addDeviceTargetingToSchema(
 type GetNetworkGraphArgs = z.infer<typeof getNetworkGraphSchema>;
 
 function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void {
-  if (device.platform !== "android") {return;}
+  if (device.platform !== "android" && device.platform !== "ios") {return;}
   try {
-    const client = AndroidCtrlProxyClient.getInstance(device);
+    const client = device.platform === "android"
+      ? AndroidCtrlProxyClient.getInstance(device)
+      : IOSCtrlProxyClient.getInstance(device);
     // Use limit (not remaining) since the server never tracks consumption —
     // the device-side NetworkMockRuleStore manages its own remaining count
     const rules = Array.from(state.getMocks().values()).map(r => ({
@@ -135,7 +138,7 @@ function syncMockRulesToDevice(device: BootedDevice, state: NetworkState): void 
     }));
     const msg = JSON.stringify({ type: "set_network_mock_rules", rules });
     const sent = client.sendMessage(msg);
-    logger.info(`[networkTools] syncMockRules: ${rules.length} rules, sent=${sent}`);
+    logger.info(`[networkTools] syncMockRules(${device.platform}): ${rules.length} rules, sent=${sent}`);
   } catch (e) {
     logger.info(`[networkTools] Failed to sync mock rules to device: ${e}`);
   }
@@ -211,7 +214,7 @@ export function registerNetworkTools(): void {
   // --- mockNetwork ---
   ToolRegistry.registerDeviceAware(
     "mockNetwork",
-    "Add a mock response rule for matching network requests. Requires --network-mockable flag.",
+    "Add a mock response rule for matching Android or iOS SDK-integrated network requests. Requires --network-mockable flag.",
     mockNetworkSchema,
     async (device, args: MockNetworkArgs) => {
       if (!serverConfig.isNetworkMockableEnabled()) {
@@ -219,9 +222,9 @@ export function registerNetworkTools(): void {
           "Network mocking is disabled. Start the server with --network-mockable to enable."
         );
       }
-      if (device.platform !== "android") {
+      if (device.platform !== "android" && device.platform !== "ios") {
         throw new ActionableError(
-          "Network mocking is only supported on Android devices."
+          "Network mocking is only supported on Android and iOS devices."
         );
       }
 
@@ -261,7 +264,7 @@ export function registerNetworkTools(): void {
   // --- clearMockNetwork ---
   ToolRegistry.registerDeviceAware(
     "clearMockNetwork",
-    "Clear mock network response rules. Optionally target a specific mock by ID. Requires --network-mockable flag.",
+    "Clear Android or iOS mock network response rules. Optionally target a specific mock by ID. Requires --network-mockable flag.",
     clearMockNetworkSchema,
     async (device, args: ClearMockNetworkArgs) => {
       if (!serverConfig.isNetworkMockableEnabled()) {
@@ -269,9 +272,9 @@ export function registerNetworkTools(): void {
           "Network mocking is disabled. Start the server with --network-mockable to enable."
         );
       }
-      if (device.platform !== "android") {
+      if (device.platform !== "android" && device.platform !== "ios") {
         throw new ActionableError(
-          "Network mocking is only supported on Android devices."
+          "Network mocking is only supported on Android and iOS devices."
         );
       }
 

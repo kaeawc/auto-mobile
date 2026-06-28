@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
 import { BootedDevice } from "../../../../src/models";
+import { NetworkState } from "../../../../src/server/NetworkState";
+import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
   FakeWebSocket,
   createInstantFailureWebSocketFactory,
@@ -31,6 +33,8 @@ describe("IOSCtrlProxyClient", function() {
 
     // Reset singleton instances for clean test state
     IOSCtrlProxyClient.resetInstances();
+    NetworkState.resetInstance();
+    serverConfig.setNetworkMockableEnabled(false);
 
     ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
       testDevice,
@@ -45,6 +49,8 @@ describe("IOSCtrlProxyClient", function() {
     if (ctrlProxyClient) {
       await ctrlProxyClient.close();
     }
+    NetworkState.resetInstance();
+    serverConfig.setNetworkMockableEnabled(false);
   });
 
   class CapturingWebSocket extends FakeWebSocket {
@@ -156,6 +162,49 @@ describe("IOSCtrlProxyClient", function() {
       (ctrlProxyClient as any).onConnectionEstablished();
 
       expect(backoffStarts).toBe(1);
+    });
+
+    test("syncs network mock rules when the connection (re)establishes", function() {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      const mock = state.addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        remaining: 3,
+        statusCode: 201,
+        responseHeaders: { "X-Test": "yes" },
+        responseBody: "{\"ok\":true}",
+        contentType: "application/json",
+      });
+      const sentMessages: string[] = [];
+
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(sentMessages).toHaveLength(1);
+      expect(JSON.parse(sentMessages[0])).toEqual({
+        type: "set_network_mock_rules",
+        rules: [{
+          mockId: mock.mockId,
+          host: "api\\.example\\.com",
+          path: "/v1/items",
+          method: "GET",
+          limit: 3,
+          remaining: 3,
+          statusCode: 201,
+          responseHeaders: { "X-Test": "yes" },
+          responseBody: "{\"ok\":true}",
+          contentType: "application/json",
+        }],
+      });
     });
   });
 

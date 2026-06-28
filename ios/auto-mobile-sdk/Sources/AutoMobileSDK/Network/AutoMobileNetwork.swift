@@ -436,6 +436,49 @@ public class AutoMobileURLProtocol: URLProtocol {
         receivedData = Data()
         totalBytesReceived = 0
 
+        if AutoMobileSDK.shared.isEnabled,
+           let url = request.url,
+           let match = NetworkMockRuleStore.shared.findMatchingRule(
+               host: url.host ?? "",
+               path: url.path,
+               method: request.httpMethod ?? "GET"
+           )
+        {
+            let body = Data(match.responseBody.utf8)
+            var headers = match.responseHeaders
+            headers["Content-Type"] = match.contentType
+            let response = HTTPURLResponse(
+                url: url,
+                statusCode: match.statusCode,
+                httpVersion: "HTTP/1.1",
+                headerFields: headers
+            )!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            if !body.isEmpty {
+                client?.urlProtocol(self, didLoad: body)
+            }
+            client?.urlProtocolDidFinishLoading(self)
+            AutoMobileNetwork.shared.recordRequest(NetworkRequestRecord(
+                url: url.absoluteString,
+                method: request.httpMethod ?? "GET",
+                requestHeaders: request.allHTTPHeaderFields,
+                requestBodySize: request.httpBody?.count,
+                statusCode: match.statusCode,
+                responseHeaders: headers,
+                responseBodySize: body.count,
+                durationMs: startTime.map { Date().timeIntervalSince($0) * 1000 },
+                error: "mocked:\(match.mockId)",
+                requestBody: request.httpBody.flatMap { data in
+                    AutoMobileNetwork.isTextContentType(request.value(forHTTPHeaderField: "Content-Type"))
+                        ? AutoMobileNetwork.utf8String(from: data.prefix(AutoMobileNetwork.shared.maxBodyBytes))
+                        : nil
+                },
+                responseBody: match.responseBody,
+                contentType: match.contentType
+            ))
+            return
+        }
+
         guard let mutableRequest = (request as NSURLRequest).mutableCopy() as? NSMutableURLRequest else {
             client?.urlProtocol(self, didFailWithError: URLError(.badURL))
             return

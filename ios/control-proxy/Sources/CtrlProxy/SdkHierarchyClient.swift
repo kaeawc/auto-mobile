@@ -36,6 +36,14 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return fetchServerInfo() != nil
     }
 
+    /// Replace network mock rules in the SDK's in-app server.
+    public func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool {
+        guard let body = try? JSONEncoder().encode(SetMockRulesBody(rules: rules)) else {
+            return false
+        }
+        return postSync(path: "/network/mock", body: body, session: urlSession)
+    }
+
     // MARK: - Private
 
     private lazy var healthSession: URLSession = {
@@ -66,4 +74,28 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         semaphore.wait()
         return result
     }
+
+    private func postSync(path: String, body: Data, session: URLSession) -> Bool {
+        let url = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var ok = false
+
+        session.dataTask(with: request) { _, response, _ in
+            defer { semaphore.signal() }
+            guard let http = response as? HTTPURLResponse else { return }
+            ok = http.statusCode == 200
+        }.resume()
+
+        semaphore.wait()
+        return ok
+    }
+}
+
+private struct SetMockRulesBody: Encodable {
+    let rules: [NetworkMockRuleDTO]
 }

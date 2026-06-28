@@ -95,6 +95,8 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 self.handleCachedHierarchy(connection)
             } else if request.contains("GET /health") {
                 self.handleHealth(connection)
+            } else if request.contains("POST /network/mock") {
+                self.handleNetworkMock(connection, data: data)
             } else {
                 self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
             }
@@ -136,11 +138,28 @@ final class SdkHierarchyServer: @unchecked Sendable {
         sendResponse(connection, statusCode: 200, body: data)
     }
 
+    private func handleNetworkMock(_ connection: NWConnection, data: Data) {
+        guard let body = Self.httpBody(from: data),
+              let payload = try? JSONDecoder().decode(SetMockRulesBody.self, from: body) else {
+            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+            return
+        }
+        NetworkMockRuleStore.shared.setRules(payload.rules)
+        sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
+    }
+
+    private static func httpBody(from data: Data) -> Data? {
+        let delimiter = Data("\r\n\r\n".utf8)
+        guard let range = data.range(of: delimiter) else { return nil }
+        return data[range.upperBound...]
+    }
+
     private func sendResponse(_ connection: NWConnection, statusCode: Int, body: Data?) {
         let statusText: String
         switch statusCode {
         case 200: statusText = "OK"
         case 204: statusText = "No Content"
+        case 400: statusText = "Bad Request"
         case 404: statusText = "Not Found"
         case 500: statusText = "Internal Server Error"
         case 503: statusText = "Service Unavailable"
@@ -166,5 +185,9 @@ final class SdkHierarchyServer: @unchecked Sendable {
 private struct HealthPayload: Encodable {
     let status: String
     let bundleId: String?
+}
+
+private struct SetMockRulesBody: Decodable {
+    let rules: [NetworkMockRuleDTO]
 }
 #endif

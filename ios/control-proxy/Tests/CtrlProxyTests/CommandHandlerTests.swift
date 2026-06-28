@@ -96,6 +96,64 @@ final class CommandHandlerTests: XCTestCase {
         return current + (element.node ?? []).reduce(0) { $0 + countClassName(className, in: $1) }
     }
 
+    // MARK: - Network Mock Relay
+
+    func testSetNetworkMockRulesRelaysRulesToSdkClient() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        let rules = [
+            NetworkMockRuleDTO(
+                mockId: "mock-1",
+                host: "api\\.example\\.com",
+                path: "^/v1/items",
+                method: "GET",
+                limit: 2,
+                remaining: 2,
+                statusCode: 500,
+                responseHeaders: ["x-test": "yes"],
+                responseBody: "{\"error\":\"mocked\"}",
+                contentType: "application/json"
+            ),
+        ]
+
+        let response = commandHandler.handle(WebSocketRequest(
+            type: RequestType.setNetworkMockRules.rawValue,
+            requestId: "mock-sync-1",
+            networkMockRules: rules
+        ))
+
+        guard let typed = response as? SetNetworkMockRulesResponse else {
+            XCTFail("Expected SetNetworkMockRulesResponse, got \(Swift.type(of: response))")
+            return
+        }
+        XCTAssertEqual(typed.type, ResponseType.setNetworkMockRulesResult.rawValue)
+        XCTAssertEqual(typed.requestId, "mock-sync-1")
+        XCTAssertTrue(typed.ok)
+        XCTAssertEqual(fetcher.setMockRulesCallCount, 1)
+        XCTAssertEqual(fetcher.lastMockRules?.first?.mockId, "mock-1")
+    }
+
+    func testSetNetworkMockRulesReturnsMissingParameterErrorWhenRulesAbsent() {
+        let response = commandHandler.handle(WebSocketRequest(
+            type: RequestType.setNetworkMockRules.rawValue,
+            requestId: "mock-sync-missing"
+        ))
+
+        guard let typed = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse, got \(Swift.type(of: response))")
+            return
+        }
+        XCTAssertEqual(typed.type, ResponseType.setNetworkMockRulesResult.rawValue)
+        XCTAssertEqual(typed.requestId, "mock-sync-missing")
+        XCTAssertEqual(typed.success, false)
+        XCTAssertEqual(typed.error, "Missing required parameter: rules")
+    }
+
     // MARK: - Hierarchy Request Tests
 
     func testRequestHierarchyIncludesPerfTiming() {

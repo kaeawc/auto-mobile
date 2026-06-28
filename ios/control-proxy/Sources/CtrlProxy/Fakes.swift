@@ -693,6 +693,9 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _fetchFreshCallCount = 0
     private var _fetchServerInfoCallCount = 0
     private var _isAvailableCallCount = 0
+    private var _setMockRulesCallCount = 0
+    private var _lastMockRules: [NetworkMockRuleDTO]?
+    public var setMockRulesResult = true
 
     public init() {}
 
@@ -748,12 +751,26 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return _isAvailableCallCount
     }
 
+    public var setMockRulesCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _setMockRulesCallCount
+    }
+
+    public var lastMockRules: [NetworkMockRuleDTO]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastMockRules
+    }
+
     public func clearHistory() {
         lock.lock()
         _fetchCallCount = 0
         _fetchFreshCallCount = 0
         _fetchServerInfoCallCount = 0
         _isAvailableCallCount = 0
+        _setMockRulesCallCount = 0
+        _lastMockRules = nil
         lock.unlock()
     }
 
@@ -787,6 +804,15 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         lock.lock()
         _isAvailableCallCount += 1
         let result = _serverInfo != nil || _isAvailable
+        lock.unlock()
+        return result
+    }
+
+    public func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool {
+        lock.lock()
+        _setMockRulesCallCount += 1
+        _lastMockRules = rules
+        let result = setMockRulesResult
         lock.unlock()
         return result
     }

@@ -67,6 +67,9 @@ public struct WebSocketRequest: Codable {
     public let requestPermission: Bool?
     public let enabled: Bool?
 
+    // Network mocking
+    public let rules: [NetworkMockRuleDTO]?
+
     public init(
         type: String,
         requestId: String? = nil,
@@ -104,7 +107,8 @@ public struct WebSocketRequest: Codable {
         orientation: String? = nil,
         permission: String? = nil,
         requestPermission: Bool? = nil,
-        enabled: Bool? = nil
+        enabled: Bool? = nil,
+        networkMockRules: [NetworkMockRuleDTO]? = nil
     ) {
         self.type = type
         self.requestId = requestId
@@ -143,6 +147,44 @@ public struct WebSocketRequest: Codable {
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled
+        self.rules = networkMockRules
+    }
+}
+
+public struct NetworkMockRuleDTO: Codable, Sendable, Equatable {
+    public let mockId: String
+    public let host: String
+    public let path: String
+    public let method: String
+    public let limit: Int?
+    public let remaining: Int?
+    public let statusCode: Int
+    public let responseHeaders: [String: String]
+    public let responseBody: String
+    public let contentType: String
+
+    public init(
+        mockId: String,
+        host: String,
+        path: String,
+        method: String,
+        limit: Int?,
+        remaining: Int?,
+        statusCode: Int,
+        responseHeaders: [String: String],
+        responseBody: String,
+        contentType: String
+    ) {
+        self.mockId = mockId
+        self.host = host
+        self.path = path
+        self.method = method
+        self.limit = limit
+        self.remaining = remaining
+        self.statusCode = statusCode
+        self.responseHeaders = responseHeaders
+        self.responseBody = responseBody
+        self.contentType = contentType
     }
 }
 
@@ -211,6 +253,22 @@ public struct WebSocketResponse: Codable {
             totalTimeMs: totalTimeMs,
             error: error
         )
+    }
+}
+
+public struct SetNetworkMockRulesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let ok: Bool
+    public let totalTimeMs: Int64?
+
+    public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
+        type = ResponseType.setNetworkMockRulesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.ok = ok
+        self.totalTimeMs = totalTimeMs
     }
 }
 
@@ -845,6 +903,9 @@ public enum RequestType: String, CaseIterable {
     case setPreference = "set_preference"
     case removePreference = "remove_preference"
     case clearPreferences = "clear_preferences"
+
+    // Network mocking
+    case setNetworkMockRules = "set_network_mock_rules"
 }
 
 // MARK: - Response Types (matching Android)
@@ -883,4 +944,5 @@ public enum ResponseType: String {
     case setPreferenceResult = "set_preference_result"
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
+    case setNetworkMockRulesResult = "set_network_mock_rules_result"
 }

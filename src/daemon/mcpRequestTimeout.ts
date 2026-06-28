@@ -49,13 +49,20 @@ function resolveOpenLinkMcpTimeoutFloorMs(): number {
     : DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS;
 }
 
-/** Per-tool minimum request timeouts. Tools absent here use the default. */
-const TOOL_TIMEOUT_FLOORS: Record<string, () => number> = {
-  executePlan: () => MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
-  startDevice: () => MIN_START_DEVICE_MCP_TIMEOUT_MS,
-  launchApp: () => MIN_LAUNCH_APP_MCP_TIMEOUT_MS,
-  openLink: resolveOpenLinkMcpTimeoutFloorMs,
-};
+function resolveToolTimeoutFloorMs(toolName: string | undefined): number | undefined {
+  switch (toolName) {
+    case "executePlan":
+      return MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS;
+    case "startDevice":
+      return MIN_START_DEVICE_MCP_TIMEOUT_MS;
+    case "launchApp":
+      return MIN_LAUNCH_APP_MCP_TIMEOUT_MS;
+    case "openLink":
+      return resolveOpenLinkMcpTimeoutFloorMs();
+    default:
+      return undefined;
+  }
+}
 
 export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
   const raw = request.timeoutMs;
@@ -63,9 +70,8 @@ export function resolveMcpRequestTimeoutMs(request: DaemonRequest): number {
     typeof raw === "number" && Number.isFinite(raw) && raw > 0
       ? raw
       : DEFAULT_MCP_REQUEST_TIMEOUT_MS;
-  const resolveFloor = request.method === "tools/call"
-    ? TOOL_TIMEOUT_FLOORS[request.params?.name]
+  const floor = request.method === "tools/call"
+    ? resolveToolTimeoutFloorMs(request.params?.name)
     : undefined;
-  const floor = resolveFloor?.();
   return floor ? Math.max(base, floor) : base;
 }

@@ -152,8 +152,8 @@ describe("UnixSocketServer MCP session reconnect", () => {
 
     await sendRequest(socketPath, "tools/list");
 
-    // After reconnect, mcpClient should hold the fresh client
-    expect((server as any).mcpClient).not.toBeNull();
+    // After reconnect, the per-key client cache should hold the fresh client.
+    expect((server as any).mcpClients.size).toBe(1);
     expect(clientsCreated).toBe(2);
   });
 
@@ -200,5 +200,27 @@ describe("UnixSocketServer MCP session reconnect", () => {
     const second = await sendRequest(socketPath, "tools/list");
     expect(second.success).toBe(true);
     expect(clientsCreated).toBe(2);
+  });
+
+  test("closes idle per-key MCP clients after the idle timeout", async () => {
+    let closeCalls = 0;
+
+    (server as any).createMcpClient = async () => createFakeMcpClient({
+      listTools: async () => ({ tools: [] }),
+      close: async () => {
+        closeCalls++;
+      },
+    });
+
+    const response = await sendRequest(socketPath, "tools/list");
+
+    expect(response.success).toBe(true);
+    expect((server as any).mcpClients.size).toBe(1);
+
+    fakeTimer.advanceTime(5 * 60 * 1000);
+    await Promise.resolve();
+
+    expect(closeCalls).toBe(1);
+    expect((server as any).mcpClients.size).toBe(0);
   });
 });

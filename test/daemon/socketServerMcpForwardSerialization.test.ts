@@ -65,15 +65,6 @@ function sendRequest(socketPath: string, request: DaemonRequest): Promise<Daemon
   });
 }
 
-function sendToolsCall(socketPath: string, toolName: string): Promise<DaemonResponse> {
-  return sendRequest(socketPath, {
-    id: randomUUID(),
-    type: "mcp_request",
-    method: "tools/call",
-    params: { name: toolName, arguments: {} },
-  });
-}
-
 function sendToolsCallWithArgs(
   socketPath: string,
   toolName: string,
@@ -164,7 +155,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     }
   });
 
-  test("concurrent tools/call from two sockets never overlaps inside callTool", async () => {
+  test("concurrent tools/call for the same device never overlaps inside callTool", async () => {
     let inFlight = 0;
     let maxInFlight = 0;
 
@@ -189,14 +180,88 @@ describe("UnixSocketServer MCP forward serialization", () => {
     };
 
     const [a, b] = await Promise.all([
-      sendToolsCall(socketPath, "observe"),
-      sendToolsCall(socketPath, "observe"),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" }),
     ]);
 
     expect(a.success).toBe(true);
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("concurrent tools/call for different devices can overlap inside callTool", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-2" }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(maxInFlight).toBe(2);
+    expect(inFlight).toBe(0);
+  });
+
+  test("concurrent implicit autolock tools/call from different sockets can overlap", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const forwardedSessionIds: string[] = [];
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          forwardedSessionIds.push(String(args.__mcpSessionId));
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", {}),
+      sendToolsCallWithArgs(socketPath, "observe", {}),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(maxInFlight).toBe(2);
+    expect(forwardedSessionIds).toHaveLength(2);
+    expect(forwardedSessionIds[0]).not.toBe(forwardedSessionIds[1]);
   });
 
   test("forwards the Unix socket session as the implicit autolock key", async () => {
@@ -314,7 +379,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
     };
 
     // First request: blocks in callTool until we release it
-    const first = sendToolsCall(socketPath, "observe");
+    const first = sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" });
 
     // Yield to the real event loop so the first request enters callTool
     for (let i = 0; i < 10; i++) {
@@ -326,7 +391,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
       id: randomUUID(),
       type: "mcp_request",
       method: "tools/call",
-      params: { name: "observe", arguments: {} },
+      params: { name: "observe", arguments: { deviceId: "device-1" } },
       timeoutMs: 500,
     });
 

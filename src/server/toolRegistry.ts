@@ -81,7 +81,92 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     result.additionalProperties = [...seenAdditionalProperties][0];
   }
 
+  const conditionalRequired = buildConditionalRequired(branches, commonRequired);
+  if (conditionalRequired) {
+    Object.assign(result, conditionalRequired);
+  }
+
   return result;
+}
+
+interface ConditionalRequirement {
+  if: {
+    properties: Record<string, { const: unknown }>;
+    required: string[];
+  };
+  then: {
+    required: string[];
+  };
+  else?: ConditionalRequirement;
+}
+
+function buildConditionalRequired(
+  branches: Record<string, unknown>[],
+  commonRequired: string[]
+): ConditionalRequirement | undefined {
+  const commonRequiredSet = new Set(commonRequired);
+  const requirements: ConditionalRequirement[] = [];
+
+  for (const branch of branches) {
+    const required = Array.isArray(branch.required)
+      ? branch.required.filter((key): key is string => typeof key === "string")
+      : [];
+    const branchOnlyRequired = required.filter(key => !commonRequiredSet.has(key));
+    if (branchOnlyRequired.length === 0) {
+      continue;
+    }
+
+    const condition = buildDiscriminatorCondition(branch);
+    if (!condition) {
+      continue;
+    }
+
+    requirements.push({
+      if: condition,
+      then: {
+        required: branchOnlyRequired,
+      },
+    });
+  }
+
+  return chainConditionalRequirements(requirements);
+}
+
+function buildDiscriminatorCondition(
+  branch: Record<string, unknown>
+): ConditionalRequirement["if"] | undefined {
+  const properties = isJsonSchemaObject(branch.properties) ? branch.properties : {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (!isJsonSchemaObject(value)) {
+      continue;
+    }
+    const values = constOrEnumValues(value);
+    if (values.length !== 1) {
+      continue;
+    }
+    return {
+      properties: {
+        [key]: { const: values[0] },
+      },
+      required: [key],
+    };
+  }
+  return undefined;
+}
+
+function chainConditionalRequirements(
+  requirements: ConditionalRequirement[]
+): ConditionalRequirement | undefined {
+  let chain: ConditionalRequirement | undefined;
+
+  for (const requirement of requirements.toReversed()) {
+    chain = {
+      ...requirement,
+      ...(chain ? { else: chain } : {}),
+    };
+  }
+
+  return chain;
 }
 
 function mergeUnionProperty(existing: unknown, incoming: unknown): unknown {

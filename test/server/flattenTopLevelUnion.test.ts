@@ -137,4 +137,44 @@ describe("flattenTopLevelUnion", () => {
     });
     expect(result.required).toEqual(["platform", "title"]);
   });
+
+  test("preserves a branch-only required field as a conditional requirement", () => {
+    const schema = {
+      oneOf: [
+        {
+          type: "object",
+          properties: {
+            platform: { type: "string", const: "ios", description: "Target platform" },
+            title: { type: "string" },
+            appId: { type: "string" },
+          },
+          required: ["platform", "title", "appId"],
+          additionalProperties: false,
+        },
+        {
+          type: "object",
+          properties: {
+            platform: { type: "string", const: "android", description: "Target platform" },
+            title: { type: "string" },
+            appId: { type: "string" },
+          },
+          required: ["platform", "title"],
+          additionalProperties: false,
+        },
+      ],
+    };
+
+    const result = flattenTopLevelUnion(schema);
+
+    expect(result.required).toEqual(["platform", "title"]);
+    expect(result.if).toEqual({
+      properties: {
+        platform: { const: "ios" },
+      },
+      required: ["platform"],
+    });
+    expect(result.then).toEqual({
+      required: ["appId"],
+    });
+  });
 });

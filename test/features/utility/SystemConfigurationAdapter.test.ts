@@ -378,6 +378,18 @@ describe("SystemConfigurationAdapter", () => {
       expect(exec.wasCommandExecuted("-k 'Locale'")).toBe(true);
     });
 
+    it("strips ideviceinfo indexes from supported language lists", async () => {
+      const exec = new FakeProcessExecutor();
+      exec.setCommandResponse("SupportedLanguages", execResult("0: zh-Hans\n1: zh-Hant\n2: zh\n"));
+      exec.setCommandResponse("Language", execResult("en\n"));
+      exec.setCommandResponse("Locale", execResult("en_US\n"));
+      const client = new CommandLineLockdownLocaleClient(exec);
+
+      const result = await client.getLanguage(iosPhysical.deviceId);
+
+      expect(result.supportedLanguages).toEqual(["zh-Hans", "zh-Hant", "zh"]);
+    });
+
     it("writes language and locale with pymobiledevice3 after pairing validation", async () => {
       const exec = new FakeProcessExecutor();
       exec.setCommandResponse("command -v pymobiledevice3", execResult("/opt/homebrew/bin/pymobiledevice3\n"));

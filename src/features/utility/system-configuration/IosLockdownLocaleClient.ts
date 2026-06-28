@@ -88,7 +88,7 @@ export class CommandLineLockdownLocaleClient implements LockdownLocaleClient {
       }
       const values = raw
         .split(/\r?\n|,/)
-        .map(value => value.trim().replace(/^"|"$/g, ""))
+        .map(value => value.trim().replace(/^"|"$/g, "").replace(/^\d+:\s*/, ""))
         .filter(Boolean);
       return values.length > 0 ? values : undefined;
     } catch {

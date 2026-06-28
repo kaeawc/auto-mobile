@@ -58,6 +58,15 @@ describe("MCP Tools Registry", () => {
     });
   });
 
+  test("should omit output schemas from generated MCP tool definitions", () => {
+    const toolDefinitions = ToolRegistry.getToolDefinitions();
+
+    expect(toolDefinitions.length).toBeGreaterThan(0);
+    for (const tool of toolDefinitions) {
+      expect(tool).not.toHaveProperty("outputSchema");
+    }
+  });
+
   test("should register all tool categories", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
     const toolNames = toolDefinitions.map(tool => tool.name);

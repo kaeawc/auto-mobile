@@ -106,11 +106,11 @@ export function normalizeAppFileRelativePath(path: string): string {
 
 export const putAppFileSchema = addDeviceTargetingToSchema(z.object({
   appId: z.string().min(1).describe("App identifier (Android package name or iOS bundle ID)"),
-  container: appFileContainerSchema.describe("Logical app container: documents, library, cache, tmp, or externalFiles where supported"),
-  sourcePath: z.string().min(1).optional().describe("Local host file path to copy into the app container"),
+  container: appFileContainerSchema.describe("Logical app container"),
+  sourcePath: z.string().min(1).optional().describe("Local host file path to copy"),
   contentText: z.string().optional().describe("Inline UTF-8 text content to write"),
-  contentBase64: z.string().optional().describe("Inline base64-encoded binary content to write losslessly"),
-  destinationPath: z.string().describe("Relative destination path inside the logical app container, e.g. fixtures/welcome.png"),
+  contentBase64: z.string().optional().describe("Inline base64-encoded binary content"),
+  destinationPath: z.string().describe("Relative destination path inside the container"),
 }).superRefine((args, ctx) => {
   if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
     ctx.addIssue({

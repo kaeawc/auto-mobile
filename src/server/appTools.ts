@@ -69,7 +69,7 @@ export const setAppPermissionsSchema = addDeviceTargetingToSchema(
     appId: z.string().describe("App package ID or bundle identifier"),
     action: appPermissionActionSchema
       .optional()
-      .describe("Permission action. Defaults to grant. Android runtime permissions currently support grant only; iOS simulators support grant/revoke/reset."),
+      .describe("Permission action; defaults to grant"),
     permissions: z
       .array(z.string().min(1))
       .optional()
@@ -103,7 +103,7 @@ export const getAppPermissionsSchema = addDeviceTargetingToSchema(
     permissions: z
       .array(z.string().min(1))
       .optional()
-      .describe("Optional permission names or simulator privacy services to query. If omitted, returns known permission rows."),
+      .describe("Optional permissions or simulator privacy services to query"),
   })
 );
 
@@ -330,14 +330,14 @@ export function registerAppTools(
 
   ToolRegistry.registerDeviceAware(
     "setAppPermissions",
-    "Grant, revoke, reset, or configure app permissions on Android devices and iOS simulators",
+    "Grant, revoke, reset, or configure app permissions",
     setAppPermissionsSchema,
     setAppPermissionsHandler
   );
 
   ToolRegistry.registerDeviceAware(
     "getAppPermissions",
-    "Read app permission state on Android devices and iOS simulators",
+    "Read app permission state",
     getAppPermissionsSchema,
     getAppPermissionsHandler
   );

@@ -24,7 +24,7 @@ const changeLocalizationBaseSchema = z.object({
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
   timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
   calendarSystem: z.string().min(1).optional().describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
-  restartApp: z.string().min(1).optional().describe("Bundle ID of app to terminate and relaunch after locale change (iOS only). Running apps cache locale at launch, so restart is needed for the app to pick up new settings.")
+  restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
 export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocalizationBaseSchema).refine(values =>
@@ -33,8 +33,8 @@ export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocaliz
 });
 
 const doNotDisturbStateInputSchema = z.object({
-  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb. If true without mode, uses the strictest available DND mode."),
-  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode: off, none/total silence, priority, or alarms.")
+  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
+  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode")
 }).refine(values => values.enabled !== undefined || values.mode !== undefined, {
   message: "Provide enabled or mode for doNotDisturb"
 });
@@ -271,12 +271,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device-level state such as Do Not Disturb. Android supports all four DND modes "
-      + "(off/none/priority/alarms) with read-back verification. iOS DND is simulator-only and "
-      + "binary (on/off) via a registered com.apple.donotdisturb.enabled notifyutil toggle; "
-      + "priority/alarms are applied as plain DND and reported honestly (capability:\"binary\", appliedMode:\"none\", "
-      + "verified:false, warning). Physical iOS devices are unsupported (capability:\"unsupported\") "
-      + "because iOS exposes no public API to set Focus/Do Not Disturb.",
+    "Set device-level state such as Do Not Disturb. Android supports off/none/priority/alarms; iOS simulators support binary DND only.",
     setDeviceStateSchema,
     setDeviceStateHandler
   );

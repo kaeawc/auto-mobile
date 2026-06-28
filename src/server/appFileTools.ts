@@ -7,8 +7,7 @@ import type { BootedDevice } from "../models";
 export function registerAppFileTools(): void {
   ToolRegistry.registerDeviceAware(
     "putAppFile",
-    "Write a local file, UTF-8 text, or base64 binary content into a logical app container. " +
-    "Use this platform-neutral tool instead of direct adb push, run-as, or simctl container copy commands.",
+    "Write a host file, UTF-8 text, or base64 content into an app container. Prefer this over platform-specific copy commands.",
     putAppFileSchema,
     async (device: BootedDevice, args: PutAppFileArgs, _progress, signal) => {
       const result = await getAppFileService().putFile(device, args, signal);

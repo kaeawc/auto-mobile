@@ -7,6 +7,9 @@ import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor"
 
 // Real subprocess spawns; shared CI runners can take seconds to fork/exec under load.
 const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
+const STDERR_FAILURE_COMMAND = process.platform === "win32"
+  ? "echo SQLITE_BUSY: database is locked 1>&2 & exit /b 7"
+  : "printf '%s\\n' 'SQLITE_BUSY: database is locked' >&2; exit 7";
 
 describe("DefaultProcessExecutor", function() {
   const executor = new DefaultProcessExecutor();
@@ -41,8 +44,7 @@ describe("DefaultProcessExecutor", function() {
   }, SUBPROCESS_TEST_TIMEOUT_MS);
 
   test("exec failure includes stderr and exit code context", async function() {
-    const script = "console.error('SQLITE_BUSY: database is locked'); process.exit(7)";
-    await expect(executor.exec(`${process.execPath} -e ${JSON.stringify(script)}`)).rejects.toThrow(
+    await expect(executor.exec(STDERR_FAILURE_COMMAND)).rejects.toThrow(
       /exit code: 7[\s\S]*stderr:[\s\S]*SQLITE_BUSY: database is locked/
     );
   }, SUBPROCESS_TEST_TIMEOUT_MS);

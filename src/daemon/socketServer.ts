@@ -394,11 +394,12 @@ export class UnixSocketServer {
     }
 
     const record = args as Record<string, unknown>;
-    if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
-      return `session:${record.sessionUuid}`;
-    }
+    // An explicit target device must serialize by physical device even when a session is present.
     if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
       return `device:${record.deviceId}`;
+    }
+    if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
+      return `session:${record.sessionUuid}`;
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
       return `mcp-session:${record.__mcpSessionId}`;

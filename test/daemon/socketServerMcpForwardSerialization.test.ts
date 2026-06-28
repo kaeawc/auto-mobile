@@ -190,6 +190,41 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(inFlight).toBe(0);
   });
 
+  test("explicit device targets serialize even when session UUIDs differ", async () => {
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-a" }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-b" }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(maxInFlight).toBe(1);
+    expect(inFlight).toBe(0);
+  });
+
   test("concurrent tools/call for different devices can overlap inside callTool", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

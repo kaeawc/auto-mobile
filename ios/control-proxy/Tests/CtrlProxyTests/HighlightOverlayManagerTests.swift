@@ -114,6 +114,15 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertEqual(scaled?.points[1].y, 40)
     }
 
+    func testParsesEightDigitColorsAsAndroidArgb() {
+        let color = HighlightOverlayColorComponents.parse(hex: "#80FF0000")
+
+        XCTAssertEqual(color.red, 1)
+        XCTAssertEqual(color.green, 0)
+        XCTAssertEqual(color.blue, 0)
+        XCTAssertEqual(color.alpha, 128.0 / 255.0)
+    }
+
     func testManagerRendersAndSchedulesAutoExpire() {
         let renderer = FakeHighlightOverlayRenderer()
         let scheduler = FakeHighlightOverlayScheduler()

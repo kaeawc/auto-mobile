@@ -130,6 +130,39 @@ enum SdkHighlightCommandScaler {
     }
 }
 
+struct SdkHighlightColorComponents: Equatable {
+    let red: Double
+    let green: Double
+    let blue: Double
+    let alpha: Double
+
+    static func parse(hex: String) -> SdkHighlightColorComponents {
+        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
+        let scanner = Scanner(string: trimmed)
+        var value: UInt64 = 0
+        guard scanner.scanHexInt64(&value) else {
+            return SdkHighlightColorComponents(red: 0, green: 0, blue: 0, alpha: 1)
+        }
+
+        switch trimmed.count {
+        case 8:
+            return SdkHighlightColorComponents(
+                red: Double((value & 0x00FF_0000) >> 16) / 255,
+                green: Double((value & 0x0000_FF00) >> 8) / 255,
+                blue: Double(value & 0x0000_00FF) / 255,
+                alpha: Double((value & 0xFF00_0000) >> 24) / 255
+            )
+        default:
+            return SdkHighlightColorComponents(
+                red: Double((value & 0xFF0000) >> 16) / 255,
+                green: Double((value & 0x00FF00) >> 8) / 255,
+                blue: Double(value & 0x0000FF) / 255,
+                alpha: 1
+            )
+        }
+    }
+}
+
 final class SdkHighlightOverlayManager {
     static let shared = SdkHighlightOverlayManager()
 
@@ -249,28 +282,13 @@ final class SdkHighlightOverlayManager {
 
 private extension UIColor {
     convenience init(autoMobileHex hex: String) {
-        let trimmed = hex.trimmingCharacters(in: CharacterSet(charactersIn: "#"))
-        let scanner = Scanner(string: trimmed)
-        var value: UInt64 = 0
-        scanner.scanHexInt64(&value)
-
-        let red: CGFloat
-        let green: CGFloat
-        let blue: CGFloat
-        let alpha: CGFloat
-        switch trimmed.count {
-        case 8:
-            red = CGFloat((value & 0xFF00_0000) >> 24) / 255
-            green = CGFloat((value & 0x00FF_0000) >> 16) / 255
-            blue = CGFloat((value & 0x0000_FF00) >> 8) / 255
-            alpha = CGFloat(value & 0x0000_00FF) / 255
-        default:
-            red = CGFloat((value & 0xFF0000) >> 16) / 255
-            green = CGFloat((value & 0x00FF00) >> 8) / 255
-            blue = CGFloat(value & 0x0000FF) / 255
-            alpha = 1
-        }
-        self.init(red: red, green: green, blue: blue, alpha: alpha)
+        let color = SdkHighlightColorComponents.parse(hex: hex)
+        self.init(
+            red: CGFloat(color.red),
+            green: CGFloat(color.green),
+            blue: CGFloat(color.blue),
+            alpha: CGFloat(color.alpha)
+        )
     }
 }
 

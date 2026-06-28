@@ -31,8 +31,10 @@ import { VisualHighlightClient } from "../features/debug/VisualHighlight";
 
 const DEFAULT_MAX_DURATION_SECONDS = 30;
 const MAX_DURATION_SECONDS = 300;
-// Keep in sync with HighlightAnimator's total fade-in + display + fade-out duration.
-const HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
+// Android uses HighlightAnimator's total fade-in + display + fade-out duration.
+// iOS SDK/runner overlays auto-remove after their 3 second TTL.
+const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
+const IOS_HIGHLIGHT_ANIMATION_DURATION_MS = 3000;
 
 interface StartVideoRecordingRequest {
   device: BootedDevice;
@@ -306,8 +308,14 @@ function recordHighlightAdded(
     description: highlight.description,
     shape: highlight.shape,
     appearedAtMs,
-    disappearedAtMs: appearedAtMs + HIGHLIGHT_ANIMATION_DURATION_MS,
+    disappearedAtMs: appearedAtMs + highlightAnimationDurationMs(session.platform),
   });
+}
+
+function highlightAnimationDurationMs(platform: BootedDevice["platform"]): number {
+  return platform === "ios"
+    ? IOS_HIGHLIGHT_ANIMATION_DURATION_MS
+    : ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS;
 }
 
 function generateHighlightId(timer: Timer = defaultTimer): string {

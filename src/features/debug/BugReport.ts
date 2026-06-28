@@ -16,6 +16,7 @@ import { TakeScreenshot } from "../observe/TakeScreenshot";
 import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
 import { DefaultElementParser } from "../utility/ElementParser";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 interface BugReportOptions {
   /**
@@ -96,7 +97,9 @@ export class BugReport {
       this.getScreenshot(result)
     ]);
 
-    const saveDir = options.saveDir || await this.createSecureTempDir();
+    const saveDir = options.saveDir
+      ? resolvePathFromDaemonLaunchWorkingDirectory(options.saveDir)
+      : await this.createSecureTempDir();
     await this.saveReport(result, saveDir);
 
     const duration = this.timer.now() - startTime;

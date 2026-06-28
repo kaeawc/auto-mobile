@@ -4,12 +4,16 @@ import { FakeIOSCtrlProxyBundleDownloader } from "../fakes/FakeIOSCtrlProxyBundl
 import * as fs from "fs/promises";
 import * as path from "path";
 import os from "os";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 
 describe("IOSCtrlProxyBuilder", function() {
   let originalProjectRoot: string | undefined;
   let originalDerivedDataPath: string | undefined;
   let originalSkipBuild: string | undefined;
   let originalCacheDir: string | undefined;
+  let originalIpaPath: string | undefined;
+  let originalBundlePath: string | undefined;
+  let originalLaunchCwd: string | undefined;
   let tempDir: string;
 
   beforeEach(async function() {
@@ -18,6 +22,9 @@ describe("IOSCtrlProxyBuilder", function() {
     originalDerivedDataPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_DERIVED_DATA;
     originalSkipBuild = process.env.AUTOMOBILE_SKIP_CTRL_PROXY_IOS_BUILD;
     originalCacheDir = process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR;
+    originalIpaPath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
+    originalBundlePath = process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+    originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
     // Create temp directory for tests
     tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "ctrl-proxy-ios-builder-test-"));
@@ -50,6 +57,24 @@ describe("IOSCtrlProxyBuilder", function() {
       delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR;
     } else {
       process.env.AUTOMOBILE_CTRL_PROXY_IOS_CACHE_DIR = originalCacheDir;
+    }
+
+    if (originalIpaPath === undefined) {
+      delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH;
+    } else {
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH = originalIpaPath;
+    }
+
+    if (originalBundlePath === undefined) {
+      delete process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH;
+    } else {
+      process.env.AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH = originalBundlePath;
+    }
+
+    if (originalLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
     }
 
     // Reset singleton instances
@@ -423,6 +448,38 @@ describe("IOSCtrlProxyBuilder", function() {
 
       expect(result.success).toBe(true);
       expect(downloader.downloadedUrls.length).toBe(1);
+    });
+
+    test.each([
+      "AUTOMOBILE_CTRL_PROXY_IOS_IPA_PATH",
+      "AUTOMOBILE_CTRL_PROXY_IOS_BUNDLE_PATH",
+    ] as const)("should resolve relative %s from daemon launch cwd", async function(envName) {
+      const launchCwd = path.join(tempDir, "launch-cwd");
+      const derivedDataPath = path.join(tempDir, "DerivedData");
+      const cacheDir = path.join(tempDir, "cache");
+      const localBundlePath = path.join(launchCwd, "build", "control-proxy.ipa");
+      await fs.mkdir(path.dirname(localBundlePath), { recursive: true });
+      await fs.writeFile(localBundlePath, "a".repeat(12000));
+
+      process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+      process.env[envName] = path.join("build", "control-proxy.ipa");
+
+      IOSCtrlProxyBuilder.resetInstances();
+      IOSCtrlProxyBuilder.setExpectedChecksumForTesting("");
+      const builder = IOSCtrlProxyBuilder.getInstance(
+        {
+          derivedDataPath,
+          bundleCacheDir: cacheDir
+        },
+        { downloader: new FakeIOSCtrlProxyBundleDownloader() }
+      );
+
+      const result = await builder.build("simulator");
+
+      expect(result.success).toBe(true);
+      await expect(fs.stat(path.join(cacheDir, "control-proxy.ipa"))).resolves.toMatchObject({
+        size: 12000,
+      });
     });
   });
 });

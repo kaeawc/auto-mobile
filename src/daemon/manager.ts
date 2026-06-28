@@ -1,8 +1,8 @@
 import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { open, readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import {
@@ -26,6 +26,12 @@ import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from ".
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { cleanupDaemonFiles } from "./daemonFiles";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  resolveDaemonLaunchWorkingDirectory,
+  resolvePathFromDaemonLaunchWorkingDirectory,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 /**
  * Check that bunx is available on PATH.
@@ -203,9 +209,9 @@ export class DaemonManager implements DaemonManagerLike {
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
-    this.lockFilePath = lockFilePath;
-    this.pidFilePath = pidFilePath;
-    this.socketPath = socketPath;
+    this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
+    this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
+    this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
     if ("findDaemonProcesses" in processFinderOrSpawner) {
       this.processFinder = processFinderOrSpawner;
       this.processSpawner = processSpawner;
@@ -254,6 +260,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private writeLockFile(): boolean {
     try {
+      mkdirSync(dirname(this.lockFilePath), { recursive: true });
       const fd = openSync(this.lockFilePath, "wx", 0o600);
       writeFileSync(fd, String(process.pid));
       closeSync(fd);
@@ -515,6 +522,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Propagate any non-default file paths to the child so its constants module
     // resolves to the same locations this manager polls.
     const childEnv = { ...process.env };
+    childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
     }
@@ -527,6 +535,7 @@ export class DaemonManager implements DaemonManagerLike {
 
     const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
       detached: true,
+      cwd: resolveStableDaemonWorkingDirectory(),
       stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
       shell: true, // Use shell to resolve command from PATH
       env: childEnv,

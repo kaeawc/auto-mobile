@@ -17,7 +17,8 @@ import {
   DAEMON_PORT_RANGE_END,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
@@ -61,6 +62,11 @@ import {
   setProcessShutdownHandler,
 } from "../processLifecycle";
 import type { BootedDevice } from "../models";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  safeProcessCwd,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -179,6 +185,9 @@ export class Daemon {
     // Enable stdout logging in daemon mode so logs appear in daemon.log file
     // (daemon's stdout/stderr are redirected to /tmp/auto-mobile-daemon-XXXXXX/daemon.log)
     logger.enableStdoutLogging();
+    const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
+    process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);
+    process.chdir(stableWorkingDirectory);
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();
@@ -594,6 +603,7 @@ export class Daemon {
       version: DAEMON_VERSION,
     };
 
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
     await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
       encoding: "utf-8",
       mode: 0o600,

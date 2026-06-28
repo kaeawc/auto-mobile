@@ -272,7 +272,7 @@ export interface IOSCtrlProxy extends CtrlProxyClient {
 
   requestMultiFingerSwipe(
     x1: number, y1: number, x2: number, y2: number,
-    fingerCount: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker
+    fingerCount: number, duration?: number, timeoutMs?: number, perf?: PerformanceTracker, fingerSpacing?: number
   ): Promise<CtrlProxySwipeResult>;
 
   clearCache(): void;
@@ -1569,9 +1569,10 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
     fingerCount: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    fingerSpacing?: number
   ): Promise<CtrlProxySwipeResult> {
-    return this.gestures.requestMultiFingerSwipe(x1, y1, x2, y2, fingerCount, duration, timeoutMs, perf);
+    return this.gestures.requestMultiFingerSwipe(x1, y1, x2, y2, fingerCount, duration, timeoutMs, perf, fingerSpacing);
   }
 
   // ===========================================================================

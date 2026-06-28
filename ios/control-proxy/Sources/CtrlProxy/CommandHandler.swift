@@ -83,6 +83,9 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestTwoFingerSwipe.rawValue:
                 return try handleTwoFingerSwipe(request, startTime: startTime)
 
+            case RequestType.requestMultiFingerSwipe.rawValue:
+                return try handleMultiFingerSwipe(request, startTime: startTime)
+
             case RequestType.requestDrag.rawValue:
                 return try handleDrag(request, startTime: startTime)
 
@@ -359,11 +362,37 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleTwoFingerSwipe(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Two-finger swipe not yet implemented on iOS
-        return WebSocketResponse.error(
-            type: ResponseType.swipeResult.rawValue,
+        try handleMultiFingerSwipe(request, startTime: startTime, defaultFingers: 2)
+    }
+
+    private func handleMultiFingerSwipe(
+        _ request: WebSocketRequest,
+        startTime: Date,
+        defaultFingers: Int = 2
+    ) throws -> WebSocketResponse {
+        guard let x1 = request.x1, let y1 = request.y1,
+              let x2 = request.x2, let y2 = request.y2
+        else {
+            throw CommandError.missingParameter("x1, y1, x2, y2")
+        }
+
+        let fingerCount = request.fingerCount ?? defaultFingers
+        let duration = request.duration ?? 300
+        let fingerSpacing = request.offset ?? 25
+
+        try gesturePerformer.multiFingerSwipe(
+            startX: Double(x1),
+            startY: Double(y1),
+            endX: Double(x2),
+            endY: Double(y2),
+            fingerCount: fingerCount,
+            fingerSpacing: fingerSpacing,
+            duration: TimeInterval(duration) / 1000.0
+        )
+
+        return WebSocketResponse.success(
+            type: ResponseType.multiFingerSwipeResult.rawValue,
             requestId: request.requestId,
-            error: "Two-finger swipe not yet implemented on iOS",
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
@@ -1061,9 +1090,11 @@ public class CommandHandler: CommandHandling {
             return ResponseType.screenshot.rawValue
         case RequestType.requestTapCoordinates.rawValue:
             return ResponseType.tapCoordinatesResult.rawValue
-        case RequestType.requestSwipe.rawValue,
-             RequestType.requestTwoFingerSwipe.rawValue:
+        case RequestType.requestSwipe.rawValue:
             return ResponseType.swipeResult.rawValue
+        case RequestType.requestTwoFingerSwipe.rawValue,
+             RequestType.requestMultiFingerSwipe.rawValue:
+            return ResponseType.multiFingerSwipeResult.rawValue
         case RequestType.requestDrag.rawValue:
             return ResponseType.dragResult.rawValue
         case RequestType.requestPinch.rawValue:

@@ -161,6 +161,8 @@ Use **Simulator > Features > Toggle VoiceOver** again, or **Option + Command + F
 
 **Three-finger scroll fallback.** When no scrollable container can be identified by `resource-id` or `content-desc`, AutoMobile falls back to a three-finger swipe gesture. This is the VoiceOver content-scroll gesture and works on most scrollable views, but may not trigger in some edge cases (e.g., nested scroll views with ambiguous focus). If scrolling fails, provide an explicit `container` selector in `swipeOn`.
 
+**Private XCTest multi-touch dependency.** The three-finger fallback uses private XCTest event-synthesis APIs because public `XCUICoordinate` gestures only drive one pointer. AutoMobile returns a descriptive CtrlProxy error if those private symbols are unavailable on the active Xcode/iOS version.
+
 **VoiceOver cursor position not tracked.** Unlike Android TalkBack, AutoMobile does not currently report which element the VoiceOver cursor is on (`accessibilityFocusedElement` is absent in iOS results). Validate interactions by checking whether the expected element appears in `observe().elements` and whether the expected navigation or state change occurred.
 
 **CtrlProxy required.** VoiceOver detection and accessibility actions require the CtrlProxy runner to be connected. If the CtrlProxy is unavailable, AutoMobile falls back to standard (non-VoiceOver) behavior with a warning logged.

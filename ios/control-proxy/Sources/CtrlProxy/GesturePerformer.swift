@@ -1,4 +1,5 @@
 import Foundation
+import ObjCExceptionCatcher
 #if canImport(os)
 import os
 #endif
@@ -328,6 +329,63 @@ public class GesturePerformer: GesturePerforming {
                     withVelocity: .default,
                     thenHoldForDuration: 0
                 )
+            }
+        }
+
+        public func multiFingerSwipe(
+            startX: Double,
+            startY: Double,
+            endX: Double,
+            endY: Double,
+            fingerCount: Int,
+            fingerSpacing: Double,
+            duration: TimeInterval
+        ) throws {
+            guard application != nil else {
+                throw GestureError.noApplication
+            }
+
+            try runOnMainThread {
+                let orientation = GesturePerformer.currentInterfaceOrientation()
+                var errorMessage: NSString?
+                let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+                    CGFloat(startX),
+                    CGFloat(startY),
+                    CGFloat(endX),
+                    CGFloat(endY),
+                    fingerCount,
+                    CGFloat(fingerSpacing),
+                    duration,
+                    orientation.rawValue,
+                    &errorMessage
+                )
+
+                if !succeeded {
+                    throw GestureError.gestureFailed(errorMessage as String? ?? "multi-finger swipe synthesis failed")
+                }
+            }
+        }
+
+        private static func currentInterfaceOrientation() -> UIInterfaceOrientation {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
+                return activeScene.interfaceOrientation
+            }
+            if let scene = scenes.first {
+                return scene.interfaceOrientation
+            }
+
+            switch UIDevice.current.orientation {
+            case .portrait:
+                return .portrait
+            case .portraitUpsideDown:
+                return .portraitUpsideDown
+            case .landscapeLeft:
+                return .landscapeLeft
+            case .landscapeRight:
+                return .landscapeRight
+            default:
+                return .portrait
             }
         }
 
@@ -1103,6 +1161,20 @@ public class GesturePerformer: GesturePerforming {
             startY _: Double,
             endX _: Double,
             endY _: Double,
+            duration _: TimeInterval
+        )
+            throws
+        {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func multiFingerSwipe(
+            startX _: Double,
+            startY _: Double,
+            endX _: Double,
+            endY _: Double,
+            fingerCount _: Int,
+            fingerSpacing _: Double,
             duration _: TimeInterval
         )
             throws

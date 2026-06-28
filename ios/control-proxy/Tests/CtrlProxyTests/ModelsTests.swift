@@ -86,6 +86,27 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(request.duration, 300)
     }
 
+    func testWebSocketRequestMultiFingerSwipeDecodesFractionalOffset() throws {
+        let json = """
+        {
+            "type": "request_multi_finger_swipe",
+            "x1": 100,
+            "y1": 600,
+            "x2": 100,
+            "y2": 200,
+            "duration": 450,
+            "offset": 30.5,
+            "fingerCount": 3
+        }
+        """
+
+        let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
+
+        XCTAssertEqual(request.type, "request_multi_finger_swipe")
+        XCTAssertEqual(request.offset ?? -1, 30.5, accuracy: 0.0001)
+        XCTAssertEqual(request.fingerCount, 3)
+    }
+
     func testWebSocketRequestDragDecoding() throws {
         let json = """
         {
@@ -290,6 +311,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(RequestType.requestHierarchy.rawValue, "request_hierarchy")
         XCTAssertEqual(RequestType.requestTapCoordinates.rawValue, "request_tap_coordinates")
         XCTAssertEqual(RequestType.requestSwipe.rawValue, "request_swipe")
+        XCTAssertEqual(RequestType.requestMultiFingerSwipe.rawValue, "request_multi_finger_swipe")
         XCTAssertEqual(RequestType.requestDrag.rawValue, "request_drag")
         XCTAssertEqual(RequestType.requestSetText.rawValue, "request_set_text")
         XCTAssertEqual(RequestType.requestPressBack.rawValue, "request_press_back")
@@ -312,6 +334,7 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(ResponseType.hierarchyUpdate.rawValue, "hierarchy_update")
         XCTAssertEqual(ResponseType.tapCoordinatesResult.rawValue, "tap_coordinates_result")
         XCTAssertEqual(ResponseType.swipeResult.rawValue, "swipe_result")
+        XCTAssertEqual(ResponseType.multiFingerSwipeResult.rawValue, "multi_finger_swipe_result")
         XCTAssertEqual(ResponseType.screenshot.rawValue, "screenshot")
         XCTAssertEqual(ResponseType.pressBackResult.rawValue, "press_back_result")
         XCTAssertEqual(ResponseType.launchAppResult.rawValue, "launch_app_result")

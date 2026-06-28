@@ -152,6 +152,16 @@ public class FakeGesturePerformer: GesturePerforming {
         public let duration: TimeInterval
     }
 
+    public struct MultiFingerSwipeCall {
+        public let startX: Double
+        public let startY: Double
+        public let endX: Double
+        public let endY: Double
+        public let fingerCount: Int
+        public let fingerSpacing: Double
+        public let duration: TimeInterval
+    }
+
     public struct DragCall {
         public let startX: Double
         public let startY: Double
@@ -178,6 +188,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var doubleTapHistory: [(x: Double, y: Double)] = []
     private var longPressHistory: [(x: Double, y: Double, duration: TimeInterval)] = []
     private var swipeHistory: [SwipeCall] = []
+    private var multiFingerSwipeHistory: [MultiFingerSwipeCall] = []
     private var dragHistory: [DragCall] = []
     private var pinchHistory: [PinchCall] = []
     private var typeTextHistory: [String] = []
@@ -224,6 +235,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getSwipeHistory() -> [SwipeCall] {
         swipeHistory
+    }
+
+    public func getMultiFingerSwipeHistory() -> [MultiFingerSwipeCall] {
+        multiFingerSwipeHistory
     }
 
     public func getDragHistory() -> [DragCall] {
@@ -315,6 +330,7 @@ public class FakeGesturePerformer: GesturePerforming {
         doubleTapHistory.removeAll()
         longPressHistory.removeAll()
         swipeHistory.removeAll()
+        multiFingerSwipeHistory.removeAll()
         dragHistory.removeAll()
         pinchHistory.removeAll()
         typeTextHistory.removeAll()
@@ -365,6 +381,27 @@ public class FakeGesturePerformer: GesturePerforming {
     public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
         try checkFailure("swipe")
         swipeHistory.append(SwipeCall(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration))
+    }
+
+    public func multiFingerSwipe(
+        startX: Double,
+        startY: Double,
+        endX: Double,
+        endY: Double,
+        fingerCount: Int,
+        fingerSpacing: Double,
+        duration: TimeInterval
+    ) throws {
+        try checkFailure("multiFingerSwipe")
+        multiFingerSwipeHistory.append(MultiFingerSwipeCall(
+            startX: startX,
+            startY: startY,
+            endX: endX,
+            endY: endY,
+            fingerCount: fingerCount,
+            fingerSpacing: fingerSpacing,
+            duration: duration
+        ))
     }
 
     public func drag(

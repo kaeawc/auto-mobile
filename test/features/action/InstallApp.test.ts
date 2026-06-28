@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { InstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
 import { createPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -9,6 +9,9 @@ import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsL
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import path from "path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -77,6 +80,8 @@ describe("InstallApp", () => {
   let fakeHost: FakeHostCommandExecutor;
   let fakeLocator: FakeAndroidBuildToolsLocator;
   let fakeTimer: FakeTimer;
+  const tempDirs: string[] = [];
+  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
@@ -85,6 +90,18 @@ describe("InstallApp", () => {
     fakeLocator = new FakeAndroidBuildToolsLocator();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+  });
+
+  afterEach(() => {
+    if (originalLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
+    }
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
   });
 
   test("installs using aapt2 and targets work profile user", async () => {
@@ -351,6 +368,26 @@ describe("InstallApp", () => {
     fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
 
     const expectedAbsolute = path.resolve(process.cwd(), "relative", "path", "app.apk");
+    fakeAdb.setCommandResponse(`install --user 0 -r "${expectedAbsolute}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const result = await installApp.execute(path.join("relative", "path", "app.apk"));
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${expectedAbsolute}"`)).toBe(true);
+  });
+
+  test("resolves relative artifact path from daemon launch cwd when daemon cwd is stable", async () => {
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const launchCwd = mkdtempSync(path.join(tmpdir(), "install-app-launch-cwd-"));
+    tempDirs.push(launchCwd);
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
+
+    const expectedAbsolute = path.resolve(launchCwd, "relative", "path", "app.apk");
     fakeAdb.setCommandResponse(`install --user 0 -r "${expectedAbsolute}"`, createExecResult("Success"));
 
     const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);

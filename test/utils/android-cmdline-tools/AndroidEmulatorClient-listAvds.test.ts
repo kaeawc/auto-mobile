@@ -59,6 +59,29 @@ describe("AndroidEmulatorClient listAvds", () => {
     }
   });
 
+  test("reports Bun posix_spawn ENOENT as a daemon cwd failure when emulator path exists", async () => {
+    const sdkDir = mkdtempSync(join(tmpdir(), "android-sdk-"));
+
+    try {
+      const emulatorDir = join(sdkDir, "emulator");
+      const emulatorPath = join(emulatorDir, "emulator");
+      mkdirSync(emulatorDir, { recursive: true });
+      writeFileSync(emulatorPath, "");
+
+      const execAsync = async (_command: string): Promise<ExecResult> => {
+        throw new Error("ENOENT: no such file or directory, posix_spawn '/bin/sh'");
+      };
+      const client = new AndroidEmulatorClient(execAsync, null, new FakeTimer());
+      (client as any).emulatorPath = emulatorPath;
+      (client as any).ensureEmulatorPath = async () => emulatorPath;
+
+      await expect(client.listAvds()).rejects.toThrow("daemon working directory");
+      await expect(client.listAvds()).rejects.not.toThrow("Android emulator not found");
+    } finally {
+      rmSync(sdkDir, { recursive: true, force: true });
+    }
+  });
+
   test("still reports missing emulator when no emulator path can be resolved", async () => {
     const originalAndroidHome = process.env.ANDROID_HOME;
     const originalAndroidSdkRoot = process.env.ANDROID_SDK_ROOT;

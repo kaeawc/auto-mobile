@@ -11,6 +11,7 @@ import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspe
 import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { logger } from "../../utils/logger";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -56,7 +57,7 @@ export class InstallApp {
     perf.serial("installApp");
 
     if (!path.isAbsolute(artifactPath)) {
-      artifactPath = path.resolve(process.cwd(), artifactPath);
+      artifactPath = resolvePathFromDaemonLaunchWorkingDirectory(artifactPath);
     }
 
     const ext = path.extname(artifactPath).toLowerCase();

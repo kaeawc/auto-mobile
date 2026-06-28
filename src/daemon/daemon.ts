@@ -61,7 +61,11 @@ import {
   setProcessShutdownHandler,
 } from "../processLifecycle";
 import type { BootedDevice } from "../models";
-import { resolveStableDaemonWorkingDirectory } from "./stableWorkingDirectory";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  safeProcessCwd,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -180,7 +184,9 @@ export class Daemon {
     // Enable stdout logging in daemon mode so logs appear in daemon.log file
     // (daemon's stdout/stderr are redirected to /tmp/auto-mobile-daemon-XXXXXX/daemon.log)
     logger.enableStdoutLogging();
-    process.chdir(resolveStableDaemonWorkingDirectory());
+    const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
+    process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);
+    process.chdir(stableWorkingDirectory);
 
     logger.info("Starting AutoMobile daemon...");
     this.setupShutdownHandlers();

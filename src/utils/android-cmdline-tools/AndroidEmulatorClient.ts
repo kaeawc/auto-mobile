@@ -332,9 +332,11 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       return false;
     }
 
-    return /\bspawn\b.*\bENOENT\b/.test(errorMsg)
-      || errorMsg.includes("getcwd")
-      || errorMsg.includes("current directory");
+    const lowerError = errorMsg.toLowerCase();
+    return (lowerError.includes("enoent") && lowerError.includes("spawn"))
+      || lowerError.includes("getcwd")
+      || lowerError.includes("current working directory")
+      || lowerError.includes("current directory");
   }
 
   /**

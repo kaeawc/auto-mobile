@@ -26,7 +26,11 @@ import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from ".
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { cleanupDaemonFiles } from "./daemonFiles";
-import { resolveStableDaemonWorkingDirectory } from "./stableWorkingDirectory";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  resolveDaemonLaunchWorkingDirectory,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 /**
  * Check that bunx is available on PATH.
@@ -516,6 +520,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Propagate any non-default file paths to the child so its constants module
     // resolves to the same locations this manager polls.
     const childEnv = { ...process.env };
+    childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
     }

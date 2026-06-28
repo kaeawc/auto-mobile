@@ -1707,37 +1707,43 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   // ===========================================================================
 
   async executeSQLForIos(
+    appId: string,
     databasePath: string,
     query: string,
     timeoutMs: number = 5000
   ): Promise<import("../../database/DatabaseInspector").SQLResult> {
-    return this.database.executeSQL(databasePath, query, timeoutMs);
+    return this.database.executeSQL(appId, databasePath, query, timeoutMs);
   }
 
-  async listDatabasesForIos(timeoutMs: number = 5000): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
-    return this.database.listDatabases(timeoutMs);
+  async listDatabasesForIos(
+    appId: string,
+    timeoutMs: number = 5000
+  ): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
+    return this.database.listDatabases(appId, timeoutMs);
   }
 
-  async listTablesForIos(databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
-    return this.database.listTables(databasePath, timeoutMs);
+  async listTablesForIos(appId: string, databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
+    return this.database.listTables(appId, databasePath, timeoutMs);
   }
 
   async getTableDataForIos(
+    appId: string,
     databasePath: string,
     table: string,
     limit: number = 50,
     offset: number = 0,
     timeoutMs: number = 5000
   ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
-    return this.database.getTableData(databasePath, table, limit, offset, timeoutMs);
+    return this.database.getTableData(appId, databasePath, table, limit, offset, timeoutMs);
   }
 
   async getTableStructureForIos(
+    appId: string,
     databasePath: string,
     table: string,
     timeoutMs: number = 5000
   ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
-    return this.database.getTableStructure(databasePath, table, timeoutMs);
+    return this.database.getTableStructure(appId, databasePath, table, timeoutMs);
   }
 
   // ===========================================================================

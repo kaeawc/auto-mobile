@@ -48,11 +48,11 @@ interface TableStructureResponseResult extends DatabaseResultBase {
 export class CtrlProxyDatabase {
   constructor(private readonly context: DelegateContext) {}
 
-  async executeSQL(databasePath: string, query: string, timeoutMs: number = 5000): Promise<SQLResult> {
+  async executeSQL(appId: string, databasePath: string, query: string, timeoutMs: number = 5000): Promise<SQLResult> {
     const result = await this.request<ExecuteSqlResult>(
       "execute_sql",
       "execute_sql_result",
-      { databasePath, query },
+      { appId, databasePath, query },
       timeoutMs,
       "Execute SQL"
     );
@@ -66,22 +66,22 @@ export class CtrlProxyDatabase {
       };
   }
 
-  async listDatabases(timeoutMs: number = 5000): Promise<DatabaseInfo[]> {
+  async listDatabases(appId: string, timeoutMs: number = 5000): Promise<DatabaseInfo[]> {
     const result = await this.request<ListDatabasesResult>(
       "list_databases",
       "list_databases_result",
-      {},
+      { appId },
       timeoutMs,
       "List databases"
     );
     return result.databases ?? [];
   }
 
-  async listTables(databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
+  async listTables(appId: string, databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
     const result = await this.request<ListTablesResult>(
       "list_tables",
       "list_tables_result",
-      { databasePath },
+      { appId, databasePath },
       timeoutMs,
       "List tables"
     );
@@ -89,6 +89,7 @@ export class CtrlProxyDatabase {
   }
 
   async getTableData(
+    appId: string,
     databasePath: string,
     table: string,
     limit: number = 50,
@@ -98,7 +99,7 @@ export class CtrlProxyDatabase {
     const result = await this.request<TableDataResponseResult>(
       "get_table_data",
       "table_data_result",
-      { databasePath, table, limit, offset },
+      { appId, databasePath, table, limit, offset },
       timeoutMs,
       "Get table data"
     );
@@ -110,6 +111,7 @@ export class CtrlProxyDatabase {
   }
 
   async getTableStructure(
+    appId: string,
     databasePath: string,
     table: string,
     timeoutMs: number = 5000
@@ -117,7 +119,7 @@ export class CtrlProxyDatabase {
     const result = await this.request<TableStructureResponseResult>(
       "get_table_structure",
       "table_structure_result",
-      { databasePath, table },
+      { appId, databasePath, table },
       timeoutMs,
       "Get table structure"
     );

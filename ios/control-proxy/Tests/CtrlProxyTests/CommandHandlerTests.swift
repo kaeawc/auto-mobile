@@ -1953,6 +1953,7 @@ final class DatabaseCommandHandlerTests: XCTestCase {
     var perfProvider: PerfProvider!
     var fakeElementLocator: FakeElementLocator!
     var fakeGesturePerformer: FakeGesturePerformer!
+    var fakeSdkHierarchy: FakeSdkHierarchyFetcher!
     var fakeDatabase: FakeSdkDatabaseFetcher!
     var commandHandler: CommandHandler!
 
@@ -1962,11 +1963,14 @@ final class DatabaseCommandHandlerTests: XCTestCase {
         perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
         fakeElementLocator = FakeElementLocator()
         fakeGesturePerformer = FakeGesturePerformer()
+        fakeSdkHierarchy = FakeSdkHierarchyFetcher()
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
         fakeDatabase = FakeSdkDatabaseFetcher()
         commandHandler = CommandHandler.createForTesting(
             elementLocator: fakeElementLocator,
             gesturePerformer: fakeGesturePerformer,
             perfProvider: perfProvider,
+            sdkHierarchyClient: fakeSdkHierarchy,
             sdkDatabaseClient: fakeDatabase
         )
     }
@@ -2004,6 +2008,7 @@ final class DatabaseCommandHandlerTests: XCTestCase {
         let request = WebSocketRequest(
             type: "execute_sql",
             requestId: "sql-1",
+            appId: "com.example.app",
             databasePath: "/app/Documents/app.db",
             query: "SELECT id, payload FROM notes"
         )
@@ -2030,6 +2035,7 @@ final class DatabaseCommandHandlerTests: XCTestCase {
         let request = WebSocketRequest(
             type: "execute_sql",
             requestId: "sql-disabled",
+            appId: "com.example.app",
             databasePath: "/app/Documents/app.db",
             query: "SELECT 1"
         )
@@ -2038,5 +2044,23 @@ final class DatabaseCommandHandlerTests: XCTestCase {
 
         XCTAssertFalse(response.success)
         XCTAssertTrue(response.error?.contains("setEnabled(true)") ?? false)
+    }
+
+    func testExecuteSqlRejectsSdkServerBundleMismatchBeforeDatabaseCall() {
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-mismatch",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertTrue(response.error?.contains("does not match requested appId") ?? false)
+        XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 0)
     }
 }

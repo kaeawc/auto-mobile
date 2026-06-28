@@ -58,6 +58,7 @@ public struct WebSocketRequest: Codable {
     public let valueType: String?
 
     // Database parameters
+    public let appId: String?
     public let databasePath: String?
     public let query: String?
     public let table: String?
@@ -74,7 +75,7 @@ public struct WebSocketRequest: Codable {
     public let requestPermission: Bool?
     public let enabled: Bool?
 
-    // Network mocking
+    /// Network mocking
     public let rules: [NetworkMockRuleDTO]?
 
     public init(
@@ -111,6 +112,7 @@ public struct WebSocketRequest: Codable {
         key: String? = nil,
         value: String? = nil,
         valueType: String? = nil,
+        appId: String? = nil,
         databasePath: String? = nil,
         query: String? = nil,
         table: String? = nil,
@@ -155,6 +157,7 @@ public struct WebSocketRequest: Codable {
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.appId = appId
         self.databasePath = databasePath
         self.query = query
         self.table = table
@@ -164,7 +167,7 @@ public struct WebSocketRequest: Codable {
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled
-        self.rules = networkMockRules
+        rules = networkMockRules
     }
 }
 
@@ -1070,7 +1073,7 @@ public enum RequestType: String, CaseIterable {
     case removePreference = "remove_preference"
     case clearPreferences = "clear_preferences"
 
-    // Network mocking
+    /// Network mocking
     case setNetworkMockRules = "set_network_mock_rules"
 
     // Database inspection

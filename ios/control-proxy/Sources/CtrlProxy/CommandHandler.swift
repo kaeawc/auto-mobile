@@ -1204,6 +1204,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
+            try validateDatabaseAppId(request)
             let result = try client.executeSQL(databasePath: databasePath, query: query)
             if let error = result.error {
                 return ExecuteSqlResponse(
@@ -1243,6 +1244,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
+            try validateDatabaseAppId(request)
             return try ListDatabasesResponse(
                 requestId: request.requestId,
                 success: true,
@@ -1278,6 +1280,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
+            try validateDatabaseAppId(request)
             return try ListTablesResponse(
                 requestId: request.requestId,
                 success: true,
@@ -1321,6 +1324,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
+            try validateDatabaseAppId(request)
             let data = try client.getTableData(
                 databasePath: databasePath,
                 table: table,
@@ -1372,6 +1376,7 @@ public class CommandHandler: CommandHandling {
         }
 
         do {
+            try validateDatabaseAppId(request)
             let structure = try client.getTableStructure(databasePath: databasePath, table: table)
             return TableStructureResponse(
                 requestId: request.requestId,
@@ -1393,6 +1398,24 @@ public class CommandHandler: CommandHandling {
 
     private var databaseUnavailableMessage: String {
         "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+    }
+
+    private func validateDatabaseAppId(_ request: WebSocketRequest) throws {
+        guard let requestedAppId = normalizedBundleId(request.appId) else {
+            throw CommandError.missingParameter("appId")
+        }
+
+        guard let serverAppId = normalizedBundleId(sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {
+            throw CommandError.executionFailed(
+                "\(databaseUnavailableMessage); unable to verify SDK server bundle for requested appId \(requestedAppId)"
+            )
+        }
+
+        guard serverAppId == requestedAppId else {
+            throw CommandError.executionFailed(
+                "SDK server bundle \(serverAppId) does not match requested appId \(requestedAppId)"
+            )
+        }
     }
 
     private func totalTimeMs(from startTime: Date) -> Int64 {

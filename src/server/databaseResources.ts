@@ -96,12 +96,12 @@ function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
   if (device.platform === "ios") {
     const client = IOSCtrlProxyClient.getInstance(device);
     return {
-      listDatabases: async () => client.listDatabasesForIos(),
-      listTables: async (_appId, databasePath) => client.listTablesForIos(databasePath),
+      listDatabases: async appId => client.listDatabasesForIos(appId),
+      listTables: async (appId, databasePath) => client.listTablesForIos(appId, databasePath),
       getTableData: async (_appId, databasePath, table, limit, offset) =>
-        client.getTableDataForIos(databasePath, table, limit, offset),
-      getTableStructure: async (_appId, databasePath, table) =>
-        client.getTableStructureForIos(databasePath, table),
+        client.getTableDataForIos(_appId, databasePath, table, limit, offset),
+      getTableStructure: async (appId, databasePath, table) =>
+        client.getTableStructureForIos(appId, databasePath, table),
     };
   }
 

@@ -72,13 +72,14 @@ describe("CtrlProxyDatabase (iOS)", function() {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("/app/Documents/app.db", "SELECT id, payload FROM notes");
+      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "SELECT id, payload FROM notes");
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
 
       const sentMessage = JSON.parse(socket!.sentMessages[0]);
       expect(sentMessage.type).toBe("execute_sql");
+      expect(sentMessage.appId).toBe("com.example.app");
       expect(sentMessage.databasePath).toBe("/app/Documents/app.db");
       expect(sentMessage.query).toBe("SELECT id, payload FROM notes");
 
@@ -108,7 +109,7 @@ describe("CtrlProxyDatabase (iOS)", function() {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("/app/Documents/app.db", "UPDATE notes SET title = 'x'");
+      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "UPDATE notes SET title = 'x'");
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);
@@ -137,7 +138,7 @@ describe("CtrlProxyDatabase (iOS)", function() {
     const client = IOSCtrlProxyClient.createForTesting(testDevice, serverPort, factory, fakeTimer);
 
     try {
-      const resultPromise = client.executeSQLForIos("/app/Documents/app.db", "SELECT 1");
+      const resultPromise = client.executeSQLForIos("com.example.app", "/app/Documents/app.db", "SELECT 1");
       const socket = await waitForSocket(getSocket);
       await waitForSocketOpen(socket);
       await waitForSentMessages(socket);

@@ -201,7 +201,7 @@ async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Pr
 
   if (device.platform === "ios") {
     try {
-      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(args.databasePath, args.query);
+      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(args.appId, args.databasePath, args.query);
     } catch (error) {
       throw new ActionableError(
         "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build " +

@@ -53,6 +53,7 @@ describe("iOS database inspection server integration", function() {
     });
 
     expect(executeSQLForIos).toHaveBeenCalledWith(
+      "com.example.app",
       "/app/Documents/app.db",
       "SELECT id, payload FROM notes"
     );
@@ -119,7 +120,7 @@ describe("iOS database inspection server integration", function() {
     const content = await match!.template.handler(match!.params);
     const payload = JSON.parse(content.text!);
 
-    expect(listDatabases).toHaveBeenCalled();
+    expect(listDatabases).toHaveBeenCalledWith("com.example.app");
     expect(payload.databases).toEqual([
       { name: "app.db", path: "/app/Documents/app.db" },
     ]);
@@ -148,6 +149,7 @@ describe("iOS database inspection server integration", function() {
     const content = await match!.template.handler(match!.params);
     const payload = JSON.parse(content.text!);
 
+    expect(listDatabases).toHaveBeenCalledWith("com.example.app");
     expect(payload.databases).toEqual([
       { name: "app.db", path: "/app/Documents/app.db" },
     ]);

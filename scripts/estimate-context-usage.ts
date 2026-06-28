@@ -25,6 +25,7 @@ import { ResourceRegistry } from "../src/server/resourceRegistry";
 import { registerObserveTools } from "../src/server/observeTools";
 import { registerInteractionTools } from "../src/server/interactionTools";
 import { registerAppTools } from "../src/server/appTools";
+import { registerAppFileTools } from "../src/server/appFileTools";
 import { registerUtilityTools } from "../src/server/utilityTools";
 import { registerDeviceTools } from "../src/server/deviceTools";
 import { registerDeepLinkTools } from "../src/server/deepLinkTools";
@@ -37,6 +38,7 @@ import { registerObservationResources } from "../src/server/observationResources
 import { registerBootedDeviceResources } from "../src/server/bootedDeviceResources";
 import { registerDeviceImageResources } from "../src/server/deviceImageResources";
 import { registerAppResources } from "../src/server/appResources";
+import { registerAppFileResources } from "../src/server/appFileResources";
 import { registerNavigationResources } from "../src/server/navigationResources";
 
 import fs from "node:fs";
@@ -103,6 +105,7 @@ function registerAllTools(): void {
   registerObserveTools();
   registerInteractionTools();
   registerAppTools();
+  registerAppFileTools();
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();
@@ -123,6 +126,7 @@ function registerAllResources(): void {
   registerBootedDeviceResources();
   registerDeviceImageResources();
   registerAppResources();
+  registerAppFileResources();
   registerNavigationResources();
 }
 

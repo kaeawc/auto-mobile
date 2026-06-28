@@ -18,16 +18,6 @@ import { consumeSetupTiming } from "./ToolExecutionContext";
 import { AndroidCtrlProxyManager } from "../utils/CtrlProxyManager";
 import { logger } from "../utils/logger";
 import { serverConfig } from "../utils/ServerConfig";
-import {
-  accessibilityStateSchema,
-  activeWindowSchema,
-  elementSchema,
-  freshnessSchema,
-  predictionsSchema,
-  screenSizeSchema,
-  selectedElementSchema,
-  systemInsetsSchema
-} from "./toolOutputSchemas";
 
 // Schema definitions
 // waitFor accepts elementId OR text directly (oneOf), plus optional timeout and optional container (same shape as tapOn)
@@ -56,62 +46,6 @@ export const observeSchema = addDeviceTargetingToSchema(z.object({
   raw: z.boolean().optional().describe("When true, include unprocessed view hierarchy in response alongside normal output (default: false)"),
   skipBackStack: z.boolean().optional().describe("When true, skip back stack collection during waitFor polling to reduce ADB overhead (default: false)")
 }));
-
-const mediaViewSchema = z.object({
-  viewId: z.string().optional(),
-  className: z.string(),
-  mediaType: z.enum(["image", "video", "loading", "mixed"]),
-  bounds: z.object({
-    left: z.number(),
-    top: z.number(),
-    right: z.number(),
-    bottom: z.number()
-  }),
-  contentDescription: z.string().optional(),
-  resourceId: z.string().optional(),
-  sourceUrl: z.string().optional(),
-  isLoading: z.boolean().optional()
-});
-
-const observeElementsSchema = z.object({
-  clickable: z.array(elementSchema),
-  scrollable: z.array(elementSchema),
-  text: z.array(elementSchema),
-  media: z.array(mediaViewSchema)
-});
-
-const observeResultSchema = z.object({
-  updatedAt: z.union([z.string(), z.number()]),
-  screenSize: screenSizeSchema,
-  systemInsets: systemInsetsSchema,
-  rotation: z.number().int().optional(),
-  viewHierarchy: z.any().optional(),
-  activeWindow: activeWindowSchema.optional(),
-  elements: observeElementsSchema.optional(),
-  selectedElements: z.array(selectedElementSchema).optional(),
-  focusedElement: elementSchema.optional(),
-  accessibilityFocusedElement: elementSchema.optional(),
-  intentChooserDetected: z.boolean().optional(),
-  notificationPermissionDetected: z.boolean().optional(),
-  wakefulness: z.enum(["Awake", "Asleep", "Dozing"]).optional(),
-  userId: z.number().int().optional(),
-  backStack: z.any().optional(),
-  error: z.string().optional(),
-  awaitedElement: elementSchema.optional(),
-  awaitDuration: z.number().int().optional(),
-  awaitTimeout: z.boolean().optional(),
-  perfTiming: z.any().optional(),
-  perfTimingTruncated: z.boolean().optional(),
-  gfxMetrics: z.any().optional(),
-  displayedTimeMetrics: z.array(z.any()).optional(),
-  performanceAudit: z.any().optional(),
-  accessibilityAudit: z.any().optional(),
-  freshness: freshnessSchema.optional(),
-  recompositionSummary: z.any().optional(),
-  predictions: predictionsSchema.optional(),
-  accessibilityState: accessibilityStateSchema.optional(),
-  rawViewHierarchy: z.any().optional()
-}).passthrough();
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
@@ -369,10 +303,7 @@ export function registerObserveTools() {
     "observe",
     "Get screen view hierarchy",
     observeSchema,
-    observeHandler,
-    false,
-    false,
-    { outputSchema: observeResultSchema }
+    observeHandler
   );
 
   ToolRegistry.registerDeviceAware(

@@ -198,6 +198,27 @@ describe("ToolRegistry.registerWithServer", () => {
     expect(receivedSignal).toBe(abortController.signal);
   });
 
+  test("keeps output schemas internal instead of advertising them through MCP registration", () => {
+    const outputSchema = z.object({ ok: z.boolean() });
+
+    ToolRegistry.register(
+      "schemaTool",
+      "Tool with a structured result contract",
+      z.object({}),
+      async () => ({ content: [{ type: "text", text: "ok" }] }),
+      false,
+      false,
+      outputSchema
+    );
+
+    ToolRegistry.registerWithServer(fakeMcpServer as any);
+
+    const registeredTool = fakeMcpServer.registeredTools.find(tool => tool.name === "schemaTool");
+    expect(registeredTool).toBeDefined();
+    expect(registeredTool!.config.outputSchema).toBeUndefined();
+    expect(ToolRegistry.getTool("schemaTool")?.outputSchema).toBe(outputSchema);
+  });
+
   test("progress callback does not throw when sendNotification fails", async () => {
     let capturedProgress: ProgressCallback | undefined;
 

@@ -32,12 +32,6 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
-import {
-  elementSchema,
-  observationSummarySchema,
-  scrollableCandidateSchema,
-  selectedElementSchema
-} from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -193,51 +187,6 @@ export const tapAnySchema = addDeviceTargetingToSchema(z.object({
   }).optional().describe("Poll for clickable element before tapping"),
   platform: platformSchema
 }).strict());
-
-const tapOnResultSchema = z.object({
-  success: z.boolean(),
-  action: z.enum(["tap", "doubleTap", "longPress", "focus"]),
-  message: z.string().optional(),
-  element: elementSchema.optional(),
-  observation: observationSummarySchema.optional(),
-  selectedElement: selectedElementSchema.optional(),
-  selectedElements: z.array(selectedElementSchema).optional(),
-  error: z.string().optional(),
-  pressRecognized: z.boolean().optional(),
-  contextMenuOpened: z.boolean().optional(),
-  selectionStarted: z.boolean().optional(),
-  searchUntil: z.object({
-    durationMs: z.number().int(),
-    requestCount: z.number().int(),
-    changeCount: z.number().int()
-  }).partial().optional(),
-  debug: z.any().optional()
-}).passthrough();
-
-const swipeOnResultSchema = z.object({
-  success: z.boolean(),
-  error: z.string().optional(),
-  warning: z.string().optional(),
-  scrollableCandidates: z.array(scrollableCandidateSchema).optional(),
-  targetType: z.enum(["screen", "element"]),
-  element: elementSchema.optional(),
-  x1: z.number().int(),
-  y1: z.number().int(),
-  x2: z.number().int(),
-  y2: z.number().int(),
-  duration: z.number().int(),
-  easing: z.enum(["linear", "decelerate", "accelerate", "accelerateDecelerate"]).optional(),
-  path: z.number().optional(),
-  found: z.boolean().optional(),
-  scrollIterations: z.number().int().optional(),
-  elapsedMs: z.number().int().optional(),
-  hierarchyChanged: z.boolean().optional(),
-  observation: observationSummarySchema.optional(),
-  a11yTotalTimeMs: z.number().int().optional(),
-  a11yGestureTimeMs: z.number().int().optional(),
-  fallbackReason: z.string().optional(),
-  debug: z.any().optional()
-}).passthrough();
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
   createElementIdTextSelectorSchema({
@@ -1044,9 +993,7 @@ export function registerInteractionTools() {
     "content-desc values from observe should be passed as text, not elementId.",
     tapOnSchema,
     tapOnHandler,
-    true,
-    false,
-    { outputSchema: tapOnResultSchema }
+    true
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1057,9 +1004,7 @@ export function registerInteractionTools() {
     "scrollableContainer: true to limit to list/RecyclerView items.",
     tapAnySchema,
     tapAnyHandler,
-    true,
-    false,
-    { outputSchema: tapOnResultSchema }
+    true
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1075,9 +1020,7 @@ export function registerInteractionTools() {
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     swipeOnHandler,
-    true, // Supports progress notifications
-    false,
-    { outputSchema: swipeOnResultSchema }
+    true // Supports progress notifications
   );
 
   ToolRegistry.registerDeviceAware(

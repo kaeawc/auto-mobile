@@ -61,6 +61,44 @@ Example URIs:
 
 Clients can subscribe to specific `automobile:apps?deviceId=...` URIs for change notifications and re-read filtered URIs after updates.
 
+### App Container Files
+
+**URI Template**: `automobile:devices/{deviceId}/apps/{appId}/files/{container}`
+
+Lists files in a logical app container without requiring callers to know Android or iOS container paths. Supported logical containers are:
+
+- `documents`
+- `library`
+- `cache`
+- `tmp`
+- `externalFiles` where the platform supports it
+
+Example list request:
+
+```json
+{
+  "method": "resources/read",
+  "params": {
+    "uri": "automobile:devices/emulator-5554/apps/com.example.app/files/documents"
+  }
+}
+```
+
+**URI Template**: `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}`
+
+Reads a single file from an app container. Nested paths and filenames containing spaces are encoded as URI path segments. Binary content is returned as an MCP `blob` so it can be round-tripped losslessly.
+
+Example read request:
+
+```json
+{
+  "method": "resources/read",
+  "params": {
+    "uri": "automobile:devices/emulator-5554/apps/com.example.app/files/documents/fixtures/welcome%20image.png"
+  }
+}
+```
+
 ### Test Timing History
 
 **URI**: `

@@ -813,8 +813,7 @@ class ToolRegistryClass {
         inputSchema: tool.schema,
         ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
           _meta: { "anthropic/alwaysLoad": true },
-        }),
-        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {})
+        })
       }, wrappedHandler);
     });
   }
@@ -826,8 +825,7 @@ class ToolRegistryClass {
       name: tool.name,
       description: tool.description,
       inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
-      ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } }),
-      ...(tool.outputSchema ? { outputSchema: toJSONSchema(tool.outputSchema) } : {})
+      ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
     }));
   }
 

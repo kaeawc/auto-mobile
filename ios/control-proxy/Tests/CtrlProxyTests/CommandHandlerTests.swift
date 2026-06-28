@@ -897,6 +897,38 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
+    func testPressButtonHardwareButtonDoesNotSwitchToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-volume-up",
+            action: "volume_up"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["volume_up"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
+    func testPressButtonPowerDoesNotSwitchToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-power",
+            action: "power"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["power"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
     func testLaunchAppSuccess() {
         // Default: app not running, no coldBoot → full launch
         fakeElementLocator.getAppStateResult = .notRunning

@@ -11,6 +11,7 @@ import type {
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
@@ -81,6 +82,27 @@ export class CtrlProxyNavigation {
       cancelScreenshotBackoff: false,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Shake",
+    });
+  }
+
+  /**
+   * Request to press a named iOS hardware or navigation button.
+   */
+  async requestPressButton(
+    button: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult> {
+    return sendCommand<CtrlProxyPressButtonResult>(this.context, {
+      idPrefix: "pressButton",
+      responseType: "press_button",
+      messageType: "request_press_button",
+      params: { action: button },
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Press button",
     });
   }
 

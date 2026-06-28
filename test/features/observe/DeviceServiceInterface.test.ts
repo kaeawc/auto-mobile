@@ -172,6 +172,7 @@ describe("DeviceService Interface Compliance", () => {
       expect(typeof client.requestLaunchApp).toBe("function");
       expect(typeof client.requestPressHome).toBe("function");
       expect(typeof client.requestPressBack).toBe("function");
+      expect(typeof client.requestPressButton).toBe("function");
       expect(typeof client.requestRecentApps).toBe("function");
       expect(typeof client.requestKeyboard).toBe("function");
 

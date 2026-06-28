@@ -908,12 +908,127 @@ public class GesturePerformer: GesturePerforming {
                 try openRecentApps()
             case "back":
                 try pressBack()
-            case "menu", "power", "volume_up", "volume_down":
-                throw GestureError.notSupported("iOS simulator button: \(button)")
+            case "volume_up", "volume_down":
+                #if targetEnvironment(simulator)
+                    throw GestureError.notSupported("Volume buttons are unavailable on the iOS simulator: \(button)")
+                #else
+                    try runOnMainThread {
+                        let deviceButton: XCUIDevice.Button
+                        if button.lowercased() == "volume_up" {
+                            deviceButton = .volumeUp
+                        } else {
+                            deviceButton = .volumeDown
+                        }
+                        XCUIDevice.shared.press(deviceButton)
+                    }
+                #endif
+            case "power":
+                #if targetEnvironment(simulator)
+                    throw GestureError.notSupported("Power/lock button is unavailable on the iOS simulator")
+                #else
+                    try pressPowerViaHID()
+                #endif
+            case "menu":
+                throw GestureError.notSupported("iOS has no menu hardware button")
             default:
                 throw GestureError.notSupported("Button: \(button)")
             }
         }
+
+        #if !targetEnvironment(simulator)
+            private typealias IOHIDEventRef = CFTypeRef
+            private typealias IOHIDEventSystemClientRef = CFTypeRef
+            private typealias IOHIDEventCreateKeyboardEventFn = @convention(c) (
+                CFAllocator?,
+                UInt64,
+                UInt32,
+                UInt32,
+                Bool,
+                UInt32
+            )
+                -> IOHIDEventRef?
+            private typealias IOHIDEventSystemClientCreateFn = @convention(c) (
+                CFAllocator?
+            )
+                -> IOHIDEventSystemClientRef?
+            private typealias IOHIDEventSystemClientDispatchEventFn = @convention(c) (
+                IOHIDEventSystemClientRef,
+                IOHIDEventRef
+            )
+                -> Void
+
+            private func pressPowerViaHID() throws {
+                guard let handle = openIOKitHandle() else {
+                    throw GestureError.notSupported("Power/lock button HID support unavailable")
+                }
+                defer { dlclose(handle) }
+
+                let createEventSymbol = dlsym(handle, "IOHIDEventCreateKeyboardEvent")
+                let createClientSymbol = dlsym(handle, "IOHIDEventSystemClientCreate")
+                let dispatchEventSymbol = dlsym(handle, "IOHIDEventSystemClientDispatchEvent")
+
+                guard let createEventSymbol, let createClientSymbol, let dispatchEventSymbol else {
+                    throw GestureError.notSupported("Power/lock button HID symbols unavailable")
+                }
+
+                let createKeyboardEvent = unsafeBitCast(
+                    createEventSymbol,
+                    to: IOHIDEventCreateKeyboardEventFn.self
+                )
+                let createSystemClient = unsafeBitCast(
+                    createClientSymbol,
+                    to: IOHIDEventSystemClientCreateFn.self
+                )
+                let dispatchEvent = unsafeBitCast(
+                    dispatchEventSymbol,
+                    to: IOHIDEventSystemClientDispatchEventFn.self
+                )
+
+                guard let client = createSystemClient(nil) else {
+                    throw GestureError.notSupported("Power/lock button HID client unavailable")
+                }
+                defer { CFRelease(client) }
+
+                let consumerUsagePage: UInt32 = 0x0C
+                let powerUsage: UInt32 = 0x30
+                let eventTimestamp: UInt64 = 0
+                let eventOptions: UInt32 = 0
+
+                guard let keyDown = createKeyboardEvent(
+                    nil,
+                    eventTimestamp,
+                    consumerUsagePage,
+                    powerUsage,
+                    true,
+                    eventOptions
+                ) else {
+                    throw GestureError.notSupported("Power/lock button HID key-down event unavailable")
+                }
+                defer { CFRelease(keyDown) }
+
+                guard let keyUp = createKeyboardEvent(
+                    nil,
+                    eventTimestamp,
+                    consumerUsagePage,
+                    powerUsage,
+                    false,
+                    eventOptions
+                ) else {
+                    throw GestureError.notSupported("Power/lock button HID key-up event unavailable")
+                }
+                defer { CFRelease(keyUp) }
+
+                dispatchEvent(client, keyDown)
+                dispatchEvent(client, keyUp)
+            }
+
+            private func openIOKitHandle() -> UnsafeMutableRawPointer? {
+                [
+                    "/System/Library/Frameworks/IOKit.framework/IOKit",
+                    "/System/Library/PrivateFrameworks/IOKit.framework/IOKit",
+                ].lazy.compactMap { dlopen($0, RTLD_NOW) }.first
+            }
+        #endif
 
         public func openRecentApps() throws {
             try runOnMainThread {

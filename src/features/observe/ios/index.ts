@@ -42,6 +42,7 @@ export type {
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
   CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,

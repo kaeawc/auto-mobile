@@ -418,22 +418,31 @@ export class UnixSocketServer {
     }
 
     const record = args as Record<string, unknown>;
+    const sessionUuid = typeof record.sessionUuid === "string" && record.sessionUuid.length > 0
+      ? record.sessionUuid
+      : undefined;
+    const hasDeviceLabel = typeof record.device === "string" && record.device.length > 0;
+    if (sessionUuid && hasDeviceLabel) {
+      return this.getSessionScopeKey(sessionUuid, record.device);
+    }
+
     // An explicit target device must serialize by physical device even when a session is present.
     if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
       return `device:${record.deviceId}`;
     }
-    if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
-      const sessionUuid = this.resolveDeviceLabelSession(record.sessionUuid, record.device);
-      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
-      if (assignedDevice) {
-        return `device:${assignedDevice}`;
-      }
-      return `session:${sessionUuid}`;
+    if (sessionUuid) {
+      return this.getSessionScopeKey(sessionUuid, record.device);
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
       return this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ?? `mcp-session:${record.__mcpSessionId}`;
     }
     return undefined;
+  }
+
+  private getSessionScopeKey(baseSessionUuid: string, deviceLabel: unknown): string {
+    const sessionUuid = this.resolveDeviceLabelSession(baseSessionUuid, deviceLabel);
+    const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
+    return assignedDevice ? `device:${assignedDevice}` : `session:${sessionUuid}`;
   }
 
   private getImplicitAutolockScopeKey(mcpSessionId: string, args: unknown): string | undefined {

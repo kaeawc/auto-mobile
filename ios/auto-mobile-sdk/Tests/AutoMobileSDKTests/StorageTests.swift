@@ -92,6 +92,9 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
 
     func testExecuteSqlEncodesQueryResult() throws {
         let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
         fakeDriver.sqlResult = SQLExecutionResult(
             columns: ["id", "payload"],
             rows: [["1", "0xCAFE"]],
@@ -119,6 +122,29 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(fakeDriver.executeSqlCalls[0].query, "SELECT id, payload FROM notes")
     }
 
+    func testExecuteSqlRejectsUnknownDatabasePathBeforeOpeningSqlite() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let request = SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/misspelled.db",
+            query: "INSERT INTO notes (title) VALUES ('new')"
+        )
+        let body = try JSONEncoder().encode(request)
+
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 404)
+        let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+        XCTAssertEqual(payload.error, "unknown_database_path")
+        XCTAssertEqual(fakeDriver.executeSqlCalls.count, 0)
+    }
+
     func testExecuteSqlReturnsDisabledWhenInspectorNotEnabled() throws {
         DatabaseInspector.shared.initialize()
         DatabaseInspector.shared.setEnabled(false)
@@ -133,11 +159,12 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
 }
 
 private final class RouteFakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
+    var databases: [DatabaseDescriptor] = []
     var sqlResult = SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0)
     var executeSqlCalls: [(databasePath: String, query: String)] = []
 
     func getDatabases() -> [DatabaseDescriptor] {
-        []
+        databases
     }
 
     func getTables(databasePath _: String) -> [String] {

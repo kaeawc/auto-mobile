@@ -9,6 +9,7 @@ import {
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
 import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
+import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -119,6 +120,28 @@ describe("IOSCtrlProxyClient", function() {
       (ctrlProxyClient as any).onConnectionClosed();
 
       expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+    });
+
+    test("notifies the observation stream when the WebSocket connection closes", function() {
+      const lostDeviceIds: string[] = [];
+      const notifier: DeviceConnectionLostNotifier = {
+        onDeviceConnectionLost: deviceId => {
+          lostDeviceIds.push(deviceId);
+        },
+      };
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        undefined,
+        notifier
+      );
+
+      (testClient as any).onConnectionClosed();
+
+      expect(lostDeviceIds).toEqual(["A1B2C3D4-E5F6-7890-ABCD-EF1234567890"]);
     });
 
     test("restarts screenshot backoff when the connection (re)establishes", function() {

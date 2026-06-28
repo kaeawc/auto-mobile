@@ -72,6 +72,10 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import {
+  observationStreamDeviceConnectionLostNotifier,
+  type DeviceConnectionLostNotifier,
+} from "../DeviceConnectionLostNotifier";
 import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
@@ -807,6 +811,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private lastLayoutTelemetryTimestamp = 0;
 
   private readonly crashEventSink: CrashEventSink;
+  private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
 
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
@@ -821,13 +826,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink
+    crashEventSink?: CrashEventSink,
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
     this.device = device;
     this.adb = adb;
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
+    this.deviceConnectionLostNotifier =
+      deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
     this.localPort = PortManager.allocate(device.deviceId);
     AndroidCtrlProxyManager.getInstance(device);
   }
@@ -894,9 +902,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink
+    crashEventSink?: CrashEventSink,
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor, crashEventSink);
+    return new AndroidCtrlProxyClient(
+      device,
+      adb,
+      webSocketFactory,
+      timer,
+      installedAppsRepository,
+      retryExecutor,
+      crashEventSink,
+      deviceConnectionLostNotifier
+    );
   }
 
   // ===========================================================================
@@ -1105,7 +1123,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionClosed(): void {
     this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
-    getDeviceDataStreamServer()?.onDeviceConnectionLost(this.device.deviceId);
+    this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();

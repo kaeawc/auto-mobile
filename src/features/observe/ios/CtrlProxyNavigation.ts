@@ -10,6 +10,7 @@ import type {
   DelegateContext,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
+  CtrlProxyShakeResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
@@ -61,6 +62,25 @@ export class CtrlProxyNavigation {
       cancelScreenshotBackoff: false,
       notConnectedMessage: "Not connected to CtrlProxy",
       errorLabel: "Press back",
+    });
+  }
+
+  /**
+   * Request a synthetic device shake.
+   */
+  async requestShake(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyShakeResult> {
+    return sendCommand<CtrlProxyShakeResult>(this.context, {
+      idPrefix: "shake",
+      responseType: "shake",
+      messageType: "request_shake",
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Shake",
     });
   }
 

@@ -5,6 +5,8 @@ import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { Timer } from "../../utils/SystemTimer";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { IOSCtrlProxyClient } from "../observe/ios";
 
 export class Shake extends BaseVisualChange {
   private shakeTimer: Timer;
@@ -27,6 +29,56 @@ export class Shake extends BaseVisualChange {
 
     const duration = options.duration ?? 1000; // Default 1 second
     const intensity = options.intensity ?? 100; // Default intensity of 100
+
+    if (this.device.platform === "ios") {
+      if (!isIosSimulatorUdid(this.device.deviceId)) {
+        perf.end();
+        return {
+          success: false,
+          duration,
+          intensity,
+          error: "shake is not supported on physical iOS devices: XCTest exposes no shake API for real devices."
+        };
+      }
+
+      return this.observedInteraction(
+        async () => {
+          try {
+            await perf.track("shakeExecution", async () => {
+              const client = IOSCtrlProxyClient.getInstance(this.device);
+              const result = await client.requestShake(duration + 2000, perf);
+              if (!result.success) {
+                throw new Error(result.error ?? "Failed to shake iOS device");
+              }
+            });
+
+            logger.info("iOS shake completed");
+
+            return {
+              success: true,
+              duration,
+              intensity
+            };
+          } catch (error) {
+            perf.end();
+            logger.error(`Failed to execute iOS shake: ${error}`);
+            return {
+              success: false,
+              duration,
+              intensity,
+              error: `Failed to shake device: ${error}`
+            };
+          }
+        },
+        {
+          changeExpected: false,
+          timeoutMs: duration + 2000,
+          tolerancePercent: 0.00,
+          progress,
+          perf
+        }
+      );
+    }
 
     return this.observedInteraction(
       async () => {

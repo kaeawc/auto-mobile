@@ -834,6 +834,19 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func shake() throws {
+            try runOnMainThread {
+                let notificationName = CFNotificationName("com.apple.UIKit.SimulatorShake" as CFString)
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    notificationName,
+                    nil,
+                    nil,
+                    true
+                )
+            }
+        }
+
         public func pressBack() throws {
             guard let app = resolveNavigationApp() else {
                 throw GestureError.noApplication
@@ -1049,6 +1062,10 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressBack() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func shake() throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

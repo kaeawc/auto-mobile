@@ -11,6 +11,7 @@ import {
   CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
   CtrlProxyPressBackResult,
+  CtrlProxyShakeResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -102,6 +103,8 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private keyboardHistory: Array<{ action: "open" | "close" | "detect" }> = [];
   private pressHomeRequestCount: number = 0;
   private pressBackRequestCount: number = 0;
+  private shakeRequestCount: number = 0;
+  private shakeTimeoutHistory: number[] = [];
   private recentAppsRequestCount: number = 0;
   private rotateHistory: Array<{ orientation: string }> = [];
   private currentOrientation: string = "portrait";
@@ -298,6 +301,14 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   getPressBackRequestCount(): number {
     return this.pressBackRequestCount;
+  }
+
+  getShakeRequestCount(): number {
+    return this.shakeRequestCount;
+  }
+
+  getShakeTimeoutHistory(): number[] {
+    return [...this.shakeTimeoutHistory];
   }
 
   getRecentAppsRequestCount(): number {
@@ -790,6 +801,22 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressBackRequestCount++;
     await this.applyDelay("pressBack");
     this.checkFailure("pressBack");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestShake(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyShakeResult> {
+    this.shakeRequestCount++;
+    this.shakeTimeoutHistory.push(timeoutMs);
+    await this.applyDelay("shake");
+    this.checkFailure("shake");
 
     return {
       success: true,

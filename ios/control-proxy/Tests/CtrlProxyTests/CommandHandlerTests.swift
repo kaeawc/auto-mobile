@@ -1112,6 +1112,21 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
     }
 
+    // MARK: - Shake Tests
+
+    func testShakeSuccess() {
+        let request = WebSocketRequest(
+            type: "request_shake",
+            requestId: "shake-123"
+        )
+
+        guard let shakeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(shakeResponse.success, true)
+        XCTAssertEqual(shakeResponse.type, "shake_result")
+        XCTAssertEqual(fakeGesturePerformer.getShakeCallCount(), 1)
+    }
+
     // MARK: - Rotate Tests
 
     func testRotateToLandscapeSuccess() {

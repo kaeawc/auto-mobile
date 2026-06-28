@@ -1453,6 +1453,71 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(json?["success"] as? Bool, true)
         XCTAssertNotNil(json?["enabled"])
     }
+
+    // MARK: - Highlight Tests
+
+    func testAddHighlightRendersShapeAndReturnsSuccess() {
+        let highlightManager = FakeHighlightOverlayManager()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.requestId, "highlight-request")
+        XCTAssertEqual(response.success, true)
+        XCTAssertNil(response.error)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+        XCTAssertEqual(highlightManager.showCalls.first?.id, "highlight-1")
+        XCTAssertEqual(highlightManager.showCalls.first?.shape.type, "box")
+    }
+
+    func testAddHighlightRequiresShape() {
+        let highlightManager = FakeHighlightOverlayManager()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            highlightOverlayManager: highlightManager
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.requestId, "highlight-request")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.error, "add_highlight requires a shape")
+        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+    }
+}
+
+private final class FakeHighlightOverlayManager: HighlightOverlayManaging {
+    var showResult = true
+    var showCalls: [(id: String, shape: HighlightShape)] = []
+
+    func show(id: String, shape: HighlightShape) -> Bool {
+        showCalls.append((id, shape))
+        return showResult
+    }
 }
 
 // MARK: - Storage Command Tests

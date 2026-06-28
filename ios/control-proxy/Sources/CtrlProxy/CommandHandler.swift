@@ -21,6 +21,7 @@ public class CommandHandler: CommandHandling {
     private let storageInspector: StorageInspecting?
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
+    private let highlightOverlayManager: HighlightOverlayManaging
 
     public init(
         elementLocator: ElementLocating,
@@ -28,7 +29,8 @@ public class CommandHandler: CommandHandling {
         perfProvider: PerfProvider = PerfProvider.instance,
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
-        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager()
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -36,6 +38,7 @@ public class CommandHandler: CommandHandling {
         self.storageInspector = storageInspector
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
+        self.highlightOverlayManager = highlightOverlayManager
     }
 
     /// Factory for testing - allows injecting fakes
@@ -45,7 +48,8 @@ public class CommandHandler: CommandHandling {
         perfProvider: PerfProvider,
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
-        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager()
     )
         -> CommandHandler
     {
@@ -55,7 +59,8 @@ public class CommandHandler: CommandHandling {
             perfProvider: perfProvider,
             storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
-            sdkHierarchyCache: sdkHierarchyCache
+            sdkHierarchyCache: sdkHierarchyCache,
+            highlightOverlayManager: highlightOverlayManager
         )
     }
 
@@ -887,11 +892,26 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleAddHighlight(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Highlights not yet implemented
-        return WebSocketResponse.error(
+        guard let shape = request.shape else {
+            return WebSocketResponse.error(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                error: "add_highlight requires a shape",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        let highlightId = request.id ?? request.requestId ?? UUID().uuidString
+        guard highlightOverlayManager.show(id: highlightId, shape: shape) else {
+            return WebSocketResponse.error(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                error: "Unable to render highlight on iOS",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        return WebSocketResponse.success(
             type: ResponseType.highlightResponse.rawValue,
             requestId: request.requestId,
-            error: "Highlights not yet implemented on iOS",
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }

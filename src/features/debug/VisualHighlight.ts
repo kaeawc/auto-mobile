@@ -2,8 +2,9 @@ import { z } from "zod";
 import { AdbClientFactory, defaultAdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import { DeviceSessionManager } from "../../utils/DeviceSessionManager";
-import { NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
+import { NoOpPerformanceTracker, type PerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import {
   ActionableError,
   BootedDevice,
@@ -15,6 +16,15 @@ import {
 } from "../../models";
 
 const DEFAULT_HIGHLIGHT_TIMEOUT_MS = 5000;
+
+export interface HighlightDeviceClient {
+  requestAddHighlight(
+    id: string,
+    shape: HighlightShape,
+    timeoutMs?: number,
+    perf?: PerformanceTracker
+  ): Promise<HighlightOperationResult>;
+}
 
 const normalizeNullableNumber = (value: number | null | undefined): number | undefined => (
   value === null ? undefined : value
@@ -129,31 +139,28 @@ interface HighlightOperationOptions {
 
 export class VisualHighlight {
   private device: BootedDevice;
-  private readonly adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
-  private accessibilityServiceClient: AndroidCtrlProxyClient;
+  private highlightClient: HighlightDeviceClient;
 
   constructor(
     device: BootedDevice,
     adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
-    accessibilityServiceClient?: AndroidCtrlProxyClient
+    highlightClient?: HighlightDeviceClient
   ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
-    if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
+    if (device.platform === "ios") {
+      this.adbFactory = defaultAdbClientFactory;
+    } else if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
       this.adbFactory = adbFactoryOrExecutor as AdbClientFactory;
-      this.adb = this.adbFactory.create(device);
     } else if (adbFactoryOrExecutor) {
       // Legacy path: wrap the executor in a factory for downstream dependencies
       const executor = adbFactoryOrExecutor as AdbExecutor;
-      this.adb = executor;
       this.adbFactory = { create: () => executor };
     } else {
       this.adbFactory = defaultAdbClientFactory;
-      this.adb = this.adbFactory.create(device);
     }
-    this.accessibilityServiceClient = accessibilityServiceClient
-      || AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
+    this.highlightClient = highlightClient || this.createDefaultHighlightClient(device);
   }
 
   async addHighlight(
@@ -161,11 +168,10 @@ export class VisualHighlight {
     shape: HighlightShape,
     options: HighlightOperationOptions = {}
   ): Promise<HighlightOperationResult> {
-    this.ensureAndroidDevice();
     const highlightId = this.parseHighlightId(id);
     const highlightShape = this.parseHighlightShape(shape);
     const timeoutMs = options.timeoutMs ?? DEFAULT_HIGHLIGHT_TIMEOUT_MS;
-    const response = await this.accessibilityServiceClient.requestAddHighlight(
+    const response = await this.highlightClient.requestAddHighlight(
       highlightId,
       highlightShape,
       timeoutMs,
@@ -206,10 +212,14 @@ export class VisualHighlight {
     return result.data;
   }
 
-  private ensureAndroidDevice(): void {
-    if (this.device.platform !== "android") {
-      throw new ActionableError("Visual highlights are only supported on Android devices.");
+  private createDefaultHighlightClient(device: BootedDevice): HighlightDeviceClient {
+    if (device.platform === "android") {
+      return AndroidCtrlProxyClient.getInstance(device, this.adbFactory);
     }
+    if (device.platform === "ios") {
+      return IOSCtrlProxyClient.getInstance(device);
+    }
+    throw new ActionableError(`Visual highlights are not supported on ${device.platform} devices.`);
   }
 }
 
@@ -240,9 +250,6 @@ export class VisualHighlightClient {
 
   private async resolveHighlight(options: HighlightOptions): Promise<VisualHighlight> {
     if (options.device) {
-      if (options.device.platform !== "android") {
-        throw new ActionableError("Visual highlights are only supported on Android devices.");
-      }
       if (options.device.platform !== options.platform) {
         throw new ActionableError(
           `Highlight platform mismatch: requested ${options.platform}, device is ${options.device.platform}.`
@@ -251,8 +258,8 @@ export class VisualHighlightClient {
       return this.visualHighlightFactory(options.device);
     }
 
-    if (options.platform !== "android") {
-      throw new ActionableError("Visual highlights are only supported on Android devices.");
+    if (options.platform !== "android" && options.platform !== "ios") {
+      throw new ActionableError(`Visual highlights are not supported on ${options.platform} devices.`);
     }
     const device = await this.deviceSessionManager.ensureDeviceReady(options.platform, options.deviceId);
     return this.visualHighlightFactory(device);

@@ -322,7 +322,7 @@ echo ""
 echo "    Accessibility:"
 echo "      - get_current_focus          : Get focused element (not implemented)"
 echo "      - get_traversal_order        : Get traversal order (not implemented)"
-echo "      - add_highlight              : Add highlight overlay (not implemented)"
+echo "      - add_highlight              : Add highlight overlay"
 echo ""
 
 echo -e "  ${CYAN}Response Types:${NC}"

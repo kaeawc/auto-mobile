@@ -1,8 +1,8 @@
 # Visual Highlighting
 
-<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android Only</kbd>
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android</kbd> <kbd>🍎 iOS Simulator</kbd>
 
-Expose visual highlight overlays (box or circle) as an MCP tool for debugging UI layout and state.
+Expose visual highlight overlays (box, circle, or path) as an MCP tool for debugging UI layout and state.
 
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
@@ -16,7 +16,8 @@ Expose visual highlight overlays (box or circle) as an MCP tool for debugging UI
     - Optional device targeting: `deviceId`, `device`, `sessionUuid`
     - Optional `timeoutMs` override
   - Returns: success flag and optional error message.
-  - iOS: returns an unsupported error (Android only for now).
+  - iOS simulator: renders a non-interactive runner overlay window above the app under test.
+  - iOS physical devices: live overlays are disabled by default until composition over the app under test is validated. Set `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true` for manual validation.
   - Highlights auto-remove after their animation completes.
 
 ## Examples
@@ -29,7 +30,7 @@ await highlight({
     bounds: { x: 100, y: 200, width: 300, height: 150 },
     style: { strokeColor: "#FF0000", strokeWidth: 3 }
   },
-  platform: "android"
+  platform: "ios"
 });
 ```
 
@@ -60,7 +61,7 @@ await highlight({
     bounds: { x: 200, y: 300, width: 50, height: 50 },
     style: { strokeColor: "#00FF00", strokeWidth: 3 }
   },
-  platform: "android"
+  platform: "ios"
 });
 
 await highlight({

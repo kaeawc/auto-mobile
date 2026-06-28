@@ -541,9 +541,6 @@ export async function startVideoRecording(
   const maxDurationSeconds = resolveMaxDurationSeconds(request.maxDurationSeconds);
   const highlightInputs = request.highlights ?? [];
 
-  if (highlightInputs.length > 0 && request.device.platform !== "android") {
-    throw new ActionableError("Visual highlights are only supported on Android devices.");
-  }
   for (const highlight of highlightInputs) {
     normalizeHighlightTiming(highlight);
   }
@@ -574,19 +571,17 @@ export async function startVideoRecording(
     config: active.config,
   });
 
-  if (request.device.platform === "android") {
-    const highlightSession = createHighlightSession(
-      active.recordingId,
-      request.device,
-      active.startedAt,
-      timer
-    );
-    highlightSessions.set(active.recordingId, highlightSession);
-    highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
+  const highlightSession = createHighlightSession(
+    active.recordingId,
+    request.device,
+    active.startedAt,
+    timer
+  );
+  highlightSessions.set(active.recordingId, highlightSession);
+  highlightSessionsByDeviceId.set(request.device.deviceId, active.recordingId);
 
-    if (highlightInputs.length > 0) {
-      await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
-    }
+  if (highlightInputs.length > 0) {
+    await scheduleRecordingHighlights(highlightSession, request.device, highlightInputs, deps);
   }
 
   await scheduleAutoStop(active.recordingId, maxDurationSeconds);

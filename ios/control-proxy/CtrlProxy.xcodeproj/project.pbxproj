@@ -16,12 +16,15 @@
 		158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
 		1BF8D64D9A034BEC375AEE8B /* ObjCExceptionCatcher.framework in Embed Frameworks */ = {isa = PBXBuildFile; fileRef = FFAE974582B8CDFFBA64AFB5 /* ObjCExceptionCatcher.framework */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
+		22D7BF7E548A966178B6A5A3 /* HighlightOverlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D07D98176593529FE7FC93F /* HighlightOverlayManager.swift */; };
 		261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
 		2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
 		2DD69FF84C0520EED9B77AFF /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
+		303C0002875E8A7AE57309D9 /* HighlightOverlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D07D98176593529FE7FC93F /* HighlightOverlayManager.swift */; };
 		3841CE71EF7F67B82441E6E3 /* DisplayLinkFPSMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1044F2C47DD6B836C1E32F1C /* DisplayLinkFPSMonitor.swift */; };
+		3DD671F18EF4035EFE3FC4C3 /* HighlightOverlayManagerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = B26563B0187D7EAC09AEC268 /* HighlightOverlayManagerTests.swift */; };
 		416E49D98E779D4D7D060F16 /* ObjCExceptionBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = 73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */; };
 		42E706C81F51E89DEBD9C1A9 /* CtrlProxy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 056D5DCA8003C7DFA37244C4 /* CtrlProxy.framework */; };
 		4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */; };
@@ -166,6 +169,7 @@
 		6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainThreadRunner.swift; sourceTree = "<group>"; };
 		73D776AE5CF32E6E89AEF7A5 /* ObjCExceptionBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridge.swift; sourceTree = "<group>"; };
 		77305F40F85694E983987E68 /* CommandHandler.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandHandler.swift; sourceTree = "<group>"; };
+		7D07D98176593529FE7FC93F /* HighlightOverlayManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightOverlayManager.swift; sourceTree = "<group>"; };
 		802717F6B1F37809C4806C23 /* CtrlProxyUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CtrlProxyUITests.swift; sourceTree = "<group>"; };
 		83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyModels.swift; sourceTree = "<group>"; };
 		878A53A7F0EDDABDF2435E7F /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
@@ -174,6 +178,7 @@
 		9BD704E3A2708D91D4FABE3E /* CtrlProxyApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = CtrlProxyApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		A284B6FFBE969931BB03A2FF /* PerfProvider.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerfProvider.swift; sourceTree = "<group>"; };
 		B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PerformanceMetrics.swift; sourceTree = "<group>"; };
+		B26563B0187D7EAC09AEC268 /* HighlightOverlayManagerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HighlightOverlayManagerTests.swift; sourceTree = "<group>"; };
 		B4CB9272A186932D89EB1072 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
 		B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ElementLocatorTests.swift; sourceTree = "<group>"; };
 		D219492B8663B05AFF608428 /* ObjCExceptionCatcher.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = ObjCExceptionCatcher.h; sourceTree = "<group>"; };
@@ -240,6 +245,7 @@
 				B7BE98EA2924A42A6CD22993 /* ElementLocatorTests.swift */,
 				3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */,
 				0F6E995191B4AF437EDB71CA /* HierarchyMergerTests.swift */,
+				B26563B0187D7EAC09AEC268 /* HighlightOverlayManagerTests.swift */,
 				184CFC1280E0802EBF53965F /* ModelsTests.swift */,
 				649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */,
 				DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */,
@@ -312,6 +318,7 @@
 				F2144B84CD70DB35A1030624 /* GesturePerformer.swift */,
 				034DC5B8A3A4FCE46CD89568 /* HierarchyDebouncer.swift */,
 				FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */,
+				7D07D98176593529FE7FC93F /* HighlightOverlayManager.swift */,
 				3BF23F10C24C9F40E5CEC303 /* Logging.swift */,
 				6B8E0FBA4D04484920DA1D03 /* MainThreadRunner.swift */,
 				D81453AD074F2A392251CFC3 /* Models.swift */,
@@ -529,6 +536,7 @@
 				D9EF3A486E53F97C1CCB7A3B /* GesturePerformer.swift in Sources */,
 				EA65C486C9E6DBB5BFE9CA41 /* HierarchyDebouncer.swift in Sources */,
 				158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */,
+				22D7BF7E548A966178B6A5A3 /* HighlightOverlayManager.swift in Sources */,
 				5651AAF00833750D1DFD55CE /* Logging.swift in Sources */,
 				A9E8300EE35B13DED1A0E579 /* MainThreadRunner.swift in Sources */,
 				BD7D2FF024054ED74F17958D /* Models.swift in Sources */,
@@ -560,6 +568,7 @@
 				E8B2051927387427E1F14EC2 /* ElementLocatorTests.swift in Sources */,
 				4413FD9E4C8BF4071C74D482 /* HierarchyDebouncerTests.swift in Sources */,
 				CFCA362E1EF1F3251B19BC1B /* HierarchyMergerTests.swift in Sources */,
+				3DD671F18EF4035EFE3FC4C3 /* HighlightOverlayManagerTests.swift in Sources */,
 				F7B78DBB0517EC004EF4ECF6 /* ModelsTests.swift in Sources */,
 				6733CA6A1FABC8D7C34F9327 /* ObjCExceptionBridgeTests.swift in Sources */,
 				0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */,
@@ -580,6 +589,7 @@
 				5FDF9AE29841625DD7EFB7EC /* GesturePerformer.swift in Sources */,
 				5458E55CB48475D2487A49C3 /* HierarchyDebouncer.swift in Sources */,
 				45B926178972D1A358CFF284 /* HierarchyMerger.swift in Sources */,
+				303C0002875E8A7AE57309D9 /* HighlightOverlayManager.swift in Sources */,
 				C72C24EBCEFADDCA5B2C99E9 /* Logging.swift in Sources */,
 				AF0C3A37F5AD66261DF7ED24 /* MainThreadRunner.swift in Sources */,
 				BD627F44D1B9F2D3976AA0EC /* Models.swift in Sources */,

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
-import { BootedDevice } from "../../../../src/models";
+import { BootedDevice, HighlightShape } from "../../../../src/models";
 import { NetworkState } from "../../../../src/server/NetworkState";
 import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
@@ -483,6 +483,70 @@ describe("IOSCtrlProxyClient", function() {
         }));
 
         const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("highlight requests", function() {
+    test("requestAddHighlight sends payload and resolves highlight response", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const shape: HighlightShape = {
+        type: "path",
+        points: [
+          { x: 1.2, y: 3.4 },
+          { x: 5.6, y: 7.8 },
+        ],
+        bounds: {
+          x: 10.2,
+          y: 20.8,
+          width: 100.4,
+          height: 80.6,
+        },
+        style: {
+          strokeColor: "#FF0000",
+          strokeWidth: 4,
+        },
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const highlightMsg = socket!.sentMessages.find(message => {
+          try { return JSON.parse(message).type === "add_highlight"; } catch { return false; }
+        });
+        expect(highlightMsg).toBeDefined();
+        const payload = JSON.parse(highlightMsg!);
+        expect(payload.id).toBe("highlight-1");
+        expect(payload.shape.bounds).toEqual({
+          x: 10,
+          y: 21,
+          width: 100,
+          height: 81,
+        });
+        expect(payload.shape.points).toEqual(shape.points);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "highlight_response",
+          requestId: payload.requestId,
+          success: true,
+          error: null,
+        }));
+
+        const result = await requestPromise;
         expect(result.success).toBe(true);
       } finally {
         await testClient.close();

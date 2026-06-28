@@ -386,7 +386,7 @@ public class CommandHandler: CommandHandling {
             endX: Double(x2),
             endY: Double(y2),
             fingerCount: fingerCount,
-            fingerSpacing: Double(fingerSpacing),
+            fingerSpacing: fingerSpacing,
             duration: TimeInterval(duration) / 1000.0
         )
 

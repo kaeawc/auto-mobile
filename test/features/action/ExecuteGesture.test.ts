@@ -69,8 +69,8 @@ describe("ExecuteGesture", () => {
       {
         finger: 1,
         points: [
-          { x: 130, y: 600 },
-          { x: 130, y: 200 },
+          { x: 130.5, y: 600 },
+          { x: 130.5, y: 200 },
         ],
       },
     ], 450);
@@ -83,7 +83,7 @@ describe("ExecuteGesture", () => {
       y2: 200,
       fingerCount: 2,
       duration: 450,
-      fingerSpacing: 30,
+      fingerSpacing: 30.5,
     }]);
   });
 

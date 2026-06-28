@@ -86,6 +86,27 @@ final class ModelsTests: XCTestCase {
         XCTAssertEqual(request.duration, 300)
     }
 
+    func testWebSocketRequestMultiFingerSwipeDecodesFractionalOffset() throws {
+        let json = """
+        {
+            "type": "request_multi_finger_swipe",
+            "x1": 100,
+            "y1": 600,
+            "x2": 100,
+            "y2": 200,
+            "duration": 450,
+            "offset": 30.5,
+            "fingerCount": 3
+        }
+        """
+
+        let request = try JSONDecoder().decode(WebSocketRequest.self, from: XCTUnwrap(json.data(using: .utf8)))
+
+        XCTAssertEqual(request.type, "request_multi_finger_swipe")
+        XCTAssertEqual(request.offset ?? -1, 30.5, accuracy: 0.0001)
+        XCTAssertEqual(request.fingerCount, 3)
+    }
+
     func testWebSocketRequestDragDecoding() throws {
         let json = """
         {

@@ -18,7 +18,7 @@ public struct WebSocketRequest: Codable {
     public let y1: Int?
     public let x2: Int?
     public let y2: Int?
-    public let offset: Int?
+    public let offset: Double?
     public let fingerCount: Int?
 
     // Drag parameters
@@ -81,7 +81,7 @@ public struct WebSocketRequest: Codable {
         y1: Int? = nil,
         x2: Int? = nil,
         y2: Int? = nil,
-        offset: Int? = nil,
+        offset: Double? = nil,
         fingerCount: Int? = nil,
         pressDurationMs: Int? = nil,
         dragDurationMs: Int? = nil,

@@ -506,6 +506,29 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(history.first?.duration ?? -1, 0.45, accuracy: 0.0001)
     }
 
+    func testMultiFingerSwipePreservesFractionalSpacing() {
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-fractional-spacing",
+            duration: 450,
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            offset: 30.5,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.fingerSpacing ?? -1, 30.5, accuracy: 0.0001)
+    }
+
     func testTwoFingerSwipeUsesMultiFingerHandler() {
         let request = WebSocketRequest(
             type: "request_two_finger_swipe",

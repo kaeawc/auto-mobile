@@ -78,6 +78,18 @@ public protocol GesturePerforming {
     /// Swipe from start to end coordinates
     func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws
 
+    /// Perform a simultaneous multi-finger swipe from start to end coordinates
+    func multiFingerSwipe(
+        startX: Double,
+        startY: Double,
+        endX: Double,
+        endY: Double,
+        fingerCount: Int,
+        fingerSpacing: Double,
+        duration: TimeInterval
+    )
+        throws
+
     // MARK: - Drag Gestures
 
     /// Drag with press, drag, and hold durations

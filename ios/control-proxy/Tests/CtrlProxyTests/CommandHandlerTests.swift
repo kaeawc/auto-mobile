@@ -476,6 +476,82 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(swipeHistory.first?.endY, 500)
     }
 
+    func testMultiFingerSwipeSuccess() {
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-swipe",
+            duration: 450,
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            offset: 30,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+        XCTAssertEqual(response.requestId, "test-multi-finger-swipe")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.startX, 100)
+        XCTAssertEqual(history.first?.startY, 600)
+        XCTAssertEqual(history.first?.endX, 100)
+        XCTAssertEqual(history.first?.endY, 200)
+        XCTAssertEqual(history.first?.fingerCount, 3)
+        XCTAssertEqual(history.first?.fingerSpacing, 30)
+        XCTAssertEqual(history.first?.duration ?? -1, 0.45, accuracy: 0.0001)
+    }
+
+    func testTwoFingerSwipeUsesMultiFingerHandler() {
+        let request = WebSocketRequest(
+            type: "request_two_finger_swipe",
+            requestId: "test-two-finger-swipe",
+            duration: 300,
+            x1: 10,
+            y1: 20,
+            x2: 30,
+            y2: 40
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.fingerCount, 2)
+        XCTAssertEqual(history.first?.fingerSpacing, 25)
+    }
+
+    func testMultiFingerSwipeFailureReturnsTypedError() {
+        fakeGesturePerformer.setFailure(
+            for: "multiFingerSwipe",
+            error: GesturePerformer.GestureError.gestureFailed(
+                "XCTest private multi-touch event synthesis classes are unavailable"
+            )
+        )
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-failure",
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertFalse(response.success ?? true)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+        XCTAssertTrue(response.error?.contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false)
+    }
+
     // MARK: - Text Input Tests
 
     func testSetTextSuccess() {

@@ -19,6 +19,7 @@ public struct WebSocketRequest: Codable {
     public let x2: Int?
     public let y2: Int?
     public let offset: Int?
+    public let fingerCount: Int?
 
     // Drag parameters
     public let pressDurationMs: Int?
@@ -81,6 +82,7 @@ public struct WebSocketRequest: Codable {
         x2: Int? = nil,
         y2: Int? = nil,
         offset: Int? = nil,
+        fingerCount: Int? = nil,
         pressDurationMs: Int? = nil,
         dragDurationMs: Int? = nil,
         holdDurationMs: Int? = nil,
@@ -120,6 +122,7 @@ public struct WebSocketRequest: Codable {
         self.x2 = x2
         self.y2 = y2
         self.offset = offset
+        self.fingerCount = fingerCount
         self.pressDurationMs = pressDurationMs
         self.dragDurationMs = dragDurationMs
         self.holdDurationMs = holdDurationMs
@@ -866,6 +869,7 @@ public enum RequestType: String, CaseIterable {
     case requestTapCoordinates = "request_tap_coordinates"
     case requestSwipe = "request_swipe"
     case requestTwoFingerSwipe = "request_two_finger_swipe"
+    case requestMultiFingerSwipe = "request_multi_finger_swipe"
     case requestDrag = "request_drag"
     case requestPinch = "request_pinch"
 
@@ -917,6 +921,7 @@ public enum ResponseType: String {
     case screenshotError = "screenshot_error"
     case tapCoordinatesResult = "tap_coordinates_result"
     case swipeResult = "swipe_result"
+    case multiFingerSwipeResult = "multi_finger_swipe_result"
     case dragResult = "drag_result"
     case pinchResult = "pinch_result"
     case setTextResult = "set_text_result"

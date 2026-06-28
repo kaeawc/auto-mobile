@@ -40,7 +40,7 @@ export class CtrlProxyGestures extends SharedGestureDelegate {
   ): Promise<GestureTimingResult> {
     return sendCommand<GestureTimingResult>(this.context, {
       idPrefix: "multi_finger_swipe",
-      responseType: "multi_finger_swipe",
+      responseType: "multi_finger_swipe_result",
       messageType: "request_multi_finger_swipe",
       params: { x1, y1, x2, y2, fingerCount, duration },
       timeoutMs,

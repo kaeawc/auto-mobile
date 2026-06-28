@@ -295,8 +295,15 @@ export class ExecuteGesture extends BaseVisualChange {
   private async executeiOSGesture(path: Point[] | FingerPath[], duration: number): Promise<any> {
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
-        // Multi-finger gestures are not supported on iOS through CtrlProxy iOS yet
-        throw new Error("Multi-finger gestures not supported on iOS - use simple swipe instead");
+        const fingers = path as FingerPath[];
+        const firstFingerPoints = fingers[0].points;
+        if (firstFingerPoints.length >= 2) {
+          const start = firstFingerPoints[0];
+          const end = firstFingerPoints[firstFingerPoints.length - 1];
+
+          const client = IOSCtrlProxyClient.getInstance(this.device);
+          await client.requestMultiFingerSwipe(start.x, start.y, end.x, end.y, fingers.length, duration);
+        }
       } else {
         // Single finger path - convert to simple swipe using CtrlProxy iOS
         const points = path as Point[];

@@ -1,7 +1,9 @@
 import { afterEach, describe, expect, spyOn, test } from "bun:test";
 import { ExecuteGesture } from "../../../src/features/action/ExecuteGesture";
 import { AndroidCtrlProxyClient } from "../../../src/features/observe/android";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbClientFactory } from "../../fakes/FakeAdbClientFactory";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 import type { BootedDevice } from "../../../src/models";
 
 describe("ExecuteGesture", () => {
@@ -9,6 +11,11 @@ describe("ExecuteGesture", () => {
     deviceId: "test-device",
     platform: "android",
     name: "Test Device"
+  };
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-test-device",
+    platform: "ios",
+    name: "Test iPhone"
   };
 
   let getInstanceSpy: ReturnType<typeof spyOn> | null = null;
@@ -44,5 +51,38 @@ describe("ExecuteGesture", () => {
     const passed = getInstanceSpy!.mock.calls[0][1] as { create?: unknown };
     expect(typeof passed).toBe("object");
     expect(typeof passed.create).toBe("function");
+  });
+
+  test("delegates iOS multi-finger FingerPath gestures to CtrlProxy", async () => {
+    const fakeClient = new FakeIOSCtrlProxy();
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+
+    const gesture = new ExecuteGesture(iosDevice, null);
+    const result = await gesture.execute([
+      {
+        finger: 0,
+        points: [
+          { x: 100, y: 600 },
+          { x: 100, y: 200 },
+        ],
+      },
+      {
+        finger: 1,
+        points: [
+          { x: 125, y: 600 },
+          { x: 125, y: 200 },
+        ],
+      },
+    ], 450);
+
+    expect(result).toEqual({ pathLength: 2, duration: 450, platform: "ios" });
+    expect(fakeClient.getMultiFingerSwipeHistory()).toEqual([{
+      x1: 100,
+      y1: 600,
+      x2: 100,
+      y2: 200,
+      fingerCount: 2,
+      duration: 450,
+    }]);
   });
 });

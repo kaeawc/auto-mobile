@@ -26,6 +26,7 @@ import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from ".
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { cleanupDaemonFiles } from "./daemonFiles";
+import { resolveStableDaemonWorkingDirectory } from "./stableWorkingDirectory";
 
 /**
  * Check that bunx is available on PATH.
@@ -527,6 +528,7 @@ export class DaemonManager implements DaemonManagerLike {
 
     const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
       detached: true,
+      cwd: resolveStableDaemonWorkingDirectory(),
       stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
       shell: true, // Use shell to resolve command from PATH
       env: childEnv,

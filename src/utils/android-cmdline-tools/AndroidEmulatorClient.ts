@@ -1,4 +1,5 @@
 import { ChildProcess, exec, spawn } from "child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
@@ -315,6 +316,27 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return this.emulatorPath;
   }
 
+  private isResolvedEmulatorPathAvailable(): boolean {
+    const trimmedPath = this.emulatorPath.trim();
+    if (trimmedPath.length === 0) {
+      return false;
+    }
+    if (!trimmedPath.includes("/") && !trimmedPath.includes("\\")) {
+      return false;
+    }
+    return existsSync(trimmedPath);
+  }
+
+  private isLikelyDaemonWorkingDirectoryFailure(errorMsg: string): boolean {
+    if (!this.isResolvedEmulatorPathAvailable()) {
+      return false;
+    }
+
+    return /\bspawn\b.*\bENOENT\b/.test(errorMsg)
+      || errorMsg.includes("getcwd")
+      || errorMsg.includes("current directory");
+  }
+
   /**
    * Get the host architecture
    * @returns The host architecture string
@@ -522,6 +544,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       // Check if the error is because emulator is not found
       const errorMsg = error instanceof Error ? error.message : String(error);
       const missingEmulator = errorMsg.includes("No such file or directory") || errorMsg.includes("command not found") || errorMsg.includes("ENOENT");
+      if (missingEmulator && this.isLikelyDaemonWorkingDirectoryFailure(errorMsg)) {
+        throw new ActionableError(
+          `Android emulator command failed because the daemon working directory is unavailable. ` +
+          `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`
+        );
+      }
       if (missingEmulator && externalMode) {
         const avds = this.listAvdsFromConfig();
         if (avds.length > 0) {

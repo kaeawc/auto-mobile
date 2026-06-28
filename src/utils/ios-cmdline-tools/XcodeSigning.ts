@@ -6,6 +6,7 @@ import { Parser } from "xml2js";
 import type { ExecResult } from "../../models";
 import { logger } from "../logger";
 import { Xcodebuild, XcodebuildClient } from "./XcodebuildClient";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../workingDirectory";
 
 type SigningStyle = "automatic" | "manual";
 
@@ -330,7 +331,9 @@ export class XcodeSigningManager {
   }
 
   public async detectTeamIdsFromXcode(): Promise<string[]> {
-    const projectPath = join(process.cwd(), "ios", "control-proxy", "CtrlProxy.xcodeproj");
+    const projectPath = resolvePathFromDaemonLaunchWorkingDirectory(
+      join("ios", "control-proxy", "CtrlProxy.xcodeproj")
+    );
     try {
       if (this.dependencies.platform() !== "darwin") {
         const available = await this.dependencies.xcodebuild.isAvailable();

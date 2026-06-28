@@ -109,6 +109,7 @@ describe("DaemonManager launch", () => {
       join(stateDir, "daemon.lock"),
       join(stateDir, "daemon.pid"),
       join(stateDir, "daemon.sock"),
+      undefined,
       spawnDaemon
     );
 

@@ -6,6 +6,7 @@ import type { Database as DatabaseSchema } from "./types";
 import { runMigrations } from "./migrator";
 import { logger } from "../utils/logger";
 import { BunSqliteDialect } from "./bunSqliteDialect";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 type BunDatabaseConstructor = typeof import("bun:sqlite").Database;
 
@@ -49,11 +50,23 @@ export function configureSqliteDatabase(sqliteDb: SqlitePragmaDatabase): void {
 const DEFAULT_DB_DIR = path.join(os.homedir(), ".auto-mobile");
 // @deprecated AUTO_MOBILE_DB_PATH - use AUTOMOBILE_DB_PATH instead
 // @deprecated AUTO_MOBILE_DB_DIR - use AUTOMOBILE_DB_DIR instead
-const ENV_DB_PATH = process.env.AUTOMOBILE_DB_PATH ?? process.env.AUTO_MOBILE_DB_PATH;
-const ENV_DB_DIR = process.env.AUTOMOBILE_DB_DIR ?? process.env.AUTO_MOBILE_DB_DIR;
-const DB_PATH = ENV_DB_PATH
-  ? path.resolve(ENV_DB_PATH)
-  : path.join(ENV_DB_DIR ? path.resolve(ENV_DB_DIR) : DEFAULT_DB_DIR, "auto-mobile.db");
+export function resolveDatabasePathFromEnvironment(
+  env: NodeJS.ProcessEnv = process.env,
+  defaultDbDir: string = DEFAULT_DB_DIR
+): string {
+  const envDbPath = env.AUTOMOBILE_DB_PATH ?? env.AUTO_MOBILE_DB_PATH;
+  if (envDbPath) {
+    return resolvePathFromDaemonLaunchWorkingDirectory(envDbPath);
+  }
+
+  const envDbDir = env.AUTOMOBILE_DB_DIR ?? env.AUTO_MOBILE_DB_DIR;
+  const dbDir = envDbDir
+    ? resolvePathFromDaemonLaunchWorkingDirectory(envDbDir)
+    : defaultDbDir;
+  return path.join(dbDir, "auto-mobile.db");
+}
+
+const DB_PATH = resolveDatabasePathFromEnvironment();
 const DB_DIR = path.dirname(DB_PATH);
 
 let dbInstance: Kysely<DatabaseSchema> | null = null;

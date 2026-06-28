@@ -34,7 +34,7 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `type` | `"mcp_request" \| "daemon_request"` | Yes | Request category |
 | `method` | `string` | Yes | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`) |
 | `params` | `object` | Yes | Method-specific parameters; pass `{}` when none are needed |
-| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000) |
+| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon. `openLink` can be configured with `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`), defaulting to 30 000 ms. |
 
 **Response**
 

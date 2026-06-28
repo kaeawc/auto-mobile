@@ -50,8 +50,8 @@ BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
             initWithName:@"AutoMobile multi-finger swipe"
             interfaceOrientation:(UIInterfaceOrientation)interfaceOrientation
         ];
-        NSInteger resolvedFingerCount = MAX(fingerCount, 1);
-        NSTimeInterval liftOffset = MAX(duration, 0.05);
+        NSInteger resolvedFingerCount = fingerCount > 1 ? fingerCount : 1;
+        NSTimeInterval liftOffset = duration > 0.05 ? duration : 0.05;
 
         for (NSInteger index = 0; index < resolvedFingerCount; index++) {
             CGFloat dx = (CGFloat)index * fingerSpacing;
@@ -67,17 +67,19 @@ BOOL ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
         NSError *synthesisError = nil;
         success = [record synthesizeWithError:&synthesisError];
         if (!success) {
+            NSString *description = synthesisError.localizedDescription != nil ? synthesisError.localizedDescription : @"unknown error";
             failure = [NSString stringWithFormat:@"multi-finger swipe synthesis failed: %@",
-                       synthesisError.localizedDescription ?: @"unknown error"];
+                       description];
         }
     });
 
     if (exception != nil) {
+        NSString *reason = exception.reason != nil ? exception.reason : @"no reason";
         failure = [NSString stringWithFormat:@"Objective-C exception during multi-finger swipe synthesis: %@ - %@",
-                   exception.name, exception.reason ?: @"no reason"];
+                   exception.name, reason];
     }
     if (!success && errorMessage != NULL) {
-        *errorMessage = failure ?: @"multi-finger swipe synthesis failed";
+        *errorMessage = failure != nil ? failure : @"multi-finger swipe synthesis failed";
     }
 
     return success;

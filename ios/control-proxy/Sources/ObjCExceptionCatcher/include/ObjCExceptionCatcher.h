@@ -4,7 +4,11 @@
 
 #if TARGET_OS_IOS
 #import <UIKit/UIKit.h>
+#endif
 
+NS_ASSUME_NONNULL_BEGIN
+
+#if TARGET_OS_IOS
 /// Private XCTest touch synthesis declarations. These symbols are not documented
 /// by Apple; callers must treat unavailability as a recoverable runtime error.
 @interface XCPointerEventPath : NSObject
@@ -19,8 +23,6 @@
 - (BOOL)synthesizeWithError:(NSError **)error;
 @end
 #endif
-
-NS_ASSUME_NONNULL_BEGIN
 
 /// Executes the given block, catching any NSException thrown.
 /// Returns the caught NSException, or nil if no exception was raised.

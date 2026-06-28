@@ -19,6 +19,7 @@ export { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 export { CtrlProxyStorage } from "./CtrlProxyStorage";
 export { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 export { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+export { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 
 // Types
 export type {

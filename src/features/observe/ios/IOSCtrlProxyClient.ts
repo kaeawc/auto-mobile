@@ -108,6 +108,7 @@ import { CtrlProxyStorage } from "./CtrlProxyStorage";
 import { CtrlProxyVoiceOver } from "./CtrlProxyVoiceOver";
 import { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
 import { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+import { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 
 // Import types
 import type {
@@ -336,6 +337,7 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
   private _storage: CtrlProxyStorage | null = null;
   private _keyboard: CtrlProxyKeyboard | null = null;
   private _highlights: CtrlProxyHighlights | null = null;
+  private _database: CtrlProxyDatabase | null = null;
 
   // Logging tag for base class
   protected readonly logTag = "IOSCtrlProxyClient";
@@ -648,6 +650,13 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
       this._highlights = new CtrlProxyHighlights(this.createDelegateContext());
     }
     return this._highlights;
+  }
+
+  private get database(): CtrlProxyDatabase {
+    if (!this._database) {
+      this._database = new CtrlProxyDatabase(this.createDelegateContext());
+    }
+    return this._database;
   }
 
   // ===========================================================================
@@ -1253,6 +1262,56 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
           };
           break;
 
+        case "execute_sql_result":
+          result = {
+            success: message.success ?? false,
+            queryType: (message as { queryType?: string }).queryType,
+            columns: (message as { columns?: string[] }).columns,
+            rows: (message as { rows?: unknown[][] }).rows,
+            rowsAffected: (message as { rowsAffected?: number }).rowsAffected,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "list_databases_result":
+          result = {
+            success: message.success ?? false,
+            databases: (message as { databases?: unknown[] }).databases ?? [],
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "list_tables_result":
+          result = {
+            success: message.success ?? false,
+            tables: (message as { tables?: string[] }).tables ?? [],
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "table_data_result":
+          result = {
+            success: message.success ?? false,
+            columns: (message as { columns?: string[] }).columns ?? [],
+            rows: (message as { rows?: unknown[][] }).rows ?? [],
+            total: (message as { total?: number }).total ?? 0,
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
+        case "table_structure_result":
+          result = {
+            success: message.success ?? false,
+            columns: (message as { columns?: unknown[] }).columns ?? [],
+            totalTimeMs: message.totalTimeMs ?? 0,
+            error: message.error,
+          };
+          break;
+
         default:
           // Handle error responses
           if (message.error) {
@@ -1641,6 +1700,44 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
 
   async clearPreferenceStore(packageName: string, fileName: string, timeoutMs: number = 5000): Promise<void> {
     return this.storage.clearPreferenceStore(packageName, fileName, timeoutMs);
+  }
+
+  // ===========================================================================
+  // Delegated Public Methods - Database (SQLite)
+  // ===========================================================================
+
+  async executeSQLForIos(
+    databasePath: string,
+    query: string,
+    timeoutMs: number = 5000
+  ): Promise<import("../../database/DatabaseInspector").SQLResult> {
+    return this.database.executeSQL(databasePath, query, timeoutMs);
+  }
+
+  async listDatabasesForIos(timeoutMs: number = 5000): Promise<import("../../database/DatabaseInspector").DatabaseInfo[]> {
+    return this.database.listDatabases(timeoutMs);
+  }
+
+  async listTablesForIos(databasePath: string, timeoutMs: number = 5000): Promise<string[]> {
+    return this.database.listTables(databasePath, timeoutMs);
+  }
+
+  async getTableDataForIos(
+    databasePath: string,
+    table: string,
+    limit: number = 50,
+    offset: number = 0,
+    timeoutMs: number = 5000
+  ): Promise<import("../../database/DatabaseInspector").TableDataResult> {
+    return this.database.getTableData(databasePath, table, limit, offset, timeoutMs);
+  }
+
+  async getTableStructureForIos(
+    databasePath: string,
+    table: string,
+    timeoutMs: number = 5000
+  ): Promise<import("../../database/DatabaseInspector").TableStructureResult> {
+    return this.database.getTableStructure(databasePath, table, timeoutMs);
   }
 
   // ===========================================================================

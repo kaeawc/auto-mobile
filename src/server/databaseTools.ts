@@ -6,6 +6,8 @@ import { createJSONToolResponse } from "../utils/toolUtils";
 import { DatabaseInspector } from "../features/database/DatabaseInspector";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { notifyDatabaseChanged } from "./databaseResources";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
+import type { SQLResult } from "../features/database/DatabaseInspector";
 
 // Schema for sqlQuery tool
 const sqlQuerySchema = addDeviceTargetingToSchema(
@@ -141,16 +143,8 @@ function findStatementAfterCTE(upperQuery: string): string | null {
 export function registerDatabaseTools() {
   // SQL Query handler
   const sqlQueryHandler = async (device: BootedDevice, args: SqlQueryArgs) => {
-    validateAndroidDevice(device);
-
     try {
-      const adb = defaultAdbClientFactory.create(device);
-      const inspector = new DatabaseInspector(device, adb);
-      const result = await inspector.executeSQL(
-        args.appId,
-        args.databasePath,
-        args.query
-      );
+      const result = await executeSqlForDevice(device, args);
 
       // If this was a mutation, notify resource subscribers of the change
       if (isMutationQuery(args.query)) {
@@ -183,7 +177,8 @@ export function registerDatabaseTools() {
   // Register the sqlQuery tool
   ToolRegistry.registerDeviceAware(
     "sqlQuery",
-    "Execute a SQL query on an Android app's database. Supports SELECT, INSERT, UPDATE, DELETE. " +
+    "Execute a SQL query on an Android or iOS app's SQLite database. Supports SELECT, INSERT, UPDATE, DELETE. " +
+    "On iOS this requires a DEBUG app build with the AutoMobile SDK integrated and DatabaseInspector.shared.setEnabled(true). " +
     "For read-only operations (listing databases, tables, viewing data/schema), use the database resources instead.",
     sqlQuerySchema,
     sqlQueryHandler
@@ -191,13 +186,29 @@ export function registerDatabaseTools() {
 }
 
 /**
- * Validate that the device is an Android device
+ * Execute SQL using the platform-specific database bridge.
  */
-function validateAndroidDevice(device: BootedDevice): void {
-  if (device.platform !== "android") {
-    throw new ActionableError(
-      "Database inspection is only supported on Android devices. " +
-      "The app must have AutoMobile SDK integrated with database inspection enabled."
+async function executeSqlForDevice(device: BootedDevice, args: SqlQueryArgs): Promise<SQLResult> {
+  if (device.platform === "android") {
+    const adb = defaultAdbClientFactory.create(device);
+    const inspector = new DatabaseInspector(device, adb);
+    return inspector.executeSQL(
+      args.appId,
+      args.databasePath,
+      args.query
     );
   }
+
+  if (device.platform === "ios") {
+    try {
+      return await IOSCtrlProxyClient.getInstance(device).executeSQLForIos(args.databasePath, args.query);
+    } catch (error) {
+      throw new ActionableError(
+        "Failed to execute SQL on iOS. Ensure the app embeds the AutoMobile SDK in a DEBUG build " +
+        `and calls DatabaseInspector.shared.setEnabled(true): ${error}`
+      );
+    }
+  }
+
+  throw new ActionableError(`Database inspection is not supported on ${device.platform} devices.`);
 }

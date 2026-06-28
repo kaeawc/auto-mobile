@@ -4,6 +4,8 @@ import { DatabaseInspector, DatabaseInfo, TableStructureResult } from "../featur
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { BootedDevice } from "../models";
 import { logger } from "../utils/logger";
+import { IOSCtrlProxyClient } from "../features/observe/ios";
+import type { TableDataResult } from "../features/database/DatabaseInspector";
 
 // Resource URI templates
 const DATABASE_RESOURCE_TEMPLATES = {
@@ -51,16 +53,59 @@ function generateHash(data: unknown): string {
 }
 
 /**
- * Find a booted Android device by ID
+ * Cross-platform interface for database inspection.
  */
-async function findBootedAndroidDevice(deviceId: string): Promise<BootedDevice | null> {
+interface AppDatabaseClient {
+  listDatabases(appId: string): Promise<DatabaseInfo[]>;
+  listTables(appId: string, databasePath: string): Promise<string[]>;
+  getTableData(appId: string, databasePath: string, table: string, limit: number, offset: number): Promise<TableDataResult>;
+  getTableStructure(appId: string, databasePath: string, table: string): Promise<TableStructureResult>;
+}
+
+/**
+ * Find a booted Android or iOS device by ID.
+ */
+async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
+  const manager = PlatformDeviceManagerFactory.getInstance();
+  const [androidDevices, iosDevices] = await Promise.all([
+    getBootedDevicesSafely("android", () => manager.getBootedDevices("android")),
+    getBootedDevicesSafely("ios", () => manager.getBootedDevices("ios")),
+  ]);
+  const devices = [...androidDevices, ...iosDevices];
+  return devices.find(d => d.deviceId === deviceId) ?? null;
+}
+
+async function getBootedDevicesSafely(
+  platform: "android" | "ios",
+  listDevices: () => Promise<BootedDevice[]>
+): Promise<BootedDevice[]> {
   try {
-    const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-    return devices.find(d => d.deviceId === deviceId) ?? null;
+    return await listDevices();
   } catch (error) {
-    logger.warn(`[DatabaseResources] Failed to find device ${deviceId}: ${error}`);
-    return null;
+    logger.warn(`[DatabaseResources] Failed to list ${platform} devices: ${error}`);
+    return [];
   }
+}
+
+function createDatabaseClient(device: BootedDevice): AppDatabaseClient {
+  if (device.platform === "android") {
+    const adb = defaultAdbClientFactory.create(device);
+    return new DatabaseInspector(device, adb);
+  }
+
+  if (device.platform === "ios") {
+    const client = IOSCtrlProxyClient.getInstance(device);
+    return {
+      listDatabases: async () => client.listDatabasesForIos(),
+      listTables: async (_appId, databasePath) => client.listTablesForIos(databasePath),
+      getTableData: async (_appId, databasePath, table, limit, offset) =>
+        client.getTableDataForIos(databasePath, table, limit, offset),
+      getTableStructure: async (_appId, databasePath, table) =>
+        client.getTableStructureForIos(databasePath, table),
+    };
+  }
+
+  throw new Error(`Database inspection is not supported on ${device.platform} devices.`);
 }
 
 /**
@@ -113,7 +158,7 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
   const uri = buildDatabasesUri(deviceId, appId);
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
         uri,
@@ -122,8 +167,7 @@ async function getDatabasesResource(params: Record<string, string>): Promise<Res
       };
     }
 
-    const adb = defaultAdbClientFactory.create(device);
-    const inspector = new DatabaseInspector(device, adb);
+    const inspector = createDatabaseClient(device);
     const databases = await inspector.listDatabases(appId);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(databases);
@@ -169,7 +213,7 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
   const uri = buildTablesUri(deviceId, decodedPath, appId);
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
         uri,
@@ -178,8 +222,7 @@ async function getTablesResource(params: Record<string, string>): Promise<Resour
       };
     }
 
-    const adb = defaultAdbClientFactory.create(device);
-    const inspector = new DatabaseInspector(device, adb);
+    const inspector = createDatabaseClient(device);
     const tables = await inspector.listTables(appId, decodedPath);
     const lastUpdated = new Date().toISOString();
 
@@ -219,7 +262,7 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
   const offset = params.offset ? parseInt(params.offset, 10) : 0;
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
         uri,
@@ -228,8 +271,7 @@ async function getTableDataResource(params: Record<string, string>): Promise<Res
       };
     }
 
-    const adb = defaultAdbClientFactory.create(device);
-    const inspector = new DatabaseInspector(device, adb);
+    const inspector = createDatabaseClient(device);
     const data = await inspector.getTableData(appId, decodedPath, decodedTable, limit, offset);
     const lastUpdated = new Date().toISOString();
 
@@ -269,7 +311,7 @@ async function getTableStructureResource(params: Record<string, string>): Promis
   const uri = buildTableStructureUri(deviceId, decodedPath, decodedTable, appId);
 
   try {
-    const device = await findBootedAndroidDevice(deviceId);
+    const device = await findBootedDevice(deviceId);
     if (!device) {
       return {
         uri,
@@ -278,8 +320,7 @@ async function getTableStructureResource(params: Record<string, string>): Promis
       };
     }
 
-    const adb = defaultAdbClientFactory.create(device);
-    const inspector = new DatabaseInspector(device, adb);
+    const inspector = createDatabaseClient(device);
     const structure = await inspector.getTableStructure(appId, decodedPath, decodedTable);
     const lastUpdated = new Date().toISOString();
     const hash = generateHash(structure);
@@ -366,7 +407,7 @@ export function registerDatabaseResources(): void {
   ResourceRegistry.registerTemplate(
     DATABASE_RESOURCE_TEMPLATES.DATABASES,
     "App Databases",
-    "List all SQLite databases in an Android app. Requires app to have AutoMobile SDK with database inspection enabled.",
+    "List all SQLite databases in an Android or iOS app. Requires app to have AutoMobile SDK with database inspection enabled; iOS support requires a DEBUG SDK server.",
     "application/json",
     getDatabasesResource
   );

@@ -1,5 +1,5 @@
-import XCTest
 @testable import AutoMobileSDK
+import XCTest
 
 final class UserDefaultsInspectorTests: XCTestCase {
     override func tearDown() {
@@ -81,5 +81,79 @@ final class DatabaseInspectorTests: XCTestCase {
         let driver = DatabaseInspector.shared.getDriver()
         XCTAssertEqual(driver?.getDatabases().count, 1)
         XCTAssertEqual(driver?.getTables(databasePath: "/path/test.db"), ["users", "posts"])
+    }
+}
+
+final class SdkDatabaseRouteHandlerTests: XCTestCase {
+    override func tearDown() {
+        DatabaseInspector.shared.reset()
+        super.tearDown()
+    }
+
+    func testExecuteSqlEncodesQueryResult() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.sqlResult = SQLExecutionResult(
+            columns: ["id", "payload"],
+            rows: [["1", "0xCAFE"]],
+            rowsAffected: 0
+        )
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let request = SdkExecuteSqlRequest(
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT id, payload FROM notes"
+        )
+        let body = try JSONEncoder().encode(request)
+
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 200)
+        let payload = try JSONDecoder().decode(SdkExecuteSqlPayload.self, from: response.body)
+        XCTAssertEqual(payload.queryType, "query")
+        XCTAssertEqual(payload.columns, ["id", "payload"])
+        XCTAssertEqual(payload.rows, [["1", "0xCAFE"]])
+        XCTAssertEqual(fakeDriver.executeSqlCalls.count, 1)
+        XCTAssertEqual(fakeDriver.executeSqlCalls[0].databasePath, "/app/Documents/app.db")
+        XCTAssertEqual(fakeDriver.executeSqlCalls[0].query, "SELECT id, payload FROM notes")
+    }
+
+    func testExecuteSqlReturnsDisabledWhenInspectorNotEnabled() throws {
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setEnabled(false)
+        let body = try JSONEncoder().encode(SdkExecuteSqlRequest(databasePath: "/db.sqlite", query: "SELECT 1"))
+
+        let response = SdkDatabaseRouteHandler().handleExecuteSql(body: body)
+
+        XCTAssertEqual(response.statusCode, 503)
+        let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+        XCTAssertEqual(payload.error, "db_inspection_disabled")
+    }
+}
+
+private final class RouteFakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
+    var sqlResult = SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0)
+    var executeSqlCalls: [(databasePath: String, query: String)] = []
+
+    func getDatabases() -> [DatabaseDescriptor] {
+        []
+    }
+
+    func getTables(databasePath _: String) -> [String] {
+        []
+    }
+
+    func getTableData(databasePath _: String, table _: String, limit _: Int, offset _: Int) -> TableDataResult {
+        TableDataResult(columns: [], rows: [], totalRows: 0)
+    }
+
+    func getTableStructure(databasePath _: String, table _: String) -> TableStructureResult {
+        TableStructureResult(columns: [])
+    }
+
+    func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
+        executeSqlCalls.append((databasePath: databasePath, query: query))
+        return sqlResult
     }
 }

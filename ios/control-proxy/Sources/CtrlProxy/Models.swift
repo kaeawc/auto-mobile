@@ -57,10 +57,16 @@ public struct WebSocketRequest: Codable {
     public let value: String?
     public let valueType: String?
 
-    // App launch parameters
+    // Database parameters
+    public let databasePath: String?
+    public let query: String?
+    public let table: String?
+    public let limit: Int?
+
+    /// App launch parameters
     public let coldBoot: Bool?
 
-    // Rotation parameters
+    /// Rotation parameters
     public let orientation: String?
 
     // Permission/settings
@@ -105,6 +111,10 @@ public struct WebSocketRequest: Codable {
         key: String? = nil,
         value: String? = nil,
         valueType: String? = nil,
+        databasePath: String? = nil,
+        query: String? = nil,
+        table: String? = nil,
+        limit: Int? = nil,
         coldBoot: Bool? = nil,
         orientation: String? = nil,
         permission: String? = nil,
@@ -145,6 +155,10 @@ public struct WebSocketRequest: Codable {
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.databasePath = databasePath
+        self.query = query
+        self.table = table
+        self.limit = limit
         self.coldBoot = coldBoot
         self.orientation = orientation
         self.permission = permission
@@ -298,8 +312,8 @@ public struct RotateResponse: Codable {
         rotationPerformed: Bool,
         error: String? = nil
     ) {
-        self.type = ResponseType.rotateResult.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.rotateResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.totalTimeMs = totalTimeMs
@@ -328,8 +342,8 @@ public struct KeyboardResponse: Codable {
         totalTimeMs: Int64,
         error: String? = nil
     ) {
-        self.type = ResponseType.keyboardResult.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.keyboardResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.open = open
@@ -734,8 +748,8 @@ public struct StorageFilesResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.preferenceFiles.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.preferenceFiles.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.files = files
@@ -761,8 +775,8 @@ public struct StorageEntriesResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.preferences.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.preferences.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.entries = entries
@@ -794,14 +808,161 @@ public struct StorageEntryResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.getPreferenceResult.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.getPreferenceResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.found = found
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+// MARK: - Database Response Models
+
+public struct ExecuteSqlResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let queryType: String?
+    public let columns: [String]?
+    public let rows: [[String?]]?
+    public let rowsAffected: Int?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        queryType: String? = nil,
+        columns: [String]? = nil,
+        rows: [[String?]]? = nil,
+        rowsAffected: Int? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.executeSqlResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.queryType = queryType
+        self.columns = columns
+        self.rows = rows
+        self.rowsAffected = rowsAffected
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct ListDatabasesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let databases: [SdkDatabaseInfo]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        databases: [SdkDatabaseInfo]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.listDatabasesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.databases = databases
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct ListTablesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let tables: [String]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        tables: [String]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.listTablesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.tables = tables
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct TableDataResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let columns: [String]?
+    public let rows: [[String?]]?
+    public let total: Int?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        columns: [String]? = nil,
+        rows: [[String?]]? = nil,
+        total: Int? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.tableDataResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.columns = columns
+        self.rows = rows
+        self.total = total
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct TableStructureResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let columns: [SdkColumnInfo]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        columns: [SdkColumnInfo]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.tableStructureResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.columns = columns
         self.error = error
         self.totalTimeMs = totalTimeMs
     }
@@ -889,7 +1050,7 @@ public enum RequestType: String, CaseIterable {
     case requestAction = "request_action"
     case requestLaunchApp = "request_launch_app"
 
-    // Device control
+    /// Device control
     case requestRotate = "request_rotate"
 
     /// Clipboard
@@ -911,6 +1072,13 @@ public enum RequestType: String, CaseIterable {
 
     // Network mocking
     case setNetworkMockRules = "set_network_mock_rules"
+
+    // Database inspection
+    case executeSql = "execute_sql"
+    case listDatabases = "list_databases"
+    case listTables = "list_tables"
+    case getTableData = "get_table_data"
+    case getTableStructure = "get_table_structure"
 }
 
 // MARK: - Response Types (matching Android)
@@ -952,4 +1120,11 @@ public enum ResponseType: String {
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
     case setNetworkMockRulesResult = "set_network_mock_rules_result"
+
+    // Database inspection
+    case executeSqlResult = "execute_sql_result"
+    case listDatabasesResult = "list_databases_result"
+    case listTablesResult = "list_tables_result"
+    case tableDataResult = "table_data_result"
+    case tableStructureResult = "table_structure_result"
 }

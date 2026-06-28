@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(os)
-import os
+    import os
 #endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
@@ -22,6 +22,7 @@ public class CommandHandler: CommandHandling {
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
     private let highlightOverlayManager: HighlightOverlayManaging
+    private let sdkDatabaseClient: (any SdkDatabaseFetching)?
 
     public init(
         elementLocator: ElementLocating,
@@ -30,7 +31,8 @@ public class CommandHandler: CommandHandling {
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
-        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager()
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
+        sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -39,6 +41,7 @@ public class CommandHandler: CommandHandling {
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
         self.highlightOverlayManager = highlightOverlayManager
+        self.sdkDatabaseClient = sdkDatabaseClient
     }
 
     /// Factory for testing - allows injecting fakes
@@ -49,7 +52,8 @@ public class CommandHandler: CommandHandling {
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
         sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
-        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager()
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
+        sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     )
         -> CommandHandler
     {
@@ -60,7 +64,8 @@ public class CommandHandler: CommandHandling {
             storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
             sdkHierarchyCache: sdkHierarchyCache,
-            highlightOverlayManager: highlightOverlayManager
+            highlightOverlayManager: highlightOverlayManager,
+            sdkDatabaseClient: sdkDatabaseClient
         )
     }
 
@@ -179,6 +184,22 @@ public class CommandHandler: CommandHandling {
             case RequestType.setNetworkMockRules.rawValue:
                 return try handleSetNetworkMockRules(request, startTime: startTime)
 
+            // Database commands
+            case RequestType.executeSql.rawValue:
+                return handleExecuteSql(request, startTime: startTime)
+
+            case RequestType.listDatabases.rawValue:
+                return handleListDatabases(request, startTime: startTime)
+
+            case RequestType.listTables.rawValue:
+                return handleListTables(request, startTime: startTime)
+
+            case RequestType.getTableData.rawValue:
+                return handleGetTableData(request, startTime: startTime)
+
+            case RequestType.getTableStructure.rawValue:
+                return handleGetTableStructure(request, startTime: startTime)
+
             default:
                 return WebSocketResponse.error(
                     type: "error",
@@ -260,7 +281,8 @@ public class CommandHandler: CommandHandling {
 
     private func matchingCachedSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
         guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName),
-              let cached = sdkHierarchyCache?.latest else {
+              let cached = sdkHierarchyCache?.latest
+        else {
             return nil
         }
         guard sdkHierarchy(cached, matches: foregroundBundleId) else {
@@ -290,7 +312,8 @@ public class CommandHandler: CommandHandling {
         }
 
         guard let fresh = sdkHierarchyClient?.fetchFreshHierarchy(),
-              sdkHierarchy(fresh, matches: foregroundBundleId) else {
+              sdkHierarchy(fresh, matches: foregroundBundleId)
+        else {
             sdkHierarchyCache?.clear()
             return nil
         }
@@ -318,7 +341,8 @@ public class CommandHandler: CommandHandling {
 
     private func normalizedBundleId(_ bundleId: String?) -> String? {
         guard let normalized = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !normalized.isEmpty else {
+              !normalized.isEmpty
+        else {
             return nil
         }
         return normalized
@@ -470,7 +494,10 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.debug("handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             if let resourceId = resourceId {
@@ -483,15 +510,23 @@ public class CommandHandler: CommandHandling {
                 }
             }
         } catch {
-            textInputLog.error("handleSetText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleSetText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.setTextResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -500,22 +535,33 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.debug("handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             try perfProvider.track("clearText") {
                 try gesturePerformer.clearText(resourceId: resourceId)
             }
         } catch {
-            textInputLog.error("handleClearText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleClearText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.clearTextResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -527,22 +573,33 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleImeAction")
         defer { perfProvider.end() }
 
-        textInputLog.debug("handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             try perfProvider.track("imeAction") {
                 try gesturePerformer.performImeAction(action)
             }
         } catch {
-            textInputLog.error("handleImeAction FAILED action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleImeAction FAILED action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.imeActionResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -557,15 +614,20 @@ public class CommandHandler: CommandHandling {
                 try gesturePerformer.selectAll()
             }
         } catch {
-            textInputLog.error("handleSelectAll FAILED error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleSelectAll FAILED error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog.debug("handleSelectAll OK elapsedMs=\(elapsedMs, privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.selectAllResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -754,7 +816,9 @@ public class CommandHandler: CommandHandling {
 
         if coldBoot {
             // Cold boot: always terminate then launch fresh
-            if appState == .runningForeground || appState == .runningBackground || appState == .runningBackgroundSuspended {
+            if appState == .runningForeground || appState == .runningBackground || appState ==
+                .runningBackgroundSuspended
+            {
                 try perfProvider.track("terminateApp") {
                     try gesturePerformer.terminateApp(bundleId: bundleId)
                 }
@@ -791,7 +855,7 @@ public class CommandHandler: CommandHandling {
         // activate() is synchronous and the app is guaranteed to remain foreground.
         if !alreadyForeground || coldBoot {
             perfProvider.track("awaitForeground") {
-                let _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
+                _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
             }
         }
 
@@ -1111,7 +1175,225 @@ public class CommandHandler: CommandHandling {
         )
     }
 
+    // MARK: - Database
+
+    private func handleExecuteSql(_ request: WebSocketRequest, startTime: Date) -> ExecuteSqlResponse {
+        guard let client = sdkDatabaseClient else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let query = request.query else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("query").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            let result = try client.executeSQL(databasePath: databasePath, query: query)
+            if let error = result.error {
+                return ExecuteSqlResponse(
+                    requestId: request.requestId,
+                    success: false,
+                    error: error,
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            }
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: true,
+                queryType: result.queryType,
+                columns: result.columns,
+                rows: result.rows,
+                rowsAffected: result.rowsAffected,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleListDatabases(_ request: WebSocketRequest, startTime: Date) -> ListDatabasesResponse {
+        guard let client = sdkDatabaseClient else {
+            return ListDatabasesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            return try ListDatabasesResponse(
+                requestId: request.requestId,
+                success: true,
+                databases: client.listDatabases(),
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ListDatabasesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleListTables(_ request: WebSocketRequest, startTime: Date) -> ListTablesResponse {
+        guard let client = sdkDatabaseClient else {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            return try ListTablesResponse(
+                requestId: request.requestId,
+                success: true,
+                tables: client.listTables(databasePath: databasePath),
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleGetTableData(_ request: WebSocketRequest, startTime: Date) -> TableDataResponse {
+        guard let client = sdkDatabaseClient else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let table = request.table else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("table").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            let data = try client.getTableData(
+                databasePath: databasePath,
+                table: table,
+                limit: request.limit ?? 50,
+                offset: request.offset ?? 0
+            )
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: true,
+                columns: data.columns,
+                rows: data.rows,
+                total: data.total,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleGetTableStructure(_ request: WebSocketRequest, startTime: Date) -> TableStructureResponse {
+        guard let client = sdkDatabaseClient else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let table = request.table else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("table").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            let structure = try client.getTableStructure(databasePath: databasePath, table: table)
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: true,
+                columns: structure.columns,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
     // MARK: - Helpers
+
+    private var databaseUnavailableMessage: String {
+        "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+    }
 
     private func totalTimeMs(from startTime: Date) -> Int64 {
         return Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -1179,6 +1461,16 @@ public class CommandHandler: CommandHandling {
             return ResponseType.clearPreferencesResult.rawValue
         case RequestType.setNetworkMockRules.rawValue:
             return ResponseType.setNetworkMockRulesResult.rawValue
+        case RequestType.executeSql.rawValue:
+            return ResponseType.executeSqlResult.rawValue
+        case RequestType.listDatabases.rawValue:
+            return ResponseType.listDatabasesResult.rawValue
+        case RequestType.listTables.rawValue:
+            return ResponseType.listTablesResult.rawValue
+        case RequestType.getTableData.rawValue:
+            return ResponseType.tableDataResult.rawValue
+        case RequestType.getTableStructure.rawValue:
+            return ResponseType.tableStructureResult.rawValue
         default:
             return "error"
         }

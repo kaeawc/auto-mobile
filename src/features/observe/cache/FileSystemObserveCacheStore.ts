@@ -36,6 +36,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
   private readonly cache: Map<string, ObserveResultCacheEntry> = new Map();
   private readonly cacheDir: string;
   private readonly timer: Timer;
+  private pendingDiskCleanup: Promise<void> = Promise.resolve();
 
   constructor(timer: Timer = defaultTimer, cacheDir?: string) {
     this.timer = timer;
@@ -52,6 +53,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
     const cacheKey = `${deviceId}:${timestamp}`;
     try {
       logger.debug(`[OBSERVE_CACHE] Caching observe result for device ${deviceId} with timestamp ${timestamp}`);
+      await this.pendingDiskCleanup;
       this.cache.set(cacheKey, { timestamp, deviceId, observeResult: result });
       await this.saveObserveResultToDisk(cacheKey, result);
       logger.debug(`[OBSERVE_CACHE] Successfully cached observe result, in-memory cache size: ${this.cache.size}`);
@@ -248,7 +250,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
       return;
     }
 
-    void Promise.all(
+    const cleanup = Promise.all(
       matches.map(async file => {
         try {
           await unlinkAsync(path.join(this.cacheDir, file));
@@ -256,6 +258,7 @@ export class FileSystemObserveCacheStore implements ObserveResultCacheStore {
           logger.warn(`[OBSERVE_CACHE] Failed to delete cache file ${file}: ${error}`);
         }
       })
-    );
+    ).then(() => {});
+    this.pendingDiskCleanup = this.pendingDiskCleanup.then(() => cleanup);
   }
 }

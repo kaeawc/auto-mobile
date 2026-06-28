@@ -1,5 +1,5 @@
-import { spawn, execSync } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
+import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { open, readFile, unlink } from "node:fs/promises";
 import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -116,6 +116,16 @@ export class PsDaemonProcessFinder implements DaemonProcessFinder {
   }
 }
 
+export interface DaemonProcessSpawner {
+  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
+}
+
+const nodeDaemonProcessSpawner: DaemonProcessSpawner = {
+  spawn: nodeSpawn,
+};
+
+const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
+
 function resolvePackageSpecifier(version: string): string {
   const trimmedVersion = version.trim();
   if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
@@ -159,7 +169,7 @@ export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<void>;
   restart(options?: DaemonOptions): Promise<void>;
-  waitForReady(timeout: number): Promise<boolean>;
+  waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean>;
 }
 
 /**
@@ -179,6 +189,7 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly pidFilePath: string;
   private readonly socketPath: string;
   private readonly processFinder: DaemonProcessFinder;
+  private readonly processSpawner: DaemonProcessSpawner;
 
   constructor(
     clientFactory: DaemonClientFactory | undefined = undefined,
@@ -187,14 +198,21 @@ export class DaemonManager implements DaemonManagerLike {
     lockFilePath: string = LOCK_FILE_PATH,
     pidFilePath: string = PID_FILE_PATH,
     socketPath: string = SOCKET_PATH,
-    processFinder: DaemonProcessFinder = new PsDaemonProcessFinder()
+    processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = new PsDaemonProcessFinder(),
+    processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
     this.lockFilePath = lockFilePath;
     this.pidFilePath = pidFilePath;
     this.socketPath = socketPath;
-    this.processFinder = processFinder;
+    if ("findDaemonProcesses" in processFinderOrSpawner) {
+      this.processFinder = processFinderOrSpawner;
+      this.processSpawner = processSpawner;
+    } else {
+      this.processFinder = new PsDaemonProcessFinder();
+      this.processSpawner = processFinderOrSpawner;
+    }
     this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
@@ -507,7 +525,7 @@ export class DaemonManager implements DaemonManagerLike {
       childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
     }
 
-    const daemonProcess = spawn(autoMobileCmd, args, {
+    const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
       detached: true,
       stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
       shell: true, // Use shell to resolve command from PATH
@@ -520,13 +538,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Unref so parent process can exit
     daemonProcess.unref();
 
-    // Wait for daemon to be ready
-    const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new ActionableError(
-        `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
-      );
-    }
+    await this.waitForDaemonStartup(daemonProcess, logPath, DAEMON_STARTUP_TIMEOUT_MS);
 
     const newStatus = await this.status();
     stderrLog(
@@ -534,6 +546,105 @@ export class DaemonManager implements DaemonManagerLike {
     );
     stderrLog(`Socket: ${newStatus.socketPath}`);
     stderrLog(`Logs: ${logPath}`);
+  }
+
+  private async waitForDaemonStartup(
+    daemonProcess: ChildProcess,
+    logPath: string,
+    timeoutMs: number
+  ): Promise<void> {
+    let cleanupProcessListeners = () => {};
+
+    const readinessAbort = new AbortController();
+    const processFailure = new Promise<never>((_, reject) => {
+      const rejectWithContext = (summary: string) => {
+        void this.formatDaemonStartupFailure(summary, logPath).then(
+          message => {
+            reject(new ActionableError(message));
+            readinessAbort.abort();
+          },
+          () => {
+            reject(new ActionableError(summary));
+            readinessAbort.abort();
+          }
+        );
+      };
+
+      const onError = (error: Error) => {
+        rejectWithContext(`Daemon subprocess failed to spawn: ${this.formatRawSpawnError(error)}`);
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        const exitCode = code === null ? "unknown" : code.toString();
+        const signalDetail = signal ? `, signal ${signal}` : "";
+        rejectWithContext(`Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`);
+      };
+
+      daemonProcess.once("error", onError);
+      daemonProcess.once("exit", onExit);
+      cleanupProcessListeners = () => {
+        daemonProcess.off("error", onError);
+        daemonProcess.off("exit", onExit);
+      };
+    });
+
+    try {
+      const ready = await Promise.race([
+        this.waitForReady(timeoutMs, readinessAbort.signal),
+        processFailure,
+      ]);
+      if (!ready) {
+        throw new ActionableError(
+          await this.formatDaemonStartupFailure(
+            `Daemon failed to start within ${timeoutMs}ms`,
+            logPath
+          )
+        );
+      }
+    } finally {
+      readinessAbort.abort();
+      cleanupProcessListeners();
+    }
+  }
+
+  private formatRawSpawnError(error: Error): string {
+    const details = error as NodeJS.ErrnoException;
+    const additions = [
+      details.code && !error.message.includes(details.code) ? `code ${details.code}` : undefined,
+      details.syscall && !error.message.includes(details.syscall) ? `syscall ${details.syscall}` : undefined,
+      details.path && !error.message.includes(details.path) ? `path ${details.path}` : undefined,
+    ].filter((value): value is string => value !== undefined);
+    return additions.length > 0 ? `${error.message} (${additions.join(", ")})` : error.message;
+  }
+
+  private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {
+    const logExcerpt = await this.readDaemonStartupLogExcerpt(logPath);
+    if (logExcerpt.length === 0) {
+      return `${summary}\nLogs: ${logPath} (empty)`;
+    }
+    return [
+      summary,
+      `Logs: ${logPath}`,
+      `Daemon stdout/stderr log excerpt (last ${MAX_DAEMON_STARTUP_LOG_BYTES} bytes):`,
+      logExcerpt,
+    ].join("\n");
+  }
+
+  private async readDaemonStartupLogExcerpt(logPath: string): Promise<string> {
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      file = await open(logPath, "r");
+      const { size } = await file.stat();
+      const start = Math.max(0, size - MAX_DAEMON_STARTUP_LOG_BYTES);
+      const length = size - start;
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, start);
+      const log = buffer.subarray(0, bytesRead).toString("utf-8").trim();
+      return start > 0 ? `...${log}` : log;
+    } catch (error) {
+      return `Unable to read daemon stdout/stderr log: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      await file?.close();
+    }
   }
 
   /**
@@ -646,25 +757,54 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Wait for daemon to be ready (socket listening)
    */
-  async waitForReady(timeout: number): Promise<boolean> {
+  async waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean> {
     const startTime = this.timer.now();
     const pollInterval = 100; // Poll every 100ms
 
     while (this.timer.now() - startTime < timeout) {
+      if (signal?.aborted) {
+        return false;
+      }
       if (existsSync(this.socketPath)) {
         const status = await this.status();
         if (status.running) {
           if (await this.verifyDaemonConnection()) {
             return true;
           }
+          if (signal?.aborted) {
+            return false;
+          }
           await this.removeInvalidSocketPath();
         }
       }
 
-      await this.timer.sleep(pollInterval);
+      await this.sleepUnlessAborted(pollInterval, signal);
     }
 
     return false;
+  }
+
+  private sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return this.timer.sleep(ms);
+    }
+    if (signal.aborted) {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      function done() {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }
+      const onAbort = () => {
+        this.timer.clearTimeout(timeout);
+        done();
+      };
+
+      const timeout = this.timer.setTimeout(done, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
   }
 
   private async verifyDaemonConnection(): Promise<boolean> {

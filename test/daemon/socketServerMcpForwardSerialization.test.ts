@@ -19,7 +19,11 @@ interface FakeMcpClient {
   close: () => Promise<void>;
 }
 
-function createFakeSession(sessionId: string, assignedDevice: string): Session {
+function createFakeSession(
+  sessionId: string,
+  assignedDevice: string,
+  customData: Record<string, unknown> = {}
+): Session {
   return {
     sessionId,
     assignedDevice,
@@ -27,7 +31,7 @@ function createFakeSession(sessionId: string, assignedDevice: string): Session {
     createdAt: 0,
     lastUsedAt: 0,
     expiresAt: 60_000,
-    cacheData: {},
+    cacheData: { customData },
     lastHeartbeat: 0,
     sessionTimeoutMs: 60_000,
     heartbeatTimeoutMs: 10_000,
@@ -36,13 +40,16 @@ function createFakeSession(sessionId: string, assignedDevice: string): Session {
   };
 }
 
-function createFakeDaemonState(sessionDevices: Map<string, string>) {
+function createFakeDaemonState(
+  sessionDevices: Map<string, string>,
+  sessionCustomData: Map<string, Record<string, unknown>>
+) {
   return {
     isInitialized: () => true,
     getSessionManager: () => ({
       getSession: (sessionId: string) => {
         const assignedDevice = sessionDevices.get(sessionId);
-        return assignedDevice ? createFakeSession(sessionId, assignedDevice) : null;
+        return assignedDevice ? createFakeSession(sessionId, assignedDevice, sessionCustomData.get(sessionId) ?? {}) : null;
       },
       releaseSession: async () => null,
     }),
@@ -159,16 +166,18 @@ describe("UnixSocketServer MCP forward serialization", () => {
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
   let sessionDevices: Map<string, string>;
+  let sessionCustomData: Map<string, Record<string, unknown>>;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-ser-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
     sessionDevices = new Map();
+    sessionCustomData = new Map();
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(sessionDevices),
+      createFakeDaemonState(sessionDevices, sessionCustomData),
       fakeTimer,
     );
     await server.start();
@@ -285,6 +294,112 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(b.success).toBe(true);
     expect(maxInFlight).toBe(1);
     expect(inFlight).toBe(0);
+  });
+
+  test("device-label tools/call serializes with explicit calls for the mapped device", async () => {
+    sessionDevices.set("session-a", "device-1");
+    sessionDevices.set("session-a:B", "device-2");
+    sessionCustomData.set("session-a", {
+      deviceLabelMap: {
+        A: "session-a",
+        B: "session-a:B",
+      },
+    });
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a", device: "B" }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-2" }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(maxInFlight).toBe(1);
+    expect(inFlight).toBe(0);
+  });
+
+  test("queued unbound session tools/call rekeys after the session binds to a device", async () => {
+    let inFlightAfterBind = 0;
+    let maxInFlightAfterBind = 0;
+    let releaseFirstSessionCall: () => void = () => {};
+    let resolveFirstSessionCallStarted: () => void = () => {};
+    let resolveSessionBound: () => void = () => {};
+    const firstSessionCallStarted = new Promise<void>(resolve => { resolveFirstSessionCallStarted = resolve; });
+    const firstSessionCallReleased = new Promise<void>(resolve => { releaseFirstSessionCall = resolve; });
+    const sessionBound = new Promise<void>(resolve => { resolveSessionBound = resolve; });
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          if (args.sessionUuid === "session-a" && !sessionDevices.has("session-a")) {
+            resolveFirstSessionCallStarted();
+            await firstSessionCallReleased;
+            sessionDevices.set("session-a", "device-1");
+            resolveSessionBound();
+            return { content: [] };
+          }
+
+          if (args.deviceId === "device-1") {
+            await sessionBound;
+          }
+
+          inFlightAfterBind += 1;
+          maxInFlightAfterBind = Math.max(maxInFlightAfterBind, inFlightAfterBind);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlightAfterBind -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const first = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
+    await firstSessionCallStarted;
+    const queuedSameSession = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
+    const explicitDevice = sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" });
+
+    releaseFirstSessionCall();
+
+    const [firstResult, sameSessionResult, explicitDeviceResult] = await Promise.all([
+      first,
+      queuedSameSession,
+      explicitDevice,
+    ]);
+
+    expect(firstResult.success).toBe(true);
+    expect(sameSessionResult.success).toBe(true);
+    expect(explicitDeviceResult.success).toBe(true);
+    expect(maxInFlightAfterBind).toBe(1);
+    expect(inFlightAfterBind).toBe(0);
   });
 
   test("concurrent tools/call for different devices can overlap inside callTool", async () => {

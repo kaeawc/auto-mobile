@@ -39,6 +39,7 @@ import type { KeyValueType } from "../features/storage/storageTypes";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
 const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+const DEVICE_LABEL_CACHE_KEY = "deviceLabelMap";
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -263,9 +264,9 @@ export class UnixSocketServer {
 
         const queueEnterMs = this.timer.now();
         const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
-        const forwardKey = this.getMcpForwardKey(request, sessionId);
+        const initialForwardKey = this.getMcpForwardKey(request, sessionId);
 
-        const result = await this.runKeyedMcpForward(forwardKey, async () => {
+        const result = await this.runMcpForwardForCurrentKey(initialForwardKey, request, sessionId, async forwardKey => {
           const queueWaitMs = this.timer.now() - queueEnterMs;
           const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
           const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
@@ -363,6 +364,24 @@ export class UnixSocketServer {
     return run;
   }
 
+  private runMcpForwardForCurrentKey<T>(
+    initialKey: string,
+    request: DaemonRequest,
+    socketSessionId: string,
+    fn: (forwardKey: string) => Promise<T>
+  ): Promise<T> {
+    return this.runKeyedMcpForward(initialKey, async () => {
+      const currentKey = this.getMcpForwardKey(request, socketSessionId);
+      if (currentKey !== initialKey) {
+        logger.debug(
+          `[McpForward] rekey requestId=${request.id} initialKey=${initialKey} currentKey=${currentKey}`
+        );
+        return await this.runMcpForwardForCurrentKey(currentKey, request, socketSessionId, fn);
+      }
+      return await fn(currentKey);
+    });
+  }
+
   private getMcpForwardKey(request: DaemonRequest, socketSessionId: string): string {
     if (request.method === "tools/call") {
       const args = request.params?.arguments;
@@ -399,16 +418,39 @@ export class UnixSocketServer {
       return `device:${record.deviceId}`;
     }
     if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
-      const assignedDevice = this.getAssignedDeviceForSession(record.sessionUuid);
+      const sessionUuid = this.resolveDeviceLabelSession(record.sessionUuid, record.device);
+      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
       if (assignedDevice) {
         return `device:${assignedDevice}`;
       }
-      return `session:${record.sessionUuid}`;
+      return `session:${sessionUuid}`;
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
       return `mcp-session:${record.__mcpSessionId}`;
     }
     return undefined;
+  }
+
+  private resolveDeviceLabelSession(baseSessionUuid: string, deviceLabel: unknown): string {
+    if (typeof deviceLabel !== "string" || deviceLabel.length === 0 || !this.daemonState.isInitialized()) {
+      return baseSessionUuid;
+    }
+    try {
+      const labelMap = this.daemonState
+        .getSessionManager()
+        .getSession(baseSessionUuid)
+        ?.cacheData.customData?.[DEVICE_LABEL_CACHE_KEY];
+      if (!labelMap || typeof labelMap !== "object" || Array.isArray(labelMap)) {
+        return baseSessionUuid;
+      }
+      const mappedSession = (labelMap as Record<string, unknown>)[deviceLabel];
+      return typeof mappedSession === "string" && mappedSession.length > 0
+        ? mappedSession
+        : baseSessionUuid;
+    } catch (error) {
+      logger.debug(`Unable to resolve device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`);
+      return baseSessionUuid;
+    }
   }
 
   private getAssignedDeviceForSession(sessionUuid: string): string | undefined {

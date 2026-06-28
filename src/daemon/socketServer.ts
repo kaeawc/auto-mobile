@@ -399,12 +399,28 @@ export class UnixSocketServer {
       return `device:${record.deviceId}`;
     }
     if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
+      const assignedDevice = this.getAssignedDeviceForSession(record.sessionUuid);
+      if (assignedDevice) {
+        return `device:${assignedDevice}`;
+      }
       return `session:${record.sessionUuid}`;
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
       return `mcp-session:${record.__mcpSessionId}`;
     }
     return undefined;
+  }
+
+  private getAssignedDeviceForSession(sessionUuid: string): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return this.daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+    } catch (error) {
+      logger.debug(`Unable to resolve device for session ${sessionUuid}: ${error}`);
+      return undefined;
+    }
   }
 
   /** Compact label for debug logs (method + tool name or resource URI). */

@@ -8,6 +8,7 @@ import { join } from "node:path";
 import { UnixSocketServer } from "../../src/daemon/socketServer";
 import { FakeTimer } from "../fakes/FakeTimer";
 import type { DaemonRequest, DaemonResponse } from "../../src/daemon/types";
+import type { Session } from "../../src/daemon/sessionManager";
 
 interface FakeMcpClient {
   callTool: (...args: unknown[]) => Promise<unknown>;
@@ -18,10 +19,33 @@ interface FakeMcpClient {
   close: () => Promise<void>;
 }
 
-function createFakeDaemonState() {
+function createFakeSession(sessionId: string, assignedDevice: string): Session {
+  return {
+    sessionId,
+    assignedDevice,
+    platform: "android",
+    createdAt: 0,
+    lastUsedAt: 0,
+    expiresAt: 60_000,
+    cacheData: {},
+    lastHeartbeat: 0,
+    sessionTimeoutMs: 60_000,
+    heartbeatTimeoutMs: 10_000,
+    heartbeatTimeoutSource: "default",
+    hasReceivedHeartbeat: false,
+  };
+}
+
+function createFakeDaemonState(sessionDevices: Map<string, string>) {
   return {
     isInitialized: () => true,
-    getSessionManager: () => ({ getSession: () => null, releaseSession: async () => null }),
+    getSessionManager: () => ({
+      getSession: (sessionId: string) => {
+        const assignedDevice = sessionDevices.get(sessionId);
+        return assignedDevice ? createFakeSession(sessionId, assignedDevice) : null;
+      },
+      releaseSession: async () => null,
+    }),
     getDevicePool: () => ({
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
@@ -134,15 +158,17 @@ describe("UnixSocketServer MCP forward serialization", () => {
   let socketPath: string;
   let server: UnixSocketServer;
   let fakeTimer: FakeTimer;
+  let sessionDevices: Map<string, string>;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-ser-${randomUUID()}.sock`);
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+    sessionDevices = new Map();
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(),
+      createFakeDaemonState(sessionDevices),
       fakeTimer,
     );
     await server.start();
@@ -217,6 +243,42 @@ describe("UnixSocketServer MCP forward serialization", () => {
     const [a, b] = await Promise.all([
       sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-a" }),
       sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1", sessionUuid: "session-b" }),
+    ]);
+
+    expect(a.success).toBe(true);
+    expect(b.success).toBe(true);
+    expect(maxInFlight).toBe(1);
+    expect(inFlight).toBe(0);
+  });
+
+  test("session-bound tools/call serializes with explicit calls for the same device", async () => {
+    sessionDevices.set("session-a", "device-1");
+    let inFlight = 0;
+    let maxInFlight = 0;
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async () => {
+          inFlight += 1;
+          maxInFlight = Math.max(maxInFlight, inFlight);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlight -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const [a, b] = await Promise.all([
+      sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" }),
+      sendToolsCallWithArgs(socketPath, "observe", { deviceId: "device-1" }),
     ]);
 
     expect(a.success).toBe(true);

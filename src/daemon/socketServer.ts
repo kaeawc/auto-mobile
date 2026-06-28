@@ -390,6 +390,11 @@ export class UnixSocketServer {
         return scopedKey;
       }
 
+      const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
+      if (implicitAutolockKey) {
+        return implicitAutolockKey;
+      }
+
       // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
       // pre-forward key so separate daemon clients can autolock and run independently.
       return `socket:${socketSessionId}`;
@@ -426,9 +431,37 @@ export class UnixSocketServer {
       return `session:${sessionUuid}`;
     }
     if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
-      return `mcp-session:${record.__mcpSessionId}`;
+      return this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ?? `mcp-session:${record.__mcpSessionId}`;
     }
     return undefined;
+  }
+
+  private getImplicitAutolockScopeKey(mcpSessionId: string, args: unknown): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      const platform = this.getRequestPlatform(args);
+      const autolockSession = this.daemonState
+        .getDevicePool()
+        .resolveAutolockSessionForMcpSession?.(mcpSessionId, platform);
+      if (!autolockSession) {
+        return undefined;
+      }
+      const assignedDevice = this.getAssignedDeviceForSession(autolockSession);
+      return assignedDevice ? `device:${assignedDevice}` : `session:${autolockSession}`;
+    } catch (error) {
+      logger.debug(`Unable to resolve autolock session for MCP session ${mcpSessionId}: ${error}`);
+      return undefined;
+    }
+  }
+
+  private getRequestPlatform(args: unknown): "android" | "ios" | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const platform = (args as Record<string, unknown>).platform;
+    return platform === "android" || platform === "ios" ? platform : undefined;
   }
 
   private resolveDeviceLabelSession(baseSessionUuid: string, deviceLabel: unknown): string {

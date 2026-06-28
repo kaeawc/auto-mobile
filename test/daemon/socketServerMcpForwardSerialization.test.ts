@@ -42,7 +42,8 @@ function createFakeSession(
 
 function createFakeDaemonState(
   sessionDevices: Map<string, string>,
-  sessionCustomData: Map<string, Record<string, unknown>>
+  sessionCustomData: Map<string, Record<string, unknown>>,
+  mcpAutolockSessions: Map<string, string>
 ) {
   return {
     isInitialized: () => true,
@@ -57,6 +58,9 @@ function createFakeDaemonState(
       refreshDevices: async () => 0,
       getStats: () => ({ total: 0, idle: 0, assigned: 0, error: 0 }),
       releaseDevice: async () => {},
+      resolveAutolockSessionForMcpSession: (mcpSessionId: string | undefined) => {
+        return mcpSessionId ? mcpAutolockSessions.get(mcpSessionId) : undefined;
+      },
     }),
   };
 }
@@ -167,6 +171,7 @@ describe("UnixSocketServer MCP forward serialization", () => {
   let fakeTimer: FakeTimer;
   let sessionDevices: Map<string, string>;
   let sessionCustomData: Map<string, Record<string, unknown>>;
+  let mcpAutolockSessions: Map<string, string>;
 
   beforeEach(async () => {
     socketPath = join(tmpdir(), `mcp-ser-${randomUUID()}.sock`);
@@ -174,10 +179,11 @@ describe("UnixSocketServer MCP forward serialization", () => {
     fakeTimer.enableAutoAdvance();
     sessionDevices = new Map();
     sessionCustomData = new Map();
+    mcpAutolockSessions = new Map();
     server = new UnixSocketServer(
       socketPath,
       "http://localhost:0/mcp",
-      createFakeDaemonState(sessionDevices, sessionCustomData),
+      createFakeDaemonState(sessionDevices, sessionCustomData, mcpAutolockSessions),
       fakeTimer,
     );
     await server.start();
@@ -400,6 +406,65 @@ describe("UnixSocketServer MCP forward serialization", () => {
     expect(explicitDeviceResult.success).toBe(true);
     expect(maxInFlightAfterBind).toBe(1);
     expect(inFlightAfterBind).toBe(0);
+  });
+
+  test("implicit autolock tools/call serializes with explicit session calls for the same device", async () => {
+    let inFlightAfterAutolock = 0;
+    let maxInFlightAfterAutolock = 0;
+    let releaseFirstImplicitCall: () => void = () => {};
+    let resolveAutolockReady: () => void = () => {};
+    const firstImplicitCallReleased = new Promise<void>(resolve => { releaseFirstImplicitCall = resolve; });
+    const autolockReady = new Promise<void>(resolve => { resolveAutolockReady = resolve; });
+
+    (server as any).createMcpClient = async () => {
+      const fake: FakeMcpClient = {
+        listTools: async () => ({ tools: [] }),
+        callTool: async request => {
+          const args = (request as { arguments: Record<string, unknown> }).arguments;
+          const mcpSessionId = String(args.__mcpSessionId);
+          if (!mcpAutolockSessions.has(mcpSessionId) && !args.sessionUuid) {
+            mcpAutolockSessions.set(mcpSessionId, "session-a");
+            sessionDevices.set("session-a", "device-1");
+            resolveAutolockReady();
+            await firstImplicitCallReleased;
+            return { content: [] };
+          }
+
+          if (args.sessionUuid === "session-a") {
+            await firstImplicitCallReleased;
+          }
+
+          inFlightAfterAutolock += 1;
+          maxInFlightAfterAutolock = Math.max(maxInFlightAfterAutolock, inFlightAfterAutolock);
+          await new Promise<void>(resolve => {
+            fakeTimer.setTimeout(resolve, 40);
+          });
+          inFlightAfterAutolock -= 1;
+          return { content: [] };
+        },
+        listResources: async () => ({ resources: [] }),
+        readResource: async () => ({ contents: [] }),
+        listResourceTemplates: async () => ({ resourceTemplates: [] }),
+        close: async () => {},
+      };
+      return fake;
+    };
+
+    const implicitSocketCalls = sendTwoToolsCallsOnOneSocket(socketPath, "observe");
+    await autolockReady;
+    const explicitSessionCall = sendToolsCallWithArgs(socketPath, "observe", { sessionUuid: "session-a" });
+
+    releaseFirstImplicitCall();
+
+    const [implicitResults, explicitSessionResult] = await Promise.all([
+      implicitSocketCalls,
+      explicitSessionCall,
+    ]);
+
+    expect(implicitResults.every(response => response.success)).toBe(true);
+    expect(explicitSessionResult.success).toBe(true);
+    expect(maxInFlightAfterAutolock).toBe(1);
+    expect(inFlightAfterAutolock).toBe(0);
   });
 
   test("concurrent tools/call for different devices can overlap inside callTool", async () => {

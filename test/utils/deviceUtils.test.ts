@@ -194,6 +194,27 @@ describe("MultiPlatformDeviceManager", () => {
     });
   });
 
+  test("listDeviceImages(ios) surfaces iOS image discovery failures", async () => {
+    const fakeSimctl = {
+      isAvailable: async () => true,
+      isUnsupportedDockerHostControlMode: () => false,
+      listSimulatorImages: async () => {
+        throw new Error("simctl list devices exploded");
+      }
+    } as unknown as SimCtlClient;
+    const fakeEmulator = {
+      listAvds: async () => []
+    } as unknown as AndroidEmulatorClient;
+
+    const manager = new MultiPlatformDeviceManager(
+      new FakeAdbClient() as unknown as AdbClient,
+      fakeSimctl,
+      fakeEmulator
+    );
+
+    await expect(manager.listDeviceImages("ios")).rejects.toThrow(/simctl list devices exploded/);
+  });
+
   test("listDeviceImages(either) keeps Android working and skips iOS in unsupported Docker host-control mode", async () => {
     await withProcessPlatform("linux", async () => {
       let simctlListCalls = 0;

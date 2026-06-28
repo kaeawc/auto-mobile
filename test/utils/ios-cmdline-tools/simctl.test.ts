@@ -2,6 +2,31 @@ import { expect, describe, test, beforeEach } from "bun:test";
 import { Simctl } from "../../../src/utils/ios-cmdline-tools/SimCtlClient";
 import { BootedDevice, ExecResult } from "../../../src/models";
 import { createExecResult } from "../../../src/utils/execResult";
+import { FakeTimer } from "../../fakes/FakeTimer";
+
+function resetSimctlCaches(): void {
+  const simctlClass = Simctl as unknown as {
+    deviceListCache: { devices: unknown[]; timestamp: number } | null;
+    localSimctlAvailability: Promise<void> | null;
+  };
+  simctlClass.deviceListCache = null;
+  simctlClass.localSimctlAvailability = null;
+}
+
+function forceStaticAvailabilityPath(instance: Simctl): void {
+  (instance as unknown as { usesInjectedExecAsync: boolean }).usesInjectedExecAsync = false;
+}
+
+function simulatorListPayload(devices: unknown[]): string {
+  return JSON.stringify({
+    devices: {
+      "com.apple.CoreSimulator.SimRuntime.iOS-26-4": devices
+    },
+    runtimes: [],
+    devicetypes: [],
+    pairs: []
+  });
+}
 
 describe("Simctl", function() {
   let simctl: Simctl;
@@ -9,6 +34,8 @@ describe("Simctl", function() {
   let mockExecAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
   beforeEach(function() {
+    resetSimctlCaches();
+
     mockDevice = {
       deviceId: "test-ios-device-id",
       name: "Test iOS Device",
@@ -143,6 +170,96 @@ describe("Simctl", function() {
   });
 
   describe("listSimulatorImages", function() {
+    test("should retry local simctl availability after a transient failed probe", async function() {
+      let versionProbeCalls = 0;
+      const payload = simulatorListPayload([
+        {
+          udid: "iphone-17-pro-udid",
+          name: "iPhone 17 Pro",
+          state: "Booted",
+          isAvailable: true,
+          deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+          os_version: "26.4"
+        }
+      ]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          versionProbeCalls++;
+          if (versionProbeCalls === 1) {
+            throw new Error("transient xcrun failure");
+          }
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          return createExecResult(payload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, null, undefined, "darwin");
+      forceStaticAvailabilityPath(simctl);
+
+      await expect(simctl.listSimulatorImages()).rejects.toThrow(/transient xcrun failure/);
+      const devices = await simctl.listSimulatorImages();
+
+      expect(versionProbeCalls).toBe(2);
+      expect(devices.map(device => device.name)).toEqual(["iPhone 17 Pro"]);
+    });
+
+    test("should not cache an empty simulator discovery result", async function() {
+      const timer = new FakeTimer();
+      let listCalls = 0;
+      const emptyPayload = simulatorListPayload([]);
+      const populatedPayload = simulatorListPayload([
+        {
+          udid: "iphone-17-pro-udid",
+          name: "iPhone 17 Pro",
+          state: "Booted",
+          isAvailable: true,
+          deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
+          os_version: "26.4"
+        }
+      ]);
+
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          listCalls++;
+          return createExecResult(listCalls === 1 ? emptyPayload : populatedPayload, "");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync, null, timer);
+
+      expect(await simctl.listSimulatorImages()).toEqual([]);
+      const devices = await simctl.listSimulatorImages();
+
+      expect(listCalls).toBe(2);
+      expect(devices.map(device => device.name)).toEqual(["iPhone 17 Pro"]);
+    });
+
+    test("should surface simctl discovery failures instead of returning an empty list", async function() {
+      mockExecAsync = async (file: string, args: string[]): Promise<ExecResult> => {
+        if (file === "xcrun" && args.join(" ") === "simctl --version") {
+          return createExecResult("simctl version 1051.50", "");
+        }
+        if (file === "xcrun" && args.join(" ") === "simctl list devices --json") {
+          throw new Error("simctl list devices exploded");
+        }
+        return createExecResult("", "");
+      };
+
+      simctl = new Simctl(null, mockExecAsync);
+
+      await expect(simctl.listSimulatorImages()).rejects.toThrow(
+        /Failed to list iOS simulator devices.*simctl list devices exploded/
+      );
+    });
+
     test("should include unavailable and transitional simulators", async function() {
       const simulatorPayload = {
         devices: {
@@ -212,8 +329,6 @@ describe("Simctl", function() {
       };
 
       simctl = new Simctl(null, mockExecAsync);
-      (Simctl as unknown as { deviceListCache: { devices: unknown[]; timestamp: number } | null })
-        .deviceListCache = null;
 
       const devices = await simctl.listSimulatorImages();
 

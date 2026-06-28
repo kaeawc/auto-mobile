@@ -347,12 +347,13 @@ export class SimCtlClient implements SimCtl {
   execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
   private hostControl: SimctlHostControlRunner;
   private timer: Timer;
+  private platform: NodeJS.Platform;
   private readonly usesInjectedExecAsync: boolean;
 
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[], timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
-  private static localSimctlAvailability: Promise<boolean> | null = null;
+  private static localSimctlAvailability: Promise<void> | null = null;
 
   /**
    * Create an IosUtils instance
@@ -365,12 +366,14 @@ export class SimCtlClient implements SimCtl {
     device: BootedDevice | null = null,
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>) | null = null,
     hostControlRunner: SimctlHostControlRunner | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    platform: NodeJS.Platform = process.platform
   ) {
     this.device = device;
     this.usesInjectedExecAsync = execAsyncFn !== null;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
+    this.platform = platform;
     this.hostControl = hostControlRunner || {
       isAvailable: () => isHostControlAvailable(),
       isRunningInDocker,
@@ -420,9 +423,12 @@ export class SimCtlClient implements SimCtl {
 
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
-    if (!(await this.isLocalSimctlAvailable())) {
-      const message = process.platform === "darwin"
-        ? "simctl is not available. Please install Xcode command line tools to continue."
+    try {
+      await this.ensureLocalSimctlAvailable();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = this.platform === "darwin"
+        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
         : "iOS simulator tooling is only available on macOS.";
       throw new ActionableError(message);
     }
@@ -495,30 +501,36 @@ export class SimCtlClient implements SimCtl {
     return this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
   }
 
-  private async isLocalSimctlAvailable(): Promise<boolean> {
+  private async ensureLocalSimctlAvailable(): Promise<void> {
     if (this.usesInjectedExecAsync) {
-      try {
-        await this.execAsync("xcrun", ["simctl", "--version"]);
-        return true;
-      } catch {
-        return false;
-      }
+      await this.execAsync("xcrun", ["simctl", "--version"]);
+      return;
     }
 
-    if (process.platform !== "darwin") {
-      return false;
+    if (this.platform !== "darwin") {
+      throw new ActionableError("iOS simulator tooling is only available on macOS.");
     }
 
     if (!SimCtlClient.localSimctlAvailability) {
       SimCtlClient.localSimctlAvailability = this.execAsync("xcrun", ["simctl", "--version"])
-        .then(() => true)
+        .then(() => undefined)
         .catch(err => {
+          SimCtlClient.localSimctlAvailability = null;
           logger.debug(`[iOS] simctl unavailable: ${err instanceof Error ? err.message : String(err)}`);
-          return false;
+          throw err;
         });
     }
 
-    return SimCtlClient.localSimctlAvailability;
+    await SimCtlClient.localSimctlAvailability;
+  }
+
+  private async isLocalSimctlAvailable(): Promise<boolean> {
+    try {
+      await this.ensureLocalSimctlAvailable();
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   /**
@@ -680,17 +692,21 @@ export class SimCtlClient implements SimCtl {
         }
       }
 
-      // Cache the result
-      SimCtlClient.deviceListCache = {
-        devices,
-        timestamp: this.timer.now()
-      };
-
       devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
+      if (devices.length > 0) {
+        SimCtlClient.deviceListCache = {
+          devices,
+          timestamp: this.timer.now()
+        };
+      } else {
+        SimCtlClient.deviceListCache = null;
+      }
       return devices;
     } catch (error) {
-      logger.debug(`Failed to get iOS devices: ${error}`);
-      return [];
+      SimCtlClient.deviceListCache = null;
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.warn(`Failed to get iOS devices: ${detail}`);
+      throw new ActionableError(`Failed to list iOS simulator devices: ${detail}`);
     }
   }
 

@@ -1,5 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { resolveDaemonLaunchCommand, runDaemonCommand } from "../../src/daemon/manager";
+import { DaemonManager, parseDaemonProcessTable, resolveDaemonLaunchCommand, runDaemonCommand } from "../../src/daemon/manager";
+import type { DaemonProcessFinder, DaemonProcessRecord } from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
 
@@ -33,6 +34,14 @@ class FakeDaemonClient implements DaemonClientLike {
   }
 }
 
+class FakeDaemonProcessFinder implements DaemonProcessFinder {
+  constructor(private readonly records: DaemonProcessRecord[]) {}
+
+  findDaemonProcesses(): DaemonProcessRecord[] {
+    return this.records;
+  }
+}
+
 describe("resolveDaemonLaunchCommand", () => {
   test("uses the current entry script when one is available", () => {
     const launch = resolveDaemonLaunchCommand("/tmp/auto-mobile/dist/src/index.js", "bunx", "1.2.3");
@@ -56,6 +65,109 @@ describe("resolveDaemonLaunchCommand", () => {
     expect(() => resolveDaemonLaunchCommand("", "bunx", "unknown")).toThrow(
       "current package version is unknown"
     );
+  });
+});
+
+describe("Daemon manager process detection", () => {
+  test("parses daemon processes from ps pid ppid command output", () => {
+    const records = parseDaemonProcessTable(`
+      10     1 /usr/bin/unrelated --daemon-mode
+      20     1 /bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"
+      21    20 bun /worktree/dist/src/index.js --daemon-mode
+      22     1 bun /worktree/dist/src/index.js
+      30     1 bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode
+    `);
+
+    expect(records).toEqual([
+      {
+        pid: 20,
+        ppid: 1,
+        command: `/bin/sh -c "bun /worktree/dist/src/index.js --daemon-mode"`,
+      },
+      {
+        pid: 21,
+        ppid: 20,
+        command: "bun /worktree/dist/src/index.js --daemon-mode",
+      },
+      {
+        pid: 30,
+        ppid: 1,
+        command: "bunx -y @kaeawc/auto-mobile@0.0.38 --daemon-mode",
+      },
+    ]);
+  });
+
+  function managerWithProcesses(records: DaemonProcessRecord[]): DaemonManager {
+    return new DaemonManager(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      new FakeDaemonProcessFinder(records)
+    );
+  }
+
+  test("reports a shell-launched daemon once using the long-lived daemon child PID", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 100,
+        ppid: 1,
+        command: `/bin/sh -c "${process.execPath} /tmp/auto-mobile/dist/src/index.js --daemon-mode"`,
+      },
+      {
+        pid: 101,
+        ppid: 100,
+        command: `${process.execPath} /tmp/auto-mobile/dist/src/index.js --daemon-mode`,
+      },
+    ]);
+
+    expect(manager.findAllDaemonProcesses()).toEqual([101]);
+  });
+
+  test("does not report the current daemon's shell wrapper as another daemon", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 100,
+        ppid: 1,
+        command: `/bin/sh -c "${process.execPath} /tmp/auto-mobile/dist/src/index.js --daemon-mode"`,
+      },
+      {
+        pid: process.pid,
+        ppid: 100,
+        command: `${process.execPath} /tmp/auto-mobile/dist/src/index.js --daemon-mode`,
+      },
+    ]);
+
+    expect(manager.findAllDaemonProcesses()).toEqual([]);
+  });
+
+  test("filters the active daemon PID while preserving distinct daemons", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 200,
+        ppid: 1,
+        command: `/bin/sh -c "bun /worktree-a/dist/src/index.js --daemon-mode"`,
+      },
+      {
+        pid: 201,
+        ppid: 200,
+        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+      },
+      {
+        pid: 300,
+        ppid: 1,
+        command: `/bin/sh -c "bun /worktree-b/dist/src/index.js --daemon-mode"`,
+      },
+      {
+        pid: 301,
+        ppid: 300,
+        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+      },
+    ]);
+
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([301]);
   });
 });
 

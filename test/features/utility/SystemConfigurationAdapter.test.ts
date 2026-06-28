@@ -263,13 +263,25 @@ describe("SystemConfigurationAdapter", () => {
 
     it("returns a verification error when physical locale read-back does not match", async () => {
       const lockdown = new FakeLockdownLocaleClient();
-      lockdown.setLanguageConfigAfterWrite = { language: "fr", locale: "fr_FR" };
+      lockdown.setLanguageConfigAfterWrite = { language: "ja", locale: "fr_FR" };
       const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
       const result = await adapter.setLocale("ja-JP", {});
 
       expect(result.success).toBe(false);
       expect(result.error).toContain("Read-back verification failed");
       expect(result.error).toContain("expected \"ja_JP\"");
+    });
+
+    it("returns a verification error when physical language read-back does not match", async () => {
+      const lockdown = new FakeLockdownLocaleClient();
+      lockdown.setLanguageConfigAfterWrite = { language: "en", locale: "ja_JP" };
+      const adapter = new IosSystemConfigurationAdapter(iosPhysical, new FakeProcessExecutor(), lockdown);
+      const result = await adapter.setLocale("ja-JP", {});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("Read-back verification failed");
+      expect(result.error).toContain("Language");
+      expect(result.error).toContain("expected \"ja\"");
     });
 
     it("surfaces pairing or lockdown write failures for physical locale changes", async () => {

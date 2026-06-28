@@ -309,6 +309,14 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
       await this.lockdownLocaleClient.setLanguage(this.device.deviceId, language, appleLocale);
 
       const after = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
+      if (after.language !== language) {
+        return {
+          success: false,
+          languageTag,
+          previousLanguageTag: before.locale ?? undefined,
+          error: `Read-back verification failed for Language: expected "${language}" but got "${after.language ?? "null"}"`
+        };
+      }
       if (after.locale !== appleLocale) {
         return {
           success: false,

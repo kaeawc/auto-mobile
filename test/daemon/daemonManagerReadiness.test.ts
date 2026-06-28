@@ -340,6 +340,34 @@ describe("DaemonManager readiness", () => {
     }
   });
 
+  test("subprocess failure wins when readiness polling is aborted", async () => {
+    const { lockPath, pidPath, socketPath } = createPaths();
+    const fakeTimer = new FakeTimer();
+    const spawner = new FakeDaemonSpawner();
+    spawner.logText = "fatal startup error\nSQLITE_BUSY: database is locked\n";
+    spawner.onSpawn = process => process.emit("exit", 7, null);
+
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      fakeTimer,
+      lockPath,
+      pidPath,
+      socketPath,
+      spawner
+    );
+    const findSpy = spyOn(manager, "findAllDaemonProcesses").mockReturnValue([]);
+
+    try {
+      await expect(manager.start()).rejects.toThrow(
+        /Daemon subprocess exited before becoming ready \(exit code 7\)[\s\S]*SQLITE_BUSY: database is locked/
+      );
+      expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+    } finally {
+      findSpy.mockRestore();
+    }
+  });
+
   test("spawn failures preserve the raw spawn error", async () => {
     const { lockPath, pidPath, socketPath } = createPaths();
     const fakeTimer = new FakeTimer();

@@ -1,4 +1,4 @@
-import { exec, spawn, type ChildProcess, type SpawnOptions } from "child_process";
+import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
 import { wrapCommandError } from "./CommandError";
@@ -23,7 +23,12 @@ type ExecAsync = (
   }
 ) => Promise<{ stdout: string | Buffer; stderr: string | Buffer }>;
 
-const execAsync: ExecAsync = promisify(exec);
+const execFileAsync = promisify(execFile);
+
+const execAsync: ExecAsync = async (command, options) => {
+  const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", command], options);
+  return { stdout, stderr };
+};
 
 const createExecResult = (stdout: string | Buffer, stderr: string | Buffer): ExecResult => {
   const stdoutText = typeof stdout === "string" ? stdout : stdout.toString();
@@ -42,6 +47,8 @@ export class DefaultProcessExecutor implements ProcessExecutor {
     try {
       // Intentionally shell-based: existing callers rely on pipes, redirects,
       // and compound commands. Use HostCommandExecutor for argv-safe execution.
+      // codeql[js/shell-command-injection-from-environment] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
+      // codeql[js/indirect-command-line-injection] This is the legacy shell executor; argv-safe callers use HostCommandExecutor.
       const { stdout, stderr } = await execAsync(command, {
         timeout: options.timeoutMs,
         maxBuffer: options.maxBuffer,

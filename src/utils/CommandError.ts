@@ -52,7 +52,7 @@ export function formatCommandError(error: unknown, options: CommandErrorFormatOp
   if (err.signal) {
     lines.push(`signal: ${err.signal}`);
   }
-  lines.push(`raw error: ${baseMessage}`);
+  lines.push(`raw error: (last ${MAX_COMMAND_OUTPUT_CHARS} chars) ${baseMessage}`);
   if (stdout.trim().length > 0) {
     lines.push(`stdout: (last ${MAX_COMMAND_OUTPUT_CHARS} chars)`, outputExcerpt(stdout));
   }

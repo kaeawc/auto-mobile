@@ -229,10 +229,10 @@ public class CommandHandler: CommandHandling {
         guard let rules = request.rules else {
             throw CommandError.missingParameter("rules")
         }
-        let ok = sdkHierarchyClient?.setMockRules(rules) ?? false
+        let succeeded = sdkHierarchyClient?.setMockRules(rules) ?? false
         return SetNetworkMockRulesResponse(
             requestId: request.requestId,
-            ok: ok,
+            ok: succeeded,
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
@@ -405,7 +405,9 @@ public class CommandHandler: CommandHandling {
         _ request: WebSocketRequest,
         startTime: Date,
         defaultFingers: Int = 2
-    ) throws -> WebSocketResponse {
+    )
+        throws -> WebSocketResponse
+    {
         guard let x1 = request.x1, let y1 = request.y1,
               let x2 = request.x2, let y2 = request.y2
         else {
@@ -1329,7 +1331,7 @@ public class CommandHandler: CommandHandling {
                 databasePath: databasePath,
                 table: table,
                 limit: request.limit ?? 50,
-                offset: request.offset ?? 0
+                offset: Int(request.offset ?? 0)
             )
             return TableDataResponse(
                 requestId: request.requestId,

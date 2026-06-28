@@ -145,6 +145,56 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
         XCTAssertEqual(fakeDriver.executeSqlCalls.count, 0)
     }
 
+    func testTableDataRejectsUnknownTableBeforeOpeningSqlite() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        fakeDriver.tablesByDatabase = ["/app/Documents/app.db": ["notes"]]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let request = SdkTableDataRequest(
+            databasePath: "/app/Documents/app.db",
+            table: "notess",
+            limit: 50,
+            offset: 0
+        )
+        let body = try JSONEncoder().encode(request)
+
+        let response = SdkDatabaseRouteHandler().handleTableData(body: body)
+
+        XCTAssertEqual(response.statusCode, 404)
+        let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+        XCTAssertEqual(payload.error, "unknown_table")
+        XCTAssertEqual(fakeDriver.tableDataCalls.count, 0)
+    }
+
+    func testTableStructureRejectsUnknownTableBeforeOpeningSqlite() throws {
+        let fakeDriver = RouteFakeDatabaseDriver()
+        fakeDriver.databases = [
+            DatabaseDescriptor(name: "app.db", path: "/app/Documents/app.db", sizeBytes: 1024),
+        ]
+        fakeDriver.tablesByDatabase = ["/app/Documents/app.db": ["notes"]]
+        DatabaseInspector.shared.initialize()
+        DatabaseInspector.shared.setDriver(fakeDriver)
+        DatabaseInspector.shared.setEnabled(true)
+
+        let request = SdkTableStructureRequest(
+            databasePath: "/app/Documents/app.db",
+            table: "notess"
+        )
+        let body = try JSONEncoder().encode(request)
+
+        let response = SdkDatabaseRouteHandler().handleTableStructure(body: body)
+
+        XCTAssertEqual(response.statusCode, 404)
+        let payload = try JSONDecoder().decode(SdkDatabaseErrorPayload.self, from: response.body)
+        XCTAssertEqual(payload.error, "unknown_table")
+        XCTAssertEqual(fakeDriver.tableStructureCalls.count, 0)
+    }
+
     func testExecuteSqlReturnsDisabledWhenInspectorNotEnabled() throws {
         DatabaseInspector.shared.initialize()
         DatabaseInspector.shared.setEnabled(false)
@@ -160,23 +210,33 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
 
 private final class RouteFakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     var databases: [DatabaseDescriptor] = []
+    var tablesByDatabase: [String: [String]] = [:]
     var sqlResult = SQLExecutionResult(columns: nil, rows: nil, rowsAffected: 0)
     var executeSqlCalls: [(databasePath: String, query: String)] = []
+    var tableDataCalls: [SdkTableDataRequest] = []
+    var tableStructureCalls: [(databasePath: String, table: String)] = []
 
     func getDatabases() -> [DatabaseDescriptor] {
         databases
     }
 
-    func getTables(databasePath _: String) -> [String] {
-        []
+    func getTables(databasePath: String) -> [String] {
+        tablesByDatabase[databasePath] ?? []
     }
 
-    func getTableData(databasePath _: String, table _: String, limit _: Int, offset _: Int) -> TableDataResult {
-        TableDataResult(columns: [], rows: [], totalRows: 0)
+    func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult {
+        tableDataCalls.append(SdkTableDataRequest(
+            databasePath: databasePath,
+            table: table,
+            limit: limit,
+            offset: offset
+        ))
+        return TableDataResult(columns: [], rows: [], totalRows: 0)
     }
 
-    func getTableStructure(databasePath _: String, table _: String) -> TableStructureResult {
-        TableStructureResult(columns: [])
+    func getTableStructure(databasePath: String, table: String) -> TableStructureResult {
+        tableStructureCalls.append((databasePath: databasePath, table: table))
+        return TableStructureResult(columns: [])
     }
 
     func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {

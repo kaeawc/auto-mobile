@@ -107,6 +107,9 @@
             guard isKnownDatabasePath(request.databasePath, driver: driver) else {
                 return error(statusCode: 404, code: "unknown_database_path")
             }
+            guard isKnownTable(request.table, databasePath: request.databasePath, driver: driver) else {
+                return error(statusCode: 404, code: "unknown_table")
+            }
 
             let result = driver.getTableData(
                 databasePath: request.databasePath,
@@ -126,6 +129,9 @@
             }
             guard isKnownDatabasePath(request.databasePath, driver: driver) else {
                 return error(statusCode: 404, code: "unknown_database_path")
+            }
+            guard isKnownTable(request.table, databasePath: request.databasePath, driver: driver) else {
+                return error(statusCode: 404, code: "unknown_table")
             }
 
             let result = driver.getTableStructure(databasePath: request.databasePath, table: request.table)
@@ -164,6 +170,10 @@
 
         private func isKnownDatabasePath(_ databasePath: String, driver: DatabaseDriver) -> Bool {
             driver.getDatabases().contains { $0.path == databasePath }
+        }
+
+        private func isKnownTable(_ table: String, databasePath: String, driver: DatabaseDriver) -> Bool {
+            driver.getTables(databasePath: databasePath).contains(table)
         }
 
         private func encode<T: Encodable>(_ payload: T) -> SdkRouteResponse {

@@ -158,7 +158,8 @@ describe("PostNotification", () => {
 
     try {
       expect(result.success).toBe(true);
-      expect(fakeAdb.wasCommandExecuted(`push "${imagePath}"`)).toBe(true);
+      const pushCommand = fakeAdb.getExecutedCommands().find(command => command.startsWith("push "));
+      expect(pushCommand?.replace(/\\\\/g, "\\")).toContain(`"${imagePath}"`);
       expect(fakeAdb.wasCommandExecuted("/sdcard/Download/automobile/pic.png")).toBe(true);
     } finally {
       await rm(tmpDir, { recursive: true, force: true });

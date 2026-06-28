@@ -124,4 +124,31 @@ describe("AppFileService", () => {
     expect(calls[1]?.command).toContain("shell base64 '/sdcard/Android/data/com.example.app/files/screenshots/home.png'");
     expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
   });
+
+  test("uses an expanded ADB maxBuffer when listing Android app files", async () => {
+    const adbFactory = new FakeAdbClientFactory();
+    const service = createAppFileServiceForTesting({
+      adbFactory,
+      simctlFactory: () => {
+        throw new Error("simctl not used");
+      },
+    });
+    const device: BootedDevice = {
+      deviceId: "emulator-5554",
+      name: "Pixel",
+      platform: "android",
+    };
+
+    await (service as any).listAndroidFiles(device, "com.example.app", "documents");
+    await (service as any).listAndroidFiles(device, "com.example.app", "externalFiles");
+
+    const calls = adbFactory.getFakeClient().getCommandCalls();
+    expect(calls).toHaveLength(2);
+    expect(calls[0]?.command).toContain("shell run-as 'com.example.app' sh -c");
+    expect(calls[0]?.command).toContain("find");
+    expect(calls[0]?.maxBuffer).toBeGreaterThan(1024 * 1024);
+    expect(calls[1]?.command).toContain("shell if [ -d '/sdcard/Android/data/com.example.app/files'");
+    expect(calls[1]?.command).toContain("find");
+    expect(calls[1]?.maxBuffer).toBe(calls[0]?.maxBuffer);
+  });
 });

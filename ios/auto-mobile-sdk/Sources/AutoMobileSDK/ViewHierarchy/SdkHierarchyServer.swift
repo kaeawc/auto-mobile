@@ -13,6 +13,7 @@ import Network
 final class SdkHierarchyServer: @unchecked Sendable {
 
     static let port: UInt16 = 8766
+    private static let httpHeaderDelimiter = Data("\r\n\r\n".utf8)
 
     private let lock = NSLock()
     private var listener: NWListener?
@@ -86,45 +87,54 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 return
             }
 
-            guard let data, let request = String(data: data, encoding: .utf8) else {
+            guard let data = data else {
                 connection.cancel()
                 return
             }
 
-            if request.contains("GET /hierarchy/fresh") {
-                self.handleFreshHierarchy(connection)
-            } else if request.contains("GET /hierarchy") {
-                self.handleCachedHierarchy(connection)
-            } else if request.contains("GET /health") {
-                self.handleHealth(connection)
-            } else if request.contains("POST /network/mock") {
-                self.handleNetworkMock(connection, data: data)
-            } else if request.contains("POST /highlight") {
-                self.handleHighlight(connection, data: data)
-            } else if request.contains("POST /db/execute") {
-                self.sendRouteResponse(
-                    connection,
-                    self.databaseRouteHandler.handleExecuteSql(body: Self.httpBody(from: data) ?? Data())
-                )
-            } else if request.contains("POST /db/list") {
-                self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
-            } else if request.contains("POST /db/tables") {
-                self.sendRouteResponse(
-                    connection,
-                    self.databaseRouteHandler.handleListTables(body: Self.httpBody(from: data) ?? Data())
-                )
-            } else if request.contains("POST /db/table-data") {
-                self.sendRouteResponse(
-                    connection,
-                    self.databaseRouteHandler.handleTableData(body: Self.httpBody(from: data) ?? Data())
-                )
-            } else if request.contains("POST /db/table-structure") {
-                self.sendRouteResponse(
-                    connection,
-                    self.databaseRouteHandler.handleTableStructure(body: Self.httpBody(from: data) ?? Data())
-                )
-            } else {
-                self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
+            self.readCompleteHttpHeaders(connection, initialData: data) { [weak self] requestData in
+                guard let self = self else {
+                    connection.cancel()
+                    return
+                }
+                guard let requestData = requestData,
+                      let headerData = Self.httpHeaderData(from: requestData),
+                      let request = String(data: headerData, encoding: .utf8) else {
+                    connection.cancel()
+                    return
+                }
+
+                if request.contains("GET /hierarchy/fresh") {
+                    self.handleFreshHierarchy(connection)
+                } else if request.contains("GET /hierarchy") {
+                    self.handleCachedHierarchy(connection)
+                } else if request.contains("GET /health") {
+                    self.handleHealth(connection)
+                } else if request.contains("POST /network/mock") {
+                    self.handleNetworkMock(connection, initialData: requestData)
+                } else if request.contains("POST /highlight") {
+                    self.handleHighlight(connection, initialData: requestData)
+                } else if request.contains("POST /db/execute") {
+                    self.handleBodyRoute(connection, initialData: requestData) {
+                        self.databaseRouteHandler.handleExecuteSql(body: $0)
+                    }
+                } else if request.contains("POST /db/list") {
+                    self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+                } else if request.contains("POST /db/tables") {
+                    self.handleBodyRoute(connection, initialData: requestData) {
+                        self.databaseRouteHandler.handleListTables(body: $0)
+                    }
+                } else if request.contains("POST /db/table-data") {
+                    self.handleBodyRoute(connection, initialData: requestData) {
+                        self.databaseRouteHandler.handleTableData(body: $0)
+                    }
+                } else if request.contains("POST /db/table-structure") {
+                    self.handleBodyRoute(connection, initialData: requestData) {
+                        self.databaseRouteHandler.handleTableStructure(body: $0)
+                    }
+                } else {
+                    self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
+                }
             }
         }
     }
@@ -164,33 +174,189 @@ final class SdkHierarchyServer: @unchecked Sendable {
         sendResponse(connection, statusCode: 200, body: data)
     }
 
-    private func handleNetworkMock(_ connection: NWConnection, data: Data) {
-        guard let body = Self.httpBody(from: data),
-              let payload = try? JSONDecoder().decode(SetMockRulesBody.self, from: body) else {
-            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
-            return
+    private func handleNetworkMock(_ connection: NWConnection, initialData: Data) {
+        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
+            guard let self = self else {
+                connection.cancel()
+                return
+            }
+            guard let body = body,
+                  let payload = try? JSONDecoder().decode(SetMockRulesBody.self, from: body) else {
+                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                return
+            }
+            NetworkMockRuleStore.shared.setRules(payload.rules)
+            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
-        NetworkMockRuleStore.shared.setRules(payload.rules)
-        sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
     }
 
-    private func handleHighlight(_ connection: NWConnection, data: Data) {
-        guard let body = Self.httpBody(from: data),
-              let payload = try? JSONDecoder().decode(SdkAddHighlightBody.self, from: body) else {
-            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
-            return
+    private func handleHighlight(_ connection: NWConnection, initialData: Data) {
+        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
+            guard let self = self else {
+                connection.cancel()
+                return
+            }
+            guard let body = body,
+                  let payload = try? JSONDecoder().decode(SdkAddHighlightBody.self, from: body) else {
+                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"bad_request\"}".utf8))
+                return
+            }
+            guard SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape) else {
+                self.sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"highlight_failed\"}".utf8))
+                return
+            }
+            self.sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
         }
-        guard SdkHighlightOverlayManager.shared.show(id: payload.id, shape: payload.shape) else {
-            sendResponse(connection, statusCode: 400, body: Data("{\"error\":\"highlight_failed\"}".utf8))
-            return
-        }
-        sendResponse(connection, statusCode: 200, body: Data("{\"status\":\"ok\"}".utf8))
     }
 
-    private static func httpBody(from data: Data) -> Data? {
-        let delimiter = Data("\r\n\r\n".utf8)
-        guard let range = data.range(of: delimiter) else { return nil }
-        return data[range.upperBound...]
+    private func handleBodyRoute(
+        _ connection: NWConnection,
+        initialData: Data,
+        route: @escaping (Data) -> SdkRouteResponse
+    ) {
+        readCompleteHttpBody(connection, initialData: initialData) { [weak self] body in
+            guard let self = self else {
+                connection.cancel()
+                return
+            }
+            self.sendRouteResponse(connection, route(body ?? Data()))
+        }
+    }
+
+    private func readCompleteHttpHeaders(
+        _ connection: NWConnection,
+        initialData: Data,
+        completion: @escaping (Data?) -> Void
+    ) {
+        if initialData.range(of: Self.httpHeaderDelimiter) != nil {
+            completion(initialData)
+            return
+        }
+
+        connection.receive(minimumIncompleteLength: 1, maximumLength: 65536) { [weak self] data, _, isComplete, error in
+            if error != nil {
+                completion(nil)
+                return
+            }
+
+            var nextData = initialData
+            if let data = data {
+                nextData.append(data)
+            }
+
+            if nextData.range(of: Self.httpHeaderDelimiter) != nil {
+                completion(nextData)
+                return
+            }
+            if isComplete {
+                completion(nil)
+                return
+            }
+
+            guard let self = self else {
+                completion(nil)
+                return
+            }
+
+            self.readCompleteHttpHeaders(connection, initialData: nextData, completion: completion)
+        }
+    }
+
+    private func readCompleteHttpBody(
+        _ connection: NWConnection,
+        initialData: Data,
+        completion: @escaping (Data?) -> Void
+    ) {
+        guard let range = initialData.range(of: Self.httpHeaderDelimiter) else {
+            completion(nil)
+            return
+        }
+
+        let headerData = initialData[..<range.lowerBound]
+        let body = Data(initialData[range.upperBound...])
+        guard let contentLength = Self.contentLength(from: Data(headerData)) else {
+            completion(body)
+            return
+        }
+        guard contentLength >= 0 else {
+            completion(nil)
+            return
+        }
+
+        if body.count >= contentLength {
+            completion(Data(body.prefix(contentLength)))
+            return
+        }
+
+        receiveRemainingHttpBody(
+            connection,
+            accumulatedBody: body,
+            expectedLength: contentLength,
+            completion: completion
+        )
+    }
+
+    private func receiveRemainingHttpBody(
+        _ connection: NWConnection,
+        accumulatedBody: Data,
+        expectedLength: Int,
+        completion: @escaping (Data?) -> Void
+    ) {
+        let remainingLength = expectedLength - accumulatedBody.count
+        guard remainingLength > 0 else {
+            completion(Data(accumulatedBody.prefix(expectedLength)))
+            return
+        }
+
+        connection.receive(minimumIncompleteLength: 1, maximumLength: min(65536, remainingLength)) { [weak self] data, _, isComplete, error in
+            if error != nil {
+                completion(nil)
+                return
+            }
+
+            var nextBody = accumulatedBody
+            if let data = data {
+                nextBody.append(data)
+            }
+
+            if nextBody.count >= expectedLength {
+                completion(Data(nextBody.prefix(expectedLength)))
+                return
+            }
+            if isComplete {
+                completion(nil)
+                return
+            }
+
+            guard let self = self else {
+                completion(nil)
+                return
+            }
+
+            self.receiveRemainingHttpBody(
+                connection,
+                accumulatedBody: nextBody,
+                expectedLength: expectedLength,
+                completion: completion
+            )
+        }
+    }
+
+    private static func contentLength(from headerData: Data) -> Int? {
+        guard let headers = String(data: headerData, encoding: .utf8) else { return nil }
+        for line in headers.components(separatedBy: "\r\n") {
+            let parts = line.split(separator: ":", maxSplits: 1)
+            guard parts.count == 2 else { continue }
+            if parts[0].trimmingCharacters(in: .whitespaces).lowercased() == "content-length" {
+                return Int(parts[1].trimmingCharacters(in: .whitespaces))
+            }
+        }
+        return nil
+    }
+
+    private static func httpHeaderData(from data: Data) -> Data? {
+        guard let range = data.range(of: httpHeaderDelimiter) else { return nil }
+        return Data(data[..<range.lowerBound])
     }
 
     private func sendResponse(_ connection: NWConnection, statusCode: Int, body: Data?) {

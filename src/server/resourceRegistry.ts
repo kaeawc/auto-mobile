@@ -100,7 +100,13 @@ class ResourceRegistryClass {
     });
     const escapedTemplate = tokenizedTemplate.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
     // Use [^/&]+ to properly handle query string parameters (stop at & delimiter)
-    const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, () => "([^/&]+)");
+    const regexPattern = escapedTemplate.replace(/__PARAM_(\d+)__/g, (_placeholder, indexText) => {
+      const index = Number(indexText);
+      const isTrailingPathParam =
+        paramNames[index] === "path" &&
+        escapedTemplate.endsWith(`__PARAM_${index}__`);
+      return isTrailingPathParam ? "(.+)" : "([^/&]+)";
+    });
 
     const regex = new RegExp(`^${regexPattern}$`);
     const match = uri.match(regex);

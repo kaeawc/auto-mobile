@@ -4560,6 +4560,79 @@
     }
   },
   {
+    "name": "putAppFile",
+    "description": "Write a local file, UTF-8 text, or base64 binary content into a logical app container. Use this platform-neutral tool instead of direct adb push, run-as, or simctl container copy commands.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App identifier (Android package name or iOS bundle ID)"
+        },
+        "container": {
+          "type": "string",
+          "enum": [
+            "documents",
+            "library",
+            "cache",
+            "tmp",
+            "externalFiles"
+          ],
+          "description": "Logical app container: documents, library, cache, tmp, or externalFiles where supported"
+        },
+        "sourcePath": {
+          "description": "Local host file path to copy into the app container",
+          "type": "string",
+          "minLength": 1
+        },
+        "contentText": {
+          "description": "Inline UTF-8 text content to write",
+          "type": "string"
+        },
+        "contentBase64": {
+          "description": "Inline base64-encoded binary content to write losslessly",
+          "type": "string"
+        },
+        "destinationPath": {
+          "type": "string",
+          "description": "Relative destination path inside the logical app container, e.g. fixtures/welcome.png"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session UUID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "container",
+        "destinationPath"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
     "name": "recentApps",
     "description": "Open recent apps",
     "inputSchema": {

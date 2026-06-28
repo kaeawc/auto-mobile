@@ -31,6 +31,7 @@ import { BootedDevice } from "../src/models";
 import { registerObserveTools } from "../src/server/observeTools";
 import { registerInteractionTools } from "../src/server/interactionTools";
 import { registerAppTools } from "../src/server/appTools";
+import { registerAppFileTools } from "../src/server/appFileTools";
 import { registerUtilityTools } from "../src/server/utilityTools";
 import { registerDeviceTools } from "../src/server/deviceTools";
 import { registerDeepLinkTools } from "../src/server/deepLinkTools";
@@ -257,6 +258,7 @@ function registerAllTools(): void {
   registerObserveTools();
   registerInteractionTools();
   registerAppTools();
+  registerAppFileTools();
   registerUtilityTools();
   registerDeviceTools();
   registerDeepLinkTools();

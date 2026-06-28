@@ -1,0 +1,175 @@
+import { z } from "zod";
+import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
+import type { Platform } from "../models";
+
+export const APP_FILE_CONTAINERS = [
+  "documents",
+  "library",
+  "cache",
+  "tmp",
+  "externalFiles",
+] as const;
+
+export type AppFileContainer = typeof APP_FILE_CONTAINERS[number];
+
+export const APP_FILE_RESOURCE_TEMPLATES = {
+  CONTAINER: "automobile:devices/{deviceId}/apps/{appId}/files/{container}",
+  FILE: "automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}",
+} as const;
+
+export interface AppFileResourceParts {
+  deviceId: string;
+  appId: string;
+  container: AppFileContainer;
+  path?: string;
+}
+
+export interface PutAppFileArgs {
+  appId: string;
+  container: AppFileContainer;
+  destinationPath: string;
+  sourcePath?: string;
+  contentText?: string;
+  contentBase64?: string;
+  platform?: Platform;
+  deviceId?: string;
+  device?: string;
+  sessionUuid?: string;
+  keepScreenAwake?: boolean;
+}
+
+export interface PutAppFileResult {
+  success: true;
+  deviceId: string;
+  platform: Platform;
+  appId: string;
+  container: AppFileContainer;
+  destinationPath: string;
+  byteCount: number;
+  resourceUri: string;
+}
+
+export interface AppFileListRequest {
+  deviceId: string;
+  appId: string;
+  container: AppFileContainer;
+}
+
+export interface AppFileListEntry {
+  path: string;
+  byteCount?: number;
+  resourceUri: string;
+}
+
+export interface AppFileListResult {
+  deviceId: string;
+  platform: Platform;
+  appId: string;
+  container: AppFileContainer;
+  files: AppFileListEntry[];
+}
+
+export interface AppFileReadRequest extends AppFileListRequest {
+  path: string;
+}
+
+export interface AppFileReadResult {
+  deviceId: string;
+  platform: Platform;
+  appId: string;
+  container: AppFileContainer;
+  path: string;
+  byteCount: number;
+  mimeType: string;
+  text?: string;
+  blob?: string;
+}
+
+const appFileContainerSchema = z.enum(APP_FILE_CONTAINERS);
+
+function countDefined(values: unknown[]): number {
+  return values.filter(value => value !== undefined).length;
+}
+
+export function normalizeAppFileRelativePath(path: string): string {
+  const normalized = path.replace(/\\/g, "/").replace(/^\.\/+/, "");
+  const segments = normalized.split("/");
+  if (
+    normalized.length === 0 ||
+    normalized.startsWith("/") ||
+    segments.some(segment => segment.length === 0 || segment === "." || segment === "..")
+  ) {
+    throw new Error("destinationPath must be a non-empty relative path without '.' or '..' segments");
+  }
+  return normalized;
+}
+
+export const putAppFileSchema = addDeviceTargetingToSchema(z.object({
+  appId: z.string().min(1).describe("App identifier (Android package name or iOS bundle ID)"),
+  container: appFileContainerSchema.describe("Logical app container: documents, library, cache, tmp, or externalFiles where supported"),
+  sourcePath: z.string().min(1).optional().describe("Local host file path to copy into the app container"),
+  contentText: z.string().optional().describe("Inline UTF-8 text content to write"),
+  contentBase64: z.string().optional().describe("Inline base64-encoded binary content to write losslessly"),
+  destinationPath: z.string().describe("Relative destination path inside the logical app container, e.g. fixtures/welcome.png"),
+}).superRefine((args, ctx) => {
+  if (countDefined([args.sourcePath, args.contentText, args.contentBase64]) !== 1) {
+    ctx.addIssue({
+      code: "custom",
+      message: "Provide exactly one content source: sourcePath, contentText, or contentBase64.",
+      path: ["sourcePath"],
+    });
+  }
+
+  try {
+    normalizeAppFileRelativePath(args.destinationPath);
+  } catch (error) {
+    ctx.addIssue({
+      code: "custom",
+      message: error instanceof Error ? error.message : "destinationPath must be a safe relative path",
+      path: ["destinationPath"],
+    });
+  }
+
+  if (args.contentBase64 !== undefined) {
+    try {
+      const decoded = Buffer.from(args.contentBase64, "base64");
+      if (decoded.toString("base64").replace(/=+$/, "") !== args.contentBase64.replace(/=+$/, "")) {
+        throw new Error("round-trip mismatch");
+      }
+    } catch {
+      ctx.addIssue({
+        code: "custom",
+        message: "contentBase64 must be valid base64.",
+        path: ["contentBase64"],
+      });
+    }
+  }
+}));
+
+function encodePathSegments(path: string): string {
+  return normalizeAppFileRelativePath(path)
+    .split("/")
+    .map(segment => encodeURIComponent(segment))
+    .join("/");
+}
+
+export function buildAppFileResourceUri(parts: AppFileResourceParts): string {
+  const base = `automobile:devices/${encodeURIComponent(parts.deviceId)}` +
+    `/apps/${encodeURIComponent(parts.appId)}` +
+    `/files/${encodeURIComponent(parts.container)}`;
+  return parts.path === undefined ? base : `${base}/${encodePathSegments(parts.path)}`;
+}
+
+export function parseAppFileResourceParams(params: Record<string, string>): AppFileResourceParts {
+  const container = decodeURIComponent(params.container);
+  if (!APP_FILE_CONTAINERS.includes(container as AppFileContainer)) {
+    throw new Error(`Unsupported app file container: ${container}`);
+  }
+
+  return {
+    deviceId: decodeURIComponent(params.deviceId),
+    appId: decodeURIComponent(params.appId),
+    container: container as AppFileContainer,
+    ...(params.path !== undefined ? { path: normalizeAppFileRelativePath(decodeURIComponent(params.path)) } : {}),
+  };
+}

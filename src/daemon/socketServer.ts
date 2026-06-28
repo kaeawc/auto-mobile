@@ -38,6 +38,8 @@ import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClien
 import type { KeyValueType } from "../features/storage/storageTypes";
 /** Must exceed the longest per-request MCP timeout (executePlan = 10 min), else long tool calls get killed mid-flight. */
 const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 60 * 1000;
+const MCP_CLIENT_IDLE_CLOSE_MS = 5 * 60 * 1000;
+const DEVICE_LABEL_CACHE_KEY = "deviceLabelMap";
 
 /**
  * Unix Socket Server that proxies requests to the HTTP MCP server
@@ -50,9 +52,9 @@ const DAEMON_RPC_SOCKET_IDLE_TIMEOUT_MS = MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS + 5 * 
  * - Manage concurrent client sessions
  *
  * JUnit uses one Unix socket per thread (`DaemonSocketClientManager` ThreadLocal) for parallel
- * tests, but this server shares a single in-process MCP HTTP client (one Streamable HTTP session).
- * Concurrent `callTool` on that client corrupts the session and yields transport errors plus
- * `Operation cancelled` on in-flight `executePlan`. All MCP forwards are serialized below.
+ * tests. Each MCP HTTP client owns one Streamable HTTP session, so concurrent calls on the same
+ * client are unsafe. MCP forwards are serialized by target key below, and each key gets its own
+ * MCP client so independent devices/sessions can run concurrently.
  *
  * The SDK's Streamable HTTP client may auto-reopen a standalone GET (SSE) after a disconnect.
  * The server transport allows only one such stream per session; a second GET while the first
@@ -79,10 +81,11 @@ export class UnixSocketServer {
   private socketPath: string;
   private mcpEndpoint: string;
   private daemonState: DaemonStateAccess;
-  private mcpClient: Client | null = null;
-  private mcpClientPromise: Promise<Client> | null = null;
-  /** Tail of a promise chain that serializes MCP HTTP forwards across all socket connections. */
-  private mcpForwardTail: Promise<void> = Promise.resolve();
+  private mcpClients: Map<string, Client> = new Map();
+  private mcpClientPromises: Map<string, Promise<Client>> = new Map();
+  /** Promise tails that serialize MCP HTTP forwards only within the same target key. */
+  private mcpForwardTails: Map<string, Promise<void>> = new Map();
+  private mcpClientIdleTimers: Map<string, NodeJS.Timeout> = new Map();
   private timer: Timer;
   private featureFlagService: FeatureFlagService | null;
 
@@ -261,13 +264,14 @@ export class UnixSocketServer {
 
         const queueEnterMs = this.timer.now();
         const totalTimeoutMs = resolveMcpRequestTimeoutMs(request);
+        const initialForwardKey = this.getMcpForwardKey(request, sessionId);
 
-        const result = await this.runExclusiveMcpForward(async () => {
+        const result = await this.runMcpForwardForCurrentKey(initialForwardKey, request, sessionId, async forwardKey => {
           const queueWaitMs = this.timer.now() - queueEnterMs;
           const remainingTimeoutMs = totalTimeoutMs - queueWaitMs;
           const forwardLabel = UnixSocketServer.describeMcpForwardRequest(request);
           logger.debug(
-            `[McpForward] start socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`
+            `[McpForward] start key=${forwardKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} queueWaitMs=${queueWaitMs} remainingTimeoutMs=${remainingTimeoutMs}`
           );
 
           if (remainingTimeoutMs <= 0) {
@@ -282,7 +286,7 @@ export class UnixSocketServer {
 
           const forwardStartMs = this.timer.now();
           try {
-            const mcpClient = await this.getMcpClient();
+            const mcpClient = await this.getMcpClient(forwardKey);
 
             try {
               return await this.handleIdeRequest(mcpClient, request, remainingTimeoutMs, sessionId);
@@ -290,9 +294,8 @@ export class UnixSocketServer {
               const ideErrorMessage = ideError instanceof Error ? ideError.message : String(ideError);
               if (ideErrorMessage.includes("Session not found")) {
                 logger.warn("MCP client session expired, reconnecting and retrying...");
-                this.mcpClient = null;
-                this.mcpClientPromise = null;
-                const freshClient = await this.getMcpClient();
+                await this.resetMcpClient(forwardKey);
+                const freshClient = await this.getMcpClient(forwardKey);
                 const retryRemainingMs = remainingTimeoutMs - (this.timer.now() - forwardStartMs);
                 if (retryRemainingMs <= 0) {
                   const toolName = request.method === "tools/call" ? request.params?.name ?? request.method : request.method;
@@ -309,7 +312,7 @@ export class UnixSocketServer {
             }
           } finally {
             logger.debug(
-              `[McpForward] end socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
+              `[McpForward] end key=${forwardKey} socketSession=${sessionId} requestId=${request.id} ${forwardLabel} forwardMs=${this.timer.now() - forwardStartMs}`
             );
           }
         });
@@ -337,16 +340,162 @@ export class UnixSocketServer {
   }
 
   /**
-   * Run one MCP forward at a time. The shared `mcpClient` is not safe under concurrent
-   * `tools/call` (long SSE responses from `executePlan` interleaved with other RPCs).
+   * Run one MCP forward at a time for a single target key. Each key owns a separate MCP client,
+   * so calls for different devices or sessions can proceed concurrently without sharing one
+   * Streamable HTTP session.
    */
-  private runExclusiveMcpForward<T>(fn: () => Promise<T>): Promise<T> {
-    const run = this.mcpForwardTail.then(() => fn());
-    this.mcpForwardTail = run.then(
+  private runKeyedMcpForward<T>(key: string, fn: () => Promise<T>): Promise<T> {
+    const previous = this.mcpForwardTails.get(key) ?? Promise.resolve();
+    const run = previous.then(() => {
+      this.clearMcpClientIdleTimer(key);
+      return fn();
+    });
+    const tail = run.then(
       () => undefined,
       () => undefined
     );
+    this.mcpForwardTails.set(key, tail);
+    void tail.finally(() => {
+      if (this.mcpForwardTails.get(key) === tail) {
+        this.mcpForwardTails.delete(key);
+        this.scheduleMcpClientIdleClose(key);
+      }
+    });
     return run;
+  }
+
+  private runMcpForwardForCurrentKey<T>(
+    initialKey: string,
+    request: DaemonRequest,
+    socketSessionId: string,
+    fn: (forwardKey: string) => Promise<T>
+  ): Promise<T> {
+    return this.runKeyedMcpForward(initialKey, async () => {
+      const currentKey = this.getMcpForwardKey(request, socketSessionId);
+      if (currentKey !== initialKey) {
+        logger.debug(
+          `[McpForward] rekey requestId=${request.id} initialKey=${initialKey} currentKey=${currentKey}`
+        );
+        return await this.runMcpForwardForCurrentKey(currentKey, request, socketSessionId, fn);
+      }
+      return await fn(currentKey);
+    });
+  }
+
+  private getMcpForwardKey(request: DaemonRequest, socketSessionId: string): string {
+    if (request.method === "tools/call") {
+      const args = request.params?.arguments;
+      const scopedKey = this.getRequestArgumentScopeKey(args);
+      if (scopedKey) {
+        return scopedKey;
+      }
+
+      const implicitAutolockKey = this.getImplicitAutolockScopeKey(socketSessionId, args);
+      if (implicitAutolockKey) {
+        return implicitAutolockKey;
+      }
+
+      // The daemon injects __mcpSessionId before forwarding. Use the socket session as the
+      // pre-forward key so separate daemon clients can autolock and run independently.
+      return `socket:${socketSessionId}`;
+    }
+
+    if (request.method === "ide/getNavigationGraph") {
+      return this.getRequestArgumentScopeKey(request.params) ?? `method:${request.method}`;
+    }
+
+    if (request.method === "resources/read") {
+      const uri = request.params?.uri;
+      return typeof uri === "string" ? `resource:${uri}` : "resource:unknown";
+    }
+
+    return `method:${request.method}`;
+  }
+
+  private getRequestArgumentScopeKey(args: unknown): string | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+
+    const record = args as Record<string, unknown>;
+    // An explicit target device must serialize by physical device even when a session is present.
+    if (typeof record.deviceId === "string" && record.deviceId.length > 0) {
+      return `device:${record.deviceId}`;
+    }
+    if (typeof record.sessionUuid === "string" && record.sessionUuid.length > 0) {
+      const sessionUuid = this.resolveDeviceLabelSession(record.sessionUuid, record.device);
+      const assignedDevice = this.getAssignedDeviceForSession(sessionUuid);
+      if (assignedDevice) {
+        return `device:${assignedDevice}`;
+      }
+      return `session:${sessionUuid}`;
+    }
+    if (typeof record.__mcpSessionId === "string" && record.__mcpSessionId.length > 0) {
+      return this.getImplicitAutolockScopeKey(record.__mcpSessionId, args) ?? `mcp-session:${record.__mcpSessionId}`;
+    }
+    return undefined;
+  }
+
+  private getImplicitAutolockScopeKey(mcpSessionId: string, args: unknown): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      const platform = this.getRequestPlatform(args);
+      const autolockSession = this.daemonState
+        .getDevicePool()
+        .resolveAutolockSessionForMcpSession?.(mcpSessionId, platform);
+      if (!autolockSession) {
+        return undefined;
+      }
+      const assignedDevice = this.getAssignedDeviceForSession(autolockSession);
+      return assignedDevice ? `device:${assignedDevice}` : `session:${autolockSession}`;
+    } catch (error) {
+      logger.debug(`Unable to resolve autolock session for MCP session ${mcpSessionId}: ${error}`);
+      return undefined;
+    }
+  }
+
+  private getRequestPlatform(args: unknown): "android" | "ios" | undefined {
+    if (!args || typeof args !== "object" || Array.isArray(args)) {
+      return undefined;
+    }
+    const platform = (args as Record<string, unknown>).platform;
+    return platform === "android" || platform === "ios" ? platform : undefined;
+  }
+
+  private resolveDeviceLabelSession(baseSessionUuid: string, deviceLabel: unknown): string {
+    if (typeof deviceLabel !== "string" || deviceLabel.length === 0 || !this.daemonState.isInitialized()) {
+      return baseSessionUuid;
+    }
+    try {
+      const labelMap = this.daemonState
+        .getSessionManager()
+        .getSession(baseSessionUuid)
+        ?.cacheData.customData?.[DEVICE_LABEL_CACHE_KEY];
+      if (!labelMap || typeof labelMap !== "object" || Array.isArray(labelMap)) {
+        return baseSessionUuid;
+      }
+      const mappedSession = (labelMap as Record<string, unknown>)[deviceLabel];
+      return typeof mappedSession === "string" && mappedSession.length > 0
+        ? mappedSession
+        : baseSessionUuid;
+    } catch (error) {
+      logger.debug(`Unable to resolve device label ${deviceLabel} for session ${baseSessionUuid}: ${error}`);
+      return baseSessionUuid;
+    }
+  }
+
+  private getAssignedDeviceForSession(sessionUuid: string): string | undefined {
+    if (!this.daemonState.isInitialized()) {
+      return undefined;
+    }
+    try {
+      return this.daemonState.getSessionManager().getSession(sessionUuid)?.assignedDevice;
+    } catch (error) {
+      logger.debug(`Unable to resolve device for session ${sessionUuid}: ${error}`);
+      return undefined;
+    }
   }
 
   /** Compact label for debug logs (method + tool name or resource URI). */
@@ -610,28 +759,74 @@ export class UnixSocketServer {
   }
 
   /**
-   * Get or create a shared MCP client (single session for state persistence)
+   * Get or create the MCP client for a target key.
    */
-  private async getMcpClient(): Promise<Client> {
-    if (this.mcpClient) {
-      return this.mcpClient;
+  private async getMcpClient(key: string): Promise<Client> {
+    this.clearMcpClientIdleTimer(key);
+
+    const existingClient = this.mcpClients.get(key);
+    if (existingClient) {
+      return existingClient;
     }
 
-    if (this.mcpClientPromise) {
-      return this.mcpClientPromise;
+    const existingPromise = this.mcpClientPromises.get(key);
+    if (existingPromise) {
+      return existingPromise;
     }
 
-    this.mcpClientPromise = this.createMcpClient()
+    const clientPromise = this.createMcpClient()
       .then(client => {
-        this.mcpClient = client;
+        this.mcpClients.set(key, client);
+        this.mcpClientPromises.delete(key);
         return client;
       })
       .catch(error => {
-        this.mcpClientPromise = null;
+        this.mcpClientPromises.delete(key);
         throw error;
       });
 
-    return this.mcpClientPromise;
+    this.mcpClientPromises.set(key, clientPromise);
+    return clientPromise;
+  }
+
+  private async resetMcpClient(key: string): Promise<void> {
+    this.clearMcpClientIdleTimer(key);
+    const existingClient = this.mcpClients.get(key);
+    this.mcpClients.delete(key);
+    this.mcpClientPromises.delete(key);
+    if (!existingClient) {
+      return;
+    }
+    try {
+      await existingClient.close();
+    } catch (error) {
+      logger.warn(`Error closing MCP client for key ${key}:`, error);
+    }
+  }
+
+  private scheduleMcpClientIdleClose(key: string): void {
+    this.clearMcpClientIdleTimer(key);
+    const timer = this.timer.setTimeout(() => {
+      void this.closeIdleMcpClient(key);
+    }, MCP_CLIENT_IDLE_CLOSE_MS);
+    this.mcpClientIdleTimers.set(key, timer);
+  }
+
+  private clearMcpClientIdleTimer(key: string): void {
+    const timer = this.mcpClientIdleTimers.get(key);
+    if (!timer) {
+      return;
+    }
+    this.timer.clearTimeout(timer);
+    this.mcpClientIdleTimers.delete(key);
+  }
+
+  private async closeIdleMcpClient(key: string): Promise<void> {
+    this.mcpClientIdleTimers.delete(key);
+    if (this.mcpForwardTails.has(key)) {
+      return;
+    }
+    await this.resetMcpClient(key);
   }
 
   /**
@@ -693,16 +888,22 @@ export class UnixSocketServer {
   async close(): Promise<void> {
     logger.info("Closing Unix socket server...");
 
-    // Close shared MCP client
-    if (this.mcpClient) {
-      try {
-        await this.mcpClient.close();
-      } catch (error) {
-        logger.warn(`Error closing MCP client:`, error);
-      }
-      this.mcpClient = null;
+    // Close MCP clients
+    const clients = Array.from(this.mcpClients.entries());
+    this.mcpClients.clear();
+    this.mcpClientPromises.clear();
+    for (const timer of this.mcpClientIdleTimers.values()) {
+      this.timer.clearTimeout(timer);
     }
-    this.mcpClientPromise = null;
+    this.mcpClientIdleTimers.clear();
+    for (const [key, client] of clients) {
+      try {
+        await client.close();
+      } catch (error) {
+        logger.warn(`Error closing MCP client for key ${key}:`, error);
+      }
+    }
+    this.mcpForwardTails.clear();
 
     // Clear sessions
     this.sessions.clear();

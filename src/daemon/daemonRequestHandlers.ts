@@ -11,6 +11,10 @@ export interface DaemonStateAccess {
     refreshDevices(): Promise<number>;
     getStats(): DevicePoolStats;
     releaseDevice(deviceId: string): Promise<void>;
+    resolveAutolockSessionForMcpSession?(
+      mcpSessionId: string | undefined,
+      platform?: "android" | "ios"
+    ): string | undefined;
   };
 }
 

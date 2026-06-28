@@ -32,6 +32,7 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
+import { tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -995,7 +996,9 @@ export function registerInteractionTools() {
     "content-desc values from observe should be passed as text, not elementId.",
     tapOnSchema,
     tapOnHandler,
-    true
+    true,
+    false,
+    { outputSchema: tapOnResultSchema }
   );
 
   ToolRegistry.registerDeviceAware(

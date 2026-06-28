@@ -144,6 +144,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number;
     fingerCount: number;
     duration: number;
+    fingerSpacing?: number;
   }> = [];
 
   // MARK: - Configuration Methods
@@ -421,6 +422,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number;
     fingerCount: number;
     duration: number;
+    fingerSpacing?: number;
   }> {
     return [...this.multiFingerSwipeHistory];
   }
@@ -949,12 +951,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     fingerCount: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    fingerSpacing?: number
   ): Promise<CtrlProxySwipeResult> {
     await this.applyDelay("multiFingerSwipe");
     this.checkFailure("multiFingerSwipe");
 
-    this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration });
+    this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration, fingerSpacing });
 
     if (this.multiFingerSwipeResult) {
       return this.multiFingerSwipeResult;

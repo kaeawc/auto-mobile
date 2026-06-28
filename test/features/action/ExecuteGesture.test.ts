@@ -53,7 +53,7 @@ describe("ExecuteGesture", () => {
     expect(typeof passed.create).toBe("function");
   });
 
-  test("delegates iOS multi-finger FingerPath gestures to CtrlProxy", async () => {
+  test("delegates iOS multi-finger FingerPath gestures to CtrlProxy with supplied spacing", async () => {
     const fakeClient = new FakeIOSCtrlProxy();
     getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
 
@@ -69,8 +69,8 @@ describe("ExecuteGesture", () => {
       {
         finger: 1,
         points: [
-          { x: 125, y: 600 },
-          { x: 125, y: 200 },
+          { x: 130, y: 600 },
+          { x: 130, y: 200 },
         ],
       },
     ], 450);
@@ -83,6 +83,61 @@ describe("ExecuteGesture", () => {
       y2: 200,
       fingerCount: 2,
       duration: 450,
+      fingerSpacing: 30,
     }]);
+  });
+
+  test("propagates failed iOS multi-finger swipe results", async () => {
+    const fakeClient = new FakeIOSCtrlProxy();
+    fakeClient.setMultiFingerSwipeResult({
+      success: false,
+      error: "XCTest private multi-touch event synthesis classes are unavailable",
+      totalTimeMs: 1,
+    });
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+
+    const gesture = new ExecuteGesture(iosDevice, null);
+
+    await expect(gesture.execute([
+      {
+        finger: 0,
+        points: [
+          { x: 100, y: 600 },
+          { x: 100, y: 200 },
+        ],
+      },
+      {
+        finger: 1,
+        points: [
+          { x: 125, y: 600 },
+          { x: 125, y: 200 },
+        ],
+      },
+    ], 300)).rejects.toThrow("iOS multi-finger gesture failed: XCTest private multi-touch event synthesis classes are unavailable");
+  });
+
+  test("rejects iOS multi-finger paths CtrlProxy cannot preserve", async () => {
+    const fakeClient = new FakeIOSCtrlProxy();
+    getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeClient as unknown as IOSCtrlProxyClient);
+
+    const gesture = new ExecuteGesture(iosDevice, null);
+
+    await expect(gesture.execute([
+      {
+        finger: 0,
+        points: [
+          { x: 100, y: 600 },
+          { x: 100, y: 200 },
+        ],
+      },
+      {
+        finger: 1,
+        points: [
+          { x: 100, y: 630 },
+          { x: 100, y: 230 },
+        ],
+      },
+    ], 300)).rejects.toThrow("iOS multi-finger gestures only support horizontally spaced parallel swipes");
+    expect(fakeClient.getMultiFingerSwipeHistory()).toHaveLength(0);
   });
 });

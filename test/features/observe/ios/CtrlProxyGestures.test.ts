@@ -75,4 +75,17 @@ describe("iOS CtrlProxyGestures", () => {
     expect(context.requestManager.getPendingCount()).toBe(0);
     expect(result.success).toBe(true);
   });
+
+  it("sends multi-finger swipe spacing as offset", async () => {
+    const { context, sent, requestManager } = createFakeContext();
+    const gestures = new CtrlProxyGestures(context);
+
+    const { sentMsg } = await callAndResolve(
+      sent,
+      requestManager,
+      () => gestures.requestMultiFingerSwipe(10, 20, 30, 40, 3, 450, 5000, undefined, 30),
+    );
+
+    expect(sentMsg.offset).toBe(30);
+  });
 });

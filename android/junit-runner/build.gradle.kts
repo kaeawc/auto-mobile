@@ -1,3 +1,4 @@
+import groovy.json.JsonSlurper
 import org.jetbrains.kotlin.gradle.dsl.KotlinVersion
 import org.jetbrains.kotlin.gradle.tasks.KotlinCompile
 
@@ -16,6 +17,11 @@ java {
 }
 
 // Version comes from root project's gradle.properties (VERSION_NAME)
+val npmPackageVersion =
+    providers.fileContents(rootProject.layout.projectDirectory.file("../package.json")).asText.map { packageJson ->
+      val parsed = JsonSlurper().parseText(packageJson) as Map<*, *>
+      parsed["version"].toString()
+    }
 
 dependencies {
   // Shared validation module
@@ -107,7 +113,7 @@ tasks.withType<Test> {
           .file("outputs/apk/debug/control-proxy-debug.apk")
   environment("AUTOMOBILE_CTRL_PROXY_APK_PATH", accessibilityApk.get().asFile.absolutePath)
   systemProperty("automobile.ctrl.proxy.apk.path", accessibilityApk.get().asFile.absolutePath)
-  systemProperty("automobile.daemon.package.version", version.toString())
+  systemProperty("automobile.daemon.package.version", npmPackageVersion.get())
   systemProperty("automobile.daemon.force.restart", "true")
   systemProperty("automobile.daemon.local.project.path", rootProject.rootDir.parentFile.absolutePath)
 
@@ -123,7 +129,7 @@ tasks.named<Jar>("jar") {
   manifest {
     attributes(
         "Implementation-Title" to project.property("POM_ARTIFACT_ID").toString(),
-        "Implementation-Version" to version.toString(),
+        "Implementation-Version" to npmPackageVersion.get(),
     )
   }
 }

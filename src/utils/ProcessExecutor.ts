@@ -1,4 +1,5 @@
 import { execFile, spawn, type ChildProcess, type SpawnOptions } from "child_process";
+import process from "node:process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
 import { wrapCommandError } from "./CommandError";
@@ -25,8 +26,19 @@ type ExecAsync = (
 
 const execFileAsync = promisify(execFile);
 
+export function shellCommandForPlatform(
+  command: string,
+  platform: NodeJS.Platform = process.platform
+): { file: string; args: string[] } {
+  if (platform === "win32") {
+    return { file: "cmd.exe", args: ["/d", "/s", "/c", command] };
+  }
+  return { file: "/bin/sh", args: ["-c", command] };
+}
+
 const execAsync: ExecAsync = async (command, options) => {
-  const { stdout, stderr } = await execFileAsync("/bin/sh", ["-c", command], options);
+  const shellCommand = shellCommandForPlatform(command);
+  const { stdout, stderr } = await execFileAsync(shellCommand.file, shellCommand.args, options);
   return { stdout, stderr };
 };
 

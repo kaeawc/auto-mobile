@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import process from "process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { DefaultProcessExecutor } from "../../src/utils/ProcessExecutor";
+import { DefaultProcessExecutor, shellCommandForPlatform } from "../../src/utils/ProcessExecutor";
 import { DefaultHostCommandExecutor } from "../../src/utils/HostCommandExecutor";
 
 // Real subprocess spawns; shared CI runners can take seconds to fork/exec under load.
@@ -10,6 +10,17 @@ const SUBPROCESS_TEST_TIMEOUT_MS = 30_000;
 
 describe("DefaultProcessExecutor", function() {
   const executor = new DefaultProcessExecutor();
+
+  test("exec selects the platform shell argv", function() {
+    expect(shellCommandForPlatform("echo hello", "win32")).toEqual({
+      file: "cmd.exe",
+      args: ["/d", "/s", "/c", "echo hello"],
+    });
+    expect(shellCommandForPlatform("echo hello", "darwin")).toEqual({
+      file: "/bin/sh",
+      args: ["-c", "echo hello"],
+    });
+  });
 
   test("exec captures stdout", async function() {
     const result = await executor.exec("echo hello");

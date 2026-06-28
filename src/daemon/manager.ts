@@ -1,8 +1,8 @@
 import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
 import { open, readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { existsSync, openSync, closeSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import {
@@ -29,6 +29,7 @@ import { cleanupDaemonFiles } from "./daemonFiles";
 import {
   DAEMON_LAUNCH_CWD_ENV,
   resolveDaemonLaunchWorkingDirectory,
+  resolvePathFromDaemonLaunchWorkingDirectory,
   resolveStableDaemonWorkingDirectory,
 } from "../utils/workingDirectory";
 
@@ -208,9 +209,9 @@ export class DaemonManager implements DaemonManagerLike {
   ) {
     this.stateProvider = stateProvider;
     this.timer = timer;
-    this.lockFilePath = lockFilePath;
-    this.pidFilePath = pidFilePath;
-    this.socketPath = socketPath;
+    this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
+    this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
+    this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
     if ("findDaemonProcesses" in processFinderOrSpawner) {
       this.processFinder = processFinderOrSpawner;
       this.processSpawner = processSpawner;
@@ -259,6 +260,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private writeLockFile(): boolean {
     try {
+      mkdirSync(dirname(this.lockFilePath), { recursive: true });
       const fd = openSync(this.lockFilePath, "wx", 0o600);
       writeFileSync(fd, String(process.pid));
       closeSync(fd);

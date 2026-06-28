@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { ChildProcess, SpawnOptions } from "node:child_process";
 import { DaemonManager, type DaemonProcessSpawner } from "../../src/daemon/manager";
 import { FakeTimer } from "../fakes/FakeTimer";
@@ -120,5 +120,57 @@ describe("DaemonManager launch", () => {
     await manager.start();
 
     expect(realpathSync(capturedEnv![DAEMON_LAUNCH_CWD_ENV]!)).toBe(realpathSync(spawnerCwd));
+  });
+
+  test("resolves relative daemon state paths before changing daemon cwd", async () => {
+    const spawnerCwd = createTempDir("daemon-spawner-cwd-");
+    process.chdir(spawnerCwd);
+    const canonicalSpawnerCwd = realpathSync(spawnerCwd);
+    const expectedLockPath = resolve(canonicalSpawnerCwd, ".auto-mobile", "daemon.lock");
+    const expectedPidPath = resolve(canonicalSpawnerCwd, ".auto-mobile", "daemon.pid");
+    const expectedSocketPath = resolve(canonicalSpawnerCwd, ".auto-mobile", "daemon.sock");
+
+    let capturedEnv: NodeJS.ProcessEnv | undefined;
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], options: SpawnOptions) => {
+        capturedEnv = options.env;
+        return {
+          unref() {},
+          once() { return this; },
+          off() { return this; },
+        } as ChildProcess;
+      }
+    };
+
+    let statusCallCount = 0;
+    class TestDaemonManager extends DaemonManager {
+      override findAllDaemonProcesses(): number[] { return []; }
+      override async status(): Promise<any> {
+        statusCallCount++;
+        return statusCallCount === 1
+          ? { running: false }
+          : { running: true, pid: 1234, port: 31847, socketPath: expectedSocketPath };
+      }
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    const manager = new TestDaemonManager(
+      undefined,
+      undefined,
+      new FakeTimer(),
+      join(".auto-mobile", "daemon.lock"),
+      join(".auto-mobile", "daemon.pid"),
+      join(".auto-mobile", "daemon.sock"),
+      undefined,
+      processSpawner
+    );
+
+    await manager.start();
+
+    expect(capturedEnv!.AUTOMOBILE_DAEMON_LOCK_FILE_PATH).toBe(expectedLockPath);
+    expect(capturedEnv!.AUTOMOBILE_DAEMON_PID_FILE_PATH).toBe(expectedPidPath);
+    expect(capturedEnv!.AUTOMOBILE_DAEMON_SOCKET_PATH).toBe(expectedSocketPath);
   });
 });

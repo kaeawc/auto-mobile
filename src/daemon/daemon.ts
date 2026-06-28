@@ -17,7 +17,8 @@ import {
   DAEMON_PORT_RANGE_END,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
 import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
@@ -602,6 +603,7 @@ export class Daemon {
       version: DAEMON_VERSION,
     };
 
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
     await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
       encoding: "utf-8",
       mode: 0o600,

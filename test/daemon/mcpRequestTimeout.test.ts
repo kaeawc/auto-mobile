@@ -1,13 +1,37 @@
-import { describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import {
   DEFAULT_MCP_REQUEST_TIMEOUT_MS,
+  DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS,
+  LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   MIN_EXECUTE_PLAN_MCP_TIMEOUT_MS,
   MIN_START_DEVICE_MCP_TIMEOUT_MS,
+  OPEN_LINK_MCP_TIMEOUT_ENV_VAR,
   resolveMcpRequestTimeoutMs
 } from "../../src/daemon/mcpRequestTimeout";
 import type { DaemonRequest } from "../../src/daemon/types";
 
 describe("resolveMcpRequestTimeoutMs", () => {
+  const originalOpenLinkTimeout = process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+  const originalLegacyOpenLinkTimeout = process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+
+  beforeEach(() => {
+    delete process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+    delete process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+  });
+
+  afterEach(() => {
+    if (originalOpenLinkTimeout === undefined) {
+      delete process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+    } else {
+      process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = originalOpenLinkTimeout;
+    }
+    if (originalLegacyOpenLinkTimeout === undefined) {
+      delete process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR];
+    } else {
+      process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = originalLegacyOpenLinkTimeout;
+    }
+  });
+
   test("uses default for non-executePlan tools/call", () => {
     const request: DaemonRequest = {
       id: "1",
@@ -124,5 +148,89 @@ describe("resolveMcpRequestTimeoutMs", () => {
       timeoutMs: 300_000
     };
     expect(resolveMcpRequestTimeoutMs(request)).toBe(300_000);
+  });
+
+  test("applies default openLink floor when client omits timeoutMs", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} }
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS);
+  });
+
+  test("raises short openLink timeouts to the default floor", () => {
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} },
+      timeoutMs: 10_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS);
+  });
+
+  test("applies configured openLink floor from environment", () => {
+    process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = "90000";
+
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} }
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(90_000);
+  });
+
+  test("applies legacy configured openLink floor from environment", () => {
+    process.env[LEGACY_OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = "45000";
+
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} }
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(45_000);
+  });
+
+  test("raises short openLink timeouts to configured environment floor", () => {
+    process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = "90000";
+
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} },
+      timeoutMs: 30_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(90_000);
+  });
+
+  test("preserves openLink timeouts above configured environment floor", () => {
+    process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = "90000";
+
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} },
+      timeoutMs: 120_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(120_000);
+  });
+
+  test("falls back to default openLink floor for invalid environment values", () => {
+    process.env[OPEN_LINK_MCP_TIMEOUT_ENV_VAR] = "not-a-number";
+
+    const request: DaemonRequest = {
+      id: "1",
+      type: "mcp_request",
+      method: "tools/call",
+      params: { name: "openLink", arguments: {} },
+      timeoutMs: 10_000
+    };
+    expect(resolveMcpRequestTimeoutMs(request)).toBe(DEFAULT_OPEN_LINK_MCP_TIMEOUT_MS);
   });
 });

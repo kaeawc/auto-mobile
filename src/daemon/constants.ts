@@ -1,5 +1,6 @@
 import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 /**
  * Get the user ID for the current process
@@ -36,7 +37,9 @@ const socketPathOverride =
   process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ??
   process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
 export const SOCKET_PATH =
-  socketPathOverride ?? `/tmp/auto-mobile-daemon-${uid}.sock`;
+  socketPathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.sock`;
 
 /**
  * PID lock file path
@@ -46,7 +49,9 @@ const pidFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ??
   process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
 export const PID_FILE_PATH =
-  pidFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.pid`;
+  pidFilePathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.pid`;
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
@@ -57,7 +62,9 @@ const lockFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ??
   process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
 export const LOCK_FILE_PATH =
-  lockFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.lock`;
+  lockFilePathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.lock`;
 
 /**
  * Connection timeout in milliseconds

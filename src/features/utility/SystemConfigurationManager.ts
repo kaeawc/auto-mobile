@@ -7,6 +7,7 @@ import { defaultTimer } from "../../utils/SystemTimer";
 import type { SystemConfigurationAdapter } from "../../utils/interfaces/SystemConfigurationAdapter";
 import { createSystemConfigurationAdapter } from "./system-configuration/createSystemConfigurationAdapter";
 import { buildAppleLanguages, iosSpawnCommand, isIosSimulator } from "./system-configuration/iosHelpers";
+import type { LockdownLocaleClient } from "./system-configuration/IosLockdownLocaleClient";
 import {
   BootedDevice,
   GetCalendarSystemResult,
@@ -38,7 +39,8 @@ export class SystemConfigurationManager {
     device: BootedDevice,
     adbFactory: AdbClientFactory = defaultAdbClientFactory,
     processExecutor: ProcessExecutor = new DefaultProcessExecutor(),
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    lockdownLocaleClient?: LockdownLocaleClient
   ) {
     this.device = device;
     this.processExecutor = processExecutor;
@@ -46,7 +48,8 @@ export class SystemConfigurationManager {
     this.adapter = createSystemConfigurationAdapter(
       device,
       adbFactory.create(device),
-      processExecutor
+      processExecutor,
+      lockdownLocaleClient
     );
   }
 
@@ -162,6 +165,7 @@ export class SystemConfigurationManager {
   }
 
   async applyIosLiveChanges(restartAppBundleId?: string): Promise<ApplyLiveChangesResult> {
+    const simulator = isIosSimulator(this.device.deviceId);
     const springBoardRestarted = await this.restartSpringBoard();
     const notificationPosted = await this.postLocaleChangeNotification();
 
@@ -173,6 +177,9 @@ export class SystemConfigurationManager {
     if (restartAppBundleId) {
       if (!BUNDLE_ID_PATTERN.test(restartAppBundleId)) {
         logger.warn(`[SystemConfigurationManager] Invalid bundle ID: ${restartAppBundleId}`);
+        result.appRestarted = false;
+      } else if (!simulator) {
+        logger.warn("[SystemConfigurationManager] iOS app restart after localization is only supported on simulators");
         result.appRestarted = false;
       } else {
         try {

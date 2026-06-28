@@ -24,26 +24,33 @@ import {
   isIosSimulator,
   parseAppleTimeFormatRaw,
 } from "./iosHelpers";
+import {
+  CommandLineLockdownLocaleClient,
+  type LockdownLocaleClient,
+} from "./IosLockdownLocaleClient";
 
-const IOS_PHYSICAL_DEVICE_ERROR = "Localization changes are only supported on iOS Simulator.";
+const IOS_PHYSICAL_TIME_ZONE_ERROR = "Time zone changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.";
+const IOS_PHYSICAL_24_HOUR_ERROR = "24-hour format changes are not supported on physical iOS devices because iOS exposes no lockdown key for this setting.";
+const IOS_PHYSICAL_CALENDAR_ERROR = "Calendar system changes are not supported as an independent setting on physical iOS devices; encode calendar in the locale when supported.";
 const DEFAULT_CALENDAR_SYSTEM = "gregory";
 
 /**
- * iOS implementation of {@link SystemConfigurationAdapter}. Routes
- * reads and writes through `xcrun simctl spawn … defaults`, so only
- * simulators are supported — physical devices return an error result.
+ * iOS implementation of {@link SystemConfigurationAdapter}. Simulators use
+ * `xcrun simctl spawn … defaults`; physical devices use lockdownd for locale
+ * reads/writes and return capability-specific errors for unsupported settings.
  */
 export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter {
   readonly defaultCalendarSystem = DEFAULT_CALENDAR_SYSTEM;
 
   constructor(
     private readonly device: BootedDevice,
-    private readonly processExecutor: ProcessExecutor
+    private readonly processExecutor: ProcessExecutor,
+    private readonly lockdownLocaleClient: LockdownLocaleClient = new CommandLineLockdownLocaleClient(processExecutor)
   ) {}
 
   async setLocale(languageTag: string, _options: BroadcastOptions): Promise<SetLocaleResult> {
     if (!this.isSimulator()) {
-      return { success: false, languageTag, error: IOS_PHYSICAL_DEVICE_ERROR };
+      return this.setPhysicalLocale(languageTag);
     }
 
     try {
@@ -86,7 +93,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   async setTimeZone(zoneId: string): Promise<SetTimeZoneResult> {
     if (!this.isSimulator()) {
-      return { success: false, zoneId, error: IOS_PHYSICAL_DEVICE_ERROR };
+      return { success: false, zoneId, error: IOS_PHYSICAL_TIME_ZONE_ERROR };
     }
 
     try {
@@ -136,7 +143,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   async set24HourFormat(enabled: boolean): Promise<Set24HourFormatResult> {
     if (!this.isSimulator()) {
-      return { success: false, enabled, error: IOS_PHYSICAL_DEVICE_ERROR };
+      return { success: false, enabled, error: IOS_PHYSICAL_24_HOUR_ERROR };
     }
 
     try {
@@ -174,7 +181,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   async setCalendarSystem(calendarSystem: string): Promise<SetCalendarSystemResult> {
     if (!this.isSimulator()) {
-      return { success: false, calendarSystem, error: IOS_PHYSICAL_DEVICE_ERROR };
+      return { success: false, calendarSystem, error: IOS_PHYSICAL_CALENDAR_ERROR };
     }
 
     try {
@@ -206,12 +213,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   async getCalendarSystem(): Promise<GetCalendarSystemResult> {
     if (!this.isSimulator()) {
-      return {
-        success: false,
-        calendarSystem: DEFAULT_CALENDAR_SYSTEM,
-        source: "default",
-        error: IOS_PHYSICAL_DEVICE_ERROR
-      };
+      return this.getPhysicalCalendarSystem();
     }
 
     const calendar = await this.iosDefaultsRead(".GlobalPreferences", "AppleCalendar");
@@ -246,7 +248,7 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
 
   async getLocalizationSettings(): Promise<LocalizationSettingsResult> {
     if (!this.isSimulator()) {
-      return { success: false, error: IOS_PHYSICAL_DEVICE_ERROR };
+      return this.getPhysicalLocalizationSettings();
     }
 
     const locale = await this.iosDefaultsRead(".GlobalPreferences", "AppleLocale");
@@ -298,7 +300,101 @@ export class IosSystemConfigurationAdapter implements SystemConfigurationAdapter
     );
   }
 
+  private async setPhysicalLocale(languageTag: string): Promise<SetLocaleResult> {
+    try {
+      const before = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
+      const appleLocale = this.toAppleLocale(languageTag);
+      const language = this.toAppleLanguage(languageTag);
+
+      await this.lockdownLocaleClient.setLanguage(this.device.deviceId, language, appleLocale);
+
+      const after = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
+      if (after.locale !== appleLocale) {
+        return {
+          success: false,
+          languageTag,
+          previousLanguageTag: before.locale ?? undefined,
+          error: `Read-back verification failed: expected "${appleLocale}" but got "${after.locale ?? "null"}"`
+        };
+      }
+
+      return {
+        success: true,
+        languageTag,
+        previousLanguageTag: before.locale ?? undefined,
+        appliedLanguages: this.buildAppleLanguages(languageTag),
+        method: "lockdown com.apple.international Language+Locale"
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        languageTag,
+        error: `Failed to set locale on physical iOS device: ${errorMessage}`
+      };
+    }
+  }
+
+  private async getPhysicalCalendarSystem(): Promise<GetCalendarSystemResult> {
+    try {
+      const config = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
+      if (config.locale) {
+        const calendarFromLocale = extractCalendarFromLocale(config.locale);
+        if (calendarFromLocale) {
+          return {
+            success: true,
+            calendarSystem: calendarFromLocale,
+            locale: config.locale,
+            source: "locale"
+          };
+        }
+      }
+
+      return {
+        success: true,
+        calendarSystem: DEFAULT_CALENDAR_SYSTEM,
+        locale: config.locale,
+        source: "default"
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        calendarSystem: DEFAULT_CALENDAR_SYSTEM,
+        source: "default",
+        error: `Failed to read physical iOS calendar system: ${errorMessage}`
+      };
+    }
+  }
+
+  private async getPhysicalLocalizationSettings(): Promise<LocalizationSettingsResult> {
+    try {
+      const config = await this.lockdownLocaleClient.getLanguage(this.device.deviceId);
+      const calendarSystem = config.locale ? extractCalendarFromLocale(config.locale) ?? DEFAULT_CALENDAR_SYSTEM : DEFAULT_CALENDAR_SYSTEM;
+
+      return {
+        success: true,
+        locale: config.locale,
+        languages: config.language,
+        timeZone: null,
+        textDirection: null,
+        timeFormat: null,
+        calendarSystem
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      return {
+        success: false,
+        error: `Failed to read physical iOS localization settings: ${errorMessage}`
+      };
+    }
+  }
+
   private toAppleLocale(languageTag: string): string {
     return languageTag.replace(/-/g, "_");
+  }
+
+  private toAppleLanguage(languageTag: string): string {
+    return languageTag.split(/[-_]/)[0] ?? languageTag;
   }
 }

@@ -346,7 +346,7 @@ public class GesturePerformer: GesturePerforming {
             }
 
             try runOnMainThread {
-                let orientation = XCUIDevice.shared.orientation.interfaceOrientation
+                let orientation = GesturePerformer.currentInterfaceOrientation()
                 var errorMessage: NSString?
                 let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
                     CGFloat(startX),
@@ -363,6 +363,29 @@ public class GesturePerformer: GesturePerforming {
                 if !succeeded {
                     throw GestureError.gestureFailed(errorMessage as String? ?? "multi-finger swipe synthesis failed")
                 }
+            }
+        }
+
+        private static func currentInterfaceOrientation() -> UIInterfaceOrientation {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
+                return activeScene.interfaceOrientation
+            }
+            if let scene = scenes.first {
+                return scene.interfaceOrientation
+            }
+
+            switch UIDevice.current.orientation {
+            case .portrait:
+                return .portrait
+            case .portraitUpsideDown:
+                return .portraitUpsideDown
+            case .landscapeLeft:
+                return .landscapeLeft
+            case .landscapeRight:
+                return .landscapeRight
+            default:
+                return .portrait
             }
         }
 

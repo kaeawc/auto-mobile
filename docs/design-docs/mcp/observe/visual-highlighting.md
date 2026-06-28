@@ -1,6 +1,6 @@
 # Visual Highlighting
 
-<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android</kbd> <kbd>🍎 iOS Simulator</kbd>
+<kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd> <kbd>🤖 Android</kbd> <kbd>🍎 iOS SDK</kbd>
 
 Expose visual highlight overlays (box, circle, or path) as an MCP tool for debugging UI layout and state.
 
@@ -16,8 +16,9 @@ Expose visual highlight overlays (box, circle, or path) as an MCP tool for debug
     - Optional device targeting: `deviceId`, `device`, `sessionUuid`
     - Optional `timeoutMs` override
   - Returns: success flag and optional error message.
-  - iOS simulator: renders a non-interactive runner overlay window above the app under test.
-  - iOS physical devices: live overlays are disabled by default until composition over the app under test is validated. Set `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true` for manual validation.
+  - iOS app-under-test rendering: prefers the AutoMobileSDK in-app bridge and renders the overlay in the app process.
+  - iOS runner fallback: disabled by default because runner-process windows are not guaranteed to composite over the app under test or simulator video capture. Set `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true` only for manual runner-overlay validation.
+  - Screenshot-derived bounds with `sourceWidth`/`sourceHeight` are scaled to the target overlay size before drawing.
   - Highlights auto-remove after their animation completes.
 
 ## Examples

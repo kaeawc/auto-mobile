@@ -90,7 +90,7 @@ After writing, use `automobile:devices/{deviceId}/apps/{appId}/files/{container}
 - 🐛 `bugReport` generates a comprehensive bug report including screen state, view hierarchy, logcat, screenshot, and optional highlight metadata.
 - 🔍 `debugSearch` debugs element search operations to understand why elements aren't found or wrong elements are selected.
 - 📸 `rawViewHierarchy` gets raw view hierarchy data (XML/JSON) without parsing for debugging.
-- 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android</kbd> <kbd>🍎 iOS Simulator</kbd>
+- 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android</kbd> <kbd>🍎 iOS SDK</kbd>
 - 🔗 `identifyInteractions` suggests likely interactions with ready-to-use tool calls (debug-only; enable the debug feature flag).
 
 #### Network & Connectivity

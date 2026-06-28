@@ -44,6 +44,14 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return postSync(path: "/network/mock", body: body, session: urlSession)
     }
 
+    /// Draw a highlight in the target app through the SDK's in-app server.
+    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+        guard let body = try? JSONEncoder().encode(AddHighlightBody(id: id, shape: shape)) else {
+            return false
+        }
+        return postSync(path: "/highlight", body: body, session: urlSession)
+    }
+
     // MARK: - Private
 
     private lazy var healthSession: URLSession = {
@@ -98,4 +106,9 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
 
 private struct SetMockRulesBody: Encodable {
     let rules: [NetworkMockRuleDTO]
+}
+
+private struct AddHighlightBody: Encodable {
+    let id: String
+    let shape: HighlightShape
 }

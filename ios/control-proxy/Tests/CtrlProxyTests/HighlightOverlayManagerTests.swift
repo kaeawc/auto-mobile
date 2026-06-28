@@ -60,6 +60,60 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertEqual(command.strokeWidth, 2)
     }
 
+    func testScalesScreenshotBoundsToOverlayTargetSize() throws {
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(
+                x: 30,
+                y: 60,
+                width: 90,
+                height: 120,
+                sourceWidth: 300,
+                sourceHeight: 600
+            )
+        )
+        let command = try HighlightOverlayCommandBuilder.command(for: shape)
+
+        let scaled = HighlightOverlayCommandScaler.scaled(
+            command,
+            targetSize: HighlightOverlayTargetSize(width: 100, height: 200)
+        )
+
+        XCTAssertEqual(scaled?.bounds?.x, 10)
+        XCTAssertEqual(scaled?.bounds?.y, 20)
+        XCTAssertEqual(scaled?.bounds?.width, 30)
+        XCTAssertEqual(scaled?.bounds?.height, 40)
+    }
+
+    func testScalesScreenshotPathPointsToOverlayTargetSize() throws {
+        let shape = HighlightShape(
+            type: "path",
+            bounds: HighlightBounds(
+                x: 0,
+                y: 0,
+                width: 300,
+                height: 600,
+                sourceWidth: 300,
+                sourceHeight: 600
+            ),
+            points: [
+                HighlightPoint(x: 30, y: 60),
+                HighlightPoint(x: 90, y: 120),
+            ]
+        )
+        let command = try HighlightOverlayCommandBuilder.command(for: shape)
+
+        let scaled = HighlightOverlayCommandScaler.scaled(
+            command,
+            targetSize: HighlightOverlayTargetSize(width: 100, height: 200)
+        )
+
+        XCTAssertEqual(scaled?.points[0].x, 10)
+        XCTAssertEqual(scaled?.points[0].y, 20)
+        XCTAssertEqual(scaled?.points[1].x, 30)
+        XCTAssertEqual(scaled?.points[1].y, 40)
+    }
+
     func testManagerRendersAndSchedulesAutoExpire() {
         let renderer = FakeHighlightOverlayRenderer()
         let scheduler = FakeHighlightOverlayScheduler()

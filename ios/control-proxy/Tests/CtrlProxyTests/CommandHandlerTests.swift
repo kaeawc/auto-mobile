@@ -1486,6 +1486,101 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(highlightManager.showCalls.first?.shape.type, "box")
     }
 
+    func testAddHighlightUsesSdkBridgeBeforeRunnerOverlay() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = true
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(sdkClient.lastHighlight?.id, "highlight-1")
+        XCTAssertEqual(sdkClient.lastHighlight?.shape.type, "box")
+        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+    }
+
+    func testAddHighlightFallsBackToRunnerOverlayWhenSdkBridgeUnavailable() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = false
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+    }
+
+    func testAddHighlightReturnsClearErrorWhenSdkAndRunnerOverlayUnavailable() {
+        let highlightManager = FakeHighlightOverlayManager()
+        highlightManager.showResult = false
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = false
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(
+            response.error,
+            "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled."
+        )
+    }
+
     func testAddHighlightRequiresShape() {
         let highlightManager = FakeHighlightOverlayManager()
         commandHandler = CommandHandler.createForTesting(

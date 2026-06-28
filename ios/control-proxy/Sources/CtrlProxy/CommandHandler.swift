@@ -901,11 +901,18 @@ public class CommandHandler: CommandHandling {
             )
         }
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
+        if sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true {
+            return WebSocketResponse.success(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
         guard highlightOverlayManager.show(id: highlightId, shape: shape) else {
             return WebSocketResponse.error(
                 type: ResponseType.highlightResponse.rawValue,
                 requestId: request.requestId,
-                error: "Unable to render highlight on iOS",
+                error: "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled.",
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }

@@ -169,6 +169,13 @@ export const tapOnSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }).strict());
 
+const tapOnResultSchema = z.object({
+  success: z.boolean(),
+  action: z.string().optional(),
+  message: z.string().optional(),
+  error: z.string().optional()
+}).passthrough();
+
 export const tapAnySchema = addDeviceTargetingToSchema(z.object({
   container: elementContainerSchema.optional().describe(
     "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."

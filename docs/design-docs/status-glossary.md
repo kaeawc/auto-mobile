@@ -65,7 +65,7 @@ The following items are documented as designs or proposals but have **no corresp
 - **Android live screen streaming (IDE mirroring)** — The Android `video-server` JAR (H.264, VirtualDisplay) is built; the full end-to-end IDE mirroring pipeline is in progress. The `videoRecording` MCP tool (record-to-file) is fully implemented. See [Android screen streaming](plat/android/screen-streaming.md).
 - **iOS XcodeCompanion** — Scaffolded macOS app with all views and navigation defined; feature completeness is ongoing. See [iOS IDE plugin](plat/ios/ide-plugin/overview.md).
 - **iOS XcodeExtension** — Scaffold with 5 registered commands; implementations are minimal stubs.
-- **`highlight` tool** — Fully implemented on Android and iOS simulator. iOS physical-device live overlays are gated behind `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true` until device composition is validated.
+- **`highlight` tool** — Fully implemented on Android and on iOS apps that include the AutoMobileSDK in-app bridge. iOS runner-process fallback overlays are gated behind `AUTOMOBILE_IOS_LIVE_HIGHLIGHTS=true` because they are not guaranteed to composite over the app under test.
 - **`rawViewHierarchy` (control-proxy source)** — Android only. iOS returns XCUITest JSON.
 - **Work profile `userId` override** — Auto-detection works; manual `userId` parameter is not supported in MCP tool schemas.
 - **AutoMobile SDK event pipeline** — Event tracking, crash handling, session management, and breadcrumbs are fully implemented on both Android and iOS. The SDK Event Pipeline MCP integration is complete. See [sdk-event-pipeline.md](mcp/sdk-event-pipeline.md).

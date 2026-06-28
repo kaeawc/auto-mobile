@@ -49,6 +49,59 @@ public enum HighlightOverlayError: Error, Equatable {
     case unsupportedShape(String)
 }
 
+public struct HighlightOverlayTargetSize {
+    public let width: Float
+    public let height: Float
+
+    public init(width: Float, height: Float) {
+        self.width = width
+        self.height = height
+    }
+}
+
+public enum HighlightOverlayCommandScaler {
+    public static func scaled(
+        _ command: HighlightOverlayRenderCommand,
+        targetSize: HighlightOverlayTargetSize?
+    ) -> HighlightOverlayRenderCommand? {
+        guard let bounds = command.bounds,
+              let sourceWidth = bounds.sourceWidth,
+              let sourceHeight = bounds.sourceHeight else {
+            return command
+        }
+        guard let targetSize,
+              sourceWidth > 0,
+              sourceHeight > 0,
+              targetSize.width > 0,
+              targetSize.height > 0 else {
+            return nil
+        }
+
+        let scaleX = targetSize.width / Float(sourceWidth)
+        let scaleY = targetSize.height / Float(sourceHeight)
+        let scaledBounds = HighlightBounds(
+            x: Int((Float(bounds.x) * scaleX).rounded()),
+            y: Int((Float(bounds.y) * scaleY).rounded()),
+            width: Int((Float(bounds.width) * scaleX).rounded()),
+            height: Int((Float(bounds.height) * scaleY).rounded())
+        )
+        let scaledPoints = command.points.map {
+            HighlightPoint(x: $0.x * scaleX, y: $0.y * scaleY)
+        }
+
+        return HighlightOverlayRenderCommand(
+            shapeType: command.shapeType,
+            bounds: scaledBounds,
+            points: scaledPoints,
+            strokeColor: command.strokeColor,
+            strokeWidth: command.strokeWidth,
+            dashPattern: command.dashPattern,
+            capStyle: command.capStyle,
+            joinStyle: command.joinStyle
+        )
+    }
+}
+
 public enum HighlightOverlayCommandBuilder {
     public static func command(for shape: HighlightShape) throws -> HighlightOverlayRenderCommand {
         switch shape.type {
@@ -126,20 +179,29 @@ public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
         @discardableResult
         public func render(id: String, command: HighlightOverlayRenderCommand) -> Bool {
             guard liveOverlayEnabled() else { return false }
+            var rendered = false
             let draw = {
                 let window = self.ensureWindow()
+                let targetSize = HighlightOverlayTargetSize(
+                    width: Float(window.bounds.width),
+                    height: Float(window.bounds.height)
+                )
+                guard let scaledCommand = HighlightOverlayCommandScaler.scaled(command, targetSize: targetSize) else {
+                    return
+                }
                 let layer = self.layers[id] ?? CAShapeLayer()
                 layer.fillColor = UIColor.clear.cgColor
-                layer.strokeColor = UIColor(autoMobileHex: command.strokeColor).cgColor
-                layer.lineWidth = CGFloat(command.strokeWidth)
-                layer.lineDashPattern = command.dashPattern?.map { NSNumber(value: $0) }
-                layer.lineCap = command.capStyle.caLineCap
-                layer.lineJoin = command.joinStyle.caLineJoin
-                layer.path = Self.path(for: command)
+                layer.strokeColor = UIColor(autoMobileHex: scaledCommand.strokeColor).cgColor
+                layer.lineWidth = CGFloat(scaledCommand.strokeWidth)
+                layer.lineDashPattern = scaledCommand.dashPattern?.map { NSNumber(value: $0) }
+                layer.lineCap = scaledCommand.capStyle.caLineCap
+                layer.lineJoin = scaledCommand.joinStyle.caLineJoin
+                layer.path = Self.path(for: scaledCommand)
                 if layer.superlayer == nil {
                     window.layer.addSublayer(layer)
                 }
                 self.layers[id] = layer
+                rendered = true
             }
 
             if Thread.isMainThread {
@@ -147,7 +209,7 @@ public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
             } else {
                 DispatchQueue.main.sync(execute: draw)
             }
-            return true
+            return rendered
         }
 
         public static func defaultLiveOverlayEnabled() -> Bool {
@@ -155,14 +217,7 @@ public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
             if flag == "1" || flag == "true" || flag == "yes" {
                 return true
             }
-            if flag == "0" || flag == "false" || flag == "no" {
-                return false
-            }
-            #if targetEnvironment(simulator)
-                return true
-            #else
-                return false
-            #endif
+            return false
         }
 
         public func remove(id: String) {

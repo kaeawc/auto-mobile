@@ -6,10 +6,10 @@ import Network
 /// Serves view hierarchy snapshots to control-proxy on demand.
 ///
 /// Endpoints:
-/// - `GET /health` → `{"status":"ok","bundleId":"<sdk app bundle id>"}`
-/// - `GET /hierarchy` → latest cached hierarchy (fast, no main-thread work)
-/// - `GET /hierarchy/fresh` → synchronous main-thread walk (slower but guaranteed fresh)
-/// - `POST /highlight` → render a debug highlight in the app-under-test process
+/// - `GET /health` -> `{"status":"ok","bundleId":"<sdk app bundle id>"}`
+/// - `GET /hierarchy` -> latest cached hierarchy (fast, no main-thread work)
+/// - `GET /hierarchy/fresh` -> synchronous main-thread walk (slower but guaranteed fresh)
+/// - `POST /highlight` -> render a debug highlight in the app-under-test process
 final class SdkHierarchyServer: @unchecked Sendable {
 
     static let port: UInt16 = 8766
@@ -18,6 +18,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
     private var listener: NWListener?
     private let queue = DispatchQueue(label: "dev.jasonpearson.automobile.sdk.hierarchy-server")
     private weak var tracker: ViewHierarchyTracker?
+    private let databaseRouteHandler = SdkDatabaseRouteHandler()
 
     init(tracker: ViewHierarchyTracker) {
         self.tracker = tracker
@@ -37,7 +38,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
 
         do {
             let nwListener = try NWListener(using: parameters, on: NWEndpoint.Port(integerLiteral: Self.port))
-            self.listener = nwListener
+            listener = nwListener
             lock.unlock()
 
             nwListener.stateUpdateHandler = { state in
@@ -85,7 +86,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 return
             }
 
-            guard let data = data, let request = String(data: data, encoding: .utf8) else {
+            guard let data, let request = String(data: data, encoding: .utf8) else {
                 connection.cancel()
                 return
             }
@@ -100,6 +101,28 @@ final class SdkHierarchyServer: @unchecked Sendable {
                 self.handleNetworkMock(connection, data: data)
             } else if request.contains("POST /highlight") {
                 self.handleHighlight(connection, data: data)
+            } else if request.contains("POST /db/execute") {
+                self.sendRouteResponse(
+                    connection,
+                    self.databaseRouteHandler.handleExecuteSql(body: Self.httpBody(from: data) ?? Data())
+                )
+            } else if request.contains("POST /db/list") {
+                self.sendRouteResponse(connection, self.databaseRouteHandler.handleListDatabases())
+            } else if request.contains("POST /db/tables") {
+                self.sendRouteResponse(
+                    connection,
+                    self.databaseRouteHandler.handleListTables(body: Self.httpBody(from: data) ?? Data())
+                )
+            } else if request.contains("POST /db/table-data") {
+                self.sendRouteResponse(
+                    connection,
+                    self.databaseRouteHandler.handleTableData(body: Self.httpBody(from: data) ?? Data())
+                )
+            } else if request.contains("POST /db/table-structure") {
+                self.sendRouteResponse(
+                    connection,
+                    self.databaseRouteHandler.handleTableStructure(body: Self.httpBody(from: data) ?? Data())
+                )
             } else {
                 self.sendResponse(connection, statusCode: 404, body: Data("{\"error\":\"not_found\"}".utf8))
             }
@@ -128,7 +151,7 @@ final class SdkHierarchyServer: @unchecked Sendable {
     }
 
     private func handleFreshHierarchy(_ connection: NWConnection) {
-        guard let tracker = tracker else {
+        guard let tracker else {
             sendResponse(connection, statusCode: 503, body: Data("{\"error\":\"tracker_unavailable\"}".utf8))
             return
         }
@@ -195,6 +218,10 @@ final class SdkHierarchyServer: @unchecked Sendable {
         connection.send(content: responseData, completion: .contentProcessed { _ in
             connection.cancel()
         })
+    }
+
+    private func sendRouteResponse(_ connection: NWConnection, _ response: SdkRouteResponse) {
+        sendResponse(connection, statusCode: response.statusCode, body: response.body)
     }
 }
 

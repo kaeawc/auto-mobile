@@ -11,6 +11,7 @@
 		0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
 		0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = 043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */; };
 		0E8A9A62BEF9C4E672D09764 /* PerfProviderTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = DEF454F64F7AF11BD79DB97D /* PerfProviderTests.swift */; };
+		102B43801F02F0409F0A2497 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45F68BA7AC670D5C3D07725B /* SdkDatabaseClient.swift */; };
 		12D60B8E4D067E91189066AD /* CommandHandlerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25C10BFA5B6504892F8459D7 /* CommandHandlerTests.swift */; };
 		141E5CD4FAF4509F538E736C /* OSLogReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBA97A6C3A1240A055D9876C /* OSLogReader.swift */; };
 		158C6F3B528C02BE92AA6132 /* HierarchyMerger.swift in Sources */ = {isa = PBXBuildFile; fileRef = FAAF8CEA9B9A28B052E57E0A /* HierarchyMerger.swift */; };
@@ -18,6 +19,7 @@
 		1F968B5EDB744057F51321EF /* ElementLocator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 95565999DC108319DEED894A /* ElementLocator.swift */; };
 		22D7BF7E548A966178B6A5A3 /* HighlightOverlayManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D07D98176593529FE7FC93F /* HighlightOverlayManager.swift */; };
 		261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */; };
+		28335B9012A77482EF8F7B71 /* SdkDatabaseClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 45F68BA7AC670D5C3D07725B /* SdkDatabaseClient.swift */; };
 		2ABF683DE1AD6578F8EAF168 /* SdkHierarchyCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */; };
 		2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0F9D7B74C318EE243B225B95 /* Protocols.swift */; };
 		2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */ = {isa = PBXBuildFile; fileRef = 83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */; };
@@ -162,6 +164,7 @@
 		3BF23F10C24C9F40E5CEC303 /* Logging.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Logging.swift; sourceTree = "<group>"; };
 		3E5AAA4E2861D92C17F39B14 /* HierarchyDebouncerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HierarchyDebouncerTests.swift; sourceTree = "<group>"; };
 		42C53A4D56EE97B5BD11EC63 /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
+		45F68BA7AC670D5C3D07725B /* SdkDatabaseClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkDatabaseClient.swift; sourceTree = "<group>"; };
 		5408FE8438060177DDAE7177 /* SdkHierarchyCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHierarchyCacheTests.swift; sourceTree = "<group>"; };
 		637A2A05C90AA6E64D224651 /* CtrlProxyTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = CtrlProxyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		649A3185201F07E4D152CED6 /* ObjCExceptionBridgeTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ObjCExceptionBridgeTests.swift; sourceTree = "<group>"; };
@@ -327,6 +330,7 @@
 				B136EAD78CC0B932F258C265 /* PerformanceMetrics.swift */,
 				A284B6FFBE969931BB03A2FF /* PerfProvider.swift */,
 				0F9D7B74C318EE243B225B95 /* Protocols.swift */,
+				45F68BA7AC670D5C3D07725B /* SdkDatabaseClient.swift */,
 				043D2CA5107B76077BA6301C /* SdkHierarchyCache.swift */,
 				E7C65BE687554E71E587B731 /* SdkHierarchyClient.swift */,
 				83E0B84D4CA225ECB1E09064 /* SdkHierarchyModels.swift */,
@@ -545,6 +549,7 @@
 				D0C171171348407EBFF5BAB7 /* PerfProvider.swift in Sources */,
 				E8327D679D58C8F804C064B1 /* PerformanceMetrics.swift in Sources */,
 				47A050F2D8153251E395B7B9 /* Protocols.swift in Sources */,
+				102B43801F02F0409F0A2497 /* SdkDatabaseClient.swift in Sources */,
 				0DCD8748EF0E74AD806385A5 /* SdkHierarchyCache.swift in Sources */,
 				0A4F48C4211E43B829855704 /* SdkHierarchyClient.swift in Sources */,
 				2CFEE57D3D518C352BAB2937 /* SdkHierarchyModels.swift in Sources */,
@@ -598,6 +603,7 @@
 				4A0FBEF6FAEF437AA17B20EA /* PerfProvider.swift in Sources */,
 				B55A16F80CE62B998CEBC6E0 /* PerformanceMetrics.swift in Sources */,
 				2BC78956D2B04A95DA43E6FB /* Protocols.swift in Sources */,
+				28335B9012A77482EF8F7B71 /* SdkDatabaseClient.swift in Sources */,
 				EE7765F6DA0807474D52C3DD /* SdkHierarchyCache.swift in Sources */,
 				261F76AE6277D92BD87CFB1C /* SdkHierarchyClient.swift in Sources */,
 				CB577FE46E063BB09F5D4010 /* SdkHierarchyModels.swift in Sources */,

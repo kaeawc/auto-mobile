@@ -100,7 +100,7 @@ public class FakeElementLocator: ElementLocating {
 
     public private(set) var switchedBundleIds: [String] = []
     public private(set) var awaitStateCalls: [(bundleId: String, expectedState: AppStateExpectation)] = []
-    public var awaitAppStateResult: Bool = true
+    public var awaitAppStateResult = true
     public private(set) var getAppStateCalls: [String] = []
     public var getAppStateResult: ObservedAppState = .notRunning
 
@@ -194,7 +194,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var typeTextHistory: [String] = []
     private var setTextHistory: [TextCall] = []
     private var clearTextHistory: [String?] = []
-    private var selectAllCallCount: Int = 0
+    private var selectAllCallCount = 0
     private var imeActionHistory: [String] = []
     private var keyboardHistory: [String] = []
     private var keyboardOpen = false
@@ -209,7 +209,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var appLaunchHistory: [String] = []
     private var appTerminateHistory: [String] = []
     private var clipboardHistory: [(action: String, text: String?)] = []
-    private var clipboardContents: String? = nil
+    private var clipboardContents: String?
 
     public init() {}
 
@@ -571,7 +571,7 @@ public class FakeStorageInspecting: StorageInspecting {
     // MARK: - Configurable State
 
     private var suites: [StorageSuiteInfo] = []
-    private var entries: [String?: [StorageEntry]] = [:]  // keyed by suiteName
+    private var entries: [String?: [StorageEntry]] = [:] // keyed by suiteName
     private var shouldThrow: Error?
 
     // MARK: - Call History
@@ -736,7 +736,7 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private var _cachedHierarchy: SdkViewHierarchy?
     private var _freshHierarchy: SdkViewHierarchy?
     private var _serverInfo: SdkHierarchyServerInfo?
-    private var _isAvailable: Bool = false
+    private var _isAvailable = false
     private var _fetchCallCount = 0
     private var _fetchFreshCallCount = 0
     private var _fetchServerInfoCallCount = 0
@@ -937,6 +937,70 @@ public class FakeSdkHierarchyCache: SdkHierarchyCaching {
         _latest = nil
         _clearCallCount += 1
         lock.unlock()
+    }
+}
+
+// MARK: - FakeSdkDatabaseFetcher
+
+/// Fake implementation of SdkDatabaseFetching for testing
+public class FakeSdkDatabaseFetcher: SdkDatabaseFetching {
+    public struct TableDataCall {
+        public let databasePath: String
+        public let table: String
+        public let limit: Int
+        public let offset: Int
+    }
+
+    public private(set) var executeSqlCalls: [(databasePath: String, query: String)] = []
+    public private(set) var listDatabasesCallCount = 0
+    public private(set) var listTablesCalls: [String] = []
+    public private(set) var tableDataCalls: [TableDataCall] = []
+    public private(set) var tableStructureCalls: [(databasePath: String, table: String)] = []
+
+    public var executeSqlResult = SdkExecuteSqlResult(queryType: "query", columns: [], rows: [], rowsAffected: 0)
+    public var executeSqlError: Error?
+    public var databases: [SdkDatabaseInfo] = []
+    public var tables: [String] = []
+    public var tableData = SdkTableDataResult(columns: [], rows: [], total: 0)
+    public var tableStructure = SdkTableStructureResult(columns: [])
+
+    public init() {}
+
+    public func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult {
+        executeSqlCalls.append((databasePath: databasePath, query: query))
+        if let executeSqlError {
+            throw executeSqlError
+        }
+        return executeSqlResult
+    }
+
+    public func listDatabases() throws -> [SdkDatabaseInfo] {
+        listDatabasesCallCount += 1
+        return databases
+    }
+
+    public func listTables(databasePath: String) throws -> [String] {
+        listTablesCalls.append(databasePath)
+        return tables
+    }
+
+    public func getTableData(
+        databasePath: String,
+        table: String,
+        limit: Int,
+        offset: Int
+    )
+        throws -> SdkTableDataResult
+    {
+        tableDataCalls.append(
+            TableDataCall(databasePath: databasePath, table: table, limit: limit, offset: offset)
+        )
+        return tableData
+    }
+
+    public func getTableStructure(databasePath: String, table: String) throws -> SdkTableStructureResult {
+        tableStructureCalls.append((databasePath: databasePath, table: table))
+        return tableStructure
     }
 }
 

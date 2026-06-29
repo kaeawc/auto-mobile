@@ -176,6 +176,7 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `getDriver` | `getDriver()` (internal) | `getDriver()` | Aligned |
 | `closeAll` | `closeAll()` | -- | Android-only |
 | Driver interface | `DatabaseDriver` | `DatabaseDriver` | Aligned methods |
+| Host access | ContentProvider bridge | DEBUG in-app SDK HTTP server relayed by CtrlProxy | `sqlQuery` and database resources share the same JSON shape |
 
 ## 16. Compose / SwiftUI View Tracking
 

@@ -32,7 +32,9 @@ final class CommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         let response = commandHandler.handle(request)
         guard let typed = response as? T else {
             XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
@@ -84,7 +86,7 @@ final class CommandHandlerTests: XCTestCase {
                         bounds: SdkBounds(left: 16, top: 740, right: 110, bottom: 770),
                         accessibilityLabel: "Discover",
                         isAccessibilityElement: true
-                    )
+                    ),
                 ]
             )
         )
@@ -288,7 +290,8 @@ final class CommandHandlerTests: XCTestCase {
             sdkHierarchyCache: cache
         )
 
-        let enriched = commandHandler.enrichWithMatchingSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+        let enriched = commandHandler
+            .enrichWithMatchingSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
 
         XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
         XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
@@ -1051,7 +1054,10 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(perfTimings.count, 1)
         XCTAssertEqual(perfTimings[0].name, "handleLaunchApp")
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            ["checkAppState", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"]
+        )
     }
 
     func testLaunchAppUsesActivateWhenRunningBackground() {
@@ -1074,7 +1080,10 @@ final class CommandHandlerTests: XCTestCase {
             return
         }
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication", "awaitForeground"]
+        )
     }
 
     func testLaunchAppUsesActivateWhenRunningForeground() {
@@ -1122,7 +1131,17 @@ final class CommandHandlerTests: XCTestCase {
             return
         }
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "terminateApp", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            [
+                "checkAppState",
+                "terminateApp",
+                "launchApp",
+                "switchForegroundApp",
+                "updateApplication",
+                "awaitForeground",
+            ]
+        )
     }
 
     func testLaunchAppColdBootNotRunningSkipsTerminate() {
@@ -1690,7 +1709,9 @@ final class StorageCommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         handleRequest(commandHandler, request, as: T.self, file: file, line: line)
     }
 
@@ -1700,7 +1721,9 @@ final class StorageCommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         let response = handler.handle(request)
         guard let typed = response as? T else {
             XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
@@ -1711,7 +1734,7 @@ final class StorageCommandHandlerTests: XCTestCase {
 
     // MARK: - List Preference Files
 
-    func testListPreferenceFilesReturnsSuites() throws {
+    func testListPreferenceFilesReturnsSuites() {
         fakeStorage.setSuites([
             StorageSuiteInfo(name: "Standard", displayName: "Standard", entryCount: 5),
             StorageSuiteInfo(name: "group.com.example", displayName: "group.com.example", entryCount: 3),
@@ -1772,7 +1795,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "get-std",
             fileName: "Standard"
         )
-        let _ = commandHandler.handle(request)
+        _ = commandHandler.handle(request)
         XCTAssertEqual(fakeStorage.getEntriesHistory, [nil])
     }
 
@@ -1897,7 +1920,8 @@ final class StorageCommandHandlerTests: XCTestCase {
         )
 
         let request = WebSocketRequest(type: "list_preference_files", requestId: "nil-1")
-        guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self) else { return }
+        guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self)
+        else { return }
 
         XCTAssertFalse(filesResponse.success)
         XCTAssertTrue(filesResponse.error?.contains("not available") ?? false)
@@ -1919,5 +1943,124 @@ final class StorageCommandHandlerTests: XCTestCase {
 
         XCTAssertFalse(wsResponse.success ?? true)
         XCTAssertTrue(wsResponse.error?.contains("parse") ?? false)
+    }
+}
+
+// MARK: - Database Command Tests
+
+final class DatabaseCommandHandlerTests: XCTestCase {
+    var fakeTimeProvider: FakeTimeProvider!
+    var perfProvider: PerfProvider!
+    var fakeElementLocator: FakeElementLocator!
+    var fakeGesturePerformer: FakeGesturePerformer!
+    var fakeSdkHierarchy: FakeSdkHierarchyFetcher!
+    var fakeDatabase: FakeSdkDatabaseFetcher!
+    var commandHandler: CommandHandler!
+
+    override func setUp() {
+        super.setUp()
+        fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        fakeElementLocator = FakeElementLocator()
+        fakeGesturePerformer = FakeGesturePerformer()
+        fakeSdkHierarchy = FakeSdkHierarchyFetcher()
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
+        fakeDatabase = FakeSdkDatabaseFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fakeSdkHierarchy,
+            sdkDatabaseClient: fakeDatabase
+        )
+    }
+
+    override func tearDown() {
+        perfProvider.clear()
+        PerfProvider.resetInstance()
+        super.tearDown()
+    }
+
+    private func handleRequest<T>(
+        _ request: WebSocketRequest,
+        as _: T.Type = T.self,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> T?
+    {
+        let response = commandHandler.handle(request)
+        guard let typed = response as? T else {
+            XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
+            return nil
+        }
+        return typed
+    }
+
+    func testExecuteSqlRelaysQueryToSdkDatabaseClient() {
+        fakeDatabase.executeSqlResult = SdkExecuteSqlResult(
+            queryType: "query",
+            columns: ["id", "payload"],
+            rows: [["1", "0xCAFE"]],
+            rowsAffected: 0
+        )
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-1",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT id, payload FROM notes"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "execute_sql_result")
+        XCTAssertEqual(response.requestId, "sql-1")
+        XCTAssertEqual(response.queryType, "query")
+        XCTAssertEqual(response.columns, ["id", "payload"])
+        XCTAssertEqual(response.rows, [["1", "0xCAFE"]])
+        XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 1)
+        XCTAssertEqual(fakeDatabase.executeSqlCalls[0].databasePath, "/app/Documents/app.db")
+        XCTAssertEqual(fakeDatabase.executeSqlCalls[0].query, "SELECT id, payload FROM notes")
+    }
+
+    func testExecuteSqlReturnsActionableErrorWhenSdkDatabaseUnavailable() {
+        fakeDatabase.executeSqlError = SdkDatabaseError
+            .unavailable(
+                "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+            )
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-disabled",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertTrue(response.error?.contains("setEnabled(true)") ?? false)
+    }
+
+    func testExecuteSqlRejectsSdkServerBundleMismatchBeforeDatabaseCall() {
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-mismatch",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertTrue(response.error?.contains("does not match requested appId") ?? false)
+        XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 0)
     }
 }

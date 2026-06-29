@@ -20,6 +20,7 @@ public class GesturePerformer: GesturePerforming {
         case notSupported(String)
         case missingParameter(String)
         case clipboardEmpty
+        case clipboardReadUnavailable
         case unsupportedAction(String)
 
         public var errorDescription: String? {
@@ -36,9 +37,28 @@ public class GesturePerformer: GesturePerforming {
                 return "Missing parameter: \(param)"
             case .clipboardEmpty:
                 return "Clipboard is empty"
+            case .clipboardReadUnavailable:
+                return "Clipboard read unavailable; live pasteboard access may be restricted, so shadow clipboard content was not returned"
             case let .unsupportedAction(action):
                 return "Unsupported action: \(action)"
             }
+        }
+    }
+
+    enum ClipboardReadResult: Equatable {
+        case value(String)
+        case empty
+        case unavailable
+    }
+
+    static func resolveClipboardGet(readResult: ClipboardReadResult) throws -> String? {
+        switch readResult {
+        case let .value(text):
+            return text.isEmpty ? nil : text
+        case .empty:
+            return nil
+        case .unavailable:
+            throw GestureError.clipboardReadUnavailable
         }
     }
 
@@ -208,7 +228,7 @@ public class GesturePerformer: GesturePerforming {
             var hasFocus = false
             var strategy = "none"
             var iterations = 0
-            while !hasFocus && Date() < deadline {
+            while !hasFocus, Date() < deadline {
                 let result = try detectKeyboardFocus(app: app)
                 hasFocus = result.0
                 strategy = result.1
@@ -847,32 +867,33 @@ public class GesturePerformer: GesturePerforming {
         /// Read `UIPasteboard.general.string` with a bounded timeout. The
         /// pasteboard read can deadlock the runner on iOS 16+ when a
         /// privacy alert is presented but no user is available to dismiss
-        /// it. Returns nil on timeout instead of blocking forever.
-        private static func readPasteboardWithTimeout(_ timeout: DispatchTimeInterval) -> String? {
+        /// it. Returns `.unavailable` on timeout instead of blocking forever.
+        private static func readPasteboardWithTimeout(_ timeout: DispatchTimeInterval) -> ClipboardReadResult {
             // Skip the read entirely if there are no strings — `hasStrings`
             // is a non-prompting synchronous check.
-            guard UIPasteboard.general.hasStrings else { return nil }
+            guard UIPasteboard.general.hasStrings else { return .empty }
             let semaphore = DispatchSemaphore(value: 0)
-            let box = NSMutableArray() // Heap-allocated holder so the closure can write past return
+            let box = ClipboardReadBox()
             DispatchQueue.global(qos: .userInitiated).async {
-                if let str = UIPasteboard.general.string {
-                    box.add(str)
-                }
+                box.text = UIPasteboard.general.string
                 semaphore.signal()
             }
             if semaphore.wait(timeout: .now() + timeout) == .timedOut {
-                return nil
+                return .unavailable
             }
-            return box.firstObject as? String
+            guard let text = box.text else { return .unavailable }
+            return text.isEmpty ? .unavailable : .value(text)
+        }
+
+        private final class ClipboardReadBox {
+            var text: String?
         }
 
         public func clipboard(action: String, text: String?) throws -> String? {
             switch action {
             case "get":
-                let live = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
-                let shadow = GesturePerformer.readShadow()
-                if let live = live, !live.isEmpty { return live }
-                return shadow
+                let readResult = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
+                return try GesturePerformer.resolveClipboardGet(readResult: readResult)
 
             case "copy":
                 guard let text = text else {
@@ -899,7 +920,15 @@ public class GesturePerformer: GesturePerforming {
                 }
                 // Use bounded read; fall back to shadow if iOS gates the read.
                 let pasteboardLive = GesturePerformer.readPasteboardWithTimeout(.milliseconds(500))
-                let clipboardText = pasteboardLive ?? GesturePerformer.readShadow()
+                let clipboardText: String?
+                switch pasteboardLive {
+                case let .value(text):
+                    clipboardText = text
+                case .empty:
+                    clipboardText = nil
+                case .unavailable:
+                    clipboardText = GesturePerformer.readShadow()
+                }
                 guard let pasteText = clipboardText, !pasteText.isEmpty else {
                     throw GestureError.clipboardEmpty
                 }

@@ -205,6 +205,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
 
     logger.info("[CTRL_PROXY] Starting APK prefetch");
     const startTime = defaultTimer.now();
+    AndroidCtrlProxyManager.prefetchError = null;
 
     AndroidCtrlProxyManager.prefetchPromise = AndroidCtrlProxyManager.doPrefetch()
       .then(apkPath => {
@@ -221,6 +222,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         logger.warn(`[CTRL_PROXY] APK prefetch failed after ${duration}ms`, {
           error: AndroidCtrlProxyManager.prefetchError.message
         });
+        AndroidCtrlProxyManager.prefetchPromise = null;
         return null;
       });
   }
@@ -232,33 +234,36 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-"));
     const apkPath = path.join(tempDir, "control-proxy.apk");
 
-    // Download the APK
-    logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
-    await AndroidCtrlProxyManager.defaultFileDownloader.download(APK_URL, apkPath);
+    try {
+      // Download the APK
+      logger.info("[CTRL_PROXY] Prefetch: downloading APK", { url: APK_URL, destination: apkPath });
+      await AndroidCtrlProxyManager.defaultFileDownloader.download(APK_URL, apkPath);
 
-    // Verify the file exists and has reasonable size
-    const stats = await fs.stat(apkPath);
-    if (stats.size < 10000) {
-      throw new Error(`Prefetched APK is too small (${stats.size} bytes), likely invalid`);
-    }
-
-    // Verify APK integrity
-    AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
-
-    // Verify checksum if provided
-    const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
-    if (expectedChecksum.length > 0) {
-      const { checksum: actualChecksum } = await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
-      if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
-        // Clean up invalid file
-        await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
-        throw new Error(`APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`);
+      // Verify the file exists and has reasonable size
+      const stats = await fs.stat(apkPath);
+      if (stats.size < 10000) {
+        throw new Error(`Prefetched APK is too small (${stats.size} bytes), likely invalid`);
       }
-      logger.info("[CTRL_PROXY] Prefetch: checksum verified", { checksum: actualChecksum });
-    }
 
-    logger.info("[CTRL_PROXY] Prefetch: APK ready", { path: apkPath, size: stats.size });
-    return apkPath;
+      // Verify APK integrity
+      AndroidCtrlProxyManager.verifyApkIntegrityStatic(apkPath);
+
+      // Verify checksum if provided
+      const expectedChecksum = AndroidCtrlProxyManager.expectedChecksumOverride ?? APK_SHA256_CHECKSUM;
+      if (expectedChecksum.length > 0) {
+        const { checksum: actualChecksum } = await AndroidCtrlProxyManager.defaultChecksumCalculator.computeFileSha256(apkPath);
+        if (actualChecksum.toLowerCase() !== expectedChecksum.toLowerCase()) {
+          throw new Error(`APK checksum verification failed. Expected: ${expectedChecksum}, Got: ${actualChecksum}`);
+        }
+        logger.info("[CTRL_PROXY] Prefetch: checksum verified", { checksum: actualChecksum });
+      }
+
+      logger.info("[CTRL_PROXY] Prefetch: APK ready", { path: apkPath, size: stats.size });
+      return apkPath;
+    } catch (error) {
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {});
+      throw error;
+    }
   }
 
   /**

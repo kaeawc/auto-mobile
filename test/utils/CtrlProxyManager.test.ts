@@ -477,6 +477,44 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
     });
 
+    test("should allow background refresh to retry failed prefetches", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("");
+      const zip = new AdmZip();
+      zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      const payload = zip.toBuffer();
+      const originalDefaultDownloader = (AndroidCtrlProxyManager as any).defaultFileDownloader;
+      let downloadCalls = 0;
+      let failedDestination: string | null = null;
+
+      try {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = {
+          download: async (_url: string, destination: string) => {
+            downloadCalls++;
+            if (downloadCalls === 1) {
+              failedDestination = destination;
+              throw new Error("network is unreachable");
+            }
+            await fs.mkdir(path.dirname(destination), { recursive: true });
+            await fs.writeFile(destination, payload);
+          }
+        };
+
+        AndroidCtrlProxyManager.prefetchApk();
+        expect(await AndroidCtrlProxyManager.getPrefetchedApkPath()).toBeNull();
+        expect(failedDestination).not.toBeNull();
+        await expect(fs.stat(path.dirname(failedDestination!))).rejects.toThrow();
+
+        AndroidCtrlProxyManager.prefetchApk();
+        const retriedPath = await AndroidCtrlProxyManager.getPrefetchedApkPath();
+
+        expect(downloadCalls).toBe(2);
+        expect(retriedPath).not.toBeNull();
+      } finally {
+        (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
+      }
+    });
+
     test("should cache failed download result briefly instead of retrying every call", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const fakeTimer = new FakeTimer();

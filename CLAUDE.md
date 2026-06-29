@@ -9,6 +9,8 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - Local validation scripts live under `scripts/` and should almost always be written in bash with shellcheck validation
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
+- One canonical primitive per concern: UUIDs come from `IdGenerator`, randomness from `Random` (`pick`/`next`), backoff from `Backoff`. Inject these (interface + fake) rather than spawning a new `randomUUID()`/`Math.random()` path.
+- Prefer narrow interfaces that expose exactly what consumers need (YAGNI); grow the interface when the second consumer arrives, not ahead of need.
 
 # Error Handling Convention
 

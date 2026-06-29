@@ -1,9 +1,19 @@
 import { describe, expect, test } from "bun:test";
-import { CryptoRandom, SeededRandom } from "../../src/utils/Random";
+import { CryptoRandom } from "../../src/utils/Random";
+import { SeededRandom } from "../fakes/SeededRandom";
 
 describe("CryptoRandom", function() {
-  test("uuid returns a v4 UUID", function() {
-    expect(new CryptoRandom().uuid()).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  test("next returns values in [0, 1)", function() {
+    const random = new CryptoRandom();
+    for (let i = 0; i < 100; i++) {
+      const value = random.next();
+      expect(value).toBeGreaterThanOrEqual(0);
+      expect(value).toBeLessThan(1);
+    }
+  });
+
+  test("pick returns one of the provided items", function() {
+    expect(["a", "b", "c"]).toContain(new CryptoRandom().pick(["a", "b", "c"]));
   });
 });
 
@@ -27,11 +37,8 @@ describe("SeededRandom", function() {
     expect(random.next()).toBe(first);
   });
 
-  test("uuid is deterministic and v4-shaped", function() {
-    const first = new SeededRandom(100).uuid();
-    const second = new SeededRandom(100).uuid();
-
-    expect(first).toBe(second);
-    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  test("pick is deterministic for a given seed", function() {
+    const items = ["a", "b", "c", "d"];
+    expect(new SeededRandom(100).pick(items)).toBe(new SeededRandom(100).pick(items));
   });
 });

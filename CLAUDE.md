@@ -10,6 +10,47 @@ Node TypeScript MCP server providing Android Debug Bridge (ADB) capabilities thr
 - Always use interfaces & fakes & FakeTimer to decouple implementations and keep tests extremely fast and non-flaky
 - Unit tests should pass in 100ms or less. Do not assume that a failing test can be allowed to fail.
 
+# Error Handling Convention
+
+Every `catch` block in `src/` must follow one of three strategies. Pick by the
+caller's contract, not by local precedent. The building blocks already exist:
+`ActionableError` (`src/models/ActionableError.ts`) and the shared `logger`
+(`src/utils/logger.ts`).
+
+1. **Throw a structured error** — for system/MCP boundaries and feature actions
+   whose failure should surface to the client. Throw `ActionableError` with
+   actionable context, or use `toActionableError(error, context)` to wrap an
+   unknown caught value in one call:
+   ```ts
+   } catch (error) {
+     throw toActionableError(error, "Failed to start Android screenrecord");
+   }
+   ```
+
+2. **Log, then return a typed failure** — for diagnostic/best-effort paths that
+   return a status object (e.g. `doctor` checks) instead of throwing. Always
+   `logger.debug`/`logger.warn` the underlying error *before* returning, so there
+   is a trace even when the user only sees a summarized message:
+   ```ts
+   } catch (error) {
+     logger.debug(`simctl check failed: ${normalizeErrorMessage(error)}`, error);
+     return { name: "simctl", status: "fail", message: "..." };
+   }
+   ```
+
+3. **Log-and-continue (swallow)** — only for genuinely-expected non-errors
+   (port probes, optional capability checks). Log at `debug` and add a one-line
+   comment stating *why* it is safe to swallow:
+   ```ts
+   } catch (error) {
+     // Connection refused is expected when no emulator is on this port.
+     logger.debug(`port ${port} probe failed: ${error}`);
+   }
+   ```
+
+Never leave a `catch` body empty or a bare `return`/`return null` with no log —
+lint allows it (`caughtErrors: "none"`), so this convention is the only backstop.
+
 # Project Structure
 
 This document summarizes the AutoMobile repo layout and where to find key components.

@@ -48,9 +48,7 @@ export const runTimerContract = (
       }, capabilities.realTime ? 1 : 10);
       timer.clearInterval(handle);
 
-      if (capabilities.realTime) {
-        await timer.sleep(10);
-      }
+      await timer.sleep(capabilities.realTime ? 10 : 0);
 
       expect(calls).toBe(0);
     });

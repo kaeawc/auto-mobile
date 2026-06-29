@@ -55,6 +55,8 @@ export class FakeTimer implements Timer {
   private autoAdvance: boolean = false;
   // Track cancelled timeout IDs for autoAdvance mode (where callbacks are scheduled via setImmediate)
   private cancelledTimeoutIds: Set<number> = new Set();
+  // Track cancelled interval IDs for autoAdvance mode (where callbacks are scheduled via setImmediate)
+  private cancelledIntervalIds: Set<number> = new Set();
 
   /**
    * Enable auto-advance mode where sleeps and timeouts resolve immediately.
@@ -231,6 +233,7 @@ export class FakeTimer implements Timer {
     this.nextTimeoutId = 1;
     this.nextIntervalId = 1000000;
     this.cancelledTimeoutIds.clear();
+    this.cancelledIntervalIds.clear();
   }
 
   /**
@@ -286,10 +289,16 @@ export class FakeTimer implements Timer {
    */
   setInterval(callback: () => void, ms: number): NodeJS.Timeout {
     const id = this.nextIntervalId as unknown as NodeJS.Timeout;
+    const numericId = this.nextIntervalId;
     this.nextIntervalId++;
     if (this.autoAdvance) {
       this.currentTime += ms;
-      setImmediate(callback);
+      setImmediate(() => {
+        if (!this.cancelledIntervalIds.has(numericId)) {
+          callback();
+        }
+        this.cancelledIntervalIds.delete(numericId);
+      });
       return id;
     }
     this.pendingIntervals.push({
@@ -307,6 +316,7 @@ export class FakeTimer implements Timer {
    */
   clearInterval(handle: NodeJS.Timeout): void {
     this.pendingIntervals = this.pendingIntervals.filter(i => i.id !== handle);
+    this.cancelledIntervalIds.add(handle as unknown as number);
   }
 
   /**

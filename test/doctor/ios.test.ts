@@ -11,10 +11,11 @@ import {
   checkXcodeCommandLineTools,
   checkXcodeInstallation,
   checkXcrunAvailable,
+  createIosCtrlProxyRunnerInspector,
   IOS_RUNNER_FEATURE_COMMANDS,
   runIosChecks
 } from "../../src/doctor/checks/ios";
-import type { IosRunnerInspection } from "../../src/doctor/checks/ios";
+import type { IosRunnerInspection, IosRunnerInspectorHooks } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
 import { FakeLogger } from "../fakes/FakeLogger";
@@ -707,5 +708,85 @@ describe("checkIosCtrlProxyRunner", () => {
     const results = await runIosChecks({}, baseDependencies);
     const names = results.map(check => check.name);
     expect(names).toContain("iOS CtrlProxy Runner");
+  });
+});
+
+describe("createIosCtrlProxyRunnerInspector lifecycle", () => {
+  const simctlReturning = (devices: { name: string; deviceId: string }[]) => ({
+    ...baseDependencies.createSimctlClient(),
+    isAvailable: async () => true,
+    getBootedSimulators: async () => devices.map(d => ({ name: d.name, platform: "ios" as const, deviceId: d.deviceId }))
+  });
+
+  const runningManager = { isInstalled: async () => true, isRunning: async () => true };
+
+  test("closes a probe client it created (no pre-existing client)", async () => {
+    let closes = 0;
+    const probe = {
+      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      close: async () => { closes += 1; }
+    };
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => null,
+      createClient: () => probe
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedRunners();
+
+    expect(inspections[0].supportedCommands).toEqual([...IOS_RUNNER_FEATURE_COMMANDS]);
+    expect(closes).toBe(1);
+  });
+
+  test("does not close a pre-existing client it did not create", async () => {
+    let closes = 0;
+    const existing = {
+      getSupportedCommands: async () => [...IOS_RUNNER_FEATURE_COMMANDS],
+      close: async () => { closes += 1; }
+    };
+    let created = false;
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => existing,
+      createClient: () => { created = true; return existing; }
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    await inspector.inspectBootedRunners();
+
+    expect(closes).toBe(0);
+    expect(created).toBe(false);
+  });
+
+  test("closes the created probe client even when the command read throws", async () => {
+    let closes = 0;
+    const probe = {
+      getSupportedCommands: async () => { throw new Error("unreachable"); },
+      close: async () => { closes += 1; }
+    };
+    const hooks: IosRunnerInspectorHooks = {
+      getManager: () => runningManager,
+      getExistingClient: () => null,
+      createClient: () => probe
+    };
+
+    const inspector = createIosCtrlProxyRunnerInspector(
+      () => simctlReturning([{ name: "iPhone 15", deviceId: "SIM-1" }]) as any,
+      new FakeLogger(),
+      hooks
+    );
+    const inspections = await inspector.inspectBootedRunners();
+
+    expect(inspections[0].supportedCommands).toBeNull();
+    expect(closes).toBe(1);
   });
 });

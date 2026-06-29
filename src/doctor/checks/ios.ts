@@ -68,13 +68,47 @@ export interface IosDoctorDependencies {
 }
 
 /**
+ * Minimal runner-manager surface the inspector needs (install/run probes).
+ */
+interface IosRunnerManager {
+  isInstalled(): Promise<boolean>;
+  isRunning(): Promise<boolean>;
+}
+
+/**
+ * Minimal runner-client surface the inspector needs: read the advertised command
+ * set and (for throwaway probe clients) close the connection afterwards.
+ */
+interface IosRunnerProbeClient {
+  getSupportedCommands(): Promise<string[] | null>;
+  close(): Promise<void>;
+}
+
+/**
+ * Injection seam for the inspector's device-side singletons, so the
+ * close-only-when-created lifecycle is unit-testable without a real device.
+ */
+export interface IosRunnerInspectorHooks {
+  getManager(device: BootedDevice): IosRunnerManager;
+  getExistingClient(deviceId: string): IosRunnerProbeClient | null;
+  createClient(device: BootedDevice): IosRunnerProbeClient;
+}
+
+const defaultIosRunnerInspectorHooks: IosRunnerInspectorHooks = {
+  getManager: device => IOSCtrlProxyManager.getInstance(device),
+  getExistingClient: deviceId => IOSCtrlProxyClient.getExistingInstance(deviceId),
+  createClient: device => IOSCtrlProxyClient.getInstance(device),
+};
+
+/**
  * Real inspector: for each booted simulator, read installed/running from the
  * CtrlProxy manager and the advertised command set from the runner's `connected`
  * handshake (connecting only when the runner is running).
  */
-function createIosCtrlProxyRunnerInspector(
+export function createIosCtrlProxyRunnerInspector(
   createSimctlClient: () => SimCtl,
-  log: Logger
+  log: Logger,
+  hooks: IosRunnerInspectorHooks = defaultIosRunnerInspectorHooks
 ): IosCtrlProxyRunnerInspector {
   return {
     async inspectBootedRunners(): Promise<IosRunnerInspection[]> {
@@ -92,15 +126,21 @@ function createIosCtrlProxyRunnerInspector(
           deviceId: simulator.deviceId,
           source: simulator.source,
         };
-        const manager = IOSCtrlProxyManager.getInstance(device);
+        const manager = hooks.getManager(device);
         const installed = await manager.isInstalled();
         const running = installed ? await manager.isRunning() : false;
 
         let supportedCommands: string[] | null = null;
         if (running) {
+          // Don't disturb a client someone else owns (e.g. the daemon's live
+          // session): if one already exists, read through it and leave its
+          // lifecycle alone. Otherwise open a throwaway probe client and close it
+          // afterwards so doctor leaves no persistent runner connection or SDK
+          // polling timer behind (especially for the one-shot CLI invocation).
+          const existing = hooks.getExistingClient(device.deviceId);
+          const probe = existing ?? hooks.createClient(device);
           try {
-            const client = IOSCtrlProxyClient.getInstance(device);
-            supportedCommands = await client.getSupportedCommands();
+            supportedCommands = await probe.getSupportedCommands();
           } catch (error) {
             // Treated as an unreachable runner (versionStatus=unknown), not a hard
             // failure: doctor still reports installed/running for the simulator.
@@ -108,6 +148,10 @@ function createIosCtrlProxyRunnerInspector(
               `iOS CtrlProxy runner command probe failed for ${simulator.deviceId}: ${normalizeErrorMessage(error)}`,
               error
             );
+          } finally {
+            if (existing === null) {
+              await probe.close();
+            }
           }
         }
 

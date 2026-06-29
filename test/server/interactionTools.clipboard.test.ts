@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { clipboardSchema, formatClipboardMessage, registerInteractionTools } from "../../src/server/interactionTools";
+import { clipboardSchema, formatClipboardMessage, formatRecentAppsMessage, registerInteractionTools } from "../../src/server/interactionTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 
 describe("clipboard tool schema", () => {
@@ -89,5 +89,15 @@ describe("clipboard tool schema", () => {
       action: "get",
       text: "",
     })).toBe("Retrieved empty clipboard");
+  });
+
+  test("formats failed recentApps without success wording", () => {
+    const message = formatRecentAppsMessage({
+      success: false,
+      error: "iOS App Switcher did not appear after recent apps invocation",
+    });
+
+    expect(message).toBe("Failed to open recent apps: iOS App Switcher did not appear after recent apps invocation");
+    expect(message).not.toContain("Opened recent apps");
   });
 });

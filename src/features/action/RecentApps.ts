@@ -46,8 +46,7 @@ export class RecentApps extends BaseVisualChange {
     if (this.device.platform === "ios") {
       return this.observedInteraction(
         async () => {
-          await perf.track("iOSRecentApps", () => this.executeIosRecentApps());
-          return { success: true, method: "ios_swipe" as const };
+          return perf.track("iOSRecentApps", () => this.executeIosRecentApps());
         },
         {
           changeExpected: true,
@@ -274,11 +273,13 @@ export class RecentApps extends BaseVisualChange {
     return { success: true, method: "hardware" };
   }
 
-  private async executeIosRecentApps(): Promise<void> {
+  private async executeIosRecentApps(): Promise<RecentAppsResult> {
     const client = IOSCtrlProxyClient.getInstance(this.device);
     const result = await client.requestRecentApps();
-    if (!result.success) {
-      throw new Error(result.error ?? "Failed to open iOS recent apps");
-    }
+    return {
+      success: result.success,
+      method: "ios_swipe",
+      error: result.success ? undefined : result.error ?? "Failed to open iOS recent apps"
+    };
   }
 }

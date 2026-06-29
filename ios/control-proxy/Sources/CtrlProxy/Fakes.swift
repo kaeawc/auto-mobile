@@ -206,6 +206,7 @@ public class FakeGesturePerformer: GesturePerforming {
     private var shakeCallCount = 0
     private var pressButtonHistory: [String] = []
     private var openRecentAppsCallCount = 0
+    private var openRecentAppsResult = true
     private var appLaunchHistory: [String] = []
     private var appTerminateHistory: [String] = []
     private var clipboardHistory: [(action: String, text: String?)] = []
@@ -281,6 +282,10 @@ public class FakeGesturePerformer: GesturePerforming {
         nextKeyboardResult = open
     }
 
+    public func setOpenRecentAppsResult(_ result: Bool) {
+        openRecentAppsResult = result
+    }
+
     public func getActionHistory() -> [(action: String, resourceId: String?, label: String?)] {
         actionHistory
     }
@@ -348,6 +353,7 @@ public class FakeGesturePerformer: GesturePerforming {
         shakeCallCount = 0
         pressButtonHistory.removeAll()
         openRecentAppsCallCount = 0
+        openRecentAppsResult = true
         appLaunchHistory.removeAll()
         appTerminateHistory.removeAll()
         clipboardHistory.removeAll()
@@ -535,9 +541,10 @@ public class FakeGesturePerformer: GesturePerforming {
         pressButtonHistory.append(button)
     }
 
-    public func openRecentApps() throws {
+    public func openRecentApps() throws -> Bool {
         try checkFailure("openRecentApps")
         openRecentAppsCallCount += 1
+        return openRecentAppsResult
     }
 
     public func launchApp(bundleId: String) throws {

@@ -1240,6 +1240,23 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 1)
     }
 
+    func testRecentAppsReturnsFailureWhenSwitcherIsNotVerified() {
+        fakeGesturePerformer.setOpenRecentAppsResult(false)
+        let request = WebSocketRequest(
+            type: "request_recent_apps",
+            requestId: "recents-not-visible"
+        )
+
+        guard let recentsResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(recentsResponse.success, false)
+        XCTAssertEqual(recentsResponse.type, "recent_apps_result")
+        XCTAssertEqual(recentsResponse.error, "iOS App Switcher did not appear after recent apps invocation")
+        XCTAssertEqual(fakeGesturePerformer.getOpenRecentAppsCallCount(), 1)
+        XCTAssertTrue(fakeElementLocator.switchedBundleIds.isEmpty)
+        XCTAssertTrue(fakeGesturePerformer.updateApplicationHistory.isEmpty)
+    }
+
     func testRecentAppsSwitchesToSpringboard() {
         let request = WebSocketRequest(
             type: "request_recent_apps",

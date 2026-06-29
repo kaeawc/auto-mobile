@@ -163,8 +163,8 @@ public protocol GesturePerforming {
     /// Press a named hardware or keyboard-backed button.
     func pressButton(_ button: String) throws
 
-    /// Open recent apps (app switcher) via swipe-up-and-hold gesture
-    func openRecentApps() throws
+    /// Open recent apps (app switcher) and return whether the switcher was verified.
+    func openRecentApps() throws -> Bool
 
     // MARK: - App Control
 

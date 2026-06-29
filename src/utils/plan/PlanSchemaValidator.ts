@@ -1,10 +1,11 @@
 import Ajv, { type ErrorObject } from "ajv";
 import addFormats from "ajv-formats";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import fs from "fs/promises";
 import path from "path";
 import { fileURLToPath } from "url";
 import { logger } from "../logger";
+import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 
 /**
  * Result of plan validation
@@ -140,7 +141,7 @@ export class PlanSchemaValidator {
     // First, try to parse YAML
     let parsed: any;
     try {
-      parsed = yaml.load(yamlContent);
+      parsed = yaml.load(yamlContent, PLAN_YAML_LOAD_OPTIONS);
     } catch (error: any) {
       const line = error.mark?.line !== undefined ? error.mark.line + 1 : undefined;
       const column = error.mark?.column !== undefined ? error.mark.column + 1 : undefined;

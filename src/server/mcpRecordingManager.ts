@@ -1,4 +1,4 @@
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { Plan } from "../models";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion } from "../utils/mcpVersion";

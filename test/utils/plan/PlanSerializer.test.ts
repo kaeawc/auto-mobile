@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { YamlPlanSerializer } from "../../../src/utils/plan/PlanSerializer";
 import type { Plan } from "../../../src/models/Plan";
 

@@ -1,12 +1,13 @@
 import fs from "fs/promises";
 import path from "path";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { Plan, PlanStep } from "../../models/Plan";
 import { logger } from "../logger";
 import { PlanNormalizer } from "./PlanNormalizer";
 import { migratePlan } from "./PlanMigrator";
 import { getMcpServerVersion } from "../mcpVersion";
 import { PlanValidator } from "./PlanValidator";
+import { PLAN_YAML_LOAD_OPTIONS } from "./planYaml";
 
 /**
  * Interface for plan serialization/deserialization
@@ -212,7 +213,7 @@ export class YamlPlanSerializer implements PlanSerializer {
 
       let rawPlan: any;
       try {
-        rawPlan = yaml.load(yamlContent) as any;
+        rawPlan = yaml.load(yamlContent, PLAN_YAML_LOAD_OPTIONS) as any;
         logger.info("Raw plan loaded successfully");
       } catch (yamlError) {
         throw new Error(`YAML parsing failed: ${yamlError}`);

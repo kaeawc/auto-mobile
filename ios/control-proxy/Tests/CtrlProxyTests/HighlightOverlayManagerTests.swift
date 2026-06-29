@@ -78,6 +78,28 @@ final class HighlightOverlayManagerTests: XCTestCase {
         XCTAssertNotEqual(segments[0].strokeWidth, segments[40].strokeWidth)
     }
 
+    func testBuildsHandDrawnBoxSegmentsAroundRectangularPerimeter() {
+        let segments = HighlightOverlayHandDrawnSegments.boxSegments(
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 80),
+            baseStrokeWidth: 8,
+            phase: 0
+        )
+
+        XCTAssertEqual(segments.count, 160)
+        XCTAssertEqual(segments.first?.startX, 10)
+        XCTAssertEqual(segments.first?.startY ?? 0, 20, accuracy: 0.001)
+        XCTAssertEqual(segments[40].startY, 20, accuracy: 2)
+        XCTAssertGreaterThan(segments[40].startX, 90)
+        XCTAssertEqual(segments[45].startX, 110, accuracy: 2)
+        XCTAssertGreaterThan(segments[45].startY, 20)
+        XCTAssertEqual(segments[80].startY, 100, accuracy: 2)
+        XCTAssertGreaterThan(segments[80].startX, 108)
+        XCTAssertEqual(segments[125].startX, 10, accuracy: 2)
+        XCTAssertLessThan(segments[125].startY, 100)
+        XCTAssertLessThan(segments.map(\.strokeWidth).min() ?? 0, 7)
+        XCTAssertGreaterThan(segments.map(\.strokeWidth).max() ?? 0, 15)
+    }
+
     func testBuildsHandDrawnPathSegmentsWithDefaultSmoothingAndTaper() {
         let points = [
             HighlightPoint(x: 10, y: 20),

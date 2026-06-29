@@ -200,6 +200,8 @@ public enum HighlightOverlayHandDrawnSegments {
     private static let ellipseStartAngleJitter: Float = 8
     private static let ellipseMinWidthFactor: Float = 0.75
     private static let ellipseMaxWidthFactor: Float = 2.0
+    private static let boxSegmentCount = 160
+    private static let boxJitterRatio: Float = 0.025
     private static let pathMinSampleDistance: Float = 3
     private static let pathTaperFraction: Float = 0.12
     private static let pathMinWidthFactor: Float = 0.35
@@ -257,6 +259,55 @@ public enum HighlightOverlayHandDrawnSegments {
         }
     }
 
+    public static func boxSegments(
+        bounds: HighlightBounds,
+        baseStrokeWidth: Float,
+        phase: Double? = nil
+    ) -> [HighlightOverlayStrokeSegment] {
+        guard bounds.width > 0, bounds.height > 0, baseStrokeWidth > 0 else { return [] }
+        let left = Float(bounds.x)
+        let top = Float(bounds.y)
+        let right = left + Float(bounds.width)
+        let bottom = top + Float(bounds.height)
+        let perimeter = 2 * (Float(bounds.width) + Float(bounds.height))
+        guard perimeter > 0 else { return [] }
+
+        let step = perimeter / Float(boxSegmentCount)
+        let jitterAmplitude = min(Float(bounds.width), Float(bounds.height)) * boxJitterRatio
+        let resolvedPhase = phase ?? Double.random(in: 0..<(Double.pi * 2))
+
+        return (0..<boxSegmentCount).map { index in
+            let startDistance = Float(index) * step
+            let endDistance = startDistance + step
+            let start = pointOnBox(
+                distance: startDistance,
+                left: left,
+                top: top,
+                right: right,
+                bottom: bottom,
+                jitterAmplitude: jitterAmplitude,
+                phase: resolvedPhase
+            )
+            let end = pointOnBox(
+                distance: endDistance,
+                left: left,
+                top: top,
+                right: right,
+                bottom: bottom,
+                jitterAmplitude: jitterAmplitude,
+                phase: resolvedPhase
+            )
+            let progress = ((startDistance + step / 2) / perimeter).clamped(to: 0...1)
+            return HighlightOverlayStrokeSegment(
+                startX: start.x,
+                startY: start.y,
+                endX: end.x,
+                endY: end.y,
+                strokeWidth: baseStrokeWidth * boxWidthFactor(progress: progress)
+            )
+        }
+    }
+
     public static func pathSegments(
         points: [HighlightPoint],
         smoothing: String?,
@@ -300,6 +351,37 @@ public enum HighlightOverlayHandDrawnSegments {
             distance += length
         }
         return segments
+    }
+
+    private static func pointOnBox(
+        distance: Float,
+        left: Float,
+        top: Float,
+        right: Float,
+        bottom: Float,
+        jitterAmplitude: Float,
+        phase: Double
+    ) -> (x: Float, y: Float) {
+        let width = right - left
+        let height = bottom - top
+        let perimeter = 2 * (width + height)
+        let wrappedDistance = distance.truncatingRemainder(dividingBy: perimeter)
+        let jitter = jitterAmplitude * Float(sin(Double(wrappedDistance) * 0.11 + phase))
+
+        if wrappedDistance <= width {
+            return (x: left + wrappedDistance, y: top + jitter)
+        }
+        if wrappedDistance <= width + height {
+            return (x: right + jitter, y: top + (wrappedDistance - width))
+        }
+        if wrappedDistance <= (2 * width) + height {
+            return (x: right - (wrappedDistance - width - height), y: bottom + jitter)
+        }
+        return (x: left + jitter, y: bottom - (wrappedDistance - (2 * width) - height))
+    }
+
+    private static func boxWidthFactor(progress: Float) -> Float {
+        ellipseMinWidthFactor + (ellipseMaxWidthFactor - ellipseMinWidthFactor) * Float(abs(sin(Double(progress) * Double.pi * 2)))
     }
 
     private static func pointOnEllipse(
@@ -610,7 +692,13 @@ public final class DefaultHighlightOverlayRenderer: HighlightOverlayRendering {
         private static func segmentLayers(for command: HighlightOverlayRenderCommand) -> [CAShapeLayer] {
             let segments: [HighlightOverlayStrokeSegment]
             switch command.shapeType {
-            case "box", "circle":
+            case "box":
+                guard let bounds = command.bounds else { return [] }
+                segments = HighlightOverlayHandDrawnSegments.boxSegments(
+                    bounds: bounds,
+                    baseStrokeWidth: command.strokeWidth
+                )
+            case "circle":
                 guard let bounds = command.bounds else { return [] }
                 segments = HighlightOverlayHandDrawnSegments.ellipseSegments(
                     bounds: bounds,

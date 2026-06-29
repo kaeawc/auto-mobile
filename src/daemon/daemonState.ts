@@ -1,6 +1,5 @@
 import { SessionManager } from "./sessionManager";
 import { DevicePool } from "./devicePool";
-import { logger } from "../utils/logger";
 
 export interface DaemonStateLike {
   isInitialized(): boolean;
@@ -55,12 +54,8 @@ export class DaemonState implements DaemonStateLike {
    */
   getDevicePool(): DevicePool {
     if (!this.devicePool) {
-      logger.error("[DAEMON-STATE-DEBUG] getDevicePool called but devicePool is null!");
       throw new Error("DaemonState not initialized");
     }
-    const stats = this.devicePool.getStats();
-    const poolInstanceId = this.devicePool.instanceId;
-    logger.debug(`[DAEMON-STATE-DEBUG] getDevicePool returning pool instance #${poolInstanceId} with ${stats.total} devices`);
     return this.devicePool;
   }
 

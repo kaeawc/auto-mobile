@@ -67,8 +67,6 @@ export interface PooledDevice {
  * Works with SessionManager to maintain bidirectional mappings.
  */
 export class DevicePool {
-  private static instanceCounter = 0;
-  readonly instanceId: number;
   private devices: Map<string, PooledDevice> = new Map();
   private deviceSessionStarts: Map<string, number> = new Map();
   private sessionManager: SessionManager;
@@ -104,8 +102,6 @@ export class DevicePool {
     deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository(),
     criteriaMatcher: DeviceCriteriaMatcher = new DeviceCriteriaMatcher()
   ) {
-    this.instanceId = ++DevicePool.instanceCounter;
-    logger.info(`[DEVICE-POOL-DEBUG] Creating DevicePool instance #${this.instanceId}`);
     this.sessionManager = sessionManager;
     this.daemonSessionId = daemonSessionId;
     this.timer = timer;
@@ -843,10 +839,6 @@ export class DevicePool {
    * This enables parallel test execution with limited devices.
    */
   async assignDeviceToSession(sessionId: string, platform?: Platform): Promise<string> {
-    logger.debug(`[DEVICE-POOL-DEBUG] Instance #${this.instanceId}: assignDeviceToSession called for session ${sessionId}`);
-    logger.debug(`[DEVICE-POOL-DEBUG] Instance #${this.instanceId}: Current devices.size: ${this.devices.size}`);
-    logger.debug(`[DEVICE-POOL-DEBUG] Instance #${this.instanceId}: Device IDs: ${Array.from(this.devices.keys()).join(", ")}`);
-
     const maxAttempts = Math.ceil(this.DEVICE_WAIT_TIMEOUT_MS / this.DEVICE_WAIT_INTERVAL_MS);
     let firstAttemptLogged = false;
 
@@ -937,11 +929,52 @@ export class DevicePool {
     shouldWait: boolean;
     totalDevices: number;
   }> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: devices.size = ${this.devices.size}`);
-      logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: device IDs = ${Array.from(this.devices.keys()).join(", ")}`);
+    return this.tryAssignFrom(
+      sessionId,
+      () => this.getDevicesByPlatform(platform),
+      "platform pool empty"
+    );
+  }
 
-      let candidates = this.getDevicesByPlatform(platform);
+  private async tryAssignDeviceWithCriteria(
+    sessionId: string,
+    criteria?: DeviceAllocationCriteria
+  ): Promise<{
+    success: boolean;
+    deviceId?: string;
+    shouldWait: boolean;
+    totalDevices: number;
+  }> {
+    return this.tryAssignFrom(
+      sessionId,
+      () => this.getDevicesMatchingCriteria(criteria),
+      "criteria pool empty"
+    );
+  }
+
+  /**
+   * Shared single-attempt assignment body for platform- and criteria-based
+   * allocation. Parameterized only by how candidate devices are selected and
+   * the label used when the candidate pool is empty.
+   *
+   * Selection order: prefer the most recently released device for reuse, then
+   * fall back to the least-recently-used idle device for load distribution.
+   *
+   * @param emptyCandidatePoolReason label logged when candidates exist in the
+   *   pool overall but none match this selector (the `totalDevices === 0` case)
+   */
+  private async tryAssignFrom(
+    sessionId: string,
+    selectCandidates: () => PooledDevice[],
+    emptyCandidatePoolReason: string
+  ): Promise<{
+    success: boolean;
+    deviceId?: string;
+    shouldWait: boolean;
+    totalDevices: number;
+  }> {
+    return await this.assignmentMutex.runExclusive(async () => {
+      let candidates = selectCandidates();
       let totalDevices = candidates.length;
 
       // Find idle devices and prefer most recently released for reuse
@@ -958,7 +991,6 @@ export class DevicePool {
           device = idleDevices[0];
         }
       }
-      logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: found idle device = ${device?.id || "none"}`);
 
       // If no devices available and pool is empty, try to refresh
       // This handles race conditions during daemon startup
@@ -967,18 +999,14 @@ export class DevicePool {
         const refreshReason = this.devices.size === 0
           ? "empty pool"
           : totalDevices === 0
-            ? "platform pool empty"
+            ? emptyCandidatePoolReason
             : "no idle usable devices";
         logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
-        const addedCount = await this.refreshDevices();
-        logger.info(`[DEVICE-POOL-DEBUG] Auto-refresh added ${addedCount} devices`);
-        candidates = this.getDevicesByPlatform(platform);
+        await this.refreshDevices();
+        candidates = selectCandidates();
         totalDevices = candidates.length;
         device = candidates.find(d => d.status === "idle");
-        logger.info(`[DEVICE-POOL-DEBUG] After refresh, found idle device = ${device?.id || "none"}`);
       }
-
-      logger.info(`[DEVICE-POOL-DEBUG] tryAssignDevice: totalDevices = ${totalDevices}`);
 
       if (!device) {
         // No idle device - check if devices exist but are busy
@@ -1001,74 +1029,6 @@ export class DevicePool {
       device.errorCount = 0; // Reset errors on successful assignment
 
       // Create session in SessionManager
-      await this.sessionManager.createSession(sessionId, device.id, device.platform);
-
-      logger.info(`Assigned device ${device.id} to session ${sessionId}`);
-
-      return {
-        success: true,
-        deviceId: device.id,
-        shouldWait: false,
-        totalDevices,
-      };
-    });
-  }
-
-  private async tryAssignDeviceWithCriteria(
-    sessionId: string,
-    criteria?: DeviceAllocationCriteria
-  ): Promise<{
-    success: boolean;
-    deviceId?: string;
-    shouldWait: boolean;
-    totalDevices: number;
-  }> {
-    return await this.assignmentMutex.runExclusive(async () => {
-      let candidates = this.getDevicesMatchingCriteria(criteria);
-      let totalDevices = candidates.length;
-
-      const idleDevices = candidates.filter(d => d.status === "idle");
-      let device: PooledDevice | undefined;
-
-      if (idleDevices.length > 0) {
-        if (this.lastReleasedDeviceId) {
-          device = idleDevices.find(d => d.id === this.lastReleasedDeviceId);
-        }
-        if (!device) {
-          device = idleDevices[0];
-        }
-      }
-
-      const busyDevicesBeforeRefresh = candidates.filter(d => d.status === "busy").length;
-      if (!device && (this.devices.size === 0 || totalDevices === 0 || busyDevicesBeforeRefresh === 0)) {
-        const refreshReason = this.devices.size === 0
-          ? "empty pool"
-          : totalDevices === 0
-            ? "criteria pool empty"
-            : "no idle usable devices";
-        logger.info(`[DevicePool] Auto-refreshing devices due to ${refreshReason}...`);
-        const addedCount = await this.refreshDevices();
-        logger.info(`[DevicePool] Auto-refresh added ${addedCount} devices`);
-        candidates = this.getDevicesMatchingCriteria(criteria);
-        totalDevices = candidates.length;
-        device = candidates.find(d => d.status === "idle");
-      }
-
-      if (!device) {
-        const busyDevices = candidates.filter(d => d.status === "busy").length;
-        return {
-          success: false,
-          shouldWait: busyDevices > 0,
-          totalDevices,
-        };
-      }
-
-      device.sessionId = sessionId;
-      device.status = "busy";
-      device.lastUsedAt = this.nextLastUsedAt();
-      device.assignmentCount++;
-      device.errorCount = 0;
-
       await this.sessionManager.createSession(sessionId, device.id, device.platform);
 
       logger.info(`Assigned device ${device.id} to session ${sessionId}`);

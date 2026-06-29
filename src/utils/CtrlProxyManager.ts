@@ -605,8 +605,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       logger.warn("[CTRL_PROXY] Skipping APK download/version check (preinstalled APK allowed)");
       return this.cacheVersionCheckResult({
         status: "skipped",
-        expectedSha256: expectedSha,
-        acceptedPreinstalled: true
+        expectedSha256: expectedSha
       });
     }
 

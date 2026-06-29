@@ -41,6 +41,12 @@ type FfmpegInput =
   | { type: "pipe" }
   | { type: "file"; path: string };
 
+type FfmpegDiagnosticsTracker = Pick<ProcessTracker, "exitState" | "stderr">;
+
+function isFailedExitCode(exitCode: number | null | undefined): boolean {
+  return exitCode !== undefined && exitCode !== 0;
+}
+
 interface FfmpegBackendHandle {
   kind: "ffmpeg";
   platform: "android" | "ios";
@@ -363,16 +369,21 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
 
     await waitForExit(ffmpegProcess, ffmpegTracker.exitPromise);
 
-    if (ffmpegTracker.exitState.exitCode && ffmpegTracker.exitState.exitCode !== 0) {
+    if (isFailedExitCode(ffmpegTracker.exitState.exitCode)) {
       throw new ActionableError(
-        `FFmpeg post-processing failed with code ${ffmpegTracker.exitState.exitCode}: ${ffmpegTracker.stderr.join("")}`
+        this.buildFfmpegFailureMessage(
+          "FFmpeg post-processing failed",
+          ffmpegArgs,
+          ffmpegTracker
+        )
       );
     }
 
-    const outputExists = await pathExists(backendHandle.config.outputPath);
-    if (!outputExists) {
-      throw new ActionableError(`FFmpeg output file missing at ${backendHandle.config.outputPath}`);
-    }
+    await this.assertFfmpegOutputReady(
+      backendHandle.config.outputPath,
+      ffmpegArgs,
+      ffmpegTracker
+    );
 
     try {
       await fsPromises.rm(capturePath, { recursive: true, force: true });
@@ -392,6 +403,14 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       args.push("-f", "mp4", "-i", "pipe:0");
     } else {
       args.push("-i", input.path);
+
+      if (!config.resolution) {
+        args.push("-c", "copy");
+        args.push("-movflags", "+faststart");
+        args.push("-y");
+        args.push(config.outputPath);
+        return args;
+      }
     }
 
     args.push("-r", String(config.fps));
@@ -618,8 +637,56 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
     }
   }
 
+  private async assertFfmpegOutputReady(
+    outputPath: string,
+    args: string[],
+    tracker: FfmpegDiagnosticsTracker
+  ): Promise<void> {
+    const outputExists = await pathExists(outputPath);
+    if (!outputExists) {
+      throw new ActionableError(
+        this.buildFfmpegFailureMessage(
+          "FFmpeg output file missing",
+          args,
+          tracker,
+          outputPath
+        )
+      );
+    }
+
+    const sizeBytes = await this.getFileSize(outputPath);
+    if (!sizeBytes || sizeBytes <= 0) {
+      throw new ActionableError(
+        this.buildFfmpegFailureMessage(
+          "FFmpeg output file is empty",
+          args,
+          tracker,
+          outputPath
+        )
+      );
+    }
+  }
+
+  private buildFfmpegFailureMessage(
+    summary: string,
+    args: string[],
+    tracker: FfmpegDiagnosticsTracker,
+    outputPath?: string
+  ): string {
+    const details = [
+      summary,
+      outputPath ? `output: ${outputPath}` : undefined,
+      `command: ${this.ffmpegPath} ${args.join(" ")}`,
+      `exitCode: ${tracker.exitState.exitCode ?? "null"}`,
+      `signal: ${tracker.exitState.signal ?? "null"}`,
+      `stderr:\n${tracker.stderr.join("").trim() || "(empty)"}`,
+    ].filter((line): line is string => Boolean(line));
+
+    return details.join("\n");
+  }
+
   private logProcessWarnings(label: string, tracker: ProcessTracker): void {
-    if (tracker.exitState.exitCode && tracker.exitState.exitCode !== 0) {
+    if (isFailedExitCode(tracker.exitState.exitCode)) {
       logger.warn(
         `[FfmpegVideo] ${label} exited with code ${tracker.exitState.exitCode}: ${tracker.stderr.join("")}`
       );

@@ -14,6 +14,7 @@ data class ViewHierarchy(
     val hierarchy: UIElementInfo? = null,
     val windowInfo: WindowInfo? = null,
     val windows: List<WindowInfo>? = null,
+    val contentHiddenRegions: List<ContentHiddenRegion>? = null,
     val intentChooserDetected: Boolean? = null,
     val notificationPermissionDetected: Boolean? = null,
     @SerialName("accessibility-focused-element")
@@ -30,4 +31,11 @@ data class ViewHierarchy(
     val sdkInt: Int? = null, // Android API level (e.g. 34)
     val deviceModel: String? = null, // e.g. "Pixel 8"
     val isEmulator: Boolean? = null, // Whether running on an emulator
+)
+
+@Serializable
+data class ContentHiddenRegion(
+    val bounds: ElementBounds,
+    val reason: String,
+    val areaPercent: Int,
 )

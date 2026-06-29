@@ -5,7 +5,12 @@
  * shared state and functionality from the main CtrlProxyClient.
  */
 
-import type { BootedDevice, RecompositionNodeInfo, ViewHierarchyWindowInfo } from "../../../models";
+import type {
+  BootedDevice,
+  ContentHiddenRegion,
+  RecompositionNodeInfo,
+  ViewHierarchyWindowInfo
+} from "../../../models";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type {
   PerfTiming,
@@ -76,6 +81,7 @@ export interface AccessibilityHierarchy {
   packageName: string;
   hierarchy: AccessibilityNode;
   windows?: ViewHierarchyWindowInfo[];
+  contentHiddenRegions?: ContentHiddenRegion[];
   intentChooserDetected?: boolean;
   notificationPermissionDetected?: boolean;
   /** Element with TalkBack cursor */

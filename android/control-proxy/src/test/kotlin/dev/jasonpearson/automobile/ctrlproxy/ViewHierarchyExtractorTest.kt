@@ -957,6 +957,95 @@ class ViewHierarchyExtractorTest {
     assertTrue("JSON should contain view-id field", jsonString.contains("\"view-id\""))
   }
 
+  @Test
+  fun `detectContentHiddenRegions finds large empty non-interactive Compose descendant with sparse child coverage`() {
+    val visibleToolbar =
+        elementWithBounds(
+            resourceId = "com.slack:id/top_bar",
+            bounds = bounds(0, 290, 1440, 458),
+        )
+    val hiddenBoundary =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            actions = listOf("accessibility_focus"),
+            children = listOf(visibleToolbar),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(hiddenBoundary),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertEquals(1, regions.size)
+    assertEquals("compose-interop-no-hide-descendants", regions[0].reason)
+    assertEquals(bounds(0, 368, 1440, 2752), regions[0].bounds)
+    assertEquals(79, regions[0].areaPercent)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores large Compose descendants with text content`() {
+    val textChild =
+        elementWithBounds(
+            bounds = bounds(32, 500, 400, 560),
+            text = "general",
+        )
+    val contentRegion =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            actions = listOf("accessibility_focus"),
+            children = listOf(textChild),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(contentRegion),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores interactive Compose descendants`() {
+    val interactiveRegion =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            actions = listOf("click"),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(interactiveRegion),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions deduplicates hidden regions aggregated across window roots`() {
+    val firstWindow = composeRootWithHiddenBoundary(bounds(0, 368, 1440, 1400))
+    val duplicateWindow = composeRootWithHiddenBoundary(bounds(0, 368, 1440, 1400))
+    val secondWindow = composeRootWithHiddenBoundary(bounds(0, 1500, 1440, 2752))
+
+    val regions =
+        extractor.detectContentHiddenRegionsAcrossRootsForTest(
+            listOf(firstWindow, duplicateWindow, secondWindow),
+        )
+
+    assertNotNull(regions)
+    assertEquals(2, regions!!.size)
+    assertEquals(bounds(0, 368, 1440, 1400), regions[0].bounds)
+    assertEquals(bounds(0, 1500, 1440, 2752), regions[1].bounds)
+  }
+
   private fun ViewHierarchyExtractor.generateDeterministicUuidForTest(path: String): String {
     val method = this.javaClass.getDeclaredMethod("generateDeterministicUuid", String::class.java)
     method.isAccessible = true
@@ -983,6 +1072,9 @@ class ViewHierarchyExtractorTest {
   private fun elementWithBounds(
       resourceId: String? = null,
       bounds: ElementBounds? = null,
+      className: String? = null,
+      text: String? = null,
+      actions: List<String>? = null,
       children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo {
     val node =
@@ -991,11 +1083,31 @@ class ViewHierarchyExtractorTest {
           children.size == 1 -> json.encodeToJsonElement(UIElementInfo.serializer(), children[0])
           else -> json.encodeToJsonElement(ListSerializer(UIElementInfo.serializer()), children)
         }
-    return UIElementInfo(resourceId = resourceId, bounds = bounds, node = node)
+    return UIElementInfo(
+        resourceId = resourceId,
+        bounds = bounds,
+        className = className,
+        text = text,
+        actions = actions,
+        node = node,
+    )
   }
 
   private fun bounds(left: Int, top: Int, right: Int, bottom: Int): ElementBounds {
     return ElementBounds(left, top, right, bottom)
+  }
+
+  private fun composeRootWithHiddenBoundary(boundaryBounds: ElementBounds): UIElementInfo {
+    val hiddenBoundary =
+        elementWithBounds(
+            bounds = boundaryBounds,
+            actions = listOf("accessibility_focus"),
+        )
+    return elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(hiddenBoundary),
+    )
   }
 
   private fun findElementByResourceId(
@@ -1086,5 +1198,38 @@ class ViewHierarchyExtractorTest {
     method.isAccessible = true
     @Suppress("UNCHECKED_CAST")
     return method.invoke(this, element, occlusionInfo, windowKey, path, isRoot) as UIElementInfo?
+  }
+
+  private fun ViewHierarchyExtractor.detectContentHiddenRegionsForTest(
+      element: UIElementInfo,
+      screenWidth: Int,
+      screenHeight: Int,
+  ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion> {
+    val method =
+        this.javaClass.getDeclaredMethod(
+            "detectContentHiddenRegions",
+            UIElementInfo::class.java,
+            Int::class.javaPrimitiveType,
+            Int::class.javaPrimitiveType,
+        )
+    method.isAccessible = true
+    @Suppress("UNCHECKED_CAST")
+    return method.invoke(this, element, screenWidth, screenHeight)
+        as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>
+  }
+
+  private fun ViewHierarchyExtractor.detectContentHiddenRegionsAcrossRootsForTest(
+      elements: List<UIElementInfo>
+  ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>? {
+    val method =
+        this.javaClass.getDeclaredMethod(
+            "detectContentHiddenRegions",
+            List::class.java,
+            dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions::class.java,
+        )
+    method.isAccessible = true
+    @Suppress("UNCHECKED_CAST")
+    return method.invoke(this, elements, null)
+        as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>?
   }
 }

@@ -17,6 +17,8 @@ export interface ViewHierarchyResult {
   packageName?: string;
   /** Optional window metadata from the accessibility service */
   windows?: ViewHierarchyWindowInfo[];
+  /** Regions where platform accessibility APIs likely hide rendered content. */
+  contentHiddenRegions?: ContentHiddenRegion[];
   /** Whether an intent chooser dialog was detected (from accessibility service) */
   intentChooserDetected?: boolean;
   /** Whether a notification permission dialog was detected (from accessibility service) */
@@ -55,6 +57,12 @@ export interface ViewHierarchyResult {
   deviceModel?: string;
   /** Whether running on an emulator (Android only, from accessibility service) */
   isEmulator?: boolean;
+}
+
+export interface ContentHiddenRegion {
+  bounds: ElementBounds;
+  reason: "compose-interop-no-hide-descendants" | string;
+  areaPercent: number;
 }
 
 export interface Hierarchy {

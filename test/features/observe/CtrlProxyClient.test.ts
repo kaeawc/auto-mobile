@@ -554,6 +554,13 @@ describe("AndroidCtrlProxyClient", function() {
         packageName: "com.google.android.deskclock",
         intentChooserDetected: true,
         notificationPermissionDetected: true,
+        contentHiddenRegions: [
+          {
+            bounds: { left: 0, top: 368, right: 1440, bottom: 2752 },
+            reason: "compose-interop-no-hide-descendants",
+            areaPercent: 79
+          }
+        ],
         hierarchy: {
           "text": "6:43 AM",
           "content-desc": "6:43 AM",
@@ -597,6 +604,13 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy.enabled).toBe("true");
       expect(result.intentChooserDetected).toBe(true);
       expect(result.notificationPermissionDetected).toBe(true);
+      expect(result.contentHiddenRegions).toEqual([
+        {
+          bounds: { left: 0, top: 368, right: 1440, bottom: 2752 },
+          reason: "compose-interop-no-hide-descendants",
+          areaPercent: 79
+        }
+      ]);
 
       // Check child node conversion
       expect(typeof result.hierarchy.node).toBe("object");

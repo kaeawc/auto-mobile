@@ -536,7 +536,13 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       return false
     }
 
-    if (countTextBearingNodes(node) > 0) {
+    // Reject only when the candidate boundary itself is labeled: a node with its own text or
+    // content-desc is its own accessible content, not a hidden interop body. Descendant labels
+    // (e.g. a toolbar title above an otherwise inaccessible Fragment/RecyclerView) are allowed to
+    // coexist with a hidden-region report. The direct-child-coverage gate below is the guard
+    // against regions that are actually mostly visible. See #2634.
+    val nodeHasOwnLabel = !node.text.isNullOrBlank() || !node.contentDesc.isNullOrBlank()
+    if (nodeHasOwnLabel) {
       return false
     }
 
@@ -546,12 +552,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
     val childCoverage = directChildCoverage(bounds, children)
     return childCoverage <= MAX_VISIBLE_CHILD_COVERAGE
-  }
-
-  private fun countTextBearingNodes(node: UIElementInfo): Int {
-    val hasText = !node.text.isNullOrBlank() || !node.contentDesc.isNullOrBlank()
-    return (if (hasText) 1 else 0) +
-        extractChildrenFromNode(node.node).sumOf { countTextBearingNodes(it) }
   }
 
   private fun isInteractive(node: UIElementInfo): Boolean {

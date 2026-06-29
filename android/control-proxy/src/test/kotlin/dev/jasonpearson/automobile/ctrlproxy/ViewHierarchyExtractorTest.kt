@@ -986,17 +986,94 @@ class ViewHierarchyExtractorTest {
   }
 
   @Test
-  fun `detectContentHiddenRegions ignores large Compose descendants with text content`() {
-    val textChild =
+  fun `detectContentHiddenRegions reports region when a sparse visible text child coexists`() {
+    // Compose interop body whose only accessibility-visible child is a small toolbar title
+    // ("general"). The recursive text reject treated this as a false negative; Option 1 lets the
+    // sparse title coexist with the hidden-region report, gated by direct child coverage.
+    val toolbarTitle =
         elementWithBounds(
-            bounds = bounds(32, 500, 400, 560),
+            resourceId = "com.slack:id/top_bar",
+            bounds = bounds(0, 290, 1440, 458),
             text = "general",
         )
     val contentRegion =
         elementWithBounds(
             bounds = bounds(0, 368, 1440, 2752),
             actions = listOf("accessibility_focus"),
-            children = listOf(textChild),
+            children = listOf(toolbarTitle),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(contentRegion),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertEquals(1, regions.size)
+    assertEquals("compose-interop-no-hide-descendants", regions[0].reason)
+    assertEquals(bounds(0, 368, 1440, 2752), regions[0].bounds)
+    assertEquals(79, regions[0].areaPercent)
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores boundary that itself carries text`() {
+    // When the candidate boundary node is itself labeled, it is its own accessible content, not a
+    // hidden interop body. Option 1 keeps rejecting on the candidate node's own text.
+    val contentRegion =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            text = "Accessible content",
+            actions = listOf("accessibility_focus"),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(contentRegion),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores boundary that itself carries a content description`() {
+    val contentRegion =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            contentDesc = "Map view",
+            actions = listOf("accessibility_focus"),
+        )
+    val composeRoot =
+        elementWithBounds(
+            className = "androidx.compose.ui.platform.ComposeView",
+            bounds = bounds(0, 0, 1440, 3000),
+            children = listOf(contentRegion),
+        )
+
+    val regions = extractor.detectContentHiddenRegionsForTest(composeRoot, 1440, 3000)
+
+    assertTrue(regions.isEmpty())
+  }
+
+  @Test
+  fun `detectContentHiddenRegions ignores region whose text descendants cover substantial bounds`() {
+    // Descendant text covering > MAX_VISIBLE_CHILD_COVERAGE means the region is mostly visible,
+    // not hidden. The direct-child-coverage gate (not descendant text counting) holds it back, so
+    // Option 1 does not regress this false-positive guard.
+    val denseTextChild =
+        elementWithBounds(
+            bounds = bounds(0, 400, 1440, 1500),
+            text = "Visible list content",
+        )
+    val contentRegion =
+        elementWithBounds(
+            bounds = bounds(0, 368, 1440, 2752),
+            actions = listOf("accessibility_focus"),
+            children = listOf(denseTextChild),
         )
     val composeRoot =
         elementWithBounds(
@@ -1074,6 +1151,7 @@ class ViewHierarchyExtractorTest {
       bounds: ElementBounds? = null,
       className: String? = null,
       text: String? = null,
+      contentDesc: String? = null,
       actions: List<String>? = null,
       children: List<UIElementInfo> = emptyList(),
   ): UIElementInfo {
@@ -1088,6 +1166,7 @@ class ViewHierarchyExtractorTest {
         bounds = bounds,
         className = className,
         text = text,
+        contentDesc = contentDesc,
         actions = actions,
         node = node,
     )

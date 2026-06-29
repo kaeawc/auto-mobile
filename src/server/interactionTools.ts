@@ -920,9 +920,11 @@ export function registerInteractionTools() {
           message = `Cleared clipboard`;
           break;
         case "get":
-          message = result.text
-            ? `Retrieved clipboard content: "${result.text.substring(0, 50)}${result.text.length > 50 ? "..." : ""}"`
-            : `Retrieved empty clipboard`;
+          message = !result.success
+            ? `Failed to retrieve clipboard content: ${result.error ?? "unknown error"}`
+            : result.text
+              ? `Retrieved clipboard content: "${result.text.substring(0, 50)}${result.text.length > 50 ? "..." : ""}"`
+              : `Retrieved empty clipboard`;
           break;
       }
 

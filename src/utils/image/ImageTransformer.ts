@@ -1,8 +1,9 @@
-import sharp from "sharp";
+import type { ResizeOptions, Sharp, WebpOptions } from "sharp";
 import { logger } from "../logger";
 import { NodeCryptoService } from "../crypto";
 import { ImageCache } from "./ImageCache";
 import { defaultTimer, type Timer } from "../SystemTimer";
+import { loadSharp } from "./loadSharp";
 
 const DEFAULT_JPEG_QUALITY = 75;
 
@@ -38,15 +39,23 @@ export interface ImageMetadata {
 }
 
 class SharpImageTransformer {
-  private sharpInstance: sharp.Sharp;
   private options: ImageOptions = {};
   private cacheKey: string | null = null;
   private useCache: boolean = true;
   private timer: Timer;
+  private operations: Array<(sharpInstance: Sharp) => Sharp> = [];
 
   constructor(private buffer: Buffer, timer: Timer = defaultTimer) {
-    this.sharpInstance = sharp(buffer);
     this.timer = timer;
+  }
+
+  private async createSharpInstance(): Promise<Sharp> {
+    const sharp = await loadSharp();
+    let sharpInstance = sharp(this.buffer);
+    for (const operation of this.operations) {
+      sharpInstance = operation(sharpInstance);
+    }
+    return sharpInstance;
   }
 
   private generateCacheKey(): string {
@@ -66,7 +75,7 @@ class SharpImageTransformer {
       throw new Error("Width must be a positive number");
     }
 
-    const resizeOptions: sharp.ResizeOptions = { width };
+    const resizeOptions: ResizeOptions = { width };
 
     if (height !== undefined) {
       if (height <= 0) {
@@ -85,7 +94,7 @@ class SharpImageTransformer {
       maintainAspectRatio
     };
 
-    this.sharpInstance = this.sharpInstance.resize(resizeOptions);
+    this.operations.push(sharpInstance => sharpInstance.resize(resizeOptions));
     return this;
   }
 
@@ -95,13 +104,13 @@ class SharpImageTransformer {
     }
 
     this.options.crop = { width, height, x, y };
-    this.sharpInstance = this.sharpInstance.extract({ width, height, left: x, top: y });
+    this.operations.push(sharpInstance => sharpInstance.extract({ width, height, left: x, top: y }));
     return this;
   }
 
   public rotate(degrees: number): SharpImageTransformer {
     this.options.rotate = degrees;
-    this.sharpInstance = this.sharpInstance.rotate(degrees);
+    this.operations.push(sharpInstance => sharpInstance.rotate(degrees));
     return this;
   }
 
@@ -110,13 +119,13 @@ class SharpImageTransformer {
 
     switch (direction) {
       case "horizontal":
-        this.sharpInstance = this.sharpInstance.flop();
+        this.operations.push(sharpInstance => sharpInstance.flop());
         break;
       case "vertical":
-        this.sharpInstance = this.sharpInstance.flip();
+        this.operations.push(sharpInstance => sharpInstance.flip());
         break;
       case "both":
-        this.sharpInstance = this.sharpInstance.flip().flop();
+        this.operations.push(sharpInstance => sharpInstance.flip().flop());
         break;
     }
 
@@ -129,7 +138,7 @@ class SharpImageTransformer {
     }
 
     this.options.blur = radius;
-    this.sharpInstance = this.sharpInstance.blur(radius);
+    this.operations.push(sharpInstance => sharpInstance.blur(radius));
     return this;
   }
 
@@ -142,13 +151,13 @@ class SharpImageTransformer {
 
     this.options.format = "jpg";
     this.options.quality = quality;
-    this.sharpInstance = this.sharpInstance.jpeg({ quality });
+    this.operations.push(sharpInstance => sharpInstance.jpeg({ quality }));
     return this;
   }
 
   public png(): SharpImageTransformer {
     this.options.format = "png";
-    this.sharpInstance = this.sharpInstance.png();
+    this.operations.push(sharpInstance => sharpInstance.png());
     return this;
   }
 
@@ -171,7 +180,7 @@ class SharpImageTransformer {
     this.options.lossless = options?.lossless;
     this.options.nearLossless = options?.nearLossless;
 
-    const webpOptions: sharp.WebpOptions = { quality };
+    const webpOptions: WebpOptions = { quality };
 
     if (options?.lossless) {
       webpOptions.lossless = true;
@@ -181,7 +190,7 @@ class SharpImageTransformer {
       webpOptions.nearLossless = true;
     }
 
-    this.sharpInstance = this.sharpInstance.webp(webpOptions);
+    this.operations.push(sharpInstance => sharpInstance.webp(webpOptions));
     return this;
   }
 
@@ -208,7 +217,8 @@ class SharpImageTransformer {
 
     try {
       const processStartTime = this.timer.now();
-      const resultBuffer = await this.sharpInstance.toBuffer();
+      const sharpInstance = await this.createSharpInstance();
+      const resultBuffer = await sharpInstance.toBuffer();
       const processDuration = this.timer.now() - processStartTime;
 
       // Store result in cache if caching is enabled
@@ -292,6 +302,7 @@ export class Image {
    */
   public async getMetadata(): Promise<ImageMetadata> {
     try {
+      const sharp = await loadSharp();
       const { width, height, format, space, hasAlpha, exif } = await sharp(this.buffer).metadata();
 
       return {
@@ -314,6 +325,7 @@ export class Image {
    */
   public async getExifMetadata(): Promise<Record<string, any>> {
     try {
+      const sharp = await loadSharp();
       const { exif } = await sharp(this.buffer).metadata();
       return exif ? {} : {};
     } catch (e: unknown) {

@@ -107,6 +107,7 @@ public class ElementLocator: ElementLocating {
         /// Explicitly switch the tracked foreground app to the given bundle ID, clearing caches.
         /// Called by CommandHandler after state-changing operations (launch, terminate, home).
         public func switchForegroundApp(bundleId: String) {
+            let previousBundleId = foregroundBundleId
             foregroundApp = nil
             foregroundBundleId = nil
             elementCache.removeAll()
@@ -120,6 +121,9 @@ public class ElementLocator: ElementLocating {
             }
             foregroundBundleId = bundleId
             lastExplicitSwitchTime = DispatchTime.now().uptimeNanoseconds
+            if previousBundleId != bundleId {
+                print("[ElementLocator] Foreground app changed: \(previousBundleId ?? "nil") -> \(bundleId)")
+            }
         }
 
         public func getAppState(bundleId: String) -> ObservedAppState {
@@ -178,8 +182,6 @@ public class ElementLocator: ElementLocating {
                     }, fallback: (0, nil, self.foregroundBundleId))
                 }
 
-            print("[ElementLocator] ensureForegroundApp: current=\(stateInfo.currentBundleId ?? "nil") state=\(stateInfo.currentAppState.map { String($0) } ?? "nil") springboard=\(stateInfo.springboardState) observed=\(observedBundleIds)")
-
             let isCurrentAppInForeground = (stateInfo.currentAppState ?? 0) >=
                 4 // .runningForeground only (3 = .runningBackground)
             let isCurrentAppSpringboard = stateInfo.currentBundleId == "com.apple.springboard"
@@ -193,13 +195,11 @@ public class ElementLocator: ElementLocating {
 
             if let detectedBundleId = perfProvider.track("detectForeground", block: { detectForegroundAppBundleId() }) {
                 if detectedBundleId != foregroundBundleId {
-                    print("[ElementLocator] Switching to foreground app: \(detectedBundleId)")
                     switchForegroundApp(bundleId: detectedBundleId)
                 }
                 didFallbackToSpringboard = false
             } else if !isCurrentAppInForeground {
                 if foregroundBundleId != "com.apple.springboard" {
-                    print("[ElementLocator] WARNING: No foreground app detected, falling back to springboard")
                     switchForegroundApp(bundleId: "com.apple.springboard")
                     didFallbackToSpringboard = true
                 }
@@ -285,8 +285,6 @@ public class ElementLocator: ElementLocating {
                     var candidateBundleIds: [String] = []
                     collectBundleIdsFromElement(snapshot, into: &candidateBundleIds)
 
-                    print("[ElementLocator] Springboard candidates: \(candidateBundleIds)")
-
                     for bundleId in candidateBundleIds {
                         if bundleId == "com.apple.springboard" {
                             continue
@@ -296,9 +294,7 @@ public class ElementLocator: ElementLocating {
                             let testApp = XCUIApplication(bundleIdentifier: bundleId)
                             return testApp.state.rawValue
                         }, fallback: 0)
-                        print("[ElementLocator] Candidate \(bundleId) state=\(stateRawValue)")
                         if stateRawValue >= 4 { // .runningForeground only
-                            print("[ElementLocator] Found foreground app from springboard: \(bundleId)")
                             return bundleId
                         }
                     }
@@ -308,12 +304,11 @@ public class ElementLocator: ElementLocating {
                     return foundBundleId
                 }
             } else {
-                print("[ElementLocator] WARNING: Failed to snapshot springboard")
+                print("[ElementLocator] Failed to snapshot springboard while detecting foreground app")
             }
 
             // Fallback: Check observed bundle IDs first (apps we've seen before)
             let observedResult: String? = perfProvider.track("checkObserved") {
-                print("[ElementLocator] Checking observed bundle IDs: \(observedBundleIds)")
                 for bundleId in observedBundleIds {
                     // Skip current app (we already know it's not in foreground)
                     if bundleId == foregroundBundleId {
@@ -324,7 +319,6 @@ public class ElementLocator: ElementLocating {
                         let testApp = XCUIApplication(bundleIdentifier: bundleId)
                         return testApp.state.rawValue
                     }, fallback: 0)
-                    print("[ElementLocator] Observed \(bundleId) state=\(stateRawValue)")
                     if stateRawValue >= 4 { // .runningForeground only
                         return bundleId
                     }
@@ -354,11 +348,9 @@ public class ElementLocator: ElementLocating {
                         return testApp.state.rawValue
                     }, fallback: 0)
                     if stateRawValue >= 4 { // .runningForeground only
-                        print("[ElementLocator] Found foreground app from system apps: \(bundleId)")
                         return bundleId
                     }
                 }
-                print("[ElementLocator] No foreground app found from any source")
                 return nil
             }
         }
@@ -428,7 +420,6 @@ public class ElementLocator: ElementLocating {
 
             // Use the observed app's bundle identifier for packageName
             let bundleId = foregroundBundleId ?? "com.apple.springboard"
-            print("[ElementLocator] getViewHierarchy: using bundleId=\(bundleId) fallback=\(didFallbackToSpringboard)")
 
             // Use snapshot() for fast hierarchy extraction - single IPC call captures everything
             // snapshot() captures all element data in ONE IPC call (fast!)
@@ -1068,6 +1059,7 @@ public class ElementLocator: ElementLocating {
 
         public func findElement(byResourceId resourceId: String) -> Any? {
             if let cached = elementCache[resourceId] {
+                print("[ElementLocator] Element found by resourceId=\(resourceId) source=cache")
                 return cached
             }
 
@@ -1089,18 +1081,28 @@ public class ElementLocator: ElementLocating {
                     }
                 }
                 return anyMatch as XCUIElement?
-            }, fallback: nil) else { return nil }
+            }, fallback: nil) else {
+                print("[ElementLocator] Element not found by resourceId=\(resourceId)")
+                return nil
+            }
             elementCache[resourceId] = element
+            print("[ElementLocator] Element found by resourceId=\(resourceId) source=query")
             return element
         }
 
         public func findElement(byText text: String) -> Any? {
             let app = currentApplication
-            return runOnMainThreadNonThrowing({
+            let element = runOnMainThreadNonThrowing({
                 let match = app.descendants(matching: .any)
                     .matching(NSPredicate(format: "label == %@", text)).firstMatch
                 return match.exists ? match as XCUIElement? : nil
             }, fallback: nil)
+            if element == nil {
+                print("[ElementLocator] Element not found by text=\(text)")
+            } else {
+                print("[ElementLocator] Element found by text=\(text)")
+            }
+            return element
         }
 
         public func getCachedElement(_ resourceId: String) -> XCUIElement? {

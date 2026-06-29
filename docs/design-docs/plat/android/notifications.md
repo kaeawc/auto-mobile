@@ -2,7 +2,7 @@
 
 <kbd>✅ Implemented</kbd> <kbd>🧪 Tested</kbd>
 
-> **Current state:** `postNotification` MCP tool is fully implemented. The AutoMobile SDK `AutoMobileNotifications.post()` hook is implemented in `android/auto-mobile-sdk/`. Apps without SDK integration cannot post notifications that appear as the app-under-test (third-party app limitation). See the [Status Glossary](../../status-glossary.md) for chip definitions.
+> **Current state:** `postNotification` MCP tool is fully implemented. The AutoMobile SDK `AutoMobileNotifications.post()` hook is implemented in `android/auto-mobile-sdk/`. Apps without SDK integration cannot post notifications that appear as the app-under-test (third-party app limitation). On iOS, `postNotification` delivers a simulated remote push on the **Simulator** via `simctl push` (requires `appId`) — see [iOS simctl integration → Push notifications](../ios/simctl.md#push-notifications). See the [Status Glossary](../../status-glossary.md) for chip definitions.
 
 ## Goal
 
@@ -82,3 +82,16 @@ Observed results:
 
 - Requires app-under-test integration (not possible for third-party apps).
 - Big picture style has size constraints and may fail with large images.
+
+## Notification policy (cross-platform)
+
+`getNotificationPolicy` reads notification *policy state*, but the underlying concept
+differs by platform:
+
+- **Android** — Do Not Disturb *policy access* (which apps may control DND), read from
+  `dumpsys notification`'s `mPolicyAccess` section. `setNotificationPolicy` can grant/revoke
+  it via `cmd notification`.
+- **iOS simulators** — per-app *notification authorization* (`UNAuthorizationStatus`:
+  notDetermined/denied/authorized/provisional/ephemeral), decoded from the BulletinBoard
+  `VersionedSectionInfo.plist`. Read-only; physical devices are unsupported. See
+  [simctl Integration → Notification authorization read](../ios/simctl.md#notification-authorization-read).

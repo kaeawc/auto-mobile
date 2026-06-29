@@ -4,6 +4,7 @@ import { BootedDevice, LaunchAppResult } from "../../models";
 import { ActionableError } from "../../models";
 import { TerminateApp } from "./TerminateApp";
 import { ClearAppData } from "./ClearAppData";
+import { ClearAppDataIos } from "./ClearAppDataIos";
 import { logger } from "../../utils/logger";
 import { ListInstalledApps } from "../observe/ListInstalledApps";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
@@ -229,7 +230,7 @@ export class LaunchApp extends BaseVisualChange {
   /**
    * Launch an iOS app by bundle identifier
    * @param bundleId - The bundle identifier to launch
-   * @param clearAppData - Whether clear app data before launch (not supported on iOS)
+   * @param clearAppData - Whether to wipe the app's data container before launch (iOS simulator)
    * @param coldBoot - Whether to cold boot the app or resume if already running
    */
   private async executeiOS(
@@ -253,7 +254,12 @@ export class LaunchApp extends BaseVisualChange {
 
         let launchResult: { success: boolean; pid?: number; error?: string };
 
-        if (coldBoot) {
+        // Clearing app data always implies a fresh process: the app is
+        // terminated, its sandbox wiped, then relaunched. Treat it as a cold
+        // boot so we go through the terminate → clearCache → simctl launch path.
+        const needsColdStart = coldBoot || clearAppData;
+
+        if (needsColdStart) {
           // Cold boot: use simctl directly. XCUIApplication.launch() is slow for heavy
           // apps (10s+ timeout) while simctl launch completes in ~500ms. CtrlProxy's
           // value is in the activate() fast path, not cold boot.
@@ -264,10 +270,33 @@ export class LaunchApp extends BaseVisualChange {
               // App might not be running
             }
           });
-          // Clear cached hierarchy so waitForIosHierarchyReady doesn't return
-          // stale pre-terminate data via the cache fast path. clearCache() nulls
-          // the cache entirely; invalidateCache() only marks it not-fresh but the
-          // time-based freshness check in getLatestHierarchy would still match.
+
+          // Wipe the app's data container (fastest iOS "clear data": no reinstall,
+          // keeps permission grants). System bundles (com.apple.*) are skipped —
+          // we never want to wipe SpringBoard/Settings data.
+          if (clearAppData && !isSystemBundleId) {
+            const clearResult = await perf.track("clearAppData", () =>
+              new ClearAppDataIos(this.device, this.simctl).execute(bundleId)
+            );
+            if (!clearResult.success) {
+              // Do NOT launch with stale data — callers request clearAppData to
+              // guarantee a clean launch. Fail loudly instead of silently
+              // reporting success on an un-cleared app.
+              const error = `Failed to clear app data: ${clearResult.error ?? "unknown error"}`;
+              logger.warn(`[LaunchApp] iOS clearAppData failed for ${bundleId}: ${error}`);
+              perf.end();
+              return { success: false, packageName: bundleId, error };
+            }
+          } else if (clearAppData && isSystemBundleId) {
+            logger.warn(`[LaunchApp] Ignoring clearAppData for system bundle ${bundleId}`);
+          }
+
+          // Re-wire CtrlProxy to the (re)launched app. The bundle is already
+          // re-targeted above (setTargetBundleId); after a data wipe the app gets
+          // a brand-new process, so drop the cached hierarchy too — otherwise
+          // waitForIosHierarchyReady returns stale pre-terminate data via the
+          // cache fast path. clearCache() nulls the cache entirely; invalidateCache()
+          // only marks it not-fresh but the time-based freshness check still matches.
           IOSCtrlProxyClient.getInstance(this.device).clearCache();
           launchResult = await perf.track("simctlLaunch", () =>
             this.simctl.launchApp(bundleId, { foregroundIfRunning: false })

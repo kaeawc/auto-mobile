@@ -287,7 +287,7 @@ Receiver Resolver Table:
     beforeEach(() => {
       // Mock the element utils methods
       const mockButton = {
-        bounds: "[100,200][300,400]",
+        bounds: { left: 100, top: 200, right: 300, bottom: 400 },
         text: "Always"
       };
 
@@ -317,7 +317,7 @@ Receiver Resolver Table:
               $: {
                 text: "Always",
                 class: "android.widget.Button",
-                bounds: "[100,200][300,400]"
+                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
               }
             }]
           }
@@ -342,7 +342,7 @@ Receiver Resolver Table:
               $: {
                 text: "Just once",
                 class: "android.widget.Button",
-                bounds: "[100,200][300,400]"
+                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
               }
             }]
           }
@@ -352,7 +352,7 @@ Receiver Resolver Table:
       // Update mock to return "Just once" button
       (deepLinkManager as any).findButtonByText = (node: any, textOptions: string[]) => {
         if (textOptions.some(option => option.includes("Just once"))) {
-          return { bounds: "[100,200][300,400]", text: "Just once" };
+          return { bounds: { left: 100, top: 200, right: 300, bottom: 400 }, text: "Just once" };
         }
         return null;
       };
@@ -383,7 +383,7 @@ Receiver Resolver Table:
       // Mock findAppInChooser method
       (deepLinkManager as any).findAppInChooser = (node: any, appPackage: string) => {
         if (appPackage === "com.example.customapp") {
-          return { bounds: "[100,200][300,400]" };
+          return { bounds: { left: 100, top: 200, right: 300, bottom: 400 } };
         }
         return null;
       };
@@ -473,7 +473,7 @@ Receiver Resolver Table:
               $: {
                 text: "Always",
                 class: "android.widget.Button",
-                bounds: "[100,200][300,400]"
+                bounds: { left: 100, top: 200, right: 300, bottom: 400 }
               }
             }]
           }

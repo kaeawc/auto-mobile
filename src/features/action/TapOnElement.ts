@@ -37,7 +37,7 @@ import { refreshAndroidViewHierarchy } from "./refreshAndroidViewHierarchy";
 import { boundsEqual, boundsNearlyEqual } from "../../utils/bounds";
 import { androidPreTapConsecutiveStableMatchesRequired } from "./androidPreTapStablePolicy";
 import { androidViewHierarchyIndicatesLikelyBlockingLoading } from "../../utils/androidTransientLoading";
-import { isTruthyFlag } from "../../utils/elementProperties";
+import { hasAccessibilityAction, isTruthyFlag } from "../../utils/elementProperties";
 import { TalkBackTapStrategy } from "../talkback/TalkBackTapStrategy";
 import {
   DefaultTalkBackNavigationDriverFactory,
@@ -524,7 +524,7 @@ export class TapOnElement extends BaseVisualChange {
       if (element) {
         logger.warn(
           `[TapOnElement] Element found but center is off-screen, will retry. ` +
-          `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}], ` +
+          `bounds=${JSON.stringify(element.bounds)}, ` +
           `screen=${observeResult.screenSize?.width}x${observeResult.screenSize?.height}`
         );
         selection = { ...selection, element: null };
@@ -563,7 +563,7 @@ export class TapOnElement extends BaseVisualChange {
         if (element && this.isElementCenterOffScreen(element, observeResult.screenSize)) {
           logger.warn(
             `[TapOnElement] Element found but center is off-screen, retrying. ` +
-            `bounds=[${element.bounds?.left},${element.bounds?.top}][${element.bounds?.right},${element.bounds?.bottom}]`
+            `bounds=${JSON.stringify(element.bounds)}`
           );
           selection = { ...selection, element: null };
           element = null;
@@ -695,19 +695,23 @@ export class TapOnElement extends BaseVisualChange {
   }
 
   private isClickableElement(element: Element): boolean {
-    return isTruthyFlag(element.clickable);
+    return isTruthyFlag(element.clickable) || hasAccessibilityAction(element.actions, "click");
   }
 
   private isLongClickableElement(element: Element): boolean {
-    return isTruthyFlag(element["long-clickable"]) || isTruthyFlag(element.longClickable);
+    return isTruthyFlag(element["long-clickable"]) ||
+      isTruthyFlag(element.longClickable) ||
+      hasAccessibilityAction(element.actions, "long_click");
   }
 
   private isClickableProps(props: Record<string, unknown>): boolean {
-    return isTruthyFlag(props.clickable);
+    return isTruthyFlag(props.clickable) || hasAccessibilityAction(props.actions, "click");
   }
 
   private isLongClickableProps(props: Record<string, unknown>): boolean {
-    return isTruthyFlag(props["long-clickable"]) || isTruthyFlag(props.longClickable);
+    return isTruthyFlag(props["long-clickable"]) ||
+      isTruthyFlag(props.longClickable) ||
+      hasAccessibilityAction(props.actions, "long_click");
   }
 
   private nodeMatchesElement(
@@ -992,7 +996,7 @@ export class TapOnElement extends BaseVisualChange {
           logger.info(
             `[TapOnElement] Tapping (${tapPoint.x}, ${tapPoint.y}) on element: ` +
             `text=${JSON.stringify(tapElement.text ?? options.text)}, ` +
-            `bounds=[${tapBounds?.left},${tapBounds?.top}][${tapBounds?.right},${tapBounds?.bottom}], ` +
+            `bounds=${JSON.stringify(tapBounds)}, ` +
             `clickable=${tapElement.clickable}, usedParent=${usedParent}`
           );
 

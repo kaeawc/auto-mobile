@@ -21,6 +21,7 @@ import { Timer, defaultTimer } from "./SystemTimer";
 import { type FileDownloader, DefaultFileDownloader } from "./FileDownloader";
 import { type ChecksumCalculator, DefaultChecksumCalculator } from "./ChecksumCalculator";
 import type { ProxyManager, ProxySetupResult } from "./interfaces/ProxyManager";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "./workingDirectory";
 
 /**
  * Android-specific accessibility-service lifecycle, extending the
@@ -1377,7 +1378,9 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       return null;
     }
     const trimmed = override.trim();
-    return trimmed.length > 0 ? trimmed : null;
+    return trimmed.length > 0
+      ? resolvePathFromDaemonLaunchWorkingDirectory(trimmed)
+      : null;
   }
 
   private shouldSkipChecksum(): boolean {

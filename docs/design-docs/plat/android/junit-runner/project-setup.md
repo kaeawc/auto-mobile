@@ -136,7 +136,10 @@ adb devices
 
 The JUnitRunner communicates with a locally running AutoMobile daemon over a Unix domain socket at
 `/tmp/auto-mobile-daemon-<uid>.sock`. If no daemon is running when the first test starts, the runner
-bootstraps one automatically using `bunx @kaeawc/auto-mobile@latest --daemon start`.
+bootstraps one automatically from a local checkout, when configured, or from
+`bunx @kaeawc/auto-mobile@<version> --daemon start`. The package version comes from
+`automobile.daemon.package.version`, `AUTOMOBILE_DAEMON_PACKAGE_VERSION`, `AUTOMOBILE_VERSION`, or the
+published junit-runner artifact metadata.
 
 For predictable local development, start the daemon yourself so you can control its lifetime and
 configuration:

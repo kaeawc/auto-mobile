@@ -1,13 +1,7 @@
-import os from "node:os";
-import path from "node:path";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "performance-push.sock"),
-  externalPath: "/tmp/auto-mobile-performance-push.sock",
-};
+import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
+import { PERFORMANCE_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 
 /**
  * Performance thresholds for health status calculation
@@ -104,7 +98,7 @@ export class PerformancePushSocketServer extends PushSubscriptionSocketServer<
   PerformanceFilter,
   LivePerformanceData
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "PerformancePush");
   }
 
@@ -191,6 +185,10 @@ let socketServer: PerformancePushSocketServer | null = null;
 
 export function getPerformancePushServer(): PerformancePushSocketServer | null {
   return socketServer;
+}
+
+export function getPerformancePushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(PERFORMANCE_PUSH_SOCKET_CONFIG);
 }
 
 export async function startPerformancePushSocketServer(): Promise<PerformancePushSocketServer> {

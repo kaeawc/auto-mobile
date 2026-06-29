@@ -295,8 +295,25 @@ export class ExecuteGesture extends BaseVisualChange {
   private async executeiOSGesture(path: Point[] | FingerPath[], duration: number): Promise<any> {
     if (Array.isArray(path) && path.length > 0) {
       if ("finger" in path[0]) {
-        // Multi-finger gestures are not supported on iOS through CtrlProxy iOS yet
-        throw new Error("Multi-finger gestures not supported on iOS - use simple swipe instead");
+        const fingers = path as FingerPath[];
+        const swipe = this.resolveIOSMultiFingerSwipe(fingers);
+        if (swipe) {
+          const client = IOSCtrlProxyClient.getInstance(this.device);
+          const result = await client.requestMultiFingerSwipe(
+            swipe.start.x,
+            swipe.start.y,
+            swipe.end.x,
+            swipe.end.y,
+            swipe.fingerCount,
+            duration,
+            undefined,
+            undefined,
+            swipe.fingerSpacing
+          );
+          if (!result.success) {
+            throw new Error(`iOS multi-finger gesture failed: ${result.error ?? "unknown error"}`);
+          }
+        }
       } else {
         // Single finger path - convert to simple swipe using CtrlProxy iOS
         const points = path as Point[];
@@ -315,5 +332,58 @@ export class ExecuteGesture extends BaseVisualChange {
       duration,
       platform: "ios"
     };
+  }
+
+  private resolveIOSMultiFingerSwipe(fingers: FingerPath[]): {
+    start: Point;
+    end: Point;
+    fingerCount: number;
+    fingerSpacing: number;
+  } | null {
+    if (fingers.length === 0) {
+      return null;
+    }
+
+    for (let index = 0; index < fingers.length; index++) {
+      const points = fingers[index].points;
+      if (points.length < 2) {
+        throw new Error("iOS multi-finger gestures require at least two points per finger");
+      }
+      if (points.length !== 2) {
+        throw new Error("iOS multi-finger gestures only support two-point swipes");
+      }
+    }
+
+    const firstFingerPoints = fingers[0].points;
+    const firstStart = firstFingerPoints[0];
+    const firstEnd = firstFingerPoints[1];
+    const fingerSpacing = fingers.length > 1 ? fingers[1].points[0].x - firstStart.x : 0;
+
+    for (let index = 0; index < fingers.length; index++) {
+      const points = fingers[index].points;
+
+      const start = points[0];
+      const end = points[1];
+      const expectedOffset = index * fingerSpacing;
+      if (
+        !this.sameCoordinate(start.y, firstStart.y) ||
+        !this.sameCoordinate(end.y, firstEnd.y) ||
+        !this.sameCoordinate(start.x - firstStart.x, expectedOffset) ||
+        !this.sameCoordinate(end.x - firstEnd.x, expectedOffset)
+      ) {
+        throw new Error("iOS multi-finger gestures only support horizontally spaced parallel swipes");
+      }
+    }
+
+    return {
+      start: firstStart,
+      end: firstEnd,
+      fingerCount: fingers.length,
+      fingerSpacing,
+    };
+  }
+
+  private sameCoordinate(a: number, b: number): boolean {
+    return Math.abs(a - b) < 0.001;
   }
 }

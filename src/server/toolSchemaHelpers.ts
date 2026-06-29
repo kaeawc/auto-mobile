@@ -4,7 +4,7 @@ import { z } from "zod";
 export const platformSchema = z.enum(["android", "ios"]).describe("Target platform");
 
 export const DEVICE_LABEL_DESCRIPTION =
-  "Device label for multi-device plans (e.g., \"A\", \"B\")";
+  "Plan device label";
 
 /**
  * Helper to add sessionUuid field to tool schemas
@@ -15,7 +15,7 @@ export const DEVICE_LABEL_DESCRIPTION =
  */
 export function addSessionUuidToSchema<T extends z.ZodObject<any>>(schema: T): z.ZodObject<any> {
   return schema.extend({
-    sessionUuid: z.string().optional().describe("Session UUID"),
+    sessionUuid: z.string().optional().describe("Session ID"),
     keepScreenAwake: z.boolean().optional().describe("Keep device awake"),
   }) as z.ZodObject<any>;
 }

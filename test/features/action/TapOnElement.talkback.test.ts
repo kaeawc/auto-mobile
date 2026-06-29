@@ -261,7 +261,7 @@ describe("TapOnElement TalkBack mode detection", () => {
             $: {
               "class": "android.widget.LinearLayout",
               "clickable": "true",
-              "bounds": "[0,0][100,100]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
               "resource-id": "parent:id"
             },
             node: [
@@ -269,7 +269,7 @@ describe("TapOnElement TalkBack mode detection", () => {
                 $: {
                   "class": "android.widget.TextView",
                   "text": "Markup",
-                  "bounds": "[10,10][50,50]",
+                  "bounds": { left: 10, top: 10, right: 50, bottom: 50 },
                   "resource-id": "android:id/text1"
                 }
               }
@@ -302,7 +302,7 @@ describe("TapOnElement TalkBack mode detection", () => {
             $: {
               "class": "android.widget.LinearLayout",
               "clickable": "true",
-              "bounds": "[0,0][200,80]",
+              "bounds": { left: 0, top: 0, right: 200, bottom: 80 },
               "resource-id": "com.example:id/settings_row"
             },
             node: [
@@ -310,7 +310,7 @@ describe("TapOnElement TalkBack mode detection", () => {
                 $: {
                   "class": "android.widget.TextView",
                   "text": "Settings",
-                  "bounds": "[10,10][190,70]"
+                  "bounds": { left: 10, top: 10, right: 190, bottom: 70 }
                   // no resource-id
                 }
               }
@@ -337,6 +337,82 @@ describe("TapOnElement TalkBack mode detection", () => {
       expect(result.element["resource-id"]).toBe("com.example:id/settings_row");
     });
 
+    test("uses parent with click action when clickable flag is absent", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: {
+              "class": "android.view.View",
+              "actions": ["click"],
+              "bounds": { left: 0, top: 0, right: 240, bottom: 96 },
+              "resource-id": "com.example:id/action_row"
+            },
+            node: [
+              {
+                $: {
+                  "class": "android.widget.TextView",
+                  "text": "Manage account",
+                  "bounds": { left: 24, top: 24, right: 216, bottom: 72 }
+                }
+              }
+            ]
+          }
+        }
+      } as any;
+
+      const textOnlyChild = {
+        bounds: { left: 24, top: 24, right: 216, bottom: 72 },
+        text: "Manage account"
+      } as any;
+
+      const result = (tapOnElement as any).resolveTapTargetElement(
+        textOnlyChild,
+        viewHierarchy,
+        "tap",
+        true
+      );
+
+      expect(result.usedParent).toBe(true);
+      expect(result.element["resource-id"]).toBe("com.example:id/action_row");
+    });
+
+    test("uses parent with long click action for longPress when flag is absent", () => {
+      const viewHierarchy = {
+        hierarchy: {
+          node: {
+            $: {
+              "class": "android.view.View",
+              "actions": ["long_click"],
+              "bounds": { left: 0, top: 0, right: 240, bottom: 96 },
+              "resource-id": "com.example:id/action_row"
+            },
+            node: {
+              $: {
+                "class": "android.widget.TextView",
+                "text": "Manage account",
+                "bounds": { left: 24, top: 24, right: 216, bottom: 72 }
+              }
+            }
+          }
+        }
+      } as any;
+
+      const textOnlyChild = {
+        bounds: { left: 24, top: 24, right: 216, bottom: 72 },
+        text: "Manage account"
+      } as any;
+
+      const result = (tapOnElement as any).resolveTapTargetElement(
+        textOnlyChild,
+        viewHierarchy,
+        "longPress",
+        true
+      );
+
+      expect(result.usedParent).toBe(true);
+      expect(result.element["resource-id"]).toBe("com.example:id/action_row");
+    });
+
     test("prefers long-clickable parent for longPress", () => {
       const viewHierarchy = {
         hierarchy: {
@@ -344,14 +420,14 @@ describe("TapOnElement TalkBack mode detection", () => {
             $: {
               "class": "android.widget.LinearLayout",
               "long-clickable": "true",
-              "bounds": "[0,0][100,100]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
               "resource-id": "parent:long"
             },
             node: {
               $: {
                 class: "android.widget.TextView",
                 text: "Markup",
-                bounds: "[10,10][50,50]"
+                bounds: { left: 10, top: 10, right: 50, bottom: 50 }
               }
             }
           }

@@ -1,9 +1,16 @@
 import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange, ProgressCallback } from "./BaseVisualChange";
-import { BootedDevice, BiometricAuthResult } from "../../models";
+import { BootedDevice, BiometricAuthResult, ExecResult } from "../../models";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { logger } from "../../utils/logger";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorDevice } from "./IosSimulatorPermissions";
+import {
+  IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS,
+  iosNotifyutilRegisteredSetCommand,
+  parseNotifyutilState
+} from "../../utils/ios-cmdline-tools/notifyutil";
 
 export interface BiometricAuthOptions {
   action: "match" | "fail" | "cancel" | "error";
@@ -13,6 +20,11 @@ export interface BiometricAuthOptions {
   ttlMs?: number;
 }
 
+/** Minimal simctl surface needed by the iOS biometric path (injectable for tests). */
+export interface BiometricSimctl {
+  executeCommand(command: string, timeoutMs?: number): Promise<ExecResult>;
+}
+
 /** Broadcast action received by AutoMobileBiometrics in the app-under-test SDK. */
 const SDK_BROADCAST_ACTION = "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE";
 
@@ -20,10 +32,24 @@ const SDK_BROADCAST_ACTION = "dev.jasonpearson.automobile.sdk.BIOMETRIC_OVERRIDE
 const DEFAULT_TTL_MS = 5000;
 
 export class BiometricAuth extends BaseVisualChange {
+  /** Darwin notification keys the iOS Simulator's BiometricKit listens on. */
+  private static readonly IOS_KEYS = {
+    enrollment: "com.apple.BiometricKit.enrollmentChanged",
+    fingerTouch: {
+      match: "com.apple.BiometricKit_Sim.fingerTouch.match",
+      nomatch: "com.apple.BiometricKit_Sim.fingerTouch.nomatch"
+    },
+    pearl: {
+      match: "com.apple.BiometricKit_Sim.pearl.match",
+      nomatch: "com.apple.BiometricKit_Sim.pearl.nomatch"
+    }
+  } as const;
+
   constructor(
     device: BootedDevice,
     adb: AdbClient | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    private simctl: BiometricSimctl | null = null
   ) {
     super(device, adb, timer);
     this.device = device;
@@ -36,18 +62,19 @@ export class BiometricAuth extends BaseVisualChange {
     const perf = createGlobalPerformanceTracker();
     perf.serial("biometricAuth");
 
-    // Only Android is supported
+    // iOS Simulator is supported via BiometricKit Darwin notifications.
+    if (this.device.platform === "ios") {
+      perf.end();
+      return this.executeIos(options);
+    }
+
+    // Only Android is otherwise supported
     if (this.device.platform !== "android") {
       perf.end();
-      return {
-        success: false,
-        action: options.action,
-        modality: options.modality ?? "any",
-        fingerprintId: options.fingerprintId,
-        errorCode: options.errorCode,
-        supported: false,
-        error: "Biometric authentication is only supported on Android devices"
-      };
+      return this.unsupported(
+        options,
+        "Biometric authentication is only supported on Android and iOS Simulator devices"
+      );
     }
 
     // Check modality before capability check (fail fast)
@@ -128,6 +155,131 @@ export class BiometricAuth extends BaseVisualChange {
         perf
       }
     );
+  }
+
+  /**
+   * Simulate a biometric match / non-match on the iOS Simulator by posting BiometricKit
+   * Darwin notifications via `xcrun simctl spawn <udid> notifyutil`.
+   *
+   * match -> *.match, fail -> *.nomatch. For modality "any" we post both fingerTouch and
+   * pearl keys; a simulator only has one biometry enrolled so the other is a harmless no-op.
+   * cancel/error have no simulator notification and return supported:"partial".
+   * Physical iOS devices have no public injection API and return supported:false.
+   */
+  private async executeIos(options: BiometricAuthOptions): Promise<BiometricAuthResult> {
+    const modality = options.modality ?? "any";
+
+    if (!isIosSimulatorDevice(this.device)) {
+      return this.unsupported(
+        options,
+        "iOS biometric simulation is only available on the iOS Simulator. " +
+          "There is no public API to inject a biometric result on a physical iOS device."
+      );
+    }
+
+    if (options.action === "cancel" || options.action === "error") {
+      return {
+        success: false,
+        action: options.action,
+        modality,
+        fingerprintId: options.fingerprintId,
+        errorCode: options.errorCode,
+        supported: "partial",
+        error: `iOS Simulator biometrics support only 'match' and 'fail'; '${options.action}' has no simctl equivalent.`
+      };
+    }
+
+    const simctl = this.simctl ?? new SimCtlClient(this.device);
+    const udid = this.device.deviceId;
+    const wantMatch = options.action === "match";
+    const keys = BiometricAuth.IOS_KEYS;
+
+    const targets: string[] = [];
+    if (modality === "face") {
+      targets.push(wantMatch ? keys.pearl.match : keys.pearl.nomatch);
+    } else if (modality === "fingerprint") {
+      targets.push(wantMatch ? keys.fingerTouch.match : keys.fingerTouch.nomatch);
+    } else {
+      targets.push(wantMatch ? keys.fingerTouch.match : keys.fingerTouch.nomatch);
+      targets.push(wantMatch ? keys.pearl.match : keys.pearl.nomatch);
+    }
+
+    try {
+      // Ensure biometry is enrolled before attempting a match.
+      const enrollmentResult = await simctl.executeCommand(
+        iosNotifyutilRegisteredSetCommand(udid, keys.enrollment, "1"),
+        IOS_NOTIFYUTIL_REGISTERED_SET_TIMEOUT_MS
+      );
+      if (enrollmentResult.stderr && enrollmentResult.stderr.trim().length > 0) {
+        return {
+          success: false,
+          action: options.action,
+          modality,
+          fingerprintId: options.fingerprintId,
+          errorCode: options.errorCode,
+          supported: true,
+          error: `notifyutil failed: ${enrollmentResult.stderr.trim()}`
+        };
+      }
+      if (parseNotifyutilState(enrollmentResult.stdout ?? "") !== true) {
+        return {
+          success: false,
+          action: options.action,
+          modality,
+          fingerprintId: options.fingerprintId,
+          errorCode: options.errorCode,
+          supported: true,
+          error: "iOS biometric enrollment did not verify: notifyutil did not read back enrolled state."
+        };
+      }
+
+      for (const target of targets) {
+        const res = await simctl.executeCommand(`spawn ${udid} notifyutil -p ${target}`);
+        if (res.stderr && res.stderr.trim().length > 0) {
+          return {
+            success: false,
+            action: options.action,
+            modality,
+            fingerprintId: options.fingerprintId,
+            errorCode: options.errorCode,
+            supported: true,
+            error: `notifyutil failed: ${res.stderr.trim()}`
+          };
+        }
+      }
+
+      return {
+        success: true,
+        action: options.action,
+        modality,
+        fingerprintId: options.fingerprintId,
+        errorCode: options.errorCode,
+        supported: true,
+        message: `Posted ${targets.join(", ")} to simulator ${udid} (${options.action})`
+      };
+    } catch (error) {
+      return {
+        success: false,
+        action: options.action,
+        modality,
+        fingerprintId: options.fingerprintId,
+        errorCode: options.errorCode,
+        supported: true,
+        error: `Failed to post iOS biometric notification: ${error instanceof Error ? error.message : String(error)}`
+      };
+    }
+  }
+
+  private unsupported(options: BiometricAuthOptions, msg: string): BiometricAuthResult {
+    return {
+      success: false,
+      action: options.action,
+      modality: options.modality ?? "any",
+      fingerprintId: options.fingerprintId,
+      errorCode: options.errorCode,
+      supported: false,
+      error: msg
+    };
   }
 
   /**

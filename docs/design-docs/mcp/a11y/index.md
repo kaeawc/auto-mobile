@@ -54,13 +54,14 @@ flowchart LR
 | `tapOn` | Coordinate tap | `ACTION_CLICK` on element |
 | `swipeOn` | Single-finger swipe | Two-finger swipe or `ACTION_SCROLL_*` |
 | `inputText` | `ACTION_SET_TEXT` | No change (already accessible) |
-| `pressButton` | Hardware keyevent | Optional `GLOBAL_ACTION_BACK` |
+| `pressButton` | Device/navigation button | Optional `GLOBAL_ACTION_BACK` |
 
 ## Topics
 
 | Document | Description |
 |----------|-------------|
 | [TalkBack/VoiceOver Adaptation](talkback-voiceover.md) | Complete design for screen reader support |
+| [accessibilityFocus tool](../../plat/android/accessibility-focus.md) | Set/clear the Android TalkBack focus cursor on an element (Android only) |
 
 ## Platform Support
 
@@ -68,4 +69,3 @@ flowchart LR
 |----------|---------------|--------|
 | Android | TalkBack | <kbd>⚠️ Partial</kbd> — detection implemented, tool adaptations in progress |
 | iOS | VoiceOver | <kbd>🚧 Design Only</kbd> — planned |
-

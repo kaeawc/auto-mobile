@@ -6,7 +6,7 @@ import type { TextMatcher } from "../../utils/interfaces/TextMatcher";
 import type { ElementFinder } from "../../utils/interfaces/ElementFinder";
 import { DefaultElementParser } from "./ElementParser";
 import { DefaultTextMatcher, normalizeQuotes } from "./TextMatcher";
-import { ANDROID_INPUT_CLASSES } from "../../utils/elementProperties";
+import { ANDROID_INPUT_CLASSES, hasAccessibilityAction } from "../../utils/elementProperties";
 
 /**
  * Handles searching and selection of elements in view hierarchy
@@ -184,7 +184,7 @@ export class DefaultElementFinder implements ElementFinder {
           (
             nodeProperties["ios-role"] === "AXButton" ||
             nodeProperties.class === "Button" ||
-            nodeProperties.clickable === "true"
+            this.isClickableNode(nodeProperties)
           )
         ) {
           logger.debug("[Element] Matches clickable element with text");
@@ -284,6 +284,12 @@ export class DefaultElementFinder implements ElementFinder {
     }
 
     return null;
+  }
+
+  private isClickableNode(props: Record<string, unknown>): boolean {
+    return props.clickable === "true" ||
+      props.clickable === true ||
+      hasAccessibilityAction(props.actions, "click");
   }
 
   /**
@@ -542,7 +548,7 @@ export class DefaultElementFinder implements ElementFinder {
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.clickable === "true" || nodeProperties.clickable === true) {
+        if (this.isClickableNode(nodeProperties)) {
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
             clickables.push(parsedNode);
@@ -611,7 +617,7 @@ export class DefaultElementFinder implements ElementFinder {
     for (const rootNode of searchRoots) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        if (nodeProperties.clickable === "true" || nodeProperties.clickable === true) {
+        if (this.isClickableNode(nodeProperties)) {
           const parsedNode = this.parser.parseNodeBounds(node);
           if (parsedNode) {
             clickables.push(parsedNode);
@@ -644,7 +650,7 @@ export class DefaultElementFinder implements ElementFinder {
     for (const rootNode of rootNodes) {
       this.parser.traverseNode(rootNode, (node: any) => {
         const nodeProperties = this.parser.extractNodeProperties(node);
-        const nodeBounds = this.parser.parseBounds(nodeProperties.bounds);
+        const nodeBounds = this.parser.parseBounds(node.bounds ?? nodeProperties.bounds);
 
         if (!nodeBounds) {
           return;
@@ -1011,7 +1017,7 @@ export class DefaultElementFinder implements ElementFinder {
     if (hasIdMatch) {
       for (const child of childArray) {
         const childProps = this.parser.extractNodeProperties(child);
-        const isClickable = childProps.clickable === "true" || childProps.clickable === true;
+        const isClickable = this.isClickableNode(childProps);
         const childRid = childProps["resource-id"];
         const isIdMatch = typeof childRid === "string" && matchesId(childRid);
 
@@ -1075,7 +1081,7 @@ export class DefaultElementFinder implements ElementFinder {
     if (hasTextMatch) {
       for (const child of childArray) {
         const childProps = this.parser.extractNodeProperties(child);
-        const isClickable = childProps.clickable === "true" || childProps.clickable === true;
+        const isClickable = this.isClickableNode(childProps);
 
         if (isClickable && !this.nodeHasText(child, matchesText)) {
           const parsedNode = this.parser.parseNodeBounds(child);
@@ -1100,7 +1106,7 @@ export class DefaultElementFinder implements ElementFinder {
     results: Element[]
   ): boolean {
     const nodeProperties = this.parser.extractNodeProperties(node);
-    const isClickable = nodeProperties.clickable === "true" || nodeProperties.clickable === true;
+    const isClickable = this.isClickableNode(nodeProperties);
 
     // Check if this node or any descendant has matching text
     const hasMatchingText = this.nodeOrDescendantHasText(node, matchesText);

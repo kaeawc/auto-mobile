@@ -9,12 +9,17 @@ import * as crypto from "crypto";
 import { PerformanceTracker, NoOpPerformanceTracker } from "../../utils/PerformanceTracker";
 import { IOSCtrlProxyClient } from "./ios";
 import type { ScreenSize } from "./interfaces/ScreenSize";
+import { parseBounds } from "../../utils/bounds";
+import { getTempDir, TEMP_SUBDIRS } from "../../utils/tempDir";
 
 export class GetScreenSize implements ScreenSize {
   private adb: AdbExecutor;
   private readonly device: BootedDevice;
   private static memoryCache = new Map<string, ScreenSize>();
-  private static cacheDir = path.join(process.cwd(), ".cache", "screen-size");
+  // Cache under the shared temp tree, not process.cwd(): the working directory
+  // varies per stdio client and may be read-only in production, which would make
+  // this on-disk cache fail or land in unpredictable places.
+  private static cacheDir = path.join(getTempDir(TEMP_SUBDIRS.CACHE), "screen-size");
 
   /**
    * Create a GetScreenSize instance
@@ -126,28 +131,17 @@ export class GetScreenSize implements ScreenSize {
 
   /**
    * Extract screen size from view hierarchy root node bounds.
-   * The root node (XCUIApplication) bounds represent the full screen dimensions.
-   * Format: "[left,top][right,bottom]" e.g., "[0,0][402,874]"
+   * The root node bounds represent the full screen dimensions.
    */
-  private extractScreenSizeFromHierarchy(viewHierarchy: { hierarchy?: { node?: { $?: { bounds?: string } } } }): ScreenSizeModel | null {
+  private extractScreenSizeFromHierarchy(viewHierarchy: { hierarchy?: { node?: { $?: { bounds?: unknown }, bounds?: unknown }, bounds?: unknown } }): ScreenSizeModel | null {
     const rootNode = viewHierarchy?.hierarchy?.node;
-    if (!rootNode?.$?.bounds) {
+    const bounds = parseBounds(rootNode?.bounds ?? rootNode?.$?.bounds ?? viewHierarchy?.hierarchy?.bounds);
+    if (!bounds) {
       return null;
     }
 
-    const boundsStr = rootNode.$.bounds;
-    const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
-    if (!match) {
-      return null;
-    }
-
-    const left = parseInt(match[1], 10);
-    const top = parseInt(match[2], 10);
-    const right = parseInt(match[3], 10);
-    const bottom = parseInt(match[4], 10);
-
-    const width = right - left;
-    const height = bottom - top;
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
 
     if (width > 0 && height > 0) {
       return { width, height };

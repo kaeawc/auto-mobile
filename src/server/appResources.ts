@@ -323,8 +323,15 @@ function getAndroidAppsMessage(deviceId: string): string {
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
   try {
-    const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
-    return devices.find(device => device.deviceId === deviceId) ?? null;
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    const androidDevices = await manager.getBootedDevices("android");
+    const android = androidDevices.find(device => device.deviceId === deviceId);
+    if (android) {
+      return android;
+    }
+
+    const iosDevices = await manager.getBootedDevices("ios");
+    return iosDevices.find(device => device.deviceId === deviceId) ?? null;
   } catch (error) {
     logger.warn(`[AppResources] Failed to list booted devices: ${error}`);
     return null;
@@ -516,17 +523,18 @@ async function getAppsQueryDevice(options: AppsQueryOptions): Promise<BootedDevi
     throw new Error("deviceId is required");
   }
 
-  const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
+  const manager = PlatformDeviceManagerFactory.getInstance();
+  const platforms: Platform[] = options.platform ? [options.platform] : ["android", "ios"];
 
-  const matched = devices.find(device => device.deviceId === options.deviceId);
-  if (!matched) {
-    throw new Error(`Device not found or not booted: ${options.deviceId}`);
-  }
-  if (options.platform && matched.platform !== options.platform) {
-    throw new Error(`Device ${options.deviceId} is not a ${options.platform} device`);
+  for (const platform of platforms) {
+    const devices = await manager.getBootedDevices(platform);
+    const matched = devices.find(device => device.deviceId === options.deviceId);
+    if (matched) {
+      return matched;
+    }
   }
 
-  return matched;
+  throw new Error(`Device not found or not booted: ${options.deviceId}`);
 }
 
 async function getAppsQueryResource(

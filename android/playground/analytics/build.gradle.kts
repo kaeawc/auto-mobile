@@ -2,7 +2,7 @@ plugins { alias(libs.plugins.android.library) }
 
 android {
   namespace = "dev.jasonpearson.automobile.analytics"
-  compileSdk = 36
+  compileSdk = libs.versions.build.android.compileSdk.get().toInt()
 
   defaultConfig {
     minSdk = 24

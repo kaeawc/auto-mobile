@@ -8,12 +8,18 @@ import type { ViewHierarchyResult } from "../../../src/models";
 const parser = new DefaultElementParser();
 const textMatcher = new DefaultTextMatcher();
 const finder = new DefaultElementFinder(parser, textMatcher);
+const bounds = (left: number, top: number, right: number, bottom: number) => ({
+  left,
+  top,
+  right,
+  bottom
+});
 
 function makeHierarchy(nodes: any): ViewHierarchyResult {
   return {
     hierarchy: {
       node: {
-        $: { bounds: "[0,0][1080,1920]" },
+        $: { bounds: bounds(0, 0, 1080, 1920) },
         node: Array.isArray(nodes) ? nodes : [nodes],
       },
     },
@@ -27,33 +33,33 @@ describe("DefaultElementFinder", () => {
     });
 
     test("returns empty for empty text", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.findElementsByText(hierarchy, "")).toEqual([]);
     });
 
     test("finds element by text", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[10,20][200,60]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(10, 20, 200, 60) } });
       const results = finder.findElementsByText(hierarchy, "Login");
       expect(results).toHaveLength(1);
       expect(results[0].bounds).toEqual({ left: 10, top: 20, right: 200, bottom: 60 });
     });
 
     test("finds element by content-desc", () => {
-      const hierarchy = makeHierarchy({ $: { "content-desc": "Close button", "bounds": "[0,0][50,50]" } });
+      const hierarchy = makeHierarchy({ $: { "content-desc": "Close button", "bounds": { left: 0, top: 0, right: 50, bottom: 50 } } });
       const results = finder.findElementsByText(hierarchy, "Close button");
       expect(results).toHaveLength(1);
     });
 
     test("partial match by default", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login to Account", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login to Account", bounds: bounds(0, 0, 100, 50) } });
       const results = finder.findElementsByText(hierarchy, "Login");
       expect(results).toHaveLength(1);
     });
 
     test("prefers exact matches over partial", () => {
       const hierarchy = makeHierarchy([
-        { $: { text: "Login", bounds: "[0,0][100,50]" } },
-        { $: { text: "Login to Account", bounds: "[0,50][100,100]" } },
+        { $: { text: "Login", bounds: bounds(0, 0, 100, 50) } },
+        { $: { text: "Login to Account", bounds: bounds(0, 50, 100, 100) } },
       ]);
       const results = finder.findElementsByText(hierarchy, "Login");
       expect(results).toHaveLength(1);
@@ -62,7 +68,7 @@ describe("DefaultElementFinder", () => {
     });
 
     test("returns empty when container not found", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       const results = finder.findElementsByText(
         hierarchy, "Login",
         { elementId: "nonexistent-container" }
@@ -72,9 +78,9 @@ describe("DefaultElementFinder", () => {
 
     test("searches within container by resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "my-form", "bounds": "[0,0][500,500]" },
+        $: { "resource-id": "my-form", "bounds": { left: 0, top: 0, right: 500, bottom: 500 } },
         node: [
-          { $: { text: "Login", bounds: "[10,10][200,50]" } },
+          { $: { text: "Login", bounds: bounds(10, 10, 200, 50) } },
         ],
       });
       const results = finder.findElementsByText(
@@ -87,7 +93,7 @@ describe("DefaultElementFinder", () => {
 
   describe("findElementByText", () => {
     test("returns first match or null", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.findElementByText(hierarchy, "Login")).not.toBeNull();
       expect(finder.findElementByText(hierarchy, "NotFound")).toBeNull();
     });
@@ -100,7 +106,7 @@ describe("DefaultElementFinder", () => {
 
     test("finds element by exact resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": "[0,0][100,50]" },
+        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
       });
       const results = finder.findElementsByResourceId(hierarchy, "com.app:id/btn_login");
       expect(results).toHaveLength(1);
@@ -108,7 +114,7 @@ describe("DefaultElementFinder", () => {
 
     test("partial match when enabled", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": "[0,0][100,50]" },
+        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
       });
       const results = finder.findElementsByResourceId(hierarchy, "btn_login", null, true);
       expect(results).toHaveLength(1);
@@ -116,7 +122,7 @@ describe("DefaultElementFinder", () => {
 
     test("no partial match when disabled", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "com.app:id/btn_login", "bounds": "[0,0][100,50]" },
+        $: { "resource-id": "com.app:id/btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
       });
       const results = finder.findElementsByResourceId(hierarchy, "btn_login", null, false);
       expect(results).toHaveLength(0);
@@ -126,7 +132,7 @@ describe("DefaultElementFinder", () => {
   describe("findElementByResourceId", () => {
     test("returns first match or null", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "btn_login", "bounds": "[0,0][100,50]" },
+        $: { "resource-id": "btn_login", "bounds": { left: 0, top: 0, right: 100, bottom: 50 } },
       });
       expect(finder.findElementByResourceId(hierarchy, "btn_login")).not.toBeNull();
       expect(finder.findElementByResourceId(hierarchy, "btn_signup")).toBeNull();
@@ -139,25 +145,25 @@ describe("DefaultElementFinder", () => {
     });
 
     test("returns false for null container", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.hasContainerElement(hierarchy, undefined)).toBe(false);
     });
 
     test("returns true when container found by resource-id", () => {
       const hierarchy = makeHierarchy({
-        $: { "resource-id": "my-form", "bounds": "[0,0][500,500]" },
+        $: { "resource-id": "my-form", "bounds": { left: 0, top: 0, right: 500, bottom: 500 } },
       });
       expect(finder.hasContainerElement(hierarchy, { elementId: "my-form" })).toBe(true);
     });
 
     test("returns false when container not found", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.hasContainerElement(hierarchy, { elementId: "missing" })).toBe(false);
     });
 
     test("finds container by text", () => {
       const hierarchy = makeHierarchy({
-        $: { text: "Form Section", bounds: "[0,0][500,500]" },
+        $: { text: "Form Section", bounds: bounds(0, 0, 500, 500) },
       });
       expect(finder.hasContainerElement(hierarchy, { text: "Form Section" })).toBe(true);
     });
@@ -165,19 +171,19 @@ describe("DefaultElementFinder", () => {
 
   describe("findElementByIndex", () => {
     test("returns null for negative index", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.findElementByIndex(hierarchy, -1)).toBeNull();
     });
 
     test("returns null for out-of-bounds index", () => {
-      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: "[0,0][100,50]" } });
+      const hierarchy = makeHierarchy({ $: { text: "Login", bounds: bounds(0, 0, 100, 50) } });
       expect(finder.findElementByIndex(hierarchy, 999)).toBeNull();
     });
 
     test("returns element at valid index", () => {
       const hierarchy = makeHierarchy([
-        { $: { text: "First", bounds: "[0,0][100,50]" } },
-        { $: { text: "Second", bounds: "[0,50][100,100]" } },
+        { $: { text: "First", bounds: bounds(0, 0, 100, 50) } },
+        { $: { text: "Second", bounds: bounds(0, 50, 100, 100) } },
       ]);
       // Index 0 is the root, index 1 is "First", index 2 is "Second"
       const result = finder.findElementByIndex(hierarchy, 0);
@@ -196,7 +202,7 @@ describe("DefaultElementFinder", () => {
 
     test("finds scrollable elements", () => {
       const hierarchy = makeHierarchy({
-        $: { scrollable: "true", bounds: "[0,0][1080,1920]" },
+        $: { scrollable: "true", bounds: bounds(0, 0, 1080, 1920) },
       });
       const results = finder.findScrollableElements(hierarchy);
       expect(results.length).toBeGreaterThanOrEqual(1);
@@ -204,7 +210,7 @@ describe("DefaultElementFinder", () => {
 
     test("returns empty when no scrollable elements", () => {
       const hierarchy = makeHierarchy({
-        $: { text: "Not scrollable", bounds: "[0,0][100,50]" },
+        $: { text: "Not scrollable", bounds: bounds(0, 0, 100, 50) },
       });
       expect(finder.findScrollableElements(hierarchy)).toEqual([]);
     });
@@ -217,7 +223,7 @@ describe("DefaultElementFinder", () => {
 
     test("finds first scrollable container", () => {
       const hierarchy = makeHierarchy({
-        $: { scrollable: "true", bounds: "[0,0][1080,1920]" },
+        $: { scrollable: "true", bounds: bounds(0, 0, 1080, 1920) },
       });
       const result = finder.findScrollableContainer(hierarchy);
       expect(result).not.toBeNull();
@@ -231,11 +237,21 @@ describe("DefaultElementFinder", () => {
 
     test("finds clickable elements", () => {
       const hierarchy = makeHierarchy([
-        { $: { clickable: "true", text: "Button", bounds: "[0,0][100,50]" } },
-        { $: { clickable: "false", text: "Label", bounds: "[0,50][100,100]" } },
+        { $: { clickable: "true", text: "Button", bounds: bounds(0, 0, 100, 50) } },
+        { $: { clickable: "false", text: "Label", bounds: bounds(0, 50, 100, 100) } },
       ]);
       const results = finder.findClickableElements(hierarchy);
       expect(results).toHaveLength(1);
+    });
+
+    test("treats click accessibility actions as clickable", () => {
+      const hierarchy = makeHierarchy([
+        { $: { "actions": ["click"], "resource-id": "com.example:id/icon_button", "bounds": bounds(0, 0, 100, 50) } },
+        { $: { "actions": ["focus"], "resource-id": "com.example:id/focus_only", "bounds": bounds(0, 50, 100, 100) } },
+      ]);
+      const results = finder.findClickableElements(hierarchy);
+      expect(results).toHaveLength(1);
+      expect(results[0]["resource-id"]).toBe("com.example:id/icon_button");
     });
   });
 
@@ -304,10 +320,10 @@ describe("DefaultElementFinder", () => {
     test("finds clickable sibling of node with matching resource-id", () => {
       const hierarchy = makeHierarchy([
         {
-          $: { bounds: "[0,0][1080,200]" },
+          $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label", "bounds": "[0,0][500,100]" } },
-            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+            { $: { "resource-id": "com.app:id/label", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
       ]);
@@ -319,10 +335,10 @@ describe("DefaultElementFinder", () => {
     test("does not return the resource-id node itself even if clickable", () => {
       const hierarchy = makeHierarchy([
         {
-          $: { bounds: "[0,0][1080,200]" },
+          $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label", "clickable": "true", "bounds": "[0,0][500,100]" } },
-            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+            { $: { "resource-id": "com.app:id/label", "clickable": "true", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
       ]);
@@ -334,10 +350,10 @@ describe("DefaultElementFinder", () => {
     test("supports partial match", () => {
       const hierarchy = makeHierarchy([
         {
-          $: { bounds: "[0,0][1080,200]" },
+          $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/label_title", "bounds": "[0,0][500,100]" } },
-            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+            { $: { "resource-id": "com.app:id/label_title", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
       ]);
@@ -348,10 +364,10 @@ describe("DefaultElementFinder", () => {
     test("returns empty when no sibling has the resource-id", () => {
       const hierarchy = makeHierarchy([
         {
-          $: { bounds: "[0,0][1080,200]" },
+          $: { bounds: bounds(0, 0, 1080, 200) },
           node: [
-            { $: { "resource-id": "com.app:id/other", "bounds": "[0,0][500,100]" } },
-            { $: { clickable: "true", bounds: "[500,0][1080,100]" } },
+            { $: { "resource-id": "com.app:id/other", "bounds": { left: 0, top: 0, right: 500, bottom: 100 } } },
+            { $: { clickable: "true", bounds: bounds(500, 0, 1080, 100) } },
           ],
         },
       ]);

@@ -155,6 +155,50 @@ function getPoolDeviceInfo(devicePool: DevicePool | null, deviceId: string): Poo
   };
 }
 
+function summarizePoolStatus(
+  devicePool: DevicePool,
+  discoveredDevices: BootedDeviceInfo[],
+  succeededPlatforms: Set<Platform>
+): PoolStatusSummary {
+  let idle = 0;
+  let assigned = 0;
+  let error = 0;
+
+  const tally = (status: PoolDeviceStatus | undefined): void => {
+    if (status === "idle") {
+      idle++;
+    } else if (status === "assigned") {
+      assigned++;
+    } else if (status === "error") {
+      error++;
+    }
+  };
+
+  // For successfully-discovered platforms, count from the live booted list so
+  // phantom (shut-down) pool entries are excluded.
+  for (const device of discoveredDevices) {
+    if (succeededPlatforms.has(device.platform)) {
+      tally(device.poolStatus);
+    }
+  }
+
+  // For platforms whose discovery failed/was unavailable, keep the pool's own
+  // tracked counts — we cannot confirm which of those entries are phantom.
+  for (const pooled of devicePool.getAllDevices()) {
+    if (!succeededPlatforms.has(pooled.platform)) {
+      tally(pooled.status === "busy" ? "assigned" : pooled.status);
+    }
+  }
+
+  return {
+    enabled: true,
+    idle,
+    assigned,
+    error,
+    total: idle + assigned + error
+  };
+}
+
 function toDeviceSessionInfo(session: Session): DeviceSessionInfo {
   return {
     sessionId: session.sessionId,
@@ -213,13 +257,12 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
   if (daemonState.isInitialized()) {
     try {
       devicePool = daemonState.getDevicePool();
-      const stats = devicePool.getStats();
       poolStatus = {
         enabled: true,
-        idle: stats.idle,
-        assigned: stats.assigned,
-        error: stats.error,
-        total: stats.total
+        idle: 0,
+        assigned: 0,
+        error: 0,
+        total: 0
       };
     } catch (error) {
       logger.warn(`[BootedDeviceResources] Failed to read device pool status: ${error}`);
@@ -238,12 +281,17 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
     }
   }
 
+  const succeededPlatforms = new Set<Platform>();
+
   try {
     // Fetch Android booted devices if requested
     if (platforms.includes("android")) {
       try {
-        const androidDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("android");
-        for (const device of androidDevices) {
+        const androidDiscovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("android");
+        for (const discoveredPlatform of androidDiscovery.succeededPlatforms) {
+          succeededPlatforms.add(discoveredPlatform);
+        }
+        for (const device of androidDiscovery.devices) {
           devices.push(
             toBootedDeviceInfo(
               device,
@@ -261,8 +309,11 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
     // Fetch iOS booted simulators if requested
     if (platforms.includes("ios")) {
       try {
-        const iosDevices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("ios");
-        for (const device of iosDevices) {
+        const iosDiscovery = await PlatformDeviceManagerFactory.getInstance().getBootedDevicesDetailed("ios");
+        for (const discoveredPlatform of iosDiscovery.succeededPlatforms) {
+          succeededPlatforms.add(discoveredPlatform);
+        }
+        for (const device of iosDiscovery.devices) {
           devices.push(
             toBootedDeviceInfo(
               device,
@@ -312,6 +363,9 @@ async function getBootedDevicesForPlatforms(platforms: Platform[]): Promise<Boot
 
   const virtualCount = devices.filter(device => device.isVirtual).length;
   const physicalCount = devices.length - virtualCount;
+  if (poolStatus && devicePool) {
+    poolStatus = summarizePoolStatus(devicePool, devices, succeededPlatforms);
+  }
 
   return {
     totalCount: devices.length,

@@ -100,7 +100,7 @@ public class FakeElementLocator: ElementLocating {
 
     public private(set) var switchedBundleIds: [String] = []
     public private(set) var awaitStateCalls: [(bundleId: String, expectedState: AppStateExpectation)] = []
-    public var awaitAppStateResult: Bool = true
+    public var awaitAppStateResult = true
     public private(set) var getAppStateCalls: [String] = []
     public var getAppStateResult: ObservedAppState = .notRunning
 
@@ -152,6 +152,16 @@ public class FakeGesturePerformer: GesturePerforming {
         public let duration: TimeInterval
     }
 
+    public struct MultiFingerSwipeCall {
+        public let startX: Double
+        public let startY: Double
+        public let endX: Double
+        public let endY: Double
+        public let fingerCount: Int
+        public let fingerSpacing: Double
+        public let duration: TimeInterval
+    }
+
     public struct DragCall {
         public let startX: Double
         public let startY: Double
@@ -178,21 +188,28 @@ public class FakeGesturePerformer: GesturePerforming {
     private var doubleTapHistory: [(x: Double, y: Double)] = []
     private var longPressHistory: [(x: Double, y: Double, duration: TimeInterval)] = []
     private var swipeHistory: [SwipeCall] = []
+    private var multiFingerSwipeHistory: [MultiFingerSwipeCall] = []
     private var dragHistory: [DragCall] = []
     private var pinchHistory: [PinchCall] = []
     private var typeTextHistory: [String] = []
     private var setTextHistory: [TextCall] = []
     private var clearTextHistory: [String?] = []
-    private var selectAllCallCount: Int = 0
+    private var selectAllCallCount = 0
     private var imeActionHistory: [String] = []
+    private var keyboardHistory: [String] = []
+    private var keyboardOpen = false
+    private var nextKeyboardResult: Bool?
     private var actionHistory: [(action: String, resourceId: String?, label: String?)] = []
     private var screenshotCallCount = 0
     private var pressHomeCallCount = 0
+    private var pressBackCallCount = 0
+    private var shakeCallCount = 0
+    private var pressButtonHistory: [String] = []
     private var openRecentAppsCallCount = 0
     private var appLaunchHistory: [String] = []
     private var appTerminateHistory: [String] = []
     private var clipboardHistory: [(action: String, text: String?)] = []
-    private var clipboardContents: String? = nil
+    private var clipboardContents: String?
 
     public init() {}
 
@@ -218,6 +235,10 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getSwipeHistory() -> [SwipeCall] {
         swipeHistory
+    }
+
+    public func getMultiFingerSwipeHistory() -> [MultiFingerSwipeCall] {
+        multiFingerSwipeHistory
     }
 
     public func getDragHistory() -> [DragCall] {
@@ -248,6 +269,18 @@ public class FakeGesturePerformer: GesturePerforming {
         imeActionHistory
     }
 
+    public func getKeyboardHistory() -> [String] {
+        keyboardHistory
+    }
+
+    public func setKeyboardOpen(_ open: Bool) {
+        keyboardOpen = open
+    }
+
+    public func setNextKeyboardResult(_ open: Bool) {
+        nextKeyboardResult = open
+    }
+
     public func getActionHistory() -> [(action: String, resourceId: String?, label: String?)] {
         actionHistory
     }
@@ -258,6 +291,18 @@ public class FakeGesturePerformer: GesturePerforming {
 
     public func getPressHomeCallCount() -> Int {
         pressHomeCallCount
+    }
+
+    public func getPressBackCallCount() -> Int {
+        pressBackCallCount
+    }
+
+    public func getShakeCallCount() -> Int {
+        shakeCallCount
+    }
+
+    public func getPressButtonHistory() -> [String] {
+        pressButtonHistory
     }
 
     public func getOpenRecentAppsCallCount() -> Int {
@@ -285,6 +330,7 @@ public class FakeGesturePerformer: GesturePerforming {
         doubleTapHistory.removeAll()
         longPressHistory.removeAll()
         swipeHistory.removeAll()
+        multiFingerSwipeHistory.removeAll()
         dragHistory.removeAll()
         pinchHistory.removeAll()
         typeTextHistory.removeAll()
@@ -292,9 +338,16 @@ public class FakeGesturePerformer: GesturePerforming {
         clearTextHistory.removeAll()
         selectAllCallCount = 0
         imeActionHistory.removeAll()
+        keyboardHistory.removeAll()
+        keyboardOpen = false
+        nextKeyboardResult = nil
         actionHistory.removeAll()
         screenshotCallCount = 0
         pressHomeCallCount = 0
+        pressBackCallCount = 0
+        shakeCallCount = 0
+        pressButtonHistory.removeAll()
+        openRecentAppsCallCount = 0
         appLaunchHistory.removeAll()
         appTerminateHistory.removeAll()
         clipboardHistory.removeAll()
@@ -328,6 +381,27 @@ public class FakeGesturePerformer: GesturePerforming {
     public func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws {
         try checkFailure("swipe")
         swipeHistory.append(SwipeCall(startX: startX, startY: startY, endX: endX, endY: endY, duration: duration))
+    }
+
+    public func multiFingerSwipe(
+        startX: Double,
+        startY: Double,
+        endX: Double,
+        endY: Double,
+        fingerCount: Int,
+        fingerSpacing: Double,
+        duration: TimeInterval
+    ) throws {
+        try checkFailure("multiFingerSwipe")
+        multiFingerSwipeHistory.append(MultiFingerSwipeCall(
+            startX: startX,
+            startY: startY,
+            endX: endX,
+            endY: endY,
+            fingerCount: fingerCount,
+            fingerSpacing: fingerSpacing,
+            duration: duration
+        ))
     }
 
     public func drag(
@@ -383,6 +457,25 @@ public class FakeGesturePerformer: GesturePerforming {
         imeActionHistory.append(action)
     }
 
+    public func keyboard(action: String) throws -> Bool {
+        try checkFailure("keyboard")
+        keyboardHistory.append(action)
+        if let result = nextKeyboardResult {
+            nextKeyboardResult = nil
+            keyboardOpen = result
+            return result
+        }
+        switch action {
+        case "open":
+            keyboardOpen = true
+        case "close":
+            keyboardOpen = false
+        default:
+            break
+        }
+        return keyboardOpen
+    }
+
     public func clipboard(action: String, text: String?) throws -> String? {
         try checkFailure("clipboard")
         clipboardHistory.append((action: action, text: text))
@@ -427,6 +520,21 @@ public class FakeGesturePerformer: GesturePerforming {
         pressHomeCallCount += 1
     }
 
+    public func pressBack() throws {
+        try checkFailure("pressBack")
+        pressBackCallCount += 1
+    }
+
+    public func shake() throws {
+        try checkFailure("shake")
+        shakeCallCount += 1
+    }
+
+    public func pressButton(_ button: String) throws {
+        try checkFailure("pressButton")
+        pressButtonHistory.append(button)
+    }
+
     public func openRecentApps() throws {
         try checkFailure("openRecentApps")
         openRecentAppsCallCount += 1
@@ -463,7 +571,7 @@ public class FakeStorageInspecting: StorageInspecting {
     // MARK: - Configurable State
 
     private var suites: [StorageSuiteInfo] = []
-    private var entries: [String?: [StorageEntry]] = [:]  // keyed by suiteName
+    private var entries: [String?: [StorageEntry]] = [:] // keyed by suiteName
     private var shouldThrow: Error?
 
     // MARK: - Call History
@@ -627,10 +735,18 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
     private let lock = NSLock()
     private var _cachedHierarchy: SdkViewHierarchy?
     private var _freshHierarchy: SdkViewHierarchy?
-    private var _isAvailable: Bool = false
+    private var _serverInfo: SdkHierarchyServerInfo?
+    private var _isAvailable = false
     private var _fetchCallCount = 0
     private var _fetchFreshCallCount = 0
+    private var _fetchServerInfoCallCount = 0
     private var _isAvailableCallCount = 0
+    private var _setMockRulesCallCount = 0
+    private var _addHighlightCallCount = 0
+    private var _lastMockRules: [NetworkMockRuleDTO]?
+    private var _lastHighlight: (id: String, shape: HighlightShape)?
+    public var setMockRulesResult = true
+    public var addHighlightResult = false
 
     public init() {}
 
@@ -654,6 +770,12 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         lock.unlock()
     }
 
+    public func setServerInfo(_ serverInfo: SdkHierarchyServerInfo?) {
+        lock.lock()
+        _serverInfo = serverInfo
+        lock.unlock()
+    }
+
     // MARK: - Assertions
 
     public var fetchCallCount: Int {
@@ -668,17 +790,52 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return _fetchFreshCallCount
     }
 
+    public var fetchServerInfoCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _fetchServerInfoCallCount
+    }
+
     public var isAvailableCallCount: Int {
         lock.lock()
         defer { lock.unlock() }
         return _isAvailableCallCount
     }
 
+    public var setMockRulesCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _setMockRulesCallCount
+    }
+
+    public var addHighlightCallCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _addHighlightCallCount
+    }
+
+    public var lastMockRules: [NetworkMockRuleDTO]? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastMockRules
+    }
+
+    public var lastHighlight: (id: String, shape: HighlightShape)? {
+        lock.lock()
+        defer { lock.unlock() }
+        return _lastHighlight
+    }
+
     public func clearHistory() {
         lock.lock()
         _fetchCallCount = 0
         _fetchFreshCallCount = 0
+        _fetchServerInfoCallCount = 0
         _isAvailableCallCount = 0
+        _setMockRulesCallCount = 0
+        _addHighlightCallCount = 0
+        _lastMockRules = nil
+        _lastHighlight = nil
         lock.unlock()
     }
 
@@ -700,10 +857,36 @@ public class FakeSdkHierarchyFetcher: SdkHierarchyFetching {
         return result
     }
 
+    public func fetchServerInfo() -> SdkHierarchyServerInfo? {
+        lock.lock()
+        _fetchServerInfoCallCount += 1
+        let result = _serverInfo
+        lock.unlock()
+        return result
+    }
+
     public func isAvailable() -> Bool {
         lock.lock()
         _isAvailableCallCount += 1
-        let result = _isAvailable
+        let result = _serverInfo != nil || _isAvailable
+        lock.unlock()
+        return result
+    }
+
+    public func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool {
+        lock.lock()
+        _setMockRulesCallCount += 1
+        _lastMockRules = rules
+        let result = setMockRulesResult
+        lock.unlock()
+        return result
+    }
+
+    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+        lock.lock()
+        _addHighlightCallCount += 1
+        _lastHighlight = (id: id, shape: shape)
+        let result = addHighlightResult
         lock.unlock()
         return result
     }
@@ -754,6 +937,70 @@ public class FakeSdkHierarchyCache: SdkHierarchyCaching {
         _latest = nil
         _clearCallCount += 1
         lock.unlock()
+    }
+}
+
+// MARK: - FakeSdkDatabaseFetcher
+
+/// Fake implementation of SdkDatabaseFetching for testing
+public class FakeSdkDatabaseFetcher: SdkDatabaseFetching {
+    public struct TableDataCall {
+        public let databasePath: String
+        public let table: String
+        public let limit: Int
+        public let offset: Int
+    }
+
+    public private(set) var executeSqlCalls: [(databasePath: String, query: String)] = []
+    public private(set) var listDatabasesCallCount = 0
+    public private(set) var listTablesCalls: [String] = []
+    public private(set) var tableDataCalls: [TableDataCall] = []
+    public private(set) var tableStructureCalls: [(databasePath: String, table: String)] = []
+
+    public var executeSqlResult = SdkExecuteSqlResult(queryType: "query", columns: [], rows: [], rowsAffected: 0)
+    public var executeSqlError: Error?
+    public var databases: [SdkDatabaseInfo] = []
+    public var tables: [String] = []
+    public var tableData = SdkTableDataResult(columns: [], rows: [], total: 0)
+    public var tableStructure = SdkTableStructureResult(columns: [])
+
+    public init() {}
+
+    public func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult {
+        executeSqlCalls.append((databasePath: databasePath, query: query))
+        if let executeSqlError {
+            throw executeSqlError
+        }
+        return executeSqlResult
+    }
+
+    public func listDatabases() throws -> [SdkDatabaseInfo] {
+        listDatabasesCallCount += 1
+        return databases
+    }
+
+    public func listTables(databasePath: String) throws -> [String] {
+        listTablesCalls.append(databasePath)
+        return tables
+    }
+
+    public func getTableData(
+        databasePath: String,
+        table: String,
+        limit: Int,
+        offset: Int
+    )
+        throws -> SdkTableDataResult
+    {
+        tableDataCalls.append(
+            TableDataCall(databasePath: databasePath, table: table, limit: limit, offset: offset)
+        )
+        return tableData
+    }
+
+    public func getTableStructure(databasePath: String, table: String) throws -> SdkTableStructureResult {
+        tableStructureCalls.append((databasePath: databasePath, table: table))
+        return tableStructure
     }
 }
 

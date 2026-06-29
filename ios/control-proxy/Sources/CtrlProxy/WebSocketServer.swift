@@ -79,12 +79,12 @@ public class WebSocketServer: WebSocketServing {
         listener?.stateUpdateHandler = { [weak self] state in
             switch state {
             case .ready:
-                print("[WebSocketServer] Server ready on port \(self?.port ?? 0)")
+                break
             case let .failed(error):
                 print("[WebSocketServer] Server failed: \(error)")
                 self?.stop()
             case .cancelled:
-                print("[WebSocketServer] Server cancelled")
+                break
             default:
                 break
             }
@@ -95,7 +95,6 @@ public class WebSocketServer: WebSocketServing {
         }
 
         listener?.start(queue: queue)
-        print("[WebSocketServer] Starting server on port \(port)...")
     }
 
     /// Stops the server
@@ -104,7 +103,6 @@ public class WebSocketServer: WebSocketServing {
         connections.removeAll()
         listener?.cancel()
         listener = nil
-        print("[WebSocketServer] Server stopped")
     }
 
     // MARK: - Connection Handling
@@ -112,8 +110,6 @@ public class WebSocketServer: WebSocketServing {
     private func handleNewConnection(_ nwConnection: NWConnection) {
         let connectionId = nextConnectionId
         nextConnectionId += 1
-
-        print("[WebSocketServer] New connection #\(connectionId) from \(nwConnection.endpoint)")
 
         let connection = WebSocketConnection(
             id: connectionId,
@@ -124,7 +120,6 @@ public class WebSocketServer: WebSocketServing {
             self?.handleMessage(message, connectionId: connectionId)
         } onClose: { [weak self] in
             self?.connections.removeValue(forKey: connectionId)
-            print("[WebSocketServer] Connection #\(connectionId) closed")
         }
 
         connections[connectionId] = connection
@@ -136,7 +131,7 @@ public class WebSocketServer: WebSocketServing {
 
         do {
             let request = try JSONDecoder().decode(WebSocketRequest.self, from: data)
-            print("[WebSocketServer] Received: \(request.type)")
+            print("[WebSocketServer] Received request type=\(request.type) requestId=\(request.requestId ?? "nil")")
 
             // Track the entire request handling with PerfProvider
             perfProvider.serial("handleRequest:\(request.type)")
@@ -254,12 +249,6 @@ public class WebSocketServer: WebSocketServing {
             encoder.outputFormatting = .sortedKeys
             let data = try encoder.encode(response)
             broadcast(data)
-            // Only log occasionally to avoid spam (snapshot contains timestamp)
-            if Int(snapshot.timestamp) % 5000 < 500 {
-                print(
-                    "[WebSocketServer] Broadcast performance update: fps=\(snapshot.fps ?? 0), frameTime=\(snapshot.frameTimeMs ?? 0)ms"
-                )
-            }
         } catch {
             print("[WebSocketServer] Failed to encode performance update: \(error)")
         }
@@ -424,10 +413,24 @@ class WebSocketConnection {
     }
 
     private func handleHealthCheck() {
-        let response = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 15\r\n\r\n{\"status\":\"ok\"}"
-        connection.send(content: response.data(using: .utf8), completion: .contentProcessed { [weak self] _ in
+        var payload: [String: String] = ["status": "ok"]
+        if let deviceId = Self.currentDeviceId() {
+            payload["deviceId"] = deviceId
+        }
+
+        let body = (try? JSONSerialization.data(withJSONObject: payload, options: [.sortedKeys]))
+            ?? Data(#"{"status":"ok"}"#.utf8)
+        let header = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: \(body.count)\r\n\r\n"
+        var response = Data(header.utf8)
+        response.append(body)
+        connection.send(content: response, completion: .contentProcessed { [weak self] _ in
             self?.connection.cancel()
         })
+    }
+
+    private static func currentDeviceId() -> String? {
+        let environment = ProcessInfo.processInfo.environment
+        return environment["AUTOMOBILE_DEVICE_ID"] ?? environment["SIMULATOR_UDID"]
     }
 
     private func handleSdkEventsPost(_ request: String) {

@@ -53,6 +53,30 @@ The daemon exposes a full [Unix Socket API](unix-socket-api.md) for IDE plugins 
 - **MCP proxy** — `tools/list`, `tools/call`, `resources/list`, `resources/read`
 - **Daemon management** — device pool queries, session lifecycle
 
+## Session Heartbeats
+
+The daemon reclaims sessions whose client heartbeat has gone stale. Sessions using the default heartbeat policy that never send their first heartbeat are reclaimed after a short grace period, while custom-heartbeat sessions, including autolock sessions, keep using their configured heartbeat timeout.
+
+Deployment overrides are read from environment variables in milliseconds:
+
+| Variable | Default | Purpose |
+| --- | ---: | --- |
+| `AUTOMOBILE_SESSION_HEARTBEAT_CHECK_INTERVAL_MS` | `10000` | How often the daemon scans for stale sessions. |
+| `AUTOMOBILE_SESSION_PRE_FIRST_HEARTBEAT_GRACE_MS` | `5000` | Grace before reclaiming a default-heartbeat session that never sent its first heartbeat. |
+| `AUTOMOBILE_SESSION_HEARTBEAT_INITIAL_GRACE_MS` | `20000` | Grace before evaluating stale custom-heartbeat sessions that never sent a heartbeat. |
+| `AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS` | `10000` | Default heartbeat timeout assigned to newly created sessions. |
+
+Each variable also supports the legacy `AUTO_MOBILE_...` prefix.
+
+## Running Many Agents on One Host
+
+When several agents run in parallel against one shared daemon, the filesystem and
+environment follow a contract: each agent executes tools in its own process
+(proxy mode is test-only), so the device caches are multi-writer. See the
+[Multi-Agent Filesystem Contract](multi-agent-filesystem-contract.md) for the
+ownership model, the required env vars, and the recommended per-agent `TMPDIR`
+isolation.
+
 ## Implementation
 
 The daemon is implemented in the main AutoMobile MCP server and can run:

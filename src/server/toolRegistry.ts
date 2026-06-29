@@ -18,27 +18,22 @@ import { createToolExecutionContext, updateSessionCache } from "./ToolExecutionC
 import { AppCleanupService, DefaultAppCleanupService } from "./AppCleanupService";
 import { ToolCallRepository } from "../db/toolCallRepository";
 import { getDeviceLabelMap, releaseDeviceLabelSessions } from "./deviceLabelMapping";
+import { isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
 import { isDebugModeEnabled } from "../utils/debug";
 import { defaultTimer, type Timer } from "../utils/SystemTimer";
 import { getMcpRecorder } from "./mcpRecordingManager";
 
 /**
  * The Anthropic API (and many MCP clients) reject tool input schemas that have
- * `anyOf` or `oneOf` at the top level. Zod's `z.union()` produces exactly that.
+ * top-level combinators such as `anyOf`, `oneOf`, or `allOf`. Zod's `z.union()`
+ * produces `anyOf`/`oneOf`.
  * This function flattens union branches into a single `type: "object"` schema
  * by merging all properties from every branch. Required fields are dropped because
  * different branches require different keys.
  *
- * Note: `allOf` is NOT handled here — it has a different semantic (intersection)
- * and would require a different merging strategy (all fields required, not any).
- *
  * Trade-off: the flattened schema loses mutual-exclusivity information, so LLMs may
- * send invalid property combinations. The server-side Zod union still validates at
- * runtime, but the error messages are less clear than a well-structured schema.
- *
- * TODO: Replace top-level z.union() usage with a discriminator field (e.g.
- * `strategy: "text" | "id" | "clickable"`) so schemas are MCP-compliant without
- * needing this lossy flattening step.
+ * send invalid property combinations or omit branch-specific required fields. The
+ * server-side Zod union still validates at runtime.
  */
 export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<string, unknown> {
   const branches = (schema.anyOf ?? schema.oneOf) as Record<string, unknown>[] | undefined;
@@ -56,6 +51,8 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
       for (const [key, value] of Object.entries(props)) {
         if (!mergedProperties[key]) {
           mergedProperties[key] = value;
+        } else {
+          mergedProperties[key] = mergeUnionProperty(mergedProperties[key], value);
         }
       }
     }
@@ -84,7 +81,122 @@ export function flattenTopLevelUnion(schema: Record<string, unknown>): Record<st
     result.additionalProperties = [...seenAdditionalProperties][0];
   }
 
+  const conditionalRequired = buildConditionalRequired(branches, commonRequired);
+  if (conditionalRequired) {
+    Object.assign(result, conditionalRequired);
+  }
+
   return result;
+}
+
+interface ConditionalRequirement {
+  if: {
+    properties: Record<string, { const: unknown }>;
+    required: string[];
+  };
+  then: {
+    required: string[];
+  };
+  else?: ConditionalRequirement;
+}
+
+function buildConditionalRequired(
+  branches: Record<string, unknown>[],
+  commonRequired: string[]
+): ConditionalRequirement | undefined {
+  const commonRequiredSet = new Set(commonRequired);
+  const requirements: ConditionalRequirement[] = [];
+
+  for (const branch of branches) {
+    const required = Array.isArray(branch.required)
+      ? branch.required.filter((key): key is string => typeof key === "string")
+      : [];
+    const branchOnlyRequired = required.filter(key => !commonRequiredSet.has(key));
+    if (branchOnlyRequired.length === 0) {
+      continue;
+    }
+
+    const condition = buildDiscriminatorCondition(branch);
+    if (!condition) {
+      continue;
+    }
+
+    requirements.push({
+      if: condition,
+      then: {
+        required: branchOnlyRequired,
+      },
+    });
+  }
+
+  return chainConditionalRequirements(requirements);
+}
+
+function buildDiscriminatorCondition(
+  branch: Record<string, unknown>
+): ConditionalRequirement["if"] | undefined {
+  const properties = isJsonSchemaObject(branch.properties) ? branch.properties : {};
+  for (const [key, value] of Object.entries(properties)) {
+    if (!isJsonSchemaObject(value)) {
+      continue;
+    }
+    const values = constOrEnumValues(value);
+    if (values.length !== 1) {
+      continue;
+    }
+    return {
+      properties: {
+        [key]: { const: values[0] },
+      },
+      required: [key],
+    };
+  }
+  return undefined;
+}
+
+function chainConditionalRequirements(
+  requirements: ConditionalRequirement[]
+): ConditionalRequirement | undefined {
+  let chain: ConditionalRequirement | undefined;
+
+  for (const requirement of requirements.toReversed()) {
+    chain = {
+      ...requirement,
+      ...(chain ? { else: chain } : {}),
+    };
+  }
+
+  return chain;
+}
+
+function mergeUnionProperty(existing: unknown, incoming: unknown): unknown {
+  if (!isJsonSchemaObject(existing) || !isJsonSchemaObject(incoming)) {
+    return existing;
+  }
+
+  const existingValues = constOrEnumValues(existing);
+  const incomingValues = constOrEnumValues(incoming);
+  if (existingValues.length === 0 || incomingValues.length === 0) {
+    return existing;
+  }
+
+  const baseSchema = { ...existing };
+  delete baseSchema.const;
+  return {
+    ...baseSchema,
+    enum: [...new Set([...existingValues, ...incomingValues])],
+  };
+}
+
+function constOrEnumValues(schema: Record<string, unknown>): unknown[] {
+  if ("const" in schema) {
+    return [schema.const];
+  }
+  return Array.isArray(schema.enum) ? schema.enum : [];
+}
+
+function isJsonSchemaObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 // Progress notification interface
@@ -202,6 +314,7 @@ class ToolRegistryClass {
       const baseSessionUuid = args.sessionUuid;
       const deviceLabel = typeof args.device === "string" ? args.device : undefined;
       const declaredDeviceLabels = Array.isArray(args.devices) ? args.devices : undefined;
+      const mcpSessionId = typeof args.__mcpSessionId === "string" ? args.__mcpSessionId : undefined;
       let sessionUuid = baseSessionUuid;
       const keepScreenAwake = typeof args.keepScreenAwake === "boolean" ? args.keepScreenAwake : undefined;
 
@@ -236,20 +349,28 @@ class ToolRegistryClass {
         }
       }
 
-      logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
       const toolStartMs = this.timer.now();
-      void this.toolCallRepository.recordToolCall({
-        toolName: name,
-        timestamp: new Date().toISOString(),
-        sessionUuid,
-      });
 
       // Extract platform from args, default to "either" for backward compatibility
       let platform: SomePlatform = args.platform || "either";
 
       if (shouldResolveDevice) {
+        const implicitSessionUuid = this.resolveImplicitAutolockSession(platform, sessionUuid, providedDeviceId, mcpSessionId);
+        if (implicitSessionUuid) {
+          sessionUuid = implicitSessionUuid;
+          args.sessionUuid = implicitSessionUuid;
+          logger.info(`[ToolRegistry] Resolved implicit autolock session for MCP session ${mcpSessionId}: ${implicitSessionUuid}`);
+        }
         await this.enforceSessionUuidForMultipleIos(platform, sessionUuid, providedDeviceId);
+        await this.enforceSessionUuidForAutolock(platform, sessionUuid, providedDeviceId);
       }
+
+      logger.info(`[ToolRegistry] Tool ${name} called, sessionUuid=${sessionUuid}, daemonInitialized=${DaemonState.getInstance().isInitialized()}`);
+      void this.toolCallRepository.recordToolCall({
+        toolName: name,
+        timestamp: new Date().toISOString(),
+        sessionUuid,
+      });
 
       // If session UUID provided, resolve device from session
       if (shouldResolveDevice && sessionUuid && DaemonState.getInstance().isInitialized()) {
@@ -297,6 +418,11 @@ class ToolRegistryClass {
         }
       } else {
         logger.info(`[ToolRegistry] ${name}: Skipping device resolution.`);
+      }
+
+      // Enforce autolock: a locked device may only be driven by the session that locked it.
+      if (device && isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
+        DaemonState.getInstance().getDevicePool().assertAutolockAccess(device.deviceId, sessionUuid);
       }
 
       // Bind session to device's CtrlProxyClient for multi-agent NavigationGraphManager isolation
@@ -561,6 +687,79 @@ class ToolRegistryClass {
     );
   }
 
+  private resolveImplicitAutolockSession(
+    platform: SomePlatform,
+    sessionUuid: string | undefined,
+    providedDeviceId: string | undefined,
+    mcpSessionId: string | undefined
+  ): string | undefined {
+    if (sessionUuid) {
+      return undefined;
+    }
+    if (!isDevicePoolAutolockEnabled() || !DaemonState.getInstance().isInitialized()) {
+      return undefined;
+    }
+
+    const platformFilter = platform === "android" || platform === "ios" ? platform : undefined;
+    const sessionId = DaemonState.getInstance()
+      .getDevicePool()
+      .resolveAutolockSessionForMcpSession(mcpSessionId, platformFilter);
+    if (!sessionId) {
+      return undefined;
+    }
+
+    if (!providedDeviceId) {
+      return sessionId;
+    }
+
+    const session = DaemonState.getInstance().getSessionManager().getSession(sessionId);
+    return session?.assignedDevice === providedDeviceId ? sessionId : undefined;
+  }
+
+  /**
+   * When device pool autolock is enabled, a tool call that does not name a target
+   * (no sessionUuid and no deviceId) must not be routed to an arbitrary device if
+   * more than one candidate exists — that would defeat the per-session device
+   * ownership autolock provides. Resolve the MCP session's autolock session when
+   * available; otherwise require the sessionUuid returned by startDevice.
+   *
+   * No-op when autolock is disabled, when a target is already specified, when a
+   * device was pinned via setActiveDevice, or when only one candidate exists.
+   */
+  private async enforceSessionUuidForAutolock(
+    platform: SomePlatform,
+    sessionUuid: string | undefined,
+    providedDeviceId: string | undefined
+  ): Promise<void> {
+    if (!isDevicePoolAutolockEnabled()) {
+      return;
+    }
+    if (sessionUuid || providedDeviceId) {
+      return;
+    }
+
+    // A device pinned via setActiveDevice is an unambiguous target.
+    const currentDevice = this.deviceSessionManager.getCurrentDevice();
+    const currentPlatform = this.deviceSessionManager.getCurrentPlatform();
+    if (currentDevice && (platform === "either" || platform === currentPlatform)) {
+      return;
+    }
+
+    const connectedPlatforms = await this.deviceSessionManager.detectConnectedPlatforms();
+    const candidates = platform === "either"
+      ? connectedPlatforms
+      : connectedPlatforms.filter(device => device.platform === platform);
+
+    if (candidates.length <= 1) {
+      return;
+    }
+
+    throw new ActionableError(
+      "Device pool autolock is enabled and multiple devices are available. " +
+      "Call startDevice first from this MCP session, or provide the sessionId returned by 'startDevice' (or a deviceId) to target a specific device."
+    );
+  }
+
   // Get all registered tools
   getAllTools(): RegisteredTool[] {
     return Array.from(this.tools.values()).filter(tool => this.isToolAvailable(tool));
@@ -614,8 +813,7 @@ class ToolRegistryClass {
         inputSchema: tool.schema,
         ...(process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true" && {
           _meta: { "anthropic/alwaysLoad": true },
-        }),
-        ...(tool.outputSchema ? { outputSchema: tool.outputSchema } : {})
+        })
       }, wrappedHandler);
     });
   }
@@ -623,13 +821,19 @@ class ToolRegistryClass {
   // Get tools in MCP format
   getToolDefinitions() {
     const alwaysLoad = process.env.AUTOMOBILE_ALWAYS_LOAD_TOOLS === "true";
-    return this.getAllTools().map(tool => ({
-      name: tool.name,
-      description: tool.description,
-      inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
-      ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } }),
-      ...(tool.outputSchema ? { outputSchema: toJSONSchema(tool.outputSchema) } : {})
-    }));
+    return this.getAllTools().map(tool => {
+      const outputSchema = tool.outputSchema
+        ? flattenTopLevelUnion(toJSONSchema(tool.outputSchema))
+        : undefined;
+
+      return {
+        name: tool.name,
+        description: tool.description,
+        inputSchema: flattenTopLevelUnion(toJSONSchema(tool.schema)),
+        ...(outputSchema && { outputSchema }),
+        ...(alwaysLoad && { _meta: { "anthropic/alwaysLoad": true } })
+      };
+    });
   }
 
   // Get a map of all schema

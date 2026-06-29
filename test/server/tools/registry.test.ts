@@ -58,6 +58,19 @@ describe("MCP Tools Registry", () => {
     });
   });
 
+  test("should expose registered output schemas in generated MCP tool definitions", () => {
+    const toolDefinitions = ToolRegistry.getToolDefinitions();
+
+    for (const toolName of ["executePlan", "tapOn"]) {
+      const tool = toolDefinitions.find(definition => definition.name === toolName);
+      expect(tool).toBeDefined();
+      expect(tool).toHaveProperty("outputSchema");
+      expect(tool!.outputSchema).toHaveProperty("type", "object");
+      expect(tool!.outputSchema.properties).toHaveProperty("success");
+      expect(tool!.outputSchema.required).toContain("success");
+    }
+  });
+
   test("should register all tool categories", () => {
     const toolDefinitions = ToolRegistry.getToolDefinitions();
     const toolNames = toolDefinitions.map(tool => tool.name);

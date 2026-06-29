@@ -1,5 +1,73 @@
 # Changelog
 
+## [v0.0.38] - 2026-06-25
+### Added
+- feat(android): accessibilityFocus — set/clear TalkBack cursor focus ([#2503](https://github.com/kaeawc/auto-mobile/issues/2503)) (android, a11y)
+- feat(ios): biometricAuth — Touch ID / Face ID simulation via simctl Darwin notifications ([#2497](https://github.com/kaeawc/auto-mobile/issues/2497)) (ios)
+- feat(ios): getNotificationPolicy — read per-app notification authorization on simulators via BulletinBoard ([#2496](https://github.com/kaeawc/auto-mobile/issues/2496)) (ios, research)
+- feat(ios): postNotification — deliver simulated push to target bundle via simctl push ([#2495](https://github.com/kaeawc/auto-mobile/issues/2495)) (ios)
+- feat(ios): deviceSnapshot — capture and restore simulator settings (includeSettings) ([#2494](https://github.com/kaeawc/auto-mobile/issues/2494)) (ios)
+- feat(ios): setDeviceState — Do Not Disturb mode fidelity and physical-device support ([#2493](https://github.com/kaeawc/auto-mobile/issues/2493)) (ios, research)
+- feat(ios): getDeepLinks — URL scheme & universal link discovery via Info.plist ([#2486](https://github.com/kaeawc/auto-mobile/issues/2486)) (ios)
+- feat(ios): dragAndDrop — coordinate drag via XCUITest CtrlProxy runner ([#2481](https://github.com/kaeawc/auto-mobile/issues/2481)) (ios)
+### Fixed
+- fix(ios): daemon runs the published-release CtrlProxy runner, not source — new runner commands fail "Unknown command type" against a stale binary ([#2539](https://github.com/kaeawc/auto-mobile/issues/2539)) (ios)
+- fix(ios): CtrlProxy WebSocket and AutoMobile SDK server collide on port 8766 — all iOS observe/gesture ops fail (Expected 101) ([#2538](https://github.com/kaeawc/auto-mobile/issues/2538)) (ios)
+- fix(daemon): signal/exception handlers registered inside main() after dynamic imports — startup window with no cleanup (regression from #2465) ([#2532](https://github.com/kaeawc/auto-mobile/issues/2532)) (release engineering)
+- fix(ios): observation stream double-pushes initial hierarchy frame on cold subscribe ([#2530](https://github.com/kaeawc/auto-mobile/issues/2530)) (ios)
+### Other
+- Client can silently use a daemon of a mismatched version (@latest spawn + restart cooldown) ([#2452](https://github.com/kaeawc/auto-mobile/issues/2452))
+- Crash/force-kill leaves stale PID and socket files; no exit-time cleanup ([#2451](https://github.com/kaeawc/auto-mobile/issues/2451))
+- Device disconnects are not surfaced to observation-stream subscribers ([#2450](https://github.com/kaeawc/auto-mobile/issues/2450))
+- Screenshot backoff stops after initial burst; live view freezes on static screens ([#2449](https://github.com/kaeawc/auto-mobile/issues/2449))
+- Observation stream pushes no initial frame on subscribe; idle devices show blank ([#2448](https://github.com/kaeawc/auto-mobile/issues/2448))
+- Observation-stream request_observation command is a no-op; socket clients cannot force a frame ([#2447](https://github.com/kaeawc/auto-mobile/issues/2447))
+- Daemon stream socket paths are not discoverable, causing silent connect failures on env mismatch ([#2446](https://github.com/kaeawc/auto-mobile/issues/2446))
+- Device pool never prunes shut-down devices, wedging discovery until daemon restart ([#2445](https://github.com/kaeawc/auto-mobile/issues/2445))
+- Daemon readiness inferred from PID/socket-file existence, not an actual connection ([#2444](https://github.com/kaeawc/auto-mobile/issues/2444))
+- Device held ~30s when a client dies before its first heartbeat ([#2443](https://github.com/kaeawc/auto-mobile/issues/2443))
+- iOS device pool never auto-boots an installed-but-shutdown simulator to satisfy criteria ([#2442](https://github.com/kaeawc/auto-mobile/issues/2442))
+- Daemon version skew is only reconciled one direction; stale daemon can serve newer clients ([#2441](https://github.com/kaeawc/auto-mobile/issues/2441))
+- Add a fast `--version` flag; today it hangs by falling through to the stdio server ([#2440](https://github.com/kaeawc/auto-mobile/issues/2440))
+
+## [v0.0.37] - 2026-06-24
+### Other
+- No changes.
+
+## [v0.0.36] - 2026-06-23
+### Other
+- installApp succeeds but app not present for launchApp/openLink (device resolution incoherence) ([#2387](https://github.com/kaeawc/auto-mobile/issues/2387))
+
+## [v0.0.35] - 2026-06-10
+### Other
+- launchApp times out on iOS when clearAppData is true ([#2368](https://github.com/kaeawc/auto-mobile/issues/2368))
+
+## [v0.0.34] - 2026-06-04
+### Other
+- No changes.
+
+## [v0.0.33] - 2026-06-04
+### Other
+- No changes.
+
+## [v0.0.32] - 2026-06-02
+### Changed
+- Dead Code Detection: Threshold Exceeded ([#2313](https://github.com/kaeawc/auto-mobile/issues/2313)) (automated, dead-code)
+### Other
+- Can't pin the on-device CtrlProxy release independently of the daemon ([#2293](https://github.com/kaeawc/auto-mobile/issues/2293))
+- `retryIfNoChange` fires false-positive retries during activity transitions ([#2283](https://github.com/kaeawc/auto-mobile/issues/2283))
+
+## [v0.0.31] - 2026-05-27
+### Changed
+- Dead Code Detection: Threshold Exceeded ([#1874](https://github.com/kaeawc/auto-mobile/issues/1874)) (automated, dead-code)
+### Other
+- Only 2 of 7 daemon CLI flags log a startup confirmation ([#2286](https://github.com/kaeawc/auto-mobile/issues/2286))
+- CtrlProxy `getLatestHierarchy` 100ms fresh-data wait too short for contended environments ([#2285](https://github.com/kaeawc/auto-mobile/issues/2285))
+- Issue 3: `SelectionStateTracker` ignores `--no-ui-perf-mode` and dominates CI ADB overhead ([#2284](https://github.com/kaeawc/auto-mobile/issues/2284))
+- `retryTapIfNoChange` throws `ReferenceError: isTalkBackEnabled is not defined` ([#2282](https://github.com/kaeawc/auto-mobile/issues/2282))
+- Bug: ReferenceError 'isTalkBackEnabled is not defined' in tapOn retryIfNoChange path ([#2277](https://github.com/kaeawc/auto-mobile/issues/2277))
+- bug(ios): observe returns "received Android hierarchy for iOS device" inside conversation views ([#2275](https://github.com/kaeawc/auto-mobile/issues/2275))
+
 ## [v0.0.30] - 2026-05-20
 ### Other
 - Remove tapClickableParent from tapOn schema — redundant with auto-escalation ([#2248](https://github.com/kaeawc/auto-mobile/issues/2248))

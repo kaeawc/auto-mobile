@@ -2,7 +2,7 @@
 
 <kbd>❌ Not Implemented</kbd> *(MCP tools)* · <kbd>✅ Implemented</kbd> *(ADB commands, validated)*
 
-> **Current state:** The ADB commands for enabling/disabling real TalkBack are validated on API 35. The three proposed MCP tools (`setTalkBackEnabled`, `setA11yFocus`, `announce`) have **not been built** — they are design proposals. The AccessibilityService infrastructure needed by simulated mode is available.
+> **Current state:** The ADB commands for enabling/disabling real TalkBack are validated on API 35. Of the three proposed MCP tools, explicit focus control now ships as [`accessibilityFocus`](accessibility-focus.md) (set/clear the TalkBack cursor); `setTalkBackEnabled` and `announce` have **not been built**. The AccessibilityService infrastructure needed by simulated mode is available.
 >
 > See the [Status Glossary](../../status-glossary.md) for chip definitions.
 

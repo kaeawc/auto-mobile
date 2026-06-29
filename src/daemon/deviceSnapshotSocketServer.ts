@@ -1,17 +1,11 @@
-import os from "node:os";
-import path from "node:path";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   DeviceSnapshotSocketRequest,
   DeviceSnapshotSocketResponse,
 } from "./deviceSnapshotSocketTypes";
 import { getDeviceSnapshotConfig, updateDeviceSnapshotConfig } from "../server/deviceSnapshotManager";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "device-snapshot.sock"),
-  externalPath: "/tmp/auto-mobile-device-snapshot.sock",
-};
+import { DEVICE_SNAPSHOT_SOCKET_CONFIG } from "./daemonFiles";
 
 /**
  * Socket server for device snapshot configuration.
@@ -21,7 +15,7 @@ export class DeviceSnapshotSocketServer extends RequestResponseSocketServer<
   DeviceSnapshotSocketRequest,
   DeviceSnapshotSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "DeviceSnapshot");
   }
 
@@ -72,6 +66,10 @@ export class DeviceSnapshotSocketServer extends RequestResponseSocketServer<
 }
 
 let socketServer: DeviceSnapshotSocketServer | null = null;
+
+export function getDeviceSnapshotSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(DEVICE_SNAPSHOT_SOCKET_CONFIG);
+}
 
 export async function startDeviceSnapshotSocketServer(): Promise<void> {
   if (!socketServer) {

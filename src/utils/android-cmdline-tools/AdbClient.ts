@@ -9,6 +9,7 @@ import { OPERATION_CANCELLED_MESSAGE } from "../constants";
 import { RetryExecutor, defaultRetryExecutor } from "../retry/RetryExecutor";
 import { TTLCache } from "../cache/Cache";
 import { Timer, defaultTimer } from "../SystemTimer";
+import { wrapCommandError } from "../CommandError";
 
 type ExecFileAsync = (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
 
@@ -79,6 +80,8 @@ export class AdbClient implements AdbExecutor {
 
   private static readonly DEVICE_LIST_TIMEOUT_MS = 10000;
   private static readonly MAX_ADB_RETRIES = 3;
+  private static readonly MAX_MACOS_MISSING_ADB_PROBES = 3;
+  private static macosMissingAdbProbes = 0;
 
   /**
    * Create an AdbClient instance
@@ -387,6 +390,31 @@ export class AdbClient implements AdbExecutor {
     return nonRetryablePatterns.some(pattern => message.includes(pattern));
   }
 
+  private isMissingExecutableError(error: unknown): boolean {
+    const err = error as NodeJS.ErrnoException;
+    const message = error instanceof Error ? error.message : String(error);
+    return err.code === "ENOENT" || message.includes("ENOENT") || message.includes("Executable not found");
+  }
+
+  private shouldSkipMissingAdbProbe(): boolean {
+    if (this.isTestMode) {
+      return false;
+    }
+    return process.platform === "darwin" &&
+      AdbClient.macosMissingAdbProbes >= AdbClient.MAX_MACOS_MISSING_ADB_PROBES;
+  }
+
+  private recordMissingAdbProbe(): void {
+    if (this.isTestMode || process.platform !== "darwin") {
+      return;
+    }
+
+    AdbClient.macosMissingAdbProbes += 1;
+    if (AdbClient.macosMissingAdbProbes === AdbClient.MAX_MACOS_MISSING_ADB_PROBES) {
+      logger.debug("[ADB] adb not found after 3 probes; skipping passive Android device scans on this macOS host.");
+    }
+  }
+
   /**
    * Internal implementation of command execution
    * @param command - The ADB command to execute
@@ -423,7 +451,12 @@ export class AdbClient implements AdbExecutor {
           throw new Error(OPERATION_CANCELLED_MESSAGE);
         }
         const duration = this.timer.now() - startTime;
-        logger.warn(`[ADB] Command failed after ${duration}ms: ${command} - ${(error as Error).message}`);
+        const message = (error as Error).message;
+        if (this.isMissingExecutableError(error)) {
+          logger.debug(`[ADB] Command failed after ${duration}ms: ${command} - ${message}`);
+        } else {
+          logger.warn(`[ADB] Command failed after ${duration}ms: ${command} - ${message}`);
+        }
         throw error;
       }
     }
@@ -479,7 +512,12 @@ export class AdbClient implements AdbExecutor {
         settled = true;
         cleanup();
         if (error) {
-          reject(error);
+          reject(wrapCommandError(error, {
+            command: file,
+            args,
+            stdout,
+            stderr,
+          }));
           return;
         }
         resolve({
@@ -604,21 +642,34 @@ export class AdbClient implements AdbExecutor {
    * @returns Promise with an array of device IDs
    */
   async getBootedAndroidDevices(): Promise<BootedDevice[]> {
+    if (this.shouldSkipMissingAdbProbe()) {
+      return [];
+    }
+
     // Check cache first - TTLCache handles expiration automatically
     const cache = getDeviceListCache();
     const cachedDevices = cache.get("devices");
     if (cachedDevices) {
-      logger.info(`Getting list of connected devices (cached)`);
+      logger.debug("Getting list of connected devices (cached)");
       return cachedDevices;
     }
 
-    logger.info("Getting list of connected devices");
-    const result = await this.executeCommand(
-      "devices",
-      AdbClient.DEVICE_LIST_TIMEOUT_MS,
-      undefined,
-      true
-    );
+    logger.debug("Getting list of connected devices");
+    let result: ExecResult;
+    try {
+      result = await this.executeCommand(
+        "devices",
+        AdbClient.DEVICE_LIST_TIMEOUT_MS,
+        undefined,
+        true
+      );
+    } catch (error) {
+      if (this.isMissingExecutableError(error)) {
+        this.recordMissingAdbProbe();
+        return [];
+      }
+      throw error;
+    }
     const lines = result.stdout.split("\n").slice(1); // Skip the first line which is the header
 
     const devices = lines

@@ -31,6 +31,24 @@ export interface DaemonResponse {
 }
 
 /**
+ * Known Unix-domain sockets exposed by the daemon.
+ */
+export type DaemonSocketName =
+  | "control"
+  | "appearance"
+  | "device-snapshot"
+  | "failures-push"
+  | "failures-stream"
+  | "observation-stream"
+  | "performance-push"
+  | "performance-stream"
+  | "telemetry-push"
+  | "test-recording"
+  | "video-recording";
+
+export type DaemonSocketPaths = Record<DaemonSocketName, string>;
+
+/**
  * Daemon status information
  */
 export interface DaemonStatus {
@@ -42,6 +60,8 @@ export interface DaemonStatus {
   port?: number;
   /** Unix socket path */
   socketPath?: string;
+  /** Unix socket paths exposed by the daemon, keyed by purpose */
+  sockets?: DaemonSocketPaths;
   /** Timestamp when daemon was started */
   startedAt?: number;
   /** Daemon version */
@@ -56,6 +76,8 @@ export interface PidFileData {
   pid: number;
   /** Unix socket path */
   socketPath: string;
+  /** Unix socket paths exposed by the daemon, keyed by purpose */
+  sockets?: DaemonSocketPaths;
   /** HTTP port */
   port: number;
   /** Timestamp when daemon was started */

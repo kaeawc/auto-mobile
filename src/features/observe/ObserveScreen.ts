@@ -36,6 +36,12 @@ import { PerformanceAuditor } from "./audits/PerformanceAuditor";
 import { AccessibilityAuditor, resolveLatestScreenshotPath } from "./audits/AccessibilityAuditor";
 import { AccessibilityStateDetector } from "./audits/AccessibilityStateDetector";
 import { appendObserveError } from "./ObserveError";
+import { ObserveElementsBuilder } from "./ObserveElementsBuilder";
+import {
+  enforceHierarchyPlatform,
+  HierarchyPlatformValidator,
+  RealHierarchyPlatformValidator
+} from "./HierarchyPlatformValidator";
 
 /**
  * Observe command class that combines screen details, view hierarchy and screenshot.
@@ -60,6 +66,8 @@ export class RealObserveScreen implements ObserveScreen {
   private performanceAuditor: PerformanceAuditor;
   private accessibilityAuditor: AccessibilityAuditor;
   private accessibilityStateDetector: AccessibilityStateDetector;
+  private elementsBuilder: ObserveElementsBuilder;
+  private platformValidator: HierarchyPlatformValidator;
 
   // ---------- Static API (kept for back-compat with resource handlers/daemon) ----------
 
@@ -192,6 +200,8 @@ export class RealObserveScreen implements ObserveScreen {
       device,
       adb: this.adb,
     });
+    this.elementsBuilder = new ObserveElementsBuilder();
+    this.platformValidator = dependencies?.platformValidator ?? new RealHierarchyPlatformValidator();
   }
 
   // ---------- Public API ----------
@@ -201,6 +211,13 @@ export class RealObserveScreen implements ObserveScreen {
    * Call this after execute() when raw hierarchy data is needed.
    */
   async appendRawViewHierarchy(result: ObserveResult, signal?: AbortSignal): Promise<void> {
+    // The raw (unfiltered) hierarchy is the companion to the validated primary
+    // hierarchy. If execute() discarded the primary as cross-platform (stale
+    // connection), re-fetching raw from the same connection would reintroduce the
+    // other platform's data the validation just scrubbed — so skip it.
+    if (!result.viewHierarchy) {
+      return;
+    }
     await this.hierarchyCollector.collectRaw(result, signal);
   }
 
@@ -259,6 +276,17 @@ export class RealObserveScreen implements ObserveScreen {
 
       // Phase 1+2: hierarchy + derived device state (platform-specific orchestration).
       await this.collectAllData(result, queryOptions, perf, skipWaitForFresh, minTimestamp, signal, skipBackStack);
+
+      // Reject a stale cross-platform hierarchy (e.g. an iOS hierarchy returned on
+      // an Android device via a stale connection) at the source — before deriving
+      // elements/predictions and before caching below — so that no downstream
+      // consumer (tool response, observe cache, LATEST_OBSERVATION resource, or the
+      // navigation-graph recorder) ever observes the other platform's data.
+      enforceHierarchyPlatform(result, this.device.platform, this.device.deviceId, this.platformValidator);
+
+      if (result.viewHierarchy) {
+        result.elements = this.elementsBuilder.build(result.viewHierarchy, this.device.platform);
+      }
 
       // Screenshot: fire-and-forget unless an accessibility audit is configured
       // (the audit needs the screenshot file on disk before it runs).

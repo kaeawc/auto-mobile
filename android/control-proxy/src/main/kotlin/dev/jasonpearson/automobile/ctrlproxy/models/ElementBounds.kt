@@ -48,11 +48,10 @@ data class ElementBounds(val left: Int, val top: Int, val right: Int, val bottom
         top > screenHeight + margin // Completely below screen
   }
 
-  /** Convert to string format matching XML bounds attribute */
-  override fun toString(): String = "[$left,$top][$right,$bottom]"
+  override fun toString(): String = """{"left":$left,"top":$top,"right":$right,"bottom":$bottom}"""
 
   companion object {
-    /** Parse bounds string like "[0,0][100,100]" into ElementBounds */
+    /** Parse legacy uiautomator bounds strings like "[0,0][100,100]" into ElementBounds. */
     fun fromString(boundsString: String?): ElementBounds? {
       if (boundsString.isNullOrBlank()) return null
 

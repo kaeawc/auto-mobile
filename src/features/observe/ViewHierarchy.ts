@@ -16,6 +16,7 @@ import { serverConfig } from "../../utils/ServerConfig";
 import { attachRawViewHierarchy } from "../../utils/viewHierarchySearch";
 import type { ViewHierarchy as ViewHierarchyInterface } from "./interfaces/ViewHierarchy";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
+import { parseBounds } from "../../utils/bounds";
 
 /**
  * Interface for element bounds
@@ -316,28 +317,6 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
-   * Parse bounds string to numeric coordinates, handling negative values
-   * @param boundsStr - Bounds string in format [left,top][right,bottom]
-   * @returns Parsed bounds or null if invalid
-   */
-  private parseBoundsString(boundsStr: string): ElementBounds | null {
-    if (!boundsStr || typeof boundsStr !== "string") {
-      return null;
-    }
-    // Handle negative coordinates with -? prefix
-    const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
-    if (!match) {
-      return null;
-    }
-    return {
-      left: parseInt(match[1], 10),
-      top: parseInt(match[2], 10),
-      right: parseInt(match[3], 10),
-      bottom: parseInt(match[4], 10)
-    };
-  }
-
-  /**
    * Check if bounds are completely offscreen
    * @param bounds - Element bounds
    * @param screenWidth - Screen width
@@ -378,15 +357,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       return null;
     }
 
-    // Parse bounds from string if present
-    const boundsStr = node.bounds || (node.$ && node.$.bounds);
-    let bounds: ElementBounds | null = null;
-
-    if (typeof boundsStr === "string") {
-      bounds = this.parseBoundsString(boundsStr);
-    } else if (boundsStr && typeof boundsStr === "object") {
-      bounds = boundsStr as ElementBounds;
-    }
+    const bounds = parseBounds(node.bounds ?? node.$?.bounds);
 
     // Check if this node is completely offscreen
     const isOffscreen = bounds && this.isCompletelyOffscreen(bounds, screenWidth, screenHeight, margin);
@@ -473,10 +444,23 @@ export class ViewHierarchy implements ViewHierarchyInterface {
     return Boolean(
       (props.resourceId && props.resourceId !== "") ||
       (props["resource-id"] && props["resource-id"] !== "") ||
+      (props.viewId && props.viewId !== "") ||
+      (props["view-id"] && props["view-id"] !== "") ||
       (props.text && props.text !== "") ||
       (props.contentDesc && props.contentDesc !== "") ||
       (props["content-desc"] && props["content-desc"] !== "") ||
       (props["test-tag"] && props["test-tag"] !== "") ||
+      (props.role && props.role !== "") ||
+      (props["state-description"] && props["state-description"] !== "") ||
+      (props["error-message"] && props["error-message"] !== "") ||
+      (props["hint-text"] && props["hint-text"] !== "") ||
+      (props["tooltip-text"] && props["tooltip-text"] !== "") ||
+      (props["pane-title"] && props["pane-title"] !== "") ||
+      (props["live-region"] && props["live-region"] !== "") ||
+      (props["collection-info"] && props["collection-info"] !== "") ||
+      (props["collection-item-info"] && props["collection-item-info"] !== "") ||
+      (props["range-info"] && props["range-info"] !== "") ||
+      (props["input-type"] && props["input-type"] !== "") ||
       props.recomposition ||
       props.recompositionMetrics
     );
@@ -490,11 +474,17 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   meetsBooleanFilterCriteria(props: any): boolean {
     return Boolean(
       (props.clickable === "true") ||
+      (props.focusable === "true") ||
       (props.scrollable === "true") ||
       (props.focused === "true") ||
+      (props["accessibility-focused"] === "true") ||
+      (props.checkable === "true") ||
+      (props.checked === "true") ||
       (props.selected === "true") ||
       (props.selected === true) ||
-      (props["long-clickable"] === "true")
+      (props["long-clickable"] === "true") ||
+      (Array.isArray(props.actions) && props.actions.length > 0) ||
+      (props.extras && Object.keys(props.extras).length > 0)
     );
   }
 
@@ -614,7 +604,7 @@ export class ViewHierarchy implements ViewHierarchyInterface {
   }
 
   /**
-   * Parse a node's bounds if they're in string format
+   * Parse a node's bounds into the object bounds format.
    * @param node - The node to parse
    * @returns The node with parsed bounds or null
    */
@@ -637,16 +627,37 @@ export class ViewHierarchy implements ViewHierarchyInterface {
       "text",
       "resourceId",
       "resource-id",
+      "viewId",
+      "view-id",
       "contentDesc",
       "content-desc",
       "clickable",
       "long-clickable",
       "scrollable",
       "enabled",
+      "focusable",
+      "focused",
+      "accessibility-focused",
+      "checkable",
+      "checked",
       "selected",
       "bounds",
       "test-tag",
+      "role",
+      "state-description",
+      "error-message",
+      "hint-text",
+      "tooltip-text",
+      "pane-title",
+      "live-region",
+      "collection-info",
+      "collection-item-info",
+      "range-info",
+      "input-type",
+      "actions",
       "extras",
+      "occlusionState",
+      "occludedBy",
       "recomposition",
       "recompositionMetrics"
     ];

@@ -18,7 +18,8 @@ public struct WebSocketRequest: Codable {
     public let y1: Int?
     public let x2: Int?
     public let y2: Int?
-    public let offset: Int?
+    public let offset: Double?
+    public let fingerCount: Int?
 
     // Drag parameters
     public let pressDurationMs: Int?
@@ -56,16 +57,26 @@ public struct WebSocketRequest: Codable {
     public let value: String?
     public let valueType: String?
 
-    // App launch parameters
+    // Database parameters
+    public let appId: String?
+    public let databasePath: String?
+    public let query: String?
+    public let table: String?
+    public let limit: Int?
+
+    /// App launch parameters
     public let coldBoot: Bool?
 
-    // Rotation parameters
+    /// Rotation parameters
     public let orientation: String?
 
     // Permission/settings
     public let permission: String?
     public let requestPermission: Bool?
     public let enabled: Bool?
+
+    /// Network mocking
+    public let rules: [NetworkMockRuleDTO]?
 
     public init(
         type: String,
@@ -77,7 +88,8 @@ public struct WebSocketRequest: Codable {
         y1: Int? = nil,
         x2: Int? = nil,
         y2: Int? = nil,
-        offset: Int? = nil,
+        offset: Double? = nil,
+        fingerCount: Int? = nil,
         pressDurationMs: Int? = nil,
         dragDurationMs: Int? = nil,
         holdDurationMs: Int? = nil,
@@ -100,11 +112,17 @@ public struct WebSocketRequest: Codable {
         key: String? = nil,
         value: String? = nil,
         valueType: String? = nil,
+        appId: String? = nil,
+        databasePath: String? = nil,
+        query: String? = nil,
+        table: String? = nil,
+        limit: Int? = nil,
         coldBoot: Bool? = nil,
         orientation: String? = nil,
         permission: String? = nil,
         requestPermission: Bool? = nil,
-        enabled: Bool? = nil
+        enabled: Bool? = nil,
+        networkMockRules: [NetworkMockRuleDTO]? = nil
     ) {
         self.type = type
         self.requestId = requestId
@@ -116,6 +134,7 @@ public struct WebSocketRequest: Codable {
         self.x2 = x2
         self.y2 = y2
         self.offset = offset
+        self.fingerCount = fingerCount
         self.pressDurationMs = pressDurationMs
         self.dragDurationMs = dragDurationMs
         self.holdDurationMs = holdDurationMs
@@ -138,11 +157,54 @@ public struct WebSocketRequest: Codable {
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.appId = appId
+        self.databasePath = databasePath
+        self.query = query
+        self.table = table
+        self.limit = limit
         self.coldBoot = coldBoot
         self.orientation = orientation
         self.permission = permission
         self.requestPermission = requestPermission
         self.enabled = enabled
+        rules = networkMockRules
+    }
+}
+
+public struct NetworkMockRuleDTO: Codable, Sendable, Equatable {
+    public let mockId: String
+    public let host: String
+    public let path: String
+    public let method: String
+    public let limit: Int?
+    public let remaining: Int?
+    public let statusCode: Int
+    public let responseHeaders: [String: String]
+    public let responseBody: String
+    public let contentType: String
+
+    public init(
+        mockId: String,
+        host: String,
+        path: String,
+        method: String,
+        limit: Int?,
+        remaining: Int?,
+        statusCode: Int,
+        responseHeaders: [String: String],
+        responseBody: String,
+        contentType: String
+    ) {
+        self.mockId = mockId
+        self.host = host
+        self.path = path
+        self.method = method
+        self.limit = limit
+        self.remaining = remaining
+        self.statusCode = statusCode
+        self.responseHeaders = responseHeaders
+        self.responseBody = responseBody
+        self.contentType = contentType
     }
 }
 
@@ -214,6 +276,22 @@ public struct WebSocketResponse: Codable {
     }
 }
 
+public struct SetNetworkMockRulesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let ok: Bool
+    public let totalTimeMs: Int64?
+
+    public init(requestId: String?, ok: Bool, totalTimeMs: Int64?) {
+        type = ResponseType.setNetworkMockRulesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.ok = ok
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
 /// Response for rotate commands with orientation details
 public struct RotateResponse: Codable {
     public let type: String
@@ -237,8 +315,8 @@ public struct RotateResponse: Codable {
         rotationPerformed: Bool,
         error: String? = nil
     ) {
-        self.type = ResponseType.rotateResult.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.rotateResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.totalTimeMs = totalTimeMs
@@ -246,6 +324,33 @@ public struct RotateResponse: Codable {
         self.currentOrientation = currentOrientation
         self.value = value
         self.rotationPerformed = rotationPerformed
+        self.error = error
+    }
+}
+
+/// Response for keyboard commands with visibility state after the command.
+public struct KeyboardResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let open: Bool
+    public let totalTimeMs: Int64
+    public let error: String?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        open: Bool,
+        totalTimeMs: Int64,
+        error: String? = nil
+    ) {
+        type = ResponseType.keyboardResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.open = open
+        self.totalTimeMs = totalTimeMs
         self.error = error
     }
 }
@@ -646,8 +751,8 @@ public struct StorageFilesResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.preferenceFiles.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.preferenceFiles.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.files = files
@@ -673,8 +778,8 @@ public struct StorageEntriesResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.preferences.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.preferences.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.entries = entries
@@ -706,14 +811,161 @@ public struct StorageEntryResponse: Codable {
         error: String? = nil,
         totalTimeMs: Int64? = nil
     ) {
-        self.type = ResponseType.getPreferenceResult.rawValue
-        self.timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        type = ResponseType.getPreferenceResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
         self.requestId = requestId
         self.success = success
         self.found = found
         self.key = key
         self.value = value
         self.valueType = valueType
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+// MARK: - Database Response Models
+
+public struct ExecuteSqlResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let queryType: String?
+    public let columns: [String]?
+    public let rows: [[String?]]?
+    public let rowsAffected: Int?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        queryType: String? = nil,
+        columns: [String]? = nil,
+        rows: [[String?]]? = nil,
+        rowsAffected: Int? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.executeSqlResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.queryType = queryType
+        self.columns = columns
+        self.rows = rows
+        self.rowsAffected = rowsAffected
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct ListDatabasesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let databases: [SdkDatabaseInfo]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        databases: [SdkDatabaseInfo]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.listDatabasesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.databases = databases
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct ListTablesResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let tables: [String]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        tables: [String]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.listTablesResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.tables = tables
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct TableDataResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let columns: [String]?
+    public let rows: [[String?]]?
+    public let total: Int?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        columns: [String]? = nil,
+        rows: [[String?]]? = nil,
+        total: Int? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.tableDataResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.columns = columns
+        self.rows = rows
+        self.total = total
+        self.error = error
+        self.totalTimeMs = totalTimeMs
+    }
+}
+
+public struct TableStructureResponse: Codable {
+    public let type: String
+    public let timestamp: Int64
+    public let requestId: String?
+    public let success: Bool
+    public let columns: [SdkColumnInfo]?
+    public let error: String?
+    public let totalTimeMs: Int64?
+
+    public init(
+        requestId: String?,
+        success: Bool,
+        columns: [SdkColumnInfo]? = nil,
+        error: String? = nil,
+        totalTimeMs: Int64? = nil
+    ) {
+        type = ResponseType.tableStructureResult.rawValue
+        timestamp = Int64(Date().timeIntervalSince1970 * 1000)
+        self.requestId = requestId
+        self.success = success
+        self.columns = columns
         self.error = error
         self.totalTimeMs = totalTimeMs
     }
@@ -739,10 +991,12 @@ public struct PerformanceUpdateResponse: Codable {
 public struct ConnectedEvent: Codable {
     public let type: String
     public let id: Int
+    public let supportedCommands: [String]
 
     public init(id: Int) {
         type = "connected"
         self.id = id
+        supportedCommands = RequestType.allCases.map(\.rawValue).sorted()
     }
 }
 
@@ -769,7 +1023,7 @@ public struct VoiceOverStateResponse: Codable {
 
 // MARK: - Request Types (matching Android)
 
-public enum RequestType: String {
+public enum RequestType: String, CaseIterable {
     // View hierarchy
     case requestHierarchy = "request_hierarchy"
     case requestHierarchyIfStale = "request_hierarchy_if_stale"
@@ -779,6 +1033,7 @@ public enum RequestType: String {
     case requestTapCoordinates = "request_tap_coordinates"
     case requestSwipe = "request_swipe"
     case requestTwoFingerSwipe = "request_two_finger_swipe"
+    case requestMultiFingerSwipe = "request_multi_finger_swipe"
     case requestDrag = "request_drag"
     case requestPinch = "request_pinch"
 
@@ -787,14 +1042,18 @@ public enum RequestType: String {
     case requestClearText = "request_clear_text"
     case requestImeAction = "request_ime_action"
     case requestSelectAll = "request_select_all"
+    case requestKeyboard = "request_keyboard"
+    case requestPressButton = "request_press_button"
     case requestPressHome = "request_press_home"
+    case requestPressBack = "request_press_back"
+    case requestShake = "request_shake"
     case requestRecentApps = "request_recent_apps"
 
     // Node actions
     case requestAction = "request_action"
     case requestLaunchApp = "request_launch_app"
 
-    // Device control
+    /// Device control
     case requestRotate = "request_rotate"
 
     /// Clipboard
@@ -813,6 +1072,16 @@ public enum RequestType: String {
     case setPreference = "set_preference"
     case removePreference = "remove_preference"
     case clearPreferences = "clear_preferences"
+
+    /// Network mocking
+    case setNetworkMockRules = "set_network_mock_rules"
+
+    // Database inspection
+    case executeSql = "execute_sql"
+    case listDatabases = "list_databases"
+    case listTables = "list_tables"
+    case getTableData = "get_table_data"
+    case getTableStructure = "get_table_structure"
 }
 
 // MARK: - Response Types (matching Android)
@@ -823,13 +1092,18 @@ public enum ResponseType: String {
     case screenshotError = "screenshot_error"
     case tapCoordinatesResult = "tap_coordinates_result"
     case swipeResult = "swipe_result"
+    case multiFingerSwipeResult = "multi_finger_swipe_result"
     case dragResult = "drag_result"
     case pinchResult = "pinch_result"
     case setTextResult = "set_text_result"
     case clearTextResult = "clear_text_result"
     case imeActionResult = "ime_action_result"
     case selectAllResult = "select_all_result"
+    case keyboardResult = "keyboard_result"
+    case pressButtonResult = "press_button_result"
     case pressHomeResult = "press_home_result"
+    case pressBackResult = "press_back_result"
+    case shakeResult = "shake_result"
     case recentAppsResult = "recent_apps_result"
     case actionResult = "action_result"
     case launchAppResult = "launch_app_result"
@@ -848,4 +1122,12 @@ public enum ResponseType: String {
     case setPreferenceResult = "set_preference_result"
     case removePreferenceResult = "remove_preference_result"
     case clearPreferencesResult = "clear_preferences_result"
+    case setNetworkMockRulesResult = "set_network_mock_rules_result"
+
+    // Database inspection
+    case executeSqlResult = "execute_sql_result"
+    case listDatabasesResult = "list_databases_result"
+    case listTablesResult = "list_tables_result"
+    case tableDataResult = "table_data_result"
+    case tableStructureResult = "table_structure_result"
 }

@@ -12,13 +12,11 @@ present these flags can only be set on MCP startup as CLI args. The plan is to h
 
 **`--debug`** - Enable debug logging
 
-**`--debug-perf`** - Enable performance debug output
+**`--debug-perf`** / **`--ui-perf-debug`** - Enable performance debug output, including response performance audits
 
 ### Performance Flags
 
 **`--ui-perf-mode`** - Enable UI performance monitoring
-
-**`--ui-perf-debug`** - Detailed performance logging
 
 **`--mem-perf-audit`** - Memory performance auditing
 

@@ -593,6 +593,8 @@ class FakeSimCtl implements SimCtl {
   async uninstallApp(): Promise<void> {}
   async getScreenSize(): Promise<any> { return { width: 390, height: 844 }; }
   async setAppearance(): Promise<void> {}
+  async openSimulatorApp(): Promise<void> {}
+  async pushNotification(): Promise<{ success: boolean; error?: string }> { return { success: true }; }
 }
 
 /**

@@ -53,6 +53,26 @@ describe("full migration chain", () => {
     expect(await tableExists(db, "device_configs")).toBe(true);
   });
 
+  test("creates device_sessions table for persisted device session diagnostics", async () => {
+    expect(await tableExists(db, "device_sessions")).toBe(true);
+    for (const col of [
+      "session_uuid",
+      "device_id",
+      "platform",
+      "status",
+      "autolock_enabled",
+      "mcp_session_id",
+      "daemon_session_id",
+      "created_at_ms",
+      "last_used_at_ms",
+      "expires_at_ms",
+      "released_at_ms",
+      "release_reason",
+    ]) {
+      expect(await columnExists(db, "device_sessions", col)).toBe(true);
+    }
+  });
+
   test("creates network_events table with detail columns", async () => {
     expect(await tableExists(db, "network_events")).toBe(true);
     expect(await columnExists(db, "network_events", "url")).toBe(true);

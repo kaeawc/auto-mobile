@@ -129,7 +129,7 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
     ["navigateToSchema", navigateToSchema, { targetScreen: "Home" }],
     ["getNavigationGraphSchema", getNavigationGraphSchema, {}],
     ["exploreSchema", exploreSchema, {}],
-    ["postNotificationSchema", postNotificationSchema, { title: "Hi", body: "Test", platform: "ios" }],
+    ["postNotificationSchema", postNotificationSchema, { title: "Hi", body: "Test", appId: "com.example", platform: "ios" }],
     ["getNotificationPolicySchema", getNotificationPolicySchema, { appId: "com.example" }],
     ["setNotificationPolicySchema", setNotificationPolicySchema, { appId: "com.example", policyAccess: true }],
     ["observeSchema", observeSchema, { platform: "ios" }],
@@ -183,4 +183,25 @@ describe("platform field accepted by all device-targeting tool schemas", () => {
       expect(result.success).toBe(false);
     });
   }
+});
+
+describe("inputTextSchema", () => {
+  test("accepts supported Android input modes", () => {
+    for (const mode of ["a11y", "eventLast", "eventAll"]) {
+      const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "android" });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  test("accepts input modes for iOS callers so runtime can ignore them", () => {
+    for (const mode of ["a11y", "eventLast", "eventAll"]) {
+      const result = inputTextSchema.safeParse({ text: "hello", mode, platform: "ios" });
+      expect(result.success).toBe(true);
+    }
+  });
+
+  test("rejects unsupported input modes", () => {
+    const result = inputTextSchema.safeParse({ text: "hello", mode: "realKeyEvents", platform: "android" });
+    expect(result.success).toBe(false);
+  });
 });

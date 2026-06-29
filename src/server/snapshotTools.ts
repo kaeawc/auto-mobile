@@ -5,9 +5,10 @@ import { ActionableError, BootedDevice } from "../models";
 import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
-export const deviceSnapshotSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["capture", "restore"]).describe("Action to perform"),
-  snapshotName: z.string().optional().describe("Name for the snapshot"),
+const snapshotNameRequiredMessage = "snapshotName is required when action is restore";
+const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Name for the snapshot");
+
+const deviceSnapshotCommonShape = {
   includeAppData: z.boolean().optional().describe("Include app data directories in snapshot"),
   includeSettings: z.boolean().optional().describe("Include system settings in snapshot"),
   useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot if available (faster, emulator only)"),
@@ -18,15 +19,22 @@ export const deviceSnapshotSchema = addDeviceTargetingToSchema(z.object({
   vmSnapshotTimeoutMs: z.number().optional().describe("Timeout in milliseconds for emulator VM snapshot commands"),
   appBundleIds: z.array(z.string()).optional()
     .describe("iOS-only: bundle IDs to include in app data snapshots (omit to skip app data capture)"),
-})).superRefine((value, ctx) => {
-  if (value.action === "restore" && !value.snapshotName) {
-    ctx.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["snapshotName"],
-      message: "snapshotName is required when action is restore",
-    });
-  }
-});
+};
+
+export const deviceSnapshotSchema = z.discriminatedUnion("action", [
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("capture").describe("Action to perform"),
+    snapshotName: optionalSnapshotNameSchema,
+    ...deviceSnapshotCommonShape,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("restore").describe("Action to perform"),
+    snapshotName: z.string({ error: snapshotNameRequiredMessage })
+      .min(1, snapshotNameRequiredMessage)
+      .describe("Name for the snapshot"),
+    ...deviceSnapshotCommonShape,
+  }))
+]);
 
 export type DeviceSnapshotToolArgs = z.infer<typeof deviceSnapshotSchema>;
 

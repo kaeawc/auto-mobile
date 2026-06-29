@@ -1,4 +1,5 @@
 import { ChildProcess, exec, spawn } from "child_process";
+import { existsSync } from "node:fs";
 import { promisify } from "util";
 import { logger } from "../logger";
 import { BootedDevice, DeviceInfo, ExecResult, ActionableError } from "../../models";
@@ -315,6 +316,29 @@ export class AndroidEmulatorClient implements AndroidEmulator {
     return this.emulatorPath;
   }
 
+  private isResolvedEmulatorPathAvailable(): boolean {
+    const trimmedPath = this.emulatorPath.trim();
+    if (trimmedPath.length === 0) {
+      return false;
+    }
+    if (!trimmedPath.includes("/") && !trimmedPath.includes("\\")) {
+      return false;
+    }
+    return existsSync(trimmedPath);
+  }
+
+  private isLikelyDaemonWorkingDirectoryFailure(errorMsg: string): boolean {
+    if (!this.isResolvedEmulatorPathAvailable()) {
+      return false;
+    }
+
+    const lowerError = errorMsg.toLowerCase();
+    return (lowerError.includes("enoent") && lowerError.includes("spawn"))
+      || lowerError.includes("getcwd")
+      || lowerError.includes("current working directory")
+      || lowerError.includes("current directory");
+  }
+
   /**
    * Get the host architecture
    * @returns The host architecture string
@@ -522,6 +546,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       // Check if the error is because emulator is not found
       const errorMsg = error instanceof Error ? error.message : String(error);
       const missingEmulator = errorMsg.includes("No such file or directory") || errorMsg.includes("command not found") || errorMsg.includes("ENOENT");
+      if (missingEmulator && this.isLikelyDaemonWorkingDirectoryFailure(errorMsg)) {
+        throw new ActionableError(
+          `Android emulator command failed because the daemon working directory is unavailable. ` +
+          `Restart the AutoMobile daemon so it can use a stable working directory. Underlying error: ${errorMsg}`
+        );
+      }
       if (missingEmulator && externalMode) {
         const avds = this.listAvdsFromConfig();
         if (avds.length > 0) {
@@ -618,8 +648,23 @@ export class AndroidEmulatorClient implements AndroidEmulator {
    * @returns Promise with array of running emulator info
    */
   async getBootedDevices(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
-    const perf = createGlobalPerformanceTracker();
     try {
+      return await this.getBootedDevicesChecked(onlyEmulators);
+    } catch (error) {
+      logger.debug(`[DeviceListTimeout] Failed to get running emulators: ${error}`);
+      return [];
+    }
+  }
+
+  /**
+   * Like {@link getBootedDevices} but rethrows discovery failures (e.g. adb
+   * unreachable) instead of swallowing them into an empty list. Callers that
+   * must distinguish "no emulators are booted" from "adb discovery failed"
+   * should use this.
+   */
+  async getBootedDevicesChecked(onlyEmulators: boolean = false): Promise<BootedDevice[]> {
+    const perf = createGlobalPerformanceTracker();
+    {
       const adb = this.adbFactory.create(null);
       perf.startOperation("adbDeviceScan");
       const devices = await adb.getBootedAndroidDevices();
@@ -641,7 +686,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           const result = await adbWithDevice.executeCommand("emu avd name", infoTimeoutMs, undefined, true);
           const avdName = result.stdout.trim().replace(/\r?\n.*$/, ""); // Remove any trailing newlines and additional text
 
-          logger.info(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
+          logger.debug(`AVD name detection for ${deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
 
           runningDevices.push({
             name: avdName || `Unknown (${deviceId})`,
@@ -651,7 +696,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
           });
         } catch (error) {
           // If we can't get the AVD name, just use the device ID
-          logger.info(`Failed to get AVD name for ${deviceId}: ${error}`);
+          logger.debug(`Failed to get AVD name for ${deviceId}: ${error}`);
           runningDevices.push({
             name: `Unknown (${deviceId})`,
             platform: "android",
@@ -669,7 +714,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             const avdName = result.stdout.trim().replace(/\r?\n.*$/, "");
 
             if (avdName) {
-              logger.info(`AVD name detection for ${device.deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
+              logger.debug(`AVD name detection for ${device.deviceId}: raw="${result.stdout}" (${result.stdout.length} chars), cleaned="${avdName}"`);
               runningDevices.push({
                 name: avdName,
                 platform: "android",
@@ -688,7 +733,7 @@ export class AndroidEmulatorClient implements AndroidEmulator {
         const cachedModel = this.modelNameCache.get(device.deviceId);
         if (cachedModel) {
           deviceName = cachedModel;
-          logger.info(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
+          logger.debug(`Got model name for ${device.deviceId}: "${cachedModel}" (cached)`);
         } else {
           try {
             const adbWithDevice = this.adbFactory.create(device);
@@ -703,12 +748,12 @@ export class AndroidEmulatorClient implements AndroidEmulator {
             if (modelName && modelName !== "unknown" && modelName.length > 0) {
               deviceName = modelName;
               this.modelNameCache.set(device.deviceId, modelName);
-              logger.info(`Got model name for ${device.deviceId}: "${modelName}"`);
+              logger.debug(`Got model name for ${device.deviceId}: "${modelName}"`);
             } else {
-              logger.info(`No model name found for ${device.deviceId}, using device ID`);
+              logger.debug(`No model name found for ${device.deviceId}, using device ID`);
             }
           } catch (error) {
-            logger.info(`Failed to get model name for ${device.deviceId}: ${error}`);
+            logger.debug(`Failed to get model name for ${device.deviceId}: ${error}`);
           }
         }
 
@@ -722,9 +767,6 @@ export class AndroidEmulatorClient implements AndroidEmulator {
       perf.endOperation("avdNameResolution");
 
       return runningDevices;
-    } catch (error) {
-      logger.error(`[DeviceListTimeout] Failed to get running emulators (ADB likely timed out):`, error);
-      return [];
     }
   }
 

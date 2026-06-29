@@ -2,6 +2,7 @@ import { Element } from "../../models/Element";
 import { ElementBounds, ViewHierarchyNode, ViewHierarchyResult } from "../../models";
 import { resolveViewHierarchyForSearch } from "../../utils/viewHierarchySearch";
 import type { ElementParser } from "../../utils/interfaces/ElementParser";
+import { parseBounds } from "../../utils/bounds";
 
 type WindowSearchOrder = "topmost-first" | "bottommost-first";
 
@@ -20,26 +21,16 @@ export class DefaultElementParser implements ElementParser {
   }
 
   /**
-   * Parse element bounds from string to object
-   * @param boundsString - The bounds string in format [left,top][right,bottom]
+   * Parse element bounds from the repository's object format.
+   * String parsing is retained only for external XML ingestion compatibility.
    * @returns The parsed bounds or null if invalid
    */
-  parseBounds(boundsString: string): ElementBounds | null {
-    if (!boundsString) {return null;}
-
-    const boundsParts = boundsString.match(/\[(\d+),(\d+)\]\[(\d+),(\d+)\]/);
-    if (!boundsParts) {return null;}
-
-    return {
-      left: parseInt(boundsParts[1], 10),
-      top: parseInt(boundsParts[2], 10),
-      right: parseInt(boundsParts[3], 10),
-      bottom: parseInt(boundsParts[4], 10)
-    };
+  parseBounds(bounds: unknown): ElementBounds | null {
+    return parseBounds(bounds);
   }
 
   /**
-   * Parse a node's bounds if they're in string format
+   * Parse a node's bounds.
    * @param node - The node to parse
    * @returns The node with parsed bounds or null
    */
@@ -50,26 +41,12 @@ export class DefaultElementParser implements ElementParser {
     const nodeProperties = this.extractNodeProperties(node);
     const parsedNode: ViewHierarchyNode = { ...nodeProperties };
 
-    // For iOS elements, bounds might already be an object structure
-    if (node.bounds && typeof node.bounds === "object" &&
-      typeof node.bounds.left === "number" &&
-      typeof node.bounds.top === "number" &&
-      typeof node.bounds.right === "number" &&
-      typeof node.bounds.bottom === "number") {
-      // iOS element already has parsed bounds object
-      parsedNode.bounds = node.bounds;
-    } else if (typeof nodeProperties.bounds === "string") {
-      // Android element with string bounds format
-      const parsedBounds = this.parseBounds(nodeProperties.bounds);
-      if (!parsedBounds) {return null;}
-      parsedNode.bounds = parsedBounds;
-    } else if (!nodeProperties.bounds) {
+    const parsedBounds = this.parseBounds(node.bounds ?? nodeProperties.bounds);
+    if (!parsedBounds) {
       return null;
-    } else {
-      // Bounds exist but in unknown format, try to use as-is
-      parsedNode.bounds = nodeProperties.bounds;
     }
 
+    parsedNode.bounds = parsedBounds;
     return parsedNode as Element;
   }
 

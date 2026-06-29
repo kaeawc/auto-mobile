@@ -14,6 +14,16 @@ import { SimCtl, SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient
 
 const MIN_XCODE_VERSION = "15.0";
 
+/**
+ * Bound every external diagnostic call. Tools like `xcrun`, `security`
+ * (keychain), and `xcode-select` can block indefinitely (license prompts, stuck
+ * keychain, missing CLT). Without a timeout a single wedged tool hangs the whole
+ * `doctor` run. On timeout execFile rejects, which each check already turns into
+ * a clean `fail` result. Overridable for slow CI hosts via
+ * AUTOMOBILE_DOCTOR_TIMEOUT_MS.
+ */
+const DOCTOR_EXEC_TIMEOUT_MS = Number(process.env.AUTOMOBILE_DOCTOR_TIMEOUT_MS) || 5000;
+
 const execFileAsync = promisify(execFile);
 
 export interface IosDoctorDependencies {
@@ -42,7 +52,10 @@ const createExecResult = (stdout: string, stderr: string): ExecResult => ({
 const createIosDoctorDependencies = (): IosDoctorDependencies => ({
   platform: () => process.platform,
   execFile: async (file, args) => {
-    const result = await execFileAsync(file, args);
+    const result = await execFileAsync(file, args, {
+      timeout: DOCTOR_EXEC_TIMEOUT_MS,
+      killSignal: "SIGKILL",
+    });
     const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
     const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();
     return createExecResult(stdout, stderr);

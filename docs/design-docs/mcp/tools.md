@@ -20,7 +20,40 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 - 🚀 `launchApp` starts apps by package name (with optional clear-app-data support).
 - ❌ `terminateApp` force-stops an app by package name.
 - 📦 `installApp` installs an APK.
+- 📄 `putAppFile` writes a local file, UTF-8 text, or base64 binary content into logical app containers such as `documents`, `cache`, `tmp`, and `externalFiles`.
 - 🔗 `getDeepLinks` reads registered deep links/intent filters for an Android package.
+
+Copy a fixture into an app container:
+
+```json
+{
+  "tool": "putAppFile",
+  "params": {
+    "appId": "com.example.app",
+    "container": "documents",
+    "sourcePath": "/Users/me/fixtures/welcome.png",
+    "destinationPath": "fixtures/welcome.png",
+    "platform": "ios"
+  }
+}
+```
+
+Write inline configuration without a temporary file:
+
+```json
+{
+  "tool": "putAppFile",
+  "params": {
+    "appId": "com.example.app",
+    "container": "documents",
+    "contentText": "{\"experiments\":{\"newOnboarding\":false}}",
+    "destinationPath": "config/experiments.json",
+    "platform": "android"
+  }
+}
+```
+
+After writing, use `automobile:devices/{deviceId}/apps/{appId}/files/{container}` to list files or `automobile:devices/{deviceId}/apps/{appId}/files/{container}/{path}` to read one back. Prefer this API over direct `adb push`, `run-as`, or `simctl get_app_container` copy commands.
 
 #### Input Methods
 
@@ -57,7 +90,7 @@ Almost all other tool calls have built-in observation via the [interaction loop]
 - 🐛 `bugReport` generates a comprehensive bug report including screen state, view hierarchy, logcat, screenshot, and optional highlight metadata.
 - 🔍 `debugSearch` debugs element search operations to understand why elements aren't found or wrong elements are selected.
 - 📸 `rawViewHierarchy` gets raw view hierarchy data (XML/JSON) without parsing for debugging.
-- 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android Only</kbd>
+- 🖍️ `highlight` draws visual overlays to highlight areas of the screen during debugging. <kbd>🤖 Android</kbd> <kbd>🍎 iOS SDK</kbd>
 - 🔗 `identifyInteractions` suggests likely interactions with ready-to-use tool calls (debug-only; enable the debug feature flag).
 
 #### Network & Connectivity

@@ -1,9 +1,7 @@
-import os from "node:os";
-import path from "node:path";
 import type { Socket } from "node:net";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import type { TelemetryEvent } from "../features/telemetry/TelemetryRecorder";
 import { getNetworkEvents } from "../db/networkEventRepository";
 import { getLogEvents } from "../db/logEventRepository";
@@ -14,11 +12,7 @@ import { getLayoutEvents } from "../db/layoutEventRepository";
 import { getDatabase } from "../db/database";
 import type { Database } from "../db/types";
 import type { Kysely } from "kysely";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "telemetry-push.sock"),
-  externalPath: "/tmp/auto-mobile-telemetry-push.sock",
-};
+import { TELEMETRY_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 
 interface TelemetryFilter {
   category: string | null; // "network", "log", "os", "navigation", "crash", "anr", "nonfatal", "storage", "layout", or null for all
@@ -36,7 +30,7 @@ export class TelemetryPushSocketServer extends PushSubscriptionSocketServer<
   TelemetryFilter,
   TelemetryEvent
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "TelemetryPush");
   }
 
@@ -242,6 +236,10 @@ let socketServer: TelemetryPushSocketServer | null = null;
 
 export function getTelemetryPushServer(): TelemetryPushSocketServer | null {
   return socketServer;
+}
+
+export function getTelemetryPushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(TELEMETRY_PUSH_SOCKET_CONFIG);
 }
 
 export async function startTelemetryPushSocketServer(): Promise<TelemetryPushSocketServer> {

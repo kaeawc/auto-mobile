@@ -198,15 +198,9 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var activeWindowHasNullRoot = false
     var hasApplicationWindow = false
 
-    // Detect if an IME (keyboard) window with an extractable root is present.
-    // When IME is visible, Android may mark app window nodes as isVisibleToUser=false
-    // even though they are physically visible above the keyboard.
-    // Only bypass visibility filtering when the IME window has a root node, because that
-    // root contributes occlusion nodes that will properly hide elements behind the keyboard.
-    // If the IME window has a null root, it cannot participate in occlusion and we must keep
-    // the isVisibleToUser filter to avoid exposing non-interactable elements under the keyboard.
-    val hasImeWindow =
-        windows.any { it.type == AccessibilityWindowInfo.TYPE_INPUT_METHOD && it.root != null }
+    // When an IME (keyboard) window is visible, Android marks the IME as isActive/isFocused.
+    // Fall back to "topmost TYPE_APPLICATION window with a root" for mainHierarchy selection.
+    val primaryAppWindowId: Int? = pickPrimaryAppWindowId(windows)
 
     // Extract from each window
     for (window in windows) {
@@ -260,13 +254,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
             )
         )
 
-        // When IME is present and this is the active app window, skip isVisibleToUser
-        // filtering. Android marks app nodes as not visible when an IME window overlays them,
-        // but they are still physically on screen above the keyboard.
-        val skipVisibilityFilter =
-            hasImeWindow &&
-                window.isActive &&
-                window.type == AccessibilityWindowInfo.TYPE_APPLICATION
         val element =
             extractNodeInfo(
                 rootNode,
@@ -275,7 +262,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 screenDimensions,
                 dedupeTextContentDesc,
                 accessibilityFocusedNode,
-                skipVisibilityFilter,
                 parentPath = "w${window.id}",
             )
         // Skip optimization if disableAllFiltering is true
@@ -300,7 +286,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           intentChooserDetected = detectIntentChooserIndicators(processedElement)
         }
 
-        if (window.isActive) {
+        // When IME is up, the IME reports isActive=true; prefer the app window underneath.
+        val isPrimaryWindow =
+            if (primaryAppWindowId != null) window.id == primaryAppWindowId else window.isActive
+        if (isPrimaryWindow) {
           mainHierarchy = processedElement
           mainPackageName = packageName
           if (notificationPermissionDetected == null && processedElement != null) {
@@ -337,7 +326,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               screenDimensions,
               dedupeTextContentDesc,
               accessibilityFocusedNode,
-              skipVisibilityFilter = hasImeWindow,
           )
       // Skip optimization if disableAllFiltering is true
       mainHierarchy =
@@ -389,7 +377,16 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
           }
       windowEntries.clear()
       windowEntries.addAll(filteredEntries)
-      mainHierarchy = windowEntries.firstOrNull { it.isActive }?.hierarchy ?: mainHierarchy
+      // Re-select main hierarchy after occlusion filtering. When IME is up, the IME entry is
+      // the isActive one — use the primary app window id instead.
+      mainHierarchy =
+          windowEntries
+              .firstOrNull {
+                if (primaryAppWindowId != null) it.windowId == primaryAppWindowId
+                else it.isActive
+              }
+              ?.hierarchy
+              ?: mainHierarchy
 
       // Debug: Check if Tab text survives occlusion filtering
       mainHierarchy?.let {
@@ -541,6 +538,50 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
   }
 
   /**
+   * Selects the window id that hierarchy extraction should treat as the "primary" user-facing
+   * window when an IME is visible. Returns null when no IME with a root is present (callers
+   * should fall back to `window.isActive`).
+   *
+   * Android marks the IME's [AccessibilityWindowInfo.isActive] as true while the keyboard is
+   * showing, which would otherwise cause `mainHierarchy` selection to pick the keyboard
+   * instead of the app underneath it.
+   */
+  private fun pickPrimaryAppWindowId(windows: List<AccessibilityWindowInfo>): Int? =
+      pickPrimaryAppWindowId(
+          windows.map {
+            WindowMeta(id = it.id, type = it.type, layer = it.layer, hasRoot = it.root != null)
+          },
+      )
+
+  /** Test-only metadata shape so primary-window selection can be unit-tested without mocking
+   *  [AccessibilityWindowInfo]. */
+  internal data class WindowMeta(
+      val id: Int,
+      val type: Int,
+      val layer: Int,
+      val hasRoot: Boolean,
+  )
+
+  /** Single-pass variant used by tests and by the production overload. */
+  internal fun pickPrimaryAppWindowId(windows: List<WindowMeta>): Int? {
+    var hasIme = false
+    var topAppId: Int? = null
+    var topAppLayer = Int.MIN_VALUE
+    for (w in windows) {
+      if (!w.hasRoot) continue
+      when (w.type) {
+        AccessibilityWindowInfo.TYPE_INPUT_METHOD -> hasIme = true
+        AccessibilityWindowInfo.TYPE_APPLICATION ->
+            if (w.layer > topAppLayer) {
+              topAppLayer = w.layer
+              topAppId = w.id
+            }
+      }
+    }
+    return if (hasIme) topAppId else null
+  }
+
+  /**
    * Recursively extracts node information with depth limiting, offscreen filtering, and zero-area
    * filtering.
    *
@@ -558,7 +599,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       screenDimensions: ScreenDimensions? = null,
       dedupeTextContentDesc: Boolean = true,
       accessibilityFocusedNode: AccessibilityNodeInfo? = null,
-      skipVisibilityFilter: Boolean = false,
       parentPath: String = "",
       childIndex: Int = 0,
   ): UIElementInfo? {
@@ -583,19 +623,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         }
       }
 
-      // Filter nodes not actually visible to the user
-      // Skip this filter when IME is present for the active app window — Android incorrectly
-      // marks app nodes as not visible when an IME window overlays them.
-      // Also skip for interactive nodes — Android can mark long-clickable or clickable views
-      // as not visible when they lack text/content-desc (e.g. illustration ImageViews),
-      // but they must still appear in the hierarchy since users can interact with them.
-      // Also skip for system UI nodes — collapsed notification groups mark child text nodes
-      // as not visible even though they are present and interactable in the shade.
-      val isSystemUiNode = node.packageName?.toString() == "com.android.systemui"
-      val isInteractiveNode = node.isClickable || node.isLongClickable || node.isScrollable || node.isCheckable
-      if (!skipVisibilityFilter && !isSystemUiNode && !isInteractiveNode && !node.isVisibleToUser) {
-        return null
-      }
+      // We intentionally do NOT filter on node.isVisibleToUser here. Android's flag is
+      // unreliable: Compose LazyColumn items, collapsed notification group children, and nodes
+      // behind an IME are all marked invisible despite being rendered on-screen. We already
+      // filter zero-area bounds and completely offscreen nodes above, which is sufficient.
 
       // Build deterministic path for viewId generation
       val segment = if (node.viewIdResourceName != null) {
@@ -619,7 +650,6 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                   screenDimensions,
                   dedupeTextContentDesc,
                   accessibilityFocusedNode,
-                  skipVisibilityFilter,
                   parentPath = currentPath,
                   childIndex = i,
               )
@@ -1298,6 +1328,10 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
       windowEntries: List<WindowEntry>,
   ): Map<NodeKey, OcclusionInfo> {
     val nodes = mutableListOf<OcclusionNode>()
+    val imeWindowKeys =
+        windowEntries.asSequence().filter { it.windowType == "input_method" }.mapTo(
+            mutableSetOf(),
+        ) { it.windowId }
     for (windowEntry in windowEntries) {
       val hierarchy = windowEntry.hierarchy
       val windowKey = windowEntry.windowId
@@ -1340,6 +1374,12 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
 
       for (j in i + 1 until sortedNodes.size) {
         val occluder = sortedNodes[j]
+        // Skip cross-window IME occluders: the IME's a11y root has a transparent wrapper that
+        // overstates the keyboard rectangle and would falsely mark the app underneath as hidden.
+        // Same-window IME-vs-IME occlusion is preserved by the `windowKey != node.windowKey` guard.
+        if (occluder.windowKey != node.windowKey && occluder.windowKey in imeWindowKeys) {
+          continue
+        }
         if (occluder.windowKey == node.windowKey) {
           // Determine relationship between node and occluder
           val relationship =

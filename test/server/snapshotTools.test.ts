@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, beforeEach, describe, expect, test } from "bun:test";
 import type { BootedDevice, DeviceSnapshotManifest } from "../../src/models";
-import { registerSnapshotTools } from "../../src/server/snapshotTools";
+import { deviceSnapshotSchema, registerSnapshotTools } from "../../src/server/snapshotTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import {
   resetDeviceSnapshotManagerDependencies,
@@ -85,6 +85,42 @@ describe("snapshot tool", () => {
 
   afterAll(() => {
     resetDeviceSnapshotManagerDependencies();
+  });
+
+  test("requires snapshotName when action is restore", () => {
+    const result = deviceSnapshotSchema.safeParse({
+      action: "restore",
+    });
+
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues[0].path).toEqual(["snapshotName"]);
+      expect(result.error.issues[0].message).toBe("snapshotName is required when action is restore");
+    }
+  });
+
+  test("rejects empty snapshotName when provided", () => {
+    for (const action of ["capture", "restore"] as const) {
+      const result = deviceSnapshotSchema.safeParse({
+        action,
+        snapshotName: "",
+      });
+
+      expect(result.success).toBe(false);
+    }
+  });
+
+  test("keeps generated tool definition free of top-level combinators", () => {
+    const toolDefinition = ToolRegistry.getToolDefinitions()
+      .find(tool => tool.name === "deviceSnapshot");
+
+    expect(toolDefinition).toBeDefined();
+    const schema = toolDefinition!.inputSchema as any;
+    expect(schema.required).toEqual(["action"]);
+    expect(schema.properties.action.enum).toEqual(["capture", "restore"]);
+    expect(schema.anyOf).toBeUndefined();
+    expect(schema.oneOf).toBeUndefined();
+    expect(schema.allOf).toBeUndefined();
   });
 
   test("captures snapshot and returns payload", async () => {

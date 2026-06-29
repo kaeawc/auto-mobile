@@ -1,6 +1,7 @@
 import { execFile } from "child_process";
 import { promisify } from "util";
 import type { ExecResult } from "../models";
+import { wrapCommandError } from "./CommandError";
 
 export interface HostCommandOptions {
   timeoutMs?: number;
@@ -56,7 +57,16 @@ export class DefaultHostCommandExecutor implements HostCommandExecutor {
       cwd: options.cwd
     };
 
-    const result = await this.execAsync(file, args, execOptions);
+    let result: { stdout: string | Buffer; stderr: string | Buffer };
+    try {
+      result = await this.execAsync(file, args, execOptions);
+    } catch (error) {
+      throw wrapCommandError(error, {
+        command: file,
+        args,
+        cwd: options.cwd,
+      });
+    }
 
     const stdout = typeof result.stdout === "string" ? result.stdout : result.stdout.toString();
     const stderr = typeof result.stderr === "string" ? result.stderr : result.stderr.toString();

@@ -23,8 +23,15 @@ interface LocalizationResourceContent {
 
 async function findBootedDevice(deviceId: string): Promise<BootedDevice | null> {
   try {
-    const devices = await PlatformDeviceManagerFactory.getInstance().getBootedDevices("either");
-    return devices.find(device => device.deviceId === deviceId) ?? null;
+    const manager = PlatformDeviceManagerFactory.getInstance();
+    const androidDevices = await manager.getBootedDevices("android");
+    const android = androidDevices.find(device => device.deviceId === deviceId);
+    if (android) {
+      return android;
+    }
+
+    const iosDevices = await manager.getBootedDevices("ios");
+    return iosDevices.find(device => device.deviceId === deviceId) ?? null;
   } catch (error) {
     logger.warn(`[LocalizationResources] Failed to list booted devices: ${error}`);
     return null;

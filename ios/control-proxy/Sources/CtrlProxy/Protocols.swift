@@ -78,6 +78,18 @@ public protocol GesturePerforming {
     /// Swipe from start to end coordinates
     func swipe(startX: Double, startY: Double, endX: Double, endY: Double, duration: TimeInterval) throws
 
+    /// Perform a simultaneous multi-finger swipe from start to end coordinates
+    func multiFingerSwipe(
+        startX: Double,
+        startY: Double,
+        endX: Double,
+        endY: Double,
+        fingerCount: Int,
+        fingerSpacing: Double,
+        duration: TimeInterval
+    )
+        throws
+
     // MARK: - Drag Gestures
 
     /// Drag with press, drag, and hold durations
@@ -112,6 +124,10 @@ public protocol GesturePerforming {
     /// Perform IME action (done, next, search, etc.)
     func performImeAction(_ action: String) throws
 
+    /// Open, close, or detect the software keyboard. Returns whether the
+    /// keyboard is visible after the requested action.
+    func keyboard(action: String) throws -> Bool
+
     // MARK: - Clipboard
 
     /// Perform clipboard operation (get, copy, clear, paste)
@@ -137,6 +153,15 @@ public protocol GesturePerforming {
 
     /// Press home button
     func pressHome() throws
+
+    /// Perform app-level back navigation
+    func pressBack() throws
+
+    /// Generate a synthetic shake motion event.
+    func shake() throws
+
+    /// Press a named hardware or keyboard-backed button.
+    func pressButton(_ button: String) throws
 
     /// Open recent apps (app switcher) via swipe-up-and-hold gesture
     func openRecentApps() throws
@@ -212,8 +237,14 @@ public protocol SdkHierarchyFetching {
     func fetchHierarchy() -> SdkViewHierarchy?
     /// Request a fresh hierarchy walk (slower).
     func fetchFreshHierarchy() -> SdkViewHierarchy?
+    /// Fetch lightweight server metadata, including the owning app bundle ID.
+    func fetchServerInfo() -> SdkHierarchyServerInfo?
     /// Whether the SDK hierarchy server is reachable.
     func isAvailable() -> Bool
+    /// Replace network mock rules in the in-app SDK.
+    func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool
+    /// Draw a highlight in the in-app SDK process.
+    func addHighlight(id: String, shape: HighlightShape) -> Bool
 }
 
 /// Protocol for accessing the cached SDK hierarchy.
@@ -224,4 +255,15 @@ public protocol SdkHierarchyCaching {
     func update(_ hierarchy: SdkViewHierarchy)
     /// Clear the cached hierarchy.
     func clear()
+}
+
+// MARK: - SDK Database Protocols
+
+/// Protocol for relaying SQLite database inspection requests to the target app SDK.
+public protocol SdkDatabaseFetching {
+    func executeSQL(databasePath: String, query: String) throws -> SdkExecuteSqlResult
+    func listDatabases() throws -> [SdkDatabaseInfo]
+    func listTables(databasePath: String) throws -> [String]
+    func getTableData(databasePath: String, table: String, limit: Int, offset: Int) throws -> SdkTableDataResult
+    func getTableStructure(databasePath: String, table: String) throws -> SdkTableStructureResult
 }

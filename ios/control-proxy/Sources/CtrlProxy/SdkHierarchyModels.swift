@@ -13,6 +13,17 @@ public struct SdkViewHierarchy: Codable, Sendable {
     public let root: SdkViewNode?
 }
 
+/// Lightweight metadata exposed by the SDK hierarchy server.
+public struct SdkHierarchyServerInfo: Codable, Sendable {
+    public let status: String
+    public let bundleId: String?
+
+    public init(status: String, bundleId: String?) {
+        self.status = status
+        self.bundleId = bundleId
+    }
+}
+
 /// A single node in the SDK's UIView hierarchy tree.
 public struct SdkViewNode: Codable, Sendable {
     public let className: String

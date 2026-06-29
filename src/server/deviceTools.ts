@@ -15,7 +15,8 @@ import { logger } from "../utils/logger";
 import { createPerformanceTracker } from "../utils/PerformanceTracker";
 import { platformSchema } from "./toolSchemaHelpers";
 import { DefaultDeviceMatcher, type DeviceMatcher } from "./deviceMatcher";
-import { DEVICE_POOL_MATCHING } from "../daemon/poolConfig";
+import { DEVICE_POOL_MATCHING, isDevicePoolAutolockEnabled } from "../daemon/poolConfig";
+import { DaemonState } from "../daemon/daemonState";
 
 // Schema definitions
 export const listDeviceImagesSchema = z.object({
@@ -79,6 +80,7 @@ export interface StartDeviceArgs {
   deviceId?: string;
   preferRunning?: boolean;
   timeoutMs?: number;
+  __mcpSessionId?: string;
 }
 
 export interface KillDeviceArgs {
@@ -387,9 +389,25 @@ export function registerDeviceTools() {
     await ctrlProxySetup(device, perf);
 
     // Always generate a session ID for consistent device interactions.
-    // When autolock is enabled, the session ID is enforced for all subsequent tool calls.
-    // When disabled, AutoMobile assumes a single agent and the session ID is advisory.
-    const sessionId = randomUUID();
+    // When autolock is enabled, lock the device to a pool-issued session UUID that
+    // is enforced for all subsequent tool calls and auto-released after an idle timeout.
+    // When disabled, still bind the returned session to this exact device so callers
+    // can mix startDevice -> setActiveDevice -> session-targeted tools without the
+    // session path assigning a different simulator/device on first use.
+    let sessionId: string | undefined;
+    if (isDevicePoolAutolockEnabled() && DaemonState.getInstance().isInitialized()) {
+      sessionId = await DaemonState.getInstance()
+        .getDevicePool()
+        .autolockDevice(device.deviceId, device.platform, args.__mcpSessionId);
+    }
+    if (!sessionId) {
+      sessionId = randomUUID();
+      if (DaemonState.getInstance().isInitialized()) {
+        sessionId = await DaemonState.getInstance()
+          .getDevicePool()
+          .bindOrReuseDeviceSession(sessionId, device.deviceId, device.platform);
+      }
+    }
 
     perf.end();
     const timing = perf.getTimings();

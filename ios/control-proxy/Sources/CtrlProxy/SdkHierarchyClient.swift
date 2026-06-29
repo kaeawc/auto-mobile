@@ -25,9 +25,31 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         return fetchSync(path: "/hierarchy/fresh")
     }
 
+    /// Fetch lightweight SDK server metadata without walking or serializing the view tree.
+    public func fetchServerInfo() -> SdkHierarchyServerInfo? {
+        guard let data = requestSync(path: "/health", session: healthSession) else { return nil }
+        return try? JSONDecoder().decode(SdkHierarchyServerInfo.self, from: data)
+    }
+
     /// Whether the SDK hierarchy server is reachable.
     public func isAvailable() -> Bool {
-        return requestSync(path: "/health", session: healthSession) != nil
+        return fetchServerInfo() != nil
+    }
+
+    /// Replace network mock rules in the SDK's in-app server.
+    public func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool {
+        guard let body = try? JSONEncoder().encode(SetMockRulesBody(rules: rules)) else {
+            return false
+        }
+        return postSync(path: "/network/mock", body: body, session: urlSession)
+    }
+
+    /// Draw a highlight in the target app through the SDK's in-app server.
+    public func addHighlight(id: String, shape: HighlightShape) -> Bool {
+        guard let body = try? JSONEncoder().encode(AddHighlightBody(id: id, shape: shape)) else {
+            return false
+        }
+        return postSync(path: "/highlight", body: body, session: urlSession)
     }
 
     // MARK: - Private
@@ -60,4 +82,33 @@ public final class SdkHierarchyClient: SdkHierarchyFetching, @unchecked Sendable
         semaphore.wait()
         return result
     }
+
+    private func postSync(path: String, body: Data, session: URLSession) -> Bool {
+        let url = baseURL.appendingPathComponent(path)
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = body
+
+        let semaphore = DispatchSemaphore(value: 0)
+        var ok = false
+
+        session.dataTask(with: request) { _, response, _ in
+            defer { semaphore.signal() }
+            guard let http = response as? HTTPURLResponse else { return }
+            ok = http.statusCode == 200
+        }.resume()
+
+        semaphore.wait()
+        return ok
+    }
+}
+
+private struct SetMockRulesBody: Encodable {
+    let rules: [NetworkMockRuleDTO]
+}
+
+private struct AddHighlightBody: Encodable {
+    let id: String
+    let shape: HighlightShape
 }

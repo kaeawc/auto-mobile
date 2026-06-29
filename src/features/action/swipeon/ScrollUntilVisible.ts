@@ -144,7 +144,7 @@ export class ScrollUntilVisible {
     );
 
     if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
-      logger.info(`[SwipeOn] Found ${target} initially but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=[${containerElement.bounds.top},${containerElement.bounds.bottom}]), will scroll`);
+      logger.info(`[SwipeOn] Found ${target} initially but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), will scroll`);
       foundElement = null;
     }
 
@@ -315,7 +315,7 @@ export class ScrollUntilVisible {
       );
 
       if (foundElement && !this.isElementWithinContainer(foundElement, containerElement.bounds)) {
-        logger.info(`[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=[${containerElement.bounds.top},${containerElement.bounds.bottom}]), continuing scroll`);
+        logger.info(`[SwipeOn] Found ${target} but it is outside container bounds (element center y=${Math.floor((foundElement.bounds.top + foundElement.bounds.bottom) / 2)}, container=${JSON.stringify(containerElement.bounds)}), continuing scroll`);
         foundElement = null;
       }
 

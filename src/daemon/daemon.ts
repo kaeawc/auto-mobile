@@ -6,6 +6,7 @@ import { logger } from "../utils/logger";
 import { MultiPlatformDeviceManager } from "../utils/deviceUtils";
 import { UnixSocketServer } from "./socketServer";
 import { SessionManager } from "./sessionManager";
+import { SessionHeartbeatMonitor } from "./SessionHeartbeatMonitor";
 import { DevicePool } from "./devicePool";
 import { DaemonState } from "./daemonState";
 import {
@@ -16,9 +17,10 @@ import {
   DAEMON_PORT_RANGE_END,
 } from "./constants";
 import { DaemonOptions, PidFileData } from "./types";
-import { writeFile, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { mkdir, writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
 import { PID_FILE_PATH, DAEMON_VERSION } from "./constants";
+import { cleanupDaemonFiles, cleanupDaemonFilesSync, readPidFileDataSync } from "./daemonFiles";
 import { executionTracker } from "../server/executionTracker";
 import { closeDatabase, getDatabase } from "../db";
 import { startupBenchmark } from "../utils/startupBenchmark";
@@ -32,13 +34,19 @@ import { startDeviceDataStreamSocketServer, stopDeviceDataStreamSocketServer, ge
 import { startFailuresStreamSocketServer, stopFailuresStreamSocketServer } from "./failuresStreamSocketServer";
 import { startFailuresPushSocketServer, stopFailuresPushSocketServer } from "./failuresPushSocketServer";
 import { startTelemetryPushSocketServer, stopTelemetryPushSocketServer } from "./telemetryPushSocketServer";
+import { getDaemonSocketPaths } from "./socketPaths";
 import { AndroidCtrlProxyClient } from "../features/observe/android";
 import { defaultAdbClientFactory } from "../utils/android-cmdline-tools/AdbClientFactory";
 import { IOSCtrlProxyClient } from "../features/observe/ios";
+import {
+  pushInitialObservationFramesForSubscriber,
+  type ObservationStreamIosClient,
+} from "./observationInitialFrame";
 import { NavigationGraphManager } from "../features/navigation/NavigationGraphManager";
 import { RealObserveScreen } from "../features/observe/ObserveScreen";
 import type { InstalledAppsStore } from "../db/installedAppsRepository";
 import { InstalledAppsRepository } from "../db/installedAppsRepository";
+import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../utils/appearance/AppearanceSyncScheduler";
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
@@ -47,6 +55,18 @@ import { Timer, defaultTimer } from "../utils/SystemTimer";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
+import { setDebugPerfEnabled } from "../utils/PerformanceTracker";
+import {
+  installProcessLifecycleHandlers,
+  setFatalProcessHandler,
+  setProcessShutdownHandler,
+} from "../processLifecycle";
+import type { BootedDevice } from "../models";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  safeProcessCwd,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 const DEVICE_DISCONNECT_POLL_INTERVAL_MS = 5000;
 const DEVICE_DISCONNECT_MISS_THRESHOLD = 3;
@@ -69,17 +89,26 @@ export class Daemon {
   private host: string;
   private debug: boolean;
   private healthCheckTimer: NodeJS.Timeout | null = null;
-  private heartbeatMonitorTimer: NodeJS.Timeout | null = null;
+  private heartbeatMonitor: SessionHeartbeatMonitor | null = null;
   private deviceDisconnectTimer: NodeJS.Timeout | null = null;
+  private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
+  private deviceSessionRepository: DeviceSessionRepository;
   private timer: Timer;
+  private shutdownHandlersRegistered: boolean = false;
+  private shutdownInProgress: boolean = false;
 
-  constructor(options: DaemonOptions = {}, installedAppsRepository?: InstalledAppsStore, timer: Timer = defaultTimer) {
+  constructor(
+    options: DaemonOptions = {},
+    installedAppsRepository?: InstalledAppsStore,
+    timer: Timer = defaultTimer,
+    deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()
+  ) {
     this.port = options.port || DEFAULT_DAEMON_PORT;
     // Prefer IPv4 loopback: Bun's fetch and Node's listen can disagree on "localhost" (::1 vs 127.0.0.1),
     // which surfaces as ConnectionRefused on the Unix-socket → Streamable HTTP MCP hop (common in Linux CI).
@@ -87,7 +116,8 @@ export class Daemon {
     this.debug = options.debug || false;
     this.daemonSessionId = randomUUID();
     this.timer = timer;
-    this.sessionManager = new SessionManager();
+    this.deviceSessionRepository = deviceSessionRepository;
+    this.sessionManager = new SessionManager(this.timer, this.deviceSessionRepository);
     // Register centralized cleanup for session-scoped state
     this.sessionManager.onSessionRelease((sessionId, deviceId) => {
       NavigationGraphManager.releaseSession(sessionId);
@@ -97,8 +127,11 @@ export class Daemon {
     this.devicePool = new DevicePool(
       this.sessionManager,
       this.daemonSessionId,
+      this.timer,
+      this.installedAppsRepository,
       undefined,
-      this.installedAppsRepository
+      undefined,
+      this.deviceSessionRepository
     );
     // Initialize singleton for daemon state access
     DaemonState.getInstance().initialize(this.sessionManager, this.devicePool);
@@ -109,6 +142,9 @@ export class Daemon {
     }
     if (options.dismissKeyboardAfterInput) {
       serverConfig.setDismissKeyboardAfterInputEnabled(true);
+    }
+    if (options.debugPerf) {
+      setDebugPerfEnabled(true);
     }
     if (options.noUiPerfMode) {
       serverConfig.setUiPerfMode(false);
@@ -149,8 +185,12 @@ export class Daemon {
     // Enable stdout logging in daemon mode so logs appear in daemon.log file
     // (daemon's stdout/stderr are redirected to /tmp/auto-mobile-daemon-XXXXXX/daemon.log)
     logger.enableStdoutLogging();
+    const stableWorkingDirectory = resolveStableDaemonWorkingDirectory();
+    process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd(stableWorkingDirectory);
+    process.chdir(stableWorkingDirectory);
 
     logger.info("Starting AutoMobile daemon...");
+    this.setupShutdownHandlers();
 
     await this.initializeDatabase();
 
@@ -216,9 +256,6 @@ export class Daemon {
     // Verify DaemonState is initialized
     const isInitialized = DaemonState.getInstance().isInitialized();
     logger.info(`DaemonState initialized: ${isInitialized}, device count: ${this.devicePool.getTotalDeviceCount()}`);
-
-    // Setup shutdown handlers
-    this.setupShutdownHandlers();
 
     // Start health check timer (every 30 seconds)
     this.startHealthCheckTimer();
@@ -560,26 +597,19 @@ export class Daemon {
     const pidData: PidFileData = {
       pid: process.pid,
       socketPath: SOCKET_PATH,
+      sockets: getDaemonSocketPaths(),
       port: this.port,
       startedAt: this.timer.now(),
       version: DAEMON_VERSION,
     };
 
+    await mkdir(dirname(PID_FILE_PATH), { recursive: true });
     await writeFile(PID_FILE_PATH, JSON.stringify(pidData, null, 2), {
       encoding: "utf-8",
       mode: 0o600,
     });
+    this.pidFileWritten = true;
     logger.info(`PID file written to ${PID_FILE_PATH}`);
-  }
-
-  /**
-   * Remove PID file
-   */
-  private async removePidFile(): Promise<void> {
-    if (existsSync(PID_FILE_PATH)) {
-      await unlink(PID_FILE_PATH);
-      logger.info(`PID file removed: ${PID_FILE_PATH}`);
-    }
   }
 
   /**
@@ -600,66 +630,73 @@ export class Daemon {
 
       const allDevices = this.devicePool.getAllDevices();
 
-      // Android: ensure accessibility service WebSocket is connected
-      const androidDevices = allDevices.filter(d => d.platform === "android");
-      for (const pooledDevice of androidDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
-        try {
-          const bootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: pooledDevice.platform as "android",
-          };
-          const client = AndroidCtrlProxyClient.getInstance(bootedDevice, defaultAdbClientFactory);
-          client.ensureConnected().then(connected => {
-            if (connected) {
-              logger.info(`[Daemon] WebSocket connected to ${pooledDevice.id} for observation stream`);
-            } else {
-              logger.warn(`[Daemon] Failed to connect WebSocket to ${pooledDevice.id}`);
-            }
-          }).catch(error => {
-            logger.warn(`[Daemon] Error connecting WebSocket to ${pooledDevice.id}: ${error}`);
-          });
-        } catch (error) {
-          logger.warn(`[Daemon] Error setting up WebSocket for ${pooledDevice.id}: ${error}`);
-        }
-      }
-
-      // iOS: ensure CtrlProxy is set up and connected
-      const iosDevices = allDevices.filter(d => d.platform === "ios");
-      for (const pooledDevice of iosDevices) {
-        if (deviceId !== null && pooledDevice.id !== deviceId) {continue;}
-        try {
-          const bootedDevice = {
-            deviceId: pooledDevice.id,
-            name: pooledDevice.name,
-            platform: "ios" as const,
-          };
-          logger.info(`[Daemon] Setting up CtrlProxy iOS for iOS device ${pooledDevice.id}`);
-          const client = IOSCtrlProxyClient.getInstance(bootedDevice, null);
-          client.ensureConnected().then(connected => {
-            if (connected) {
-              logger.info(`[Daemon] CtrlProxy iOS connected to ${pooledDevice.id} for observation stream`);
-            } else {
-              logger.warn(`[Daemon] Failed to connect CtrlProxy iOS to ${pooledDevice.id}`);
-            }
-          }).catch(error => {
-            logger.warn(`[Daemon] Error connecting CtrlProxy iOS to ${pooledDevice.id}: ${error}`);
-          });
-        } catch (error) {
-          logger.warn(`[Daemon] Error setting up CtrlProxy iOS for ${pooledDevice.id}: ${error}`);
-        }
-      }
+      pushInitialObservationFramesForSubscriber(deviceId, allDevices, {
+        streamServer: server,
+        androidClientFactory: device => AndroidCtrlProxyClient.getInstance(device, defaultAdbClientFactory),
+        iosClientFactory: device => this.createObservationStreamIosClient(device),
+      }).catch(error => {
+        logger.warn(`[Daemon] Error pushing initial observation frame: ${error}`);
+      });
 
       if (allDevices.length === 0) {
         logger.info("[Daemon] No devices in pool to connect");
       }
     });
 
+    server.setOnObservationRequested(async ({ deviceId, signal }) => {
+      const pooledDevices = deviceId
+        ? [this.devicePool.getDevice(deviceId)].filter(device => device !== null)
+        : this.devicePool.getAllDevices();
+
+      if (pooledDevices.length === 0) {
+        throw new Error(deviceId ? `Device ${deviceId} is not available` : "No devices are available");
+      }
+
+      const requestStart = this.timer.now();
+      const observations = [];
+      for (const pooledDevice of pooledDevices) {
+        if (signal.aborted) {
+          throw new Error("Observation request was aborted");
+        }
+
+        const bootedDevice: BootedDevice = {
+          deviceId: pooledDevice.id,
+          name: pooledDevice.name,
+          platform: pooledDevice.platform,
+          iosVersion: pooledDevice.iosVersion,
+        };
+        const observeScreen = new RealObserveScreen(bootedDevice);
+        const observation = await observeScreen.execute({
+          skipWaitForFresh: false,
+          minTimestamp: requestStart,
+          signal,
+        });
+        observations.push({ deviceId: pooledDevice.id, observation });
+      }
+
+      return observations;
+    });
+
     logger.info("[Daemon] Observation stream callback configured");
 
     // Wire up navigation graph updates to stream to IDE plugins
     this.setupNavigationGraphStreamListener(server);
+  }
+
+  private createObservationStreamIosClient(device: BootedDevice): ObservationStreamIosClient {
+    const client = IOSCtrlProxyClient.getInstance(device);
+    return {
+      ensureConnected: () => client.ensureConnected(),
+      getLatestHierarchy: (...args) => client.getLatestHierarchy(...args),
+      requestHierarchySyncWithoutObservationStreamPush: async (...args) => {
+        const result = await client.requestHierarchySyncWithoutObservationStreamPush(...args);
+        return result ? { hierarchy: result.hierarchy } : null;
+      },
+      convertToViewHierarchyResult: hierarchy =>
+        client.convertToViewHierarchyResult(hierarchy as never),
+      requestScreenshotWithoutObservationStreamPush: (...args) =>
+        client.requestScreenshotWithoutObservationStreamPush(...args),
+    };
   }
 
   /**
@@ -753,30 +790,13 @@ export class Daemon {
    * Start periodic heartbeat checks to cancel stale sessions
    */
   private startHeartbeatMonitor(): void {
-    const HEARTBEAT_CHECK_INTERVAL_MS = 10000;
-    const INITIAL_HEARTBEAT_GRACE_MS = 20_000;
-
-    this.heartbeatMonitorTimer = defaultTimer.setInterval(async () => {
-      const now = this.timer.now();
-      const sessions = this.sessionManager.getAllSessions();
-
-      for (const session of sessions) {
-        if (!session.hasReceivedHeartbeat && now - session.createdAt < INITIAL_HEARTBEAT_GRACE_MS) {
-          continue;
-        }
-        if (executionTracker.hasActiveSessionUuidExecutions(session.sessionId)) {
-          continue;
-        }
-        const timeoutMs = session.heartbeatTimeoutMs ?? SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
-        const lastHeartbeat = session.lastHeartbeat ?? session.lastUsedAt;
-        if (now - lastHeartbeat > timeoutMs) {
-          logger.warn(`Session ${session.sessionId} heartbeat timeout, cancelling`);
-          await this.cancelAndReleaseSession(session.sessionId);
-        }
-      }
-    }, HEARTBEAT_CHECK_INTERVAL_MS);
-
-    this.heartbeatMonitorTimer.unref();
+    this.heartbeatMonitor = new SessionHeartbeatMonitor(
+      this.sessionManager,
+      sessionId => executionTracker.hasActiveSessionUuidExecutions(sessionId),
+      sessionId => this.cancelAndReleaseSession(sessionId),
+      this.timer,
+    );
+    this.heartbeatMonitor.start();
   }
 
   private startDeviceDisconnectMonitor(): void {
@@ -793,7 +813,9 @@ export class Daemon {
           return;
         }
 
-        const bootedDevices = await deviceManager.getBootedDevices("either");
+        const discovery = await deviceManager.getBootedDevicesDetailed("either");
+        const bootedDevices = discovery.devices;
+        const succeededPlatforms = discovery.succeededPlatforms;
         const bootedDeviceIds = new Set(bootedDevices.map(device => device.deviceId));
         const activeRecordings = await listActiveVideoRecordings();
 
@@ -801,6 +823,21 @@ export class Daemon {
         const candidateDeviceIds = new Set<string>();
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
+        }
+        for (const device of this.devicePool.getAllDevices()) {
+          // Skip idle devices on platforms whose discovery failed or was
+          // unavailable this poll — a partial discovery cannot confirm they
+          // disconnected, so counting misses would risk dropping a healthy
+          // idle device.
+          if (device.status === "idle" && !succeededPlatforms.has(device.platform)) {
+            logger.warn(
+              `[DisconnectMonitor] Skipping idle ${device.platform} device ${device.id}: ` +
+              `${device.platform} discovery did not succeed this poll`
+            );
+            this.deviceDisconnectMisses.delete(device.id);
+            continue;
+          }
+          candidateDeviceIds.add(device.id);
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
@@ -872,6 +909,7 @@ export class Daemon {
             await this.cancelAndReleaseSession(sessionId);
           }
 
+          await this.devicePool.removeDevice(deviceId);
           this.deviceDisconnectMisses.delete(deviceId);
         }
       } catch (error) {
@@ -1038,6 +1076,11 @@ export class Daemon {
       getDatabase();
       // Clear installed apps cache from previous daemon sessions
       await this.installedAppsRepository.clearOldDaemonSessions(this.daemonSessionId);
+      await this.deviceSessionRepository.markStaleActiveSessionsExpired(
+        this.daemonSessionId,
+        this.timer.now(),
+        "daemon-restart"
+      );
       logger.info(`[Daemon] Cleared old daemon session caches, current session: ${this.daemonSessionId}`);
     } catch (error) {
       logger.error(`Failed to initialize database: ${error}`);
@@ -1048,14 +1091,39 @@ export class Daemon {
    * Setup graceful shutdown handlers
    */
   private setupShutdownHandlers(): void {
+    if (this.shutdownHandlersRegistered) {
+      return;
+    }
+    this.shutdownHandlersRegistered = true;
+    installProcessLifecycleHandlers();
+
     const shutdown = async (signal: string) => {
+      if (this.shutdownInProgress) {
+        return;
+      }
+      this.shutdownInProgress = true;
       logger.info(`Received ${signal}, shutting down daemon...`);
       await this.stop();
-      process.exit(0);
     };
 
-    process.on("SIGINT", () => shutdown("SIGINT"));
-    process.on("SIGTERM", () => shutdown("SIGTERM"));
+    const cleanupAndExit = (label: string, error: unknown) => {
+      logger.error(`${label}: ${error instanceof Error ? error.stack ?? error.message : String(error)}`);
+      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
+      logger.close();
+      process.exit(1);
+    };
+
+    setProcessShutdownHandler(shutdown);
+    process.once("exit", () => {
+      cleanupDaemonFilesSync(this.getDaemonFileCleanupOptions());
+    });
+    setFatalProcessHandler(event => {
+      if (event.type === "uncaughtException") {
+        cleanupAndExit("Uncaught exception in daemon", event.error);
+        return;
+      }
+      cleanupAndExit("Unhandled rejection in daemon", event.reason);
+    });
   }
 
   /**
@@ -1069,9 +1137,9 @@ export class Daemon {
       clearInterval(this.healthCheckTimer);
       this.healthCheckTimer = null;
     }
-    if (this.heartbeatMonitorTimer) {
-      clearInterval(this.heartbeatMonitorTimer);
-      this.heartbeatMonitorTimer = null;
+    if (this.heartbeatMonitor) {
+      this.heartbeatMonitor.stop();
+      this.heartbeatMonitor = null;
     }
     if (this.deviceDisconnectTimer) {
       clearInterval(this.deviceDisconnectTimer);
@@ -1119,13 +1187,20 @@ export class Daemon {
       });
     }
 
-    // Remove PID file
-    await this.removePidFile();
+    await cleanupDaemonFiles(this.getDaemonFileCleanupOptions());
 
     await closeDatabase();
 
     logger.info("Daemon stopped");
     logger.close();
+  }
+
+  private getDaemonFileCleanupOptions(): { expectedPid?: number } {
+    if (this.pidFileWritten) {
+      return { expectedPid: process.pid };
+    }
+    const pidData = readPidFileDataSync();
+    return pidData && pidData.pid !== process.pid ? { expectedPid: process.pid } : {};
   }
 
   /**

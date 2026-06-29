@@ -748,9 +748,8 @@ export class CtrlProxyHierarchy {
       converted.recomposition = node.recomposition;
     }
 
-    // Convert bounds from object format to string format
     if (node.bounds) {
-      converted.bounds = `[${node.bounds.left},${node.bounds.top}][${node.bounds.right},${node.bounds.bottom}]`;
+      converted.bounds = node.bounds;
     }
 
     // Convert child nodes recursively

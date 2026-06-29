@@ -1,11 +1,8 @@
 import { Element } from "./Element";
 
 /**
- * Result of a setAccessibilityFocus operation.
- * This interface defines the return value for the future setAccessibilityFocus tool.
- *
- * Note: Implementation is deferred to a future PR. This interface serves as a scaffold
- * for the tool's contract.
+ * Result of an accessibilityFocus (set/clear TalkBack cursor) operation.
+ * Returned by the `accessibilityFocus` MCP tool.
  */
 export interface SetAccessibilityFocusResult {
   /**

@@ -52,12 +52,14 @@ AutoMobile queries `UIAccessibility.isVoiceOverRunning` via the CtrlProxy WebSoc
 | `tapOn` | Coordinate-based tap | Accessibility activation on the target element |
 | `swipeOn` / scroll | Single-finger swipe | Accessibility scroll action or three-finger swipe |
 | `inputText` / `clearText` | Text injection | Text injection (unchanged) |
-| `pressButton` | Hardware keycode | Hardware keycode (unchanged; see note below) |
+| `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
 | `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
 
 No tool parameters change. Existing automation scripts work without modification.
 
 **Home button note.** When VoiceOver is active, the home button requires a single press to invoke rather than the swipe gesture used in standard navigation. AutoMobile handles this correctly with `pressButton({ button: "home" })`.
+
+**Back navigation note.** iOS has no hardware back button. AutoMobile maps `pressButton({ button: "back" })` to app-level back navigation through CtrlProxy.
 
 ---
 
@@ -158,6 +160,8 @@ Use **Simulator > Features > Toggle VoiceOver** again, or **Option + Command + F
 **Virtual nodes reject coordinate taps.** Controls like sliders or page indicators may be represented as virtual nodes. AutoMobile handles these with accessibility actions, but if you observe unexpected failures on such controls, inspect the `observe` output to confirm the node exists and has the expected type.
 
 **Three-finger scroll fallback.** When no scrollable container can be identified by `resource-id` or `content-desc`, AutoMobile falls back to a three-finger swipe gesture. This is the VoiceOver content-scroll gesture and works on most scrollable views, but may not trigger in some edge cases (e.g., nested scroll views with ambiguous focus). If scrolling fails, provide an explicit `container` selector in `swipeOn`.
+
+**Private XCTest multi-touch dependency.** The three-finger fallback uses private XCTest event-synthesis APIs because public `XCUICoordinate` gestures only drive one pointer. AutoMobile returns a descriptive CtrlProxy error if those private symbols are unavailable on the active Xcode/iOS version.
 
 **VoiceOver cursor position not tracked.** Unlike Android TalkBack, AutoMobile does not currently report which element the VoiceOver cursor is on (`accessibilityFocusedElement` is absent in iOS results). Validate interactions by checking whether the expected element appears in `observe().elements` and whether the expected navigation or state change occurred.
 

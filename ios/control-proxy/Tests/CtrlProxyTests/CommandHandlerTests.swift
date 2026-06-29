@@ -32,13 +32,128 @@ final class CommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         let response = commandHandler.handle(request)
         guard let typed = response as? T else {
             XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
             return nil
         }
         return typed
+    }
+
+    private func makeHierarchy(packageName: String?) -> ViewHierarchy {
+        ViewHierarchy(
+            packageName: packageName,
+            hierarchy: UIElementInfo(
+                text: "Root",
+                className: "UIView",
+                bounds: ElementBounds(left: 0, top: 0, right: 375, bottom: 812)
+            ),
+            windowInfo: WindowInfo(id: 0, type: 1, isActive: true, isFocused: true)
+        )
+    }
+
+    private func makeSdkHierarchy(bundleId: String?, backgroundColor: String = "#123456FF") -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: bundleId,
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: SdkViewNode(
+                className: "UIView",
+                bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+                backgroundColor: backgroundColor
+            )
+        )
+    }
+
+    private func makeSdkHierarchyWithTabBarNode(bundleId: String?) -> SdkViewHierarchy {
+        SdkViewHierarchy(
+            timestamp: 1000,
+            bundleId: bundleId,
+            screenScale: 3.0,
+            screenWidth: 375,
+            screenHeight: 812,
+            root: SdkViewNode(
+                className: "UIView",
+                bounds: SdkBounds(left: 0, top: 0, right: 375, bottom: 812),
+                children: [
+                    SdkViewNode(
+                        className: "UITabBarButtonLabel",
+                        bounds: SdkBounds(left: 16, top: 740, right: 110, bottom: 770),
+                        accessibilityLabel: "Discover",
+                        isAccessibilityElement: true
+                    ),
+                ]
+            )
+        )
+    }
+
+    private func countClassName(_ className: String, in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        let current = element.className == className ? 1 : 0
+        return current + (element.node ?? []).reduce(0) { $0 + countClassName(className, in: $1) }
+    }
+
+    // MARK: - Network Mock Relay
+
+    func testSetNetworkMockRulesRelaysRulesToSdkClient() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        let rules = [
+            NetworkMockRuleDTO(
+                mockId: "mock-1",
+                host: "api\\.example\\.com",
+                path: "^/v1/items",
+                method: "GET",
+                limit: 2,
+                remaining: 2,
+                statusCode: 500,
+                responseHeaders: ["x-test": "yes"],
+                responseBody: "{\"error\":\"mocked\"}",
+                contentType: "application/json"
+            ),
+        ]
+
+        let response = commandHandler.handle(WebSocketRequest(
+            type: RequestType.setNetworkMockRules.rawValue,
+            requestId: "mock-sync-1",
+            networkMockRules: rules
+        ))
+
+        guard let typed = response as? SetNetworkMockRulesResponse else {
+            XCTFail("Expected SetNetworkMockRulesResponse, got \(Swift.type(of: response))")
+            return
+        }
+        XCTAssertEqual(typed.type, ResponseType.setNetworkMockRulesResult.rawValue)
+        XCTAssertEqual(typed.requestId, "mock-sync-1")
+        XCTAssertTrue(typed.ok)
+        XCTAssertEqual(fetcher.setMockRulesCallCount, 1)
+        XCTAssertEqual(fetcher.lastMockRules?.first?.mockId, "mock-1")
+    }
+
+    func testSetNetworkMockRulesReturnsMissingParameterErrorWhenRulesAbsent() {
+        let response = commandHandler.handle(WebSocketRequest(
+            type: RequestType.setNetworkMockRules.rawValue,
+            requestId: "mock-sync-missing"
+        ))
+
+        guard let typed = response as? WebSocketResponse else {
+            XCTFail("Expected WebSocketResponse, got \(Swift.type(of: response))")
+            return
+        }
+        XCTAssertEqual(typed.type, ResponseType.setNetworkMockRulesResult.rawValue)
+        XCTAssertEqual(typed.requestId, "mock-sync-missing")
+        XCTAssertEqual(typed.success, false)
+        XCTAssertEqual(typed.error, "Missing required parameter: rules")
     }
 
     // MARK: - Hierarchy Request Tests
@@ -108,6 +223,184 @@ final class CommandHandlerTests: XCTestCase {
         // Should have extraction as a child
         let extractionChild = perfTiming?.children?.first { $0.name == "extraction" }
         XCTAssertNotNil(extractionChild, "Expected 'extraction' child in perf timing")
+    }
+
+    func testRequestHierarchyMergesCachedSdkHierarchyForForegroundBundle() {
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-match"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.packageName, "com.test.app")
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#123456FF")
+    }
+
+    func testRequestHierarchySkipsCachedSdkHierarchyForDifferentForegroundBundle() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "dev.sdk.app"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "dev.sdk.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-mismatch"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.packageName, "com.apple.Preferences")
+        XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
+    func testEnrichWithMatchingSdkHierarchyClearsForeignCacheWhenSdkServerIsDown() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(nil)
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchyWithTabBarNode(bundleId: "dev.jasonpearson.automobile.Playground"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+
+        let enriched = commandHandler
+            .enrichWithMatchingSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
+    func testEnrichWithCachedSdkHierarchyDoesNotProbeServerForForeignCache() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.apple.Preferences"))
+        fetcher.setFreshHierarchy(makeSdkHierarchyWithTabBarNode(bundleId: "com.apple.Preferences"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchyWithTabBarNode(bundleId: "dev.jasonpearson.automobile.Playground"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+
+        let enriched = commandHandler.enrichWithCachedSdkHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        XCTAssertEqual(enriched.packageName, "com.apple.Preferences")
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: enriched.hierarchy), 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 0)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+        XCTAssertEqual(cache.clearCallCount, 1)
+    }
+
+    func testRequestHierarchyFetchesFreshSdkHierarchyOnlyWhenServerBundleMatchesForeground() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.test.app"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-fresh"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#123456FF")
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 1)
+    }
+
+    func testRequestHierarchyDoesNotFetchFreshSdkHierarchyWhenServerBundleDiffers() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "dev.sdk.app"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "dev.sdk.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-no-fresh"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertNil(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"])
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 0)
+    }
+
+    func testRequestHierarchyReplacesForeignCacheWithFreshForegroundHierarchy() {
+        let fetcher = FakeSdkHierarchyFetcher()
+        fetcher.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.apple.Preferences"))
+        fetcher.setFreshHierarchy(makeSdkHierarchy(bundleId: "com.apple.Preferences", backgroundColor: "#ABCDEF01"))
+
+        let cache = FakeSdkHierarchyCache()
+        cache.update(makeSdkHierarchy(bundleId: "dev.sdk.app", backgroundColor: "#123456FF"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fetcher,
+            sdkHierarchyCache: cache
+        )
+        fakeElementLocator.setHierarchy(makeHierarchy(packageName: "com.apple.Preferences"))
+
+        let request = WebSocketRequest(
+            type: "request_hierarchy",
+            requestId: "test-sdk-replace-cache"
+        )
+
+        guard let hierarchyResponse = handleRequest(request, as: HierarchyUpdateResponse.self) else { return }
+
+        XCTAssertEqual(hierarchyResponse.data?.hierarchy?.extras?["sdk.backgroundColor"], "#ABCDEF01")
+        XCTAssertEqual(cache.latest?.bundleId, "com.apple.Preferences")
+        XCTAssertEqual(cache.updateCallCount, 2)
+        XCTAssertEqual(cache.clearCallCount, 0)
+        XCTAssertEqual(fetcher.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(fetcher.fetchFreshCallCount, 1)
     }
 
     func testRequestHierarchyError() {
@@ -184,6 +477,105 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(swipeHistory.count, 1)
         XCTAssertEqual(swipeHistory.first?.startY, 200)
         XCTAssertEqual(swipeHistory.first?.endY, 500)
+    }
+
+    func testMultiFingerSwipeSuccess() {
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-swipe",
+            duration: 450,
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            offset: 30,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+        XCTAssertEqual(response.requestId, "test-multi-finger-swipe")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.startX, 100)
+        XCTAssertEqual(history.first?.startY, 600)
+        XCTAssertEqual(history.first?.endX, 100)
+        XCTAssertEqual(history.first?.endY, 200)
+        XCTAssertEqual(history.first?.fingerCount, 3)
+        XCTAssertEqual(history.first?.fingerSpacing, 30)
+        XCTAssertEqual(history.first?.duration ?? -1, 0.45, accuracy: 0.0001)
+    }
+
+    func testMultiFingerSwipePreservesFractionalSpacing() {
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-fractional-spacing",
+            duration: 450,
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            offset: 30.5,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.fingerSpacing ?? -1, 30.5, accuracy: 0.0001)
+    }
+
+    func testTwoFingerSwipeUsesMultiFingerHandler() {
+        let request = WebSocketRequest(
+            type: "request_two_finger_swipe",
+            requestId: "test-two-finger-swipe",
+            duration: 300,
+            x1: 10,
+            y1: 20,
+            x2: 30,
+            y2: 40
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertTrue(response.success ?? false)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+
+        let history = fakeGesturePerformer.getMultiFingerSwipeHistory()
+        XCTAssertEqual(history.count, 1)
+        XCTAssertEqual(history.first?.fingerCount, 2)
+        XCTAssertEqual(history.first?.fingerSpacing, 25)
+    }
+
+    func testMultiFingerSwipeFailureReturnsTypedError() {
+        fakeGesturePerformer.setFailure(
+            for: "multiFingerSwipe",
+            error: GesturePerformer.GestureError.gestureFailed(
+                "XCTest private multi-touch event synthesis classes are unavailable"
+            )
+        )
+        let request = WebSocketRequest(
+            type: "request_multi_finger_swipe",
+            requestId: "test-multi-finger-failure",
+            x1: 100,
+            y1: 600,
+            x2: 100,
+            y2: 200,
+            fingerCount: 3
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertFalse(response.success ?? true)
+        XCTAssertEqual(response.type, "multi_finger_swipe_result")
+        XCTAssertTrue(response.error?.contains("XCTest private multi-touch event synthesis classes are unavailable") ?? false)
     }
 
     // MARK: - Text Input Tests
@@ -335,6 +727,95 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(errorResponse.success, false)
     }
 
+    func testKeyboardDetectSuccess() {
+        fakeGesturePerformer.setKeyboardOpen(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-detect",
+            action: "detect"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "keyboard_result")
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["detect"])
+    }
+
+    func testKeyboardOpenSuccess() {
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-open",
+            action: "open"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["open"])
+    }
+
+    func testKeyboardOpenFailureWhenKeyboardRemainsClosed() {
+        fakeGesturePerformer.setNextKeyboardResult(false)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-open-failed",
+            action: "open"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.open, false)
+        XCTAssertEqual(response.error, "Keyboard did not open")
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["open"])
+    }
+
+    func testKeyboardCloseSuccess() {
+        fakeGesturePerformer.setKeyboardOpen(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-close",
+            action: "close"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.open, false)
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["close"])
+    }
+
+    func testKeyboardCloseFailureWhenKeyboardRemainsOpen() {
+        fakeGesturePerformer.setNextKeyboardResult(true)
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-close-failed",
+            action: "close"
+        )
+
+        guard let response = handleRequest(request, as: KeyboardResponse.self) else { return }
+
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.open, true)
+        XCTAssertEqual(response.error, "Keyboard did not close")
+        XCTAssertEqual(fakeGesturePerformer.getKeyboardHistory(), ["close"])
+    }
+
+    func testKeyboardMissingAction() {
+        let request = WebSocketRequest(
+            type: "request_keyboard",
+            requestId: "keyboard-missing"
+        )
+
+        guard let errorResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+        XCTAssertEqual(errorResponse.success, false)
+        XCTAssertEqual(errorResponse.type, "keyboard_result")
+        XCTAssertTrue(errorResponse.error?.contains("action") == true)
+    }
+
     func testClearTextWithoutResourceId() {
         let request = WebSocketRequest(
             type: "request_clear_text",
@@ -464,6 +945,92 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(childNames, ["pressHome", "switchForegroundApp", "updateApplication"])
     }
 
+    func testPressBackSuccess() {
+        let request = WebSocketRequest(
+            type: "request_press_back",
+            requestId: "back-123"
+        )
+
+        guard let backResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(backResponse.success, true)
+        XCTAssertEqual(backResponse.type, "press_back_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressBackCallCount(), 1)
+
+        guard let perfTimings = perfProvider.flush() else {
+            XCTFail("Expected perf timing data from handlePressBack")
+            return
+        }
+        XCTAssertEqual(perfTimings.count, 1)
+        XCTAssertEqual(perfTimings[0].name, "handlePressBack")
+        let childNames = perfTimings[0].children?.map { $0.name } ?? []
+        XCTAssertEqual(childNames, ["pressBack"])
+    }
+
+    func testPressButtonBackSuccess() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-back",
+            action: "back"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["back"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
+    func testPressButtonHomeSwitchesToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-home",
+            action: "home"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["home"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, ["com.apple.springboard"])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
+    }
+
+    func testPressButtonHardwareButtonDoesNotSwitchToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-volume-up",
+            action: "volume_up"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["volume_up"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
+    func testPressButtonPowerDoesNotSwitchToSpringBoard() {
+        let request = WebSocketRequest(
+            type: "request_press_button",
+            requestId: "button-power",
+            action: "power"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(response.type, "press_button_result")
+        XCTAssertEqual(fakeGesturePerformer.getPressButtonHistory(), ["power"])
+        XCTAssertEqual(fakeElementLocator.switchedBundleIds, [])
+        XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, [])
+    }
+
     func testLaunchAppSuccess() {
         // Default: app not running, no coldBoot → full launch
         fakeElementLocator.getAppStateResult = .notRunning
@@ -487,7 +1054,10 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(perfTimings.count, 1)
         XCTAssertEqual(perfTimings[0].name, "handleLaunchApp")
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            ["checkAppState", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"]
+        )
     }
 
     func testLaunchAppUsesActivateWhenRunningBackground() {
@@ -510,7 +1080,10 @@ final class CommandHandlerTests: XCTestCase {
             return
         }
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            ["checkAppState", "activateApp", "switchForegroundApp", "updateApplication", "awaitForeground"]
+        )
     }
 
     func testLaunchAppUsesActivateWhenRunningForeground() {
@@ -558,7 +1131,17 @@ final class CommandHandlerTests: XCTestCase {
             return
         }
         let childNames = perfTimings[0].children?.map { $0.name } ?? []
-        XCTAssertEqual(childNames, ["checkAppState", "terminateApp", "launchApp", "switchForegroundApp", "updateApplication", "awaitForeground"])
+        XCTAssertEqual(
+            childNames,
+            [
+                "checkAppState",
+                "terminateApp",
+                "launchApp",
+                "switchForegroundApp",
+                "updateApplication",
+                "awaitForeground",
+            ]
+        )
     }
 
     func testLaunchAppColdBootNotRunningSkipsTerminate() {
@@ -677,6 +1260,21 @@ final class CommandHandlerTests: XCTestCase {
         _ = commandHandler.handle(request)
 
         XCTAssertEqual(fakeGesturePerformer.updateApplicationHistory, ["com.apple.springboard"])
+    }
+
+    // MARK: - Shake Tests
+
+    func testShakeSuccess() {
+        let request = WebSocketRequest(
+            type: "request_shake",
+            requestId: "shake-123"
+        )
+
+        guard let shakeResponse = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(shakeResponse.success, true)
+        XCTAssertEqual(shakeResponse.type, "shake_result")
+        XCTAssertEqual(fakeGesturePerformer.getShakeCallCount(), 1)
     }
 
     // MARK: - Rotate Tests
@@ -874,6 +1472,205 @@ final class CommandHandlerTests: XCTestCase {
         XCTAssertEqual(json?["success"] as? Bool, true)
         XCTAssertNotNil(json?["enabled"])
     }
+
+    // MARK: - Highlight Tests
+
+    func testAddHighlightRendersShapeAndReturnsSuccess() {
+        let highlightManager = FakeHighlightOverlayManager()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.requestId, "highlight-request")
+        XCTAssertEqual(response.success, true)
+        XCTAssertNil(response.error)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+        XCTAssertEqual(highlightManager.showCalls.first?.id, "highlight-1")
+        XCTAssertEqual(highlightManager.showCalls.first?.shape.type, "box")
+    }
+
+    func testAddHighlightUsesSdkBridgeBeforeRunnerOverlay() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = true
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(sdkClient.lastHighlight?.id, "highlight-1")
+        XCTAssertEqual(sdkClient.lastHighlight?.shape.type, "box")
+        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+    }
+
+    func testAddHighlightFallsBackWithoutPostingWhenSdkBridgeTargetsDifferentBundle() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = true
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.fetchServerInfoCallCount, 1)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 0)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+    }
+
+    func testAddHighlightFallsBackToRunnerOverlayWhenSdkBridgeUnavailable() {
+        let highlightManager = FakeHighlightOverlayManager()
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = false
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, true)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(highlightManager.showCalls.count, 1)
+    }
+
+    func testAddHighlightReturnsClearErrorWhenSdkAndRunnerOverlayUnavailable() {
+        let highlightManager = FakeHighlightOverlayManager()
+        highlightManager.showResult = false
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = false
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient,
+            highlightOverlayManager: highlightManager
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(
+            response.error,
+            "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled."
+        )
+    }
+
+    func testAddHighlightRequiresShape() {
+        let highlightManager = FakeHighlightOverlayManager()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            highlightOverlayManager: highlightManager
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1"
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.requestId, "highlight-request")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(response.error, "add_highlight requires a shape")
+        XCTAssertTrue(highlightManager.showCalls.isEmpty)
+    }
+}
+
+private final class FakeHighlightOverlayManager: HighlightOverlayManaging {
+    var showResult = true
+    var showCalls: [(id: String, shape: HighlightShape)] = []
+
+    func show(id: String, shape: HighlightShape) -> Bool {
+        showCalls.append((id, shape))
+        return showResult
+    }
 }
 
 // MARK: - Storage Command Tests
@@ -912,7 +1709,9 @@ final class StorageCommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         handleRequest(commandHandler, request, as: T.self, file: file, line: line)
     }
 
@@ -922,7 +1721,9 @@ final class StorageCommandHandlerTests: XCTestCase {
         as _: T.Type = T.self,
         file: StaticString = #file,
         line: UInt = #line
-    ) -> T? {
+    )
+        -> T?
+    {
         let response = handler.handle(request)
         guard let typed = response as? T else {
             XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
@@ -933,7 +1734,7 @@ final class StorageCommandHandlerTests: XCTestCase {
 
     // MARK: - List Preference Files
 
-    func testListPreferenceFilesReturnsSuites() throws {
+    func testListPreferenceFilesReturnsSuites() {
         fakeStorage.setSuites([
             StorageSuiteInfo(name: "Standard", displayName: "Standard", entryCount: 5),
             StorageSuiteInfo(name: "group.com.example", displayName: "group.com.example", entryCount: 3),
@@ -994,7 +1795,7 @@ final class StorageCommandHandlerTests: XCTestCase {
             requestId: "get-std",
             fileName: "Standard"
         )
-        let _ = commandHandler.handle(request)
+        _ = commandHandler.handle(request)
         XCTAssertEqual(fakeStorage.getEntriesHistory, [nil])
     }
 
@@ -1119,7 +1920,8 @@ final class StorageCommandHandlerTests: XCTestCase {
         )
 
         let request = WebSocketRequest(type: "list_preference_files", requestId: "nil-1")
-        guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self) else { return }
+        guard let filesResponse = handleRequest(handlerNoStorage, request, as: StorageFilesResponse.self)
+        else { return }
 
         XCTAssertFalse(filesResponse.success)
         XCTAssertTrue(filesResponse.error?.contains("not available") ?? false)
@@ -1141,5 +1943,124 @@ final class StorageCommandHandlerTests: XCTestCase {
 
         XCTAssertFalse(wsResponse.success ?? true)
         XCTAssertTrue(wsResponse.error?.contains("parse") ?? false)
+    }
+}
+
+// MARK: - Database Command Tests
+
+final class DatabaseCommandHandlerTests: XCTestCase {
+    var fakeTimeProvider: FakeTimeProvider!
+    var perfProvider: PerfProvider!
+    var fakeElementLocator: FakeElementLocator!
+    var fakeGesturePerformer: FakeGesturePerformer!
+    var fakeSdkHierarchy: FakeSdkHierarchyFetcher!
+    var fakeDatabase: FakeSdkDatabaseFetcher!
+    var commandHandler: CommandHandler!
+
+    override func setUp() {
+        super.setUp()
+        fakeTimeProvider = FakeTimeProvider(initialTime: 1000)
+        perfProvider = PerfProvider.createForTesting(timeProvider: fakeTimeProvider)
+        fakeElementLocator = FakeElementLocator()
+        fakeGesturePerformer = FakeGesturePerformer()
+        fakeSdkHierarchy = FakeSdkHierarchyFetcher()
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.example.app"))
+        fakeDatabase = FakeSdkDatabaseFetcher()
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: fakeSdkHierarchy,
+            sdkDatabaseClient: fakeDatabase
+        )
+    }
+
+    override func tearDown() {
+        perfProvider.clear()
+        PerfProvider.resetInstance()
+        super.tearDown()
+    }
+
+    private func handleRequest<T>(
+        _ request: WebSocketRequest,
+        as _: T.Type = T.self,
+        file: StaticString = #file,
+        line: UInt = #line
+    )
+        -> T?
+    {
+        let response = commandHandler.handle(request)
+        guard let typed = response as? T else {
+            XCTFail("Expected \(T.self), got \(Swift.type(of: response))", file: file, line: line)
+            return nil
+        }
+        return typed
+    }
+
+    func testExecuteSqlRelaysQueryToSdkDatabaseClient() {
+        fakeDatabase.executeSqlResult = SdkExecuteSqlResult(
+            queryType: "query",
+            columns: ["id", "payload"],
+            rows: [["1", "0xCAFE"]],
+            rowsAffected: 0
+        )
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-1",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT id, payload FROM notes"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertTrue(response.success)
+        XCTAssertEqual(response.type, "execute_sql_result")
+        XCTAssertEqual(response.requestId, "sql-1")
+        XCTAssertEqual(response.queryType, "query")
+        XCTAssertEqual(response.columns, ["id", "payload"])
+        XCTAssertEqual(response.rows, [["1", "0xCAFE"]])
+        XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 1)
+        XCTAssertEqual(fakeDatabase.executeSqlCalls[0].databasePath, "/app/Documents/app.db")
+        XCTAssertEqual(fakeDatabase.executeSqlCalls[0].query, "SELECT id, payload FROM notes")
+    }
+
+    func testExecuteSqlReturnsActionableErrorWhenSdkDatabaseUnavailable() {
+        fakeDatabase.executeSqlError = SdkDatabaseError
+            .unavailable(
+                "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+            )
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-disabled",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertTrue(response.error?.contains("setEnabled(true)") ?? false)
+    }
+
+    func testExecuteSqlRejectsSdkServerBundleMismatchBeforeDatabaseCall() {
+        fakeSdkHierarchy.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
+
+        let request = WebSocketRequest(
+            type: "execute_sql",
+            requestId: "sql-mismatch",
+            appId: "com.example.app",
+            databasePath: "/app/Documents/app.db",
+            query: "SELECT 1"
+        )
+
+        guard let response = handleRequest(request, as: ExecuteSqlResponse.self) else { return }
+
+        XCTAssertFalse(response.success)
+        XCTAssertTrue(response.error?.contains("does not match requested appId") ?? false)
+        XCTAssertEqual(fakeDatabase.executeSqlCalls.count, 0)
     }
 }

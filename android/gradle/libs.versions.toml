@@ -5,13 +5,13 @@
 [versions]
 # Build tool versions
 build-android-buildTools = "36.0.0"        # Used in playground Android modules
-build-android-compileSdk = "36"            # Used in playground Android modules
+build-android-compileSdk = "37"            # Used in playground Android modules
 build-android-minSdk = "24"                # Used in playground Android modules
 build-android-targetSdk = "36"             # Used in playground Android modules
 build-android-agp = "9.2.1"
 
 # Kotlin versions
-build-kotlin = "2.3.21"
+build-kotlin = "2.4.0"
 build-kotlin-language = "2.3"              # Used in all Kotlin modules
 build-kotlin-coroutines = "1.11.0"
 
@@ -23,14 +23,14 @@ build-gradle-doctor = "0.10.0"
 build-gradle-sortDependencies = "0.14"
 
 # AndroidX versions
-androidx-core = "1.18.0"
+androidx-core = "1.19.0"
 androidx-activity-compose = "1.13.0"
 androidx-compose-bom = "2026.05.01"
-androidx-lifecycle = "2.10.0"
+androidx-lifecycle = "2.11.0"
 androidx-startup = "1.2.0"
 
 # Media library versions
-coil = "3.4.0"
+coil = "3.5.0"
 core-splashscreen = "1.2.0"
 kotlinx-coroutines-test = "1.11.0"
 media3 = "1.10.1"
@@ -39,12 +39,12 @@ media3 = "1.10.1"
 clikt = "5.1.0"
 junit-jupiter-api = "6.1.0"
 junit-vintage-engine = "6.1.0"
-koog-agents = "0.8.0"
-mockk = "1.14.9"
+koog-agents = "1.0.0"
+mockk = "1.14.11"
 mockk-android = "1.14.4"
 robolectric = "4.16.1"
 snakeyaml = "2.6"
-json-schema-validator = "3.0.2"
+json-schema-validator = "3.0.3"
 test-junit = "4.13.2"
 turbine = "1.2.1"
 test-androidx-junit = "1.3.0"
@@ -57,17 +57,17 @@ navigation3 = "1.1.2"              # Used in playground app
 kotlinx-serialization-json = "1.11.0"
 appcompat = "1.7.1"
 material = "1.14.0"
-lifecycleViewmodelNavigation3Android = "2.10.0"
+lifecycleViewmodelNavigation3Android = "2.11.0"
 
 # Network and server libraries
 ktor = "3.5.0"
-okhttp = "5.3.2"
+okhttp = "5.4.0"
 
 # Publishing
 mavenpublish = "0.36.0"
 dokka = "2.2.0"
-compose-multiplatform = "1.11.0"
-metro = "1.1.1"
+compose-multiplatform = "1.11.1"
+metro = "1.2.0"
 
 [plugins]
 compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "build-kotlin" }

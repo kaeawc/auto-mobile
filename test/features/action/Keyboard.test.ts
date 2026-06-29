@@ -1,5 +1,6 @@
-import { beforeEach, describe, expect, test } from "bun:test";
+import { beforeEach, describe, expect, spyOn, test } from "bun:test";
 import { Keyboard } from "../../../src/features/action/Keyboard";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { BootedDevice, ViewHierarchyResult } from "../../../src/models";
 import { AdbClientFactory } from "../../../src/utils/android-cmdline-tools/AdbClientFactory";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
@@ -16,6 +17,12 @@ describe("Keyboard", () => {
     deviceId: "test-device",
     platform: "android",
     name: "Test Device"
+  };
+
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-device",
+    platform: "ios",
+    name: "iPhone"
   };
 
   const baseHierarchy = (): ViewHierarchyResult => ({
@@ -52,7 +59,7 @@ describe("Keyboard", () => {
         $: {
           focused: "true",
           class: "android.widget.EditText",
-          bounds: "[10,20][210,120]"
+          bounds: { left: 10, top: 20, right: 210, bottom: 120 }
         }
       }
     }
@@ -121,5 +128,69 @@ describe("Keyboard", () => {
     expect(result.success).toBe(true);
     expect(result.open).toBe(false);
     expect(fakeAdb.wasCommandExecuted("shell input keyevent KEYCODE_BACK")).toBe(true);
+  });
+
+  test("ios detect delegates to CtrlProxy keyboard request", async () => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async (action: string) => ({
+        success: true,
+        open: action === "detect",
+        totalTimeMs: 5
+      })
+    } as any);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("detect");
+
+      expect(result.success).toBe(true);
+      expect(result.open).toBe(true);
+      expect(getInstanceSpy).toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios close returns CtrlProxy failure", async () => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({
+        success: false,
+        open: true,
+        totalTimeMs: 5,
+        error: "No keyboard focus"
+      })
+    } as any);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("close");
+
+      expect(result.success).toBe(false);
+      expect(result.open).toBe(true);
+      expect(result.error).toBe("No keyboard focus");
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios open fails when keyboard remains closed", async () => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestKeyboard: async () => ({
+        success: true,
+        open: false,
+        totalTimeMs: 5
+      })
+    } as any);
+
+    try {
+      const keyboard = new Keyboard(iosDevice, fakeAdbFactory, fakeHierarchy, fakeTimer);
+      const result = await keyboard.execute("open");
+
+      expect(result.success).toBe(false);
+      expect(result.open).toBe(false);
+      expect(result.error).toBe("Keyboard did not open");
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
   });
 });

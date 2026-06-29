@@ -1,14 +1,8 @@
-import os from "node:os";
-import path from "node:path";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { PushSubscriptionSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { PushSubscriptionSocketServer, getSocketPath } from "./socketServer/index";
 import type { FailureType, FailureSeverity } from "../server/failuresResources";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "failures-push.sock"),
-  externalPath: "/tmp/auto-mobile-failures-push.sock",
-};
+import { FAILURES_PUSH_SOCKET_CONFIG } from "./daemonFiles";
 
 /**
  * Failure notification data pushed to clients
@@ -54,7 +48,7 @@ export class FailuresPushSocketServer extends PushSubscriptionSocketServer<
   FailureFilter,
   FailureNotificationPush
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(FAILURES_PUSH_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "FailuresPush");
   }
 
@@ -94,6 +88,10 @@ let socketServer: FailuresPushSocketServer | null = null;
 
 export function getFailuresPushServer(): FailuresPushSocketServer | null {
   return socketServer;
+}
+
+export function getFailuresPushSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(FAILURES_PUSH_SOCKET_CONFIG);
 }
 
 export async function startFailuresPushSocketServer(): Promise<FailuresPushSocketServer> {

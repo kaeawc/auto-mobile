@@ -26,3 +26,15 @@ export interface DeepLinkResult {
     rawOutput?: string;
     error?: string;
 }
+
+/**
+ * Minimal shape of an iOS app's `Info.plist` relevant to deep-link discovery.
+ * Custom URL schemes are declared under `CFBundleURLTypes`; document/MIME types
+ * under `CFBundleDocumentTypes`. Universal-link hosts are NOT here — they live in
+ * the code-signing entitlements (`com.apple.developer.associated-domains`).
+ */
+export interface IosInfoPlist {
+    CFBundleURLTypes?: { CFBundleURLName?: string; CFBundleURLSchemes?: string[] }[];
+    CFBundleDocumentTypes?: { LSItemContentTypes?: string[] }[];
+    LSApplicationQueriesSchemes?: string[];
+}

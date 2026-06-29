@@ -206,4 +206,85 @@ describe("RestoreSnapshotIos", () => {
     expect(simctl.getMethodCalls("executeCommand")).toHaveLength(0);
     expect(simctl.getMethodCalls("terminateApp")).toHaveLength(0);
   });
+
+  it("restores iOS settings via per-key defaults write and simctl ui", async () => {
+    const snapshotName = "settings-restore";
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+        ui: { appearance: "dark", contentSize: "large" },
+      },
+    };
+
+    const restoreSnapshot = new RestoreSnapshotIos(device, simctl as any, store);
+    await restoreSnapshot.execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const commands = simctl.getMethodCalls("executeCommand").map(c => String(c.command));
+    expect(commands).toContain(
+      `spawn "${device.deviceId}" defaults write ".GlobalPreferences" "AppleLocale" "nl_BE"`
+    );
+    expect(commands).toContain(`ui "${device.deviceId}" appearance dark`);
+    expect(commands).toContain(`ui "${device.deviceId}" content_size "large"`);
+  });
+
+  it("skips settings restore when includeSettings is false", async () => {
+    const snapshotName = "settings-skip";
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: false,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+      },
+    };
+
+    const restoreSnapshot = new RestoreSnapshotIos(device, simctl as any, store);
+    await restoreSnapshot.execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const commands = simctl.getMethodCalls("executeCommand").map(c => String(c.command));
+    expect(commands.some(c => c.includes("defaults write"))).toBe(false);
+  });
+
+  it("continues restoring remaining settings when one key write fails (non-fatal)", async () => {
+    const snapshotName = "settings-partial";
+    simctl.setCommandError(
+      `spawn "${device.deviceId}" defaults write ".GlobalPreferences" "AppleLocale" "nl_BE"`,
+      new Error("write failed")
+    );
+    const manifest: DeviceSnapshotManifest = {
+      snapshotName,
+      timestamp: new Date().toISOString(),
+      deviceId: device.deviceId,
+      deviceName: device.name,
+      platform: "ios",
+      snapshotType: "app_data",
+      includeAppData: false,
+      includeSettings: true,
+      iosSettings: {
+        values: { ".GlobalPreferences/AppleLocale": "nl_BE" },
+        ui: { appearance: "light" },
+      },
+    };
+
+    const restoreSnapshot = new RestoreSnapshotIos(device, simctl as any, store);
+    // Should not throw despite the failed key write.
+    await restoreSnapshot.execute({ snapshotName, manifest, useVmSnapshot: false });
+
+    const commands = simctl.getMethodCalls("executeCommand").map(c => String(c.command));
+    // UI restore still runs after the failed defaults write.
+    expect(commands).toContain(`ui "${device.deviceId}" appearance light`);
+  });
 });

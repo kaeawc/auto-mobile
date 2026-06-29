@@ -1,7 +1,282 @@
 [
   {
+    "name": "accessibilityFocus",
+    "description": "Set or clear the Android TalkBack accessibility-focus cursor on a target element (Android only). Provide one selector: resourceId, text, or contentDesc. action defaults to 'set'; pass 'clear' to clear the cursor.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "action": {
+          "description": "Set (default) or clear the accessibility (TalkBack) focus cursor",
+          "type": "string",
+          "enum": [
+            "set",
+            "clear"
+          ]
+        },
+        "resourceId": {
+          "description": "Resource ID of the target element, e.g. com.example:id/title",
+          "type": "string"
+        },
+        "text": {
+          "description": "Text of the target element (resolved to a resource-id via the element finder)",
+          "type": "string"
+        },
+        "contentDesc": {
+          "description": "Content description of the target element (resolved to a resource-id)",
+          "type": "string"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session ID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Plan device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "additionalProperties": false
+    },
+    "outputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "success": {
+          "type": "boolean"
+        },
+        "error": {
+          "type": "string"
+        },
+        "warning": {
+          "type": "string"
+        },
+        "focusedElement": {
+          "type": "object",
+          "properties": {
+            "bounds": {
+              "type": "object",
+              "properties": {
+                "left": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "top": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "right": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "bottom": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerX": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                },
+                "centerY": {
+                  "type": "integer",
+                  "minimum": -9007199254740991,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": [
+                "left",
+                "top",
+                "right",
+                "bottom"
+              ],
+              "additionalProperties": false
+            },
+            "text": {
+              "type": "string"
+            },
+            "resource-id": {
+              "type": "string"
+            },
+            "content-desc": {
+              "type": "string"
+            },
+            "class": {
+              "type": "string"
+            },
+            "package": {
+              "type": "string"
+            },
+            "checkable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "checked": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "clickable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "enabled": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focusable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "accessibility-focused": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "scrollable": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            },
+            "selected": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "string",
+                  "const": "true"
+                },
+                {
+                  "type": "string",
+                  "const": "false"
+                }
+              ]
+            }
+          },
+          "required": [
+            "bounds"
+          ],
+          "additionalProperties": {}
+        }
+      },
+      "required": [
+        "success"
+      ],
+      "additionalProperties": {}
+    }
+  },
+  {
     "name": "biometricAuth",
-    "description": "Simulate biometric authentication (fingerprint) on Android emulators, or inject a deterministic result via the AutoMobile SDK on any device. Supports match/fail/cancel/error actions. The SDK broadcast path requires the app to integrate AutoMobileBiometrics.consumeOverride().",
+    "description": "Simulate biometric authentication on Android emulators (fingerprint) and the iOS Simulator (Touch ID / Face ID via BiometricKit), or inject a deterministic result via the AutoMobile SDK on any Android device. Supports match/fail on both platforms; cancel/error require the AutoMobileBiometrics SDK (Android only). Physical iOS devices are not supported (no public biometric-injection API).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -17,7 +292,7 @@
           "description": "Biometric action: 'match' triggers successful authentication, 'fail' simulates a non-matching biometric, 'cancel' cancels the prompt, 'error' injects a hard error (requires AutoMobileBiometrics SDK integration in the app)."
         },
         "modality": {
-          "description": "Biometric modality (default: 'any'). Currently only 'fingerprint' is reliably supported on Android emulators. 'face' is not consistently supported.",
+          "description": "Biometric modality (default: 'any'). Android emulators reliably support only 'fingerprint'. iOS Simulator supports both: 'fingerprint' -> Touch ID, 'face' -> Face ID, 'any' posts both (the simulator's non-enrolled biometry is a no-op).",
           "type": "string",
           "enum": [
             "any",
@@ -46,7 +321,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -54,7 +329,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -115,12 +390,12 @@
           "minLength": 1
         },
         "restartApp": {
-          "description": "Bundle ID of app to terminate and relaunch after locale change (iOS only). Running apps cache locale at launch, so restart is needed for the app to pick up new settings.",
+          "description": "iOS bundle ID to relaunch after locale change",
           "type": "string",
           "minLength": 1
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -128,7 +403,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -158,7 +433,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -166,7 +441,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -189,17 +464,18 @@
       "properties": {
         "action": {
           "type": "string",
+          "description": "Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content",
           "enum": [
             "copy",
             "paste",
             "clear",
             "get"
-          ],
-          "description": "Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"
+          ]
         },
         "text": {
-          "description": "Text to copy (required for 'copy' action)",
-          "type": "string"
+          "type": "string",
+          "minLength": 1,
+          "description": "Text to copy (required for 'copy' action)"
         },
         "platform": {
           "type": "string",
@@ -210,7 +486,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -218,7 +494,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -230,7 +506,22 @@
         "action",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "copy"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "text"
+        ]
+      }
     }
   },
   {
@@ -305,15 +596,16 @@
       "properties": {
         "action": {
           "type": "string",
+          "description": "Action to perform",
           "enum": [
             "capture",
             "restore"
-          ],
-          "description": "Action to perform"
+          ]
         },
         "snapshotName": {
           "description": "Name for the snapshot",
-          "type": "string"
+          "type": "string",
+          "minLength": 1
         },
         "includeAppData": {
           "description": "Include app data directories in snapshot",
@@ -363,7 +655,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -371,7 +663,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -382,7 +674,22 @@
       "required": [
         "action"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "action": {
+            "const": "restore"
+          }
+        },
+        "required": [
+          "action"
+        ]
+      },
+      "then": {
+        "required": [
+          "snapshotName"
+        ]
+      }
     }
   },
   {
@@ -508,7 +815,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -516,7 +823,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -569,7 +876,7 @@
           "type": "string"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "devices": {
@@ -848,7 +1155,7 @@
   },
   {
     "name": "getAppPermissions",
-    "description": "Read app permission state on Android devices and iOS simulators",
+    "description": "Read app permission state",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -858,7 +1165,7 @@
           "description": "App package ID or bundle identifier"
         },
         "permissions": {
-          "description": "Optional permission names or simulator privacy services to query. If omitted, returns known permission rows.",
+          "description": "Optional permissions or simulator privacy services to query",
           "type": "array",
           "items": {
             "type": "string",
@@ -874,7 +1181,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -882,7 +1189,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -916,7 +1223,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -924,7 +1231,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -964,7 +1271,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -972,7 +1279,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1004,7 +1311,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1012,7 +1319,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1673,7 +1980,7 @@
           ]
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1681,7 +1988,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         }
       },
@@ -1707,7 +2014,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1715,7 +2022,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1757,7 +2064,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1765,7 +2072,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1782,7 +2089,7 @@
   },
   {
     "name": "inputText",
-    "description": "Input text",
+    "description": "Input text. The optional mode field is Android-only and ignored on iOS.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -1791,6 +2098,15 @@
           "type": "string",
           "minLength": 1,
           "description": "Text to input"
+        },
+        "mode": {
+          "description": "(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default.",
+          "type": "string",
+          "enum": [
+            "a11y",
+            "eventLast",
+            "eventAll"
+          ]
         },
         "imeAction": {
           "description": "IME action after input",
@@ -1817,7 +2133,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1825,7 +2141,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1860,7 +2176,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1868,7 +2184,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1907,7 +2223,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -1915,7 +2231,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -1999,7 +2315,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -2007,7 +2323,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -2197,7 +2513,7 @@
           "type": "boolean"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -2205,7 +2521,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -2217,1711 +2533,6 @@
         "platform"
       ],
       "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "updatedAt": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "number"
-            }
-          ]
-        },
-        "screenSize": {
-          "type": "object",
-          "properties": {
-            "width": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "height": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "width",
-            "height"
-          ],
-          "additionalProperties": false
-        },
-        "systemInsets": {
-          "type": "object",
-          "properties": {
-            "top": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "right": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "bottom": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "left": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": [
-            "top",
-            "right",
-            "bottom",
-            "left"
-          ],
-          "additionalProperties": false
-        },
-        "rotation": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "viewHierarchy": {},
-        "activeWindow": {
-          "type": "object",
-          "properties": {
-            "appId": {
-              "type": "string"
-            },
-            "activityName": {
-              "type": "string"
-            },
-            "layoutSeqSum": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "type": {
-              "type": "string"
-            }
-          },
-          "additionalProperties": {}
-        },
-        "elements": {
-          "type": "object",
-          "properties": {
-            "clickable": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "text": {
-                    "type": "string"
-                  },
-                  "resource-id": {
-                    "type": "string"
-                  },
-                  "content-desc": {
-                    "type": "string"
-                  },
-                  "class": {
-                    "type": "string"
-                  },
-                  "package": {
-                    "type": "string"
-                  },
-                  "checkable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "checked": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "clickable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "enabled": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focusable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "accessibility-focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "scrollable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "selected": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "bounds"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "scrollable": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "text": {
-                    "type": "string"
-                  },
-                  "resource-id": {
-                    "type": "string"
-                  },
-                  "content-desc": {
-                    "type": "string"
-                  },
-                  "class": {
-                    "type": "string"
-                  },
-                  "package": {
-                    "type": "string"
-                  },
-                  "checkable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "checked": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "clickable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "enabled": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focusable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "accessibility-focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "scrollable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "selected": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "bounds"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "text": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "text": {
-                    "type": "string"
-                  },
-                  "resource-id": {
-                    "type": "string"
-                  },
-                  "content-desc": {
-                    "type": "string"
-                  },
-                  "class": {
-                    "type": "string"
-                  },
-                  "package": {
-                    "type": "string"
-                  },
-                  "checkable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "checked": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "clickable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "enabled": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focusable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "accessibility-focused": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "scrollable": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  },
-                  "selected": {
-                    "anyOf": [
-                      {
-                        "type": "boolean"
-                      },
-                      {
-                        "type": "string",
-                        "const": "true"
-                      },
-                      {
-                        "type": "string",
-                        "const": "false"
-                      }
-                    ]
-                  }
-                },
-                "required": [
-                  "bounds"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "media": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "viewId": {
-                    "type": "string"
-                  },
-                  "className": {
-                    "type": "string"
-                  },
-                  "mediaType": {
-                    "type": "string",
-                    "enum": [
-                      "image",
-                      "video",
-                      "loading",
-                      "mixed"
-                    ]
-                  },
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "number"
-                      },
-                      "top": {
-                        "type": "number"
-                      },
-                      "right": {
-                        "type": "number"
-                      },
-                      "bottom": {
-                        "type": "number"
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "contentDescription": {
-                    "type": "string"
-                  },
-                  "resourceId": {
-                    "type": "string"
-                  },
-                  "sourceUrl": {
-                    "type": "string"
-                  },
-                  "isLoading": {
-                    "type": "boolean"
-                  }
-                },
-                "required": [
-                  "className",
-                  "mediaType",
-                  "bounds"
-                ],
-                "additionalProperties": false
-              }
-            }
-          },
-          "required": [
-            "clickable",
-            "scrollable",
-            "text",
-            "media"
-          ],
-          "additionalProperties": false
-        },
-        "selectedElements": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "text": {
-                "type": "string"
-              },
-              "resourceId": {
-                "type": "string"
-              },
-              "contentDesc": {
-                "type": "string"
-              },
-              "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "top": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "right": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "bottom": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerX": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerY": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
-                ],
-                "additionalProperties": false
-              },
-              "indexInMatches": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "totalMatches": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "selectionStrategy": {
-                "type": "string"
-              },
-              "selectedState": {
-                "type": "object",
-                "properties": {
-                  "method": {
-                    "type": "string",
-                    "enum": [
-                      "accessibility",
-                      "visual"
-                    ]
-                  },
-                  "confidence": {
-                    "type": "number"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "method",
-                  "confidence"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": {}
-          }
-        },
-        "focusedElement": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        },
-        "accessibilityFocusedElement": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        },
-        "intentChooserDetected": {
-          "type": "boolean"
-        },
-        "notificationPermissionDetected": {
-          "type": "boolean"
-        },
-        "wakefulness": {
-          "type": "string",
-          "enum": [
-            "Awake",
-            "Asleep",
-            "Dozing"
-          ]
-        },
-        "userId": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "backStack": {},
-        "error": {
-          "type": "string"
-        },
-        "awaitedElement": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        },
-        "awaitDuration": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "awaitTimeout": {
-          "type": "boolean"
-        },
-        "perfTiming": {},
-        "perfTimingTruncated": {
-          "type": "boolean"
-        },
-        "gfxMetrics": {},
-        "displayedTimeMetrics": {
-          "type": "array",
-          "items": {}
-        },
-        "performanceAudit": {},
-        "accessibilityAudit": {},
-        "freshness": {
-          "type": "object",
-          "properties": {
-            "requestedAfter": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "actualTimestamp": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "isFresh": {
-              "type": "boolean"
-            },
-            "staleDurationMs": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "warning": {
-              "type": "string"
-            }
-          },
-          "required": [
-            "isFresh"
-          ],
-          "additionalProperties": {}
-        },
-        "recompositionSummary": {},
-        "predictions": {
-          "type": "object",
-          "properties": {
-            "likelyActions": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "action": {
-                    "type": "string"
-                  },
-                  "target": {
-                    "type": "object",
-                    "properties": {
-                      "text": {
-                        "type": "string"
-                      },
-                      "elementId": {
-                        "type": "string"
-                      },
-                      "contentDesc": {
-                        "type": "string"
-                      },
-                      "container": {
-                        "type": "object",
-                        "properties": {
-                          "text": {
-                            "type": "string"
-                          },
-                          "elementId": {
-                            "type": "string"
-                          },
-                          "contentDesc": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      },
-                      "lookFor": {
-                        "type": "object",
-                        "properties": {
-                          "text": {
-                            "type": "string"
-                          },
-                          "elementId": {
-                            "type": "string"
-                          },
-                          "contentDesc": {
-                            "type": "string"
-                          }
-                        },
-                        "additionalProperties": false
-                      }
-                    },
-                    "additionalProperties": {}
-                  },
-                  "predictedScreen": {
-                    "type": "string"
-                  },
-                  "predictedElements": {
-                    "type": "array",
-                    "items": {
-                      "type": "string"
-                    }
-                  },
-                  "confidence": {
-                    "type": "number"
-                  }
-                },
-                "required": [
-                  "action",
-                  "target",
-                  "predictedScreen",
-                  "confidence"
-                ],
-                "additionalProperties": {}
-              }
-            },
-            "interactableElements": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "elementId": {
-                    "type": "string"
-                  },
-                  "elementText": {
-                    "type": "string"
-                  },
-                  "elementContentDesc": {
-                    "type": "string"
-                  },
-                  "predictedOutcome": {
-                    "type": "object",
-                    "properties": {
-                      "screenName": {
-                        "type": "string"
-                      },
-                      "basedOn": {
-                        "type": "string",
-                        "enum": [
-                          "navigation_graph"
-                        ]
-                      }
-                    },
-                    "required": [
-                      "screenName",
-                      "basedOn"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "additionalProperties": {}
-              }
-            }
-          },
-          "required": [
-            "likelyActions",
-            "interactableElements"
-          ],
-          "additionalProperties": {}
-        },
-        "accessibilityState": {
-          "type": "object",
-          "properties": {
-            "enabled": {
-              "type": "boolean"
-            },
-            "service": {
-              "type": "string",
-              "enum": [
-                "talkback",
-                "voiceover",
-                "unknown"
-              ]
-            }
-          },
-          "required": [
-            "enabled",
-            "service"
-          ],
-          "additionalProperties": {}
-        },
-        "rawViewHierarchy": {}
-      },
-      "required": [
-        "updatedAt",
-        "screenSize",
-        "systemInsets"
-      ],
-      "additionalProperties": {}
     }
   },
   {
@@ -3944,7 +2555,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -3952,7 +2563,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -3998,7 +2609,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4006,7 +2617,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4103,7 +2714,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4111,7 +2722,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4128,7 +2739,7 @@
   },
   {
     "name": "postNotification",
-    "description": "Post a notification from the app-under-test when AutoMobile SDK hooks are installed.",
+    "description": "Post a notification: on Android, from the app-under-test when AutoMobile SDK hooks are installed; on the iOS Simulator, deliver a simulated remote push to the given bundle id via 'simctl push' (requires appId; physical iOS devices unsupported).",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4156,7 +2767,7 @@
           "type": "string"
         },
         "actions": {
-          "description": "Action buttons to include",
+          "description": "Action buttons to include (Android only)",
           "type": "array",
           "items": {
             "type": "object",
@@ -4180,19 +2791,24 @@
           }
         },
         "channelId": {
-          "description": "Notification channel ID (Android only)",
+          "description": "Notification channel ID (Android); reused as the APNs category on iOS",
           "type": "string"
+        },
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."
         },
         "platform": {
           "type": "string",
+          "description": "Target platform",
           "enum": [
-            "android",
-            "ios"
-          ],
-          "description": "Target platform"
+            "ios",
+            "android"
+          ]
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4200,7 +2816,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4213,12 +2829,27 @@
         "body",
         "platform"
       ],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "properties": {
+          "platform": {
+            "const": "ios"
+          }
+        },
+        "required": [
+          "platform"
+        ]
+      },
+      "then": {
+        "required": [
+          "appId"
+        ]
+      }
     }
   },
   {
     "name": "pressButton",
-    "description": "Press hardware button",
+    "description": "Press device or navigation button",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4245,7 +2876,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4253,7 +2884,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4264,6 +2895,79 @@
       "required": [
         "button",
         "platform"
+      ],
+      "additionalProperties": false
+    }
+  },
+  {
+    "name": "putAppFile",
+    "description": "Write a host file, UTF-8 text, or base64 content into an app container. Prefer this over platform-specific copy commands.",
+    "inputSchema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "type": "object",
+      "properties": {
+        "appId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "App identifier (Android package name or iOS bundle ID)"
+        },
+        "container": {
+          "type": "string",
+          "enum": [
+            "documents",
+            "library",
+            "cache",
+            "tmp",
+            "externalFiles"
+          ],
+          "description": "Logical app container"
+        },
+        "sourcePath": {
+          "description": "Local host file path to copy",
+          "type": "string",
+          "minLength": 1
+        },
+        "contentText": {
+          "description": "Inline UTF-8 text content to write",
+          "type": "string"
+        },
+        "contentBase64": {
+          "description": "Inline base64-encoded binary content",
+          "type": "string"
+        },
+        "destinationPath": {
+          "type": "string",
+          "description": "Relative destination path inside the container"
+        },
+        "platform": {
+          "type": "string",
+          "enum": [
+            "android",
+            "ios"
+          ],
+          "description": "Target platform"
+        },
+        "sessionUuid": {
+          "description": "Session ID",
+          "type": "string"
+        },
+        "keepScreenAwake": {
+          "description": "Keep device awake",
+          "type": "boolean"
+        },
+        "device": {
+          "description": "Plan device label",
+          "type": "string"
+        },
+        "deviceId": {
+          "description": "Device ID",
+          "type": "string"
+        }
+      },
+      "required": [
+        "appId",
+        "container",
+        "destinationPath"
       ],
       "additionalProperties": false
     }
@@ -4284,7 +2988,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4292,7 +2996,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4405,7 +3109,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4413,7 +3117,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4444,7 +3148,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4452,7 +3156,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4490,7 +3194,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4498,7 +3202,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4533,7 +3237,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4550,7 +3254,7 @@
   },
   {
     "name": "setAppPermissions",
-    "description": "Grant, revoke, reset, or configure app permissions on Android devices and iOS simulators",
+    "description": "Grant, revoke, reset, or configure app permissions",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4560,7 +3264,7 @@
           "description": "App package ID or bundle identifier"
         },
         "action": {
-          "description": "Permission action. Defaults to grant. Android runtime permissions currently support grant only; iOS simulators support grant/revoke/reset.",
+          "description": "Permission action; defaults to grant",
           "type": "string",
           "enum": [
             "grant",
@@ -4603,7 +3307,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4611,7 +3315,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4627,7 +3331,7 @@
   },
   {
     "name": "setDeviceState",
-    "description": "Set device-level state such as Do Not Disturb",
+    "description": "Set device-level state such as Do Not Disturb. Android supports off/none/priority/alarms; iOS simulators support binary DND only.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
@@ -4637,11 +3341,11 @@
           "type": "object",
           "properties": {
             "enabled": {
-              "description": "Enable or disable Do Not Disturb. If true without mode, uses the strictest available DND mode.",
+              "description": "Enable or disable Do Not Disturb",
               "type": "boolean"
             },
             "mode": {
-              "description": "Do Not Disturb mode: off, none/total silence, priority, or alarms.",
+              "description": "Do Not Disturb mode",
               "type": "string",
               "enum": [
                 "off",
@@ -4662,7 +3366,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4670,7 +3374,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4706,7 +3410,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4714,7 +3418,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -4731,17 +3435,17 @@
   },
   {
     "name": "shake",
-    "description": "Shake device",
+    "description": "Shake device. iOS support is Simulator-only; physical iOS devices are not supported by XCTest.",
     "inputSchema": {
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "type": "object",
       "properties": {
         "duration": {
-          "description": "Shake duration in ms (default: 1000)",
+          "description": "Shake duration in ms (default: 1000). On iOS Simulator this contributes to the runner timeout budget.",
           "type": "number"
         },
         "intensity": {
-          "description": "Shake acceleration intensity (default: 100)",
+          "description": "Shake acceleration intensity (default: 100). Ignored on iOS Simulator because XCTest shake has no intensity parameter.",
           "type": "number"
         },
         "platform": {
@@ -4753,7 +3457,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -4761,7 +3465,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -5015,7 +3719,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -5023,7 +3727,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -5036,851 +3740,6 @@
         "platform"
       ],
       "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "error": {
-          "type": "string"
-        },
-        "warning": {
-          "type": "string"
-        },
-        "scrollableCandidates": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "elementId": {
-                "type": "string"
-              },
-              "text": {
-                "type": "string"
-              },
-              "contentDesc": {
-                "type": "string"
-              },
-              "className": {
-                "type": "string"
-              }
-            },
-            "additionalProperties": {}
-          }
-        },
-        "targetType": {
-          "type": "string",
-          "enum": [
-            "screen",
-            "element"
-          ]
-        },
-        "element": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        },
-        "x1": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "y1": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "x2": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "y2": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "duration": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "easing": {
-          "type": "string",
-          "enum": [
-            "linear",
-            "decelerate",
-            "accelerate",
-            "accelerateDecelerate"
-          ]
-        },
-        "path": {
-          "type": "number"
-        },
-        "found": {
-          "type": "boolean"
-        },
-        "scrollIterations": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "elapsedMs": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "hierarchyChanged": {
-          "type": "boolean"
-        },
-        "observation": {
-          "type": "object",
-          "properties": {
-            "selectedElements": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "text": {
-                    "type": "string"
-                  },
-                  "resourceId": {
-                    "type": "string"
-                  },
-                  "contentDesc": {
-                    "type": "string"
-                  },
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "indexInMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "totalMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "selectionStrategy": {
-                    "type": "string"
-                  },
-                  "selectedState": {
-                    "type": "object",
-                    "properties": {
-                      "method": {
-                        "type": "string",
-                        "enum": [
-                          "accessibility",
-                          "visual"
-                        ]
-                      },
-                      "confidence": {
-                        "type": "number"
-                      },
-                      "reason": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "confidence"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "additionalProperties": {}
-              }
-            },
-            "focusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
-                  ],
-                  "additionalProperties": false
-                },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "accessibilityFocusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
-                  ],
-                  "additionalProperties": false
-                },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "activeWindow": {
-              "type": "object",
-              "properties": {
-                "appId": {
-                  "type": "string"
-                },
-                "activityName": {
-                  "type": "string"
-                },
-                "layoutSeqSum": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "type": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": {}
-            }
-          },
-          "additionalProperties": {}
-        },
-        "a11yTotalTimeMs": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "a11yGestureTimeMs": {
-          "type": "integer",
-          "minimum": -9007199254740991,
-          "maximum": 9007199254740991
-        },
-        "fallbackReason": {
-          "type": "string"
-        },
-        "debug": {}
-      },
-      "required": [
-        "success",
-        "targetType",
-        "x1",
-        "y1",
-        "x2",
-        "y2",
-        "duration"
-      ],
-      "additionalProperties": {}
     }
   },
   {
@@ -5938,7 +3797,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -5946,7 +3805,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -6047,7 +3906,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -6055,7 +3914,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -6068,980 +3927,6 @@
         "platform"
       ],
       "additionalProperties": false
-    },
-    "outputSchema": {
-      "$schema": "https://json-schema.org/draft/2020-12/schema",
-      "type": "object",
-      "properties": {
-        "success": {
-          "type": "boolean"
-        },
-        "action": {
-          "type": "string",
-          "enum": [
-            "tap",
-            "doubleTap",
-            "longPress",
-            "focus"
-          ]
-        },
-        "message": {
-          "type": "string"
-        },
-        "element": {
-          "type": "object",
-          "properties": {
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "text": {
-              "type": "string"
-            },
-            "resource-id": {
-              "type": "string"
-            },
-            "content-desc": {
-              "type": "string"
-            },
-            "class": {
-              "type": "string"
-            },
-            "package": {
-              "type": "string"
-            },
-            "checkable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "checked": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "clickable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "enabled": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focusable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "accessibility-focused": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "scrollable": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            },
-            "selected": {
-              "anyOf": [
-                {
-                  "type": "boolean"
-                },
-                {
-                  "type": "string",
-                  "const": "true"
-                },
-                {
-                  "type": "string",
-                  "const": "false"
-                }
-              ]
-            }
-          },
-          "required": [
-            "bounds"
-          ],
-          "additionalProperties": {}
-        },
-        "observation": {
-          "type": "object",
-          "properties": {
-            "selectedElements": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "properties": {
-                  "text": {
-                    "type": "string"
-                  },
-                  "resourceId": {
-                    "type": "string"
-                  },
-                  "contentDesc": {
-                    "type": "string"
-                  },
-                  "bounds": {
-                    "type": "object",
-                    "properties": {
-                      "left": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "top": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "right": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "bottom": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerX": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      },
-                      "centerY": {
-                        "type": "integer",
-                        "minimum": -9007199254740991,
-                        "maximum": 9007199254740991
-                      }
-                    },
-                    "required": [
-                      "left",
-                      "top",
-                      "right",
-                      "bottom"
-                    ],
-                    "additionalProperties": false
-                  },
-                  "indexInMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "totalMatches": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "selectionStrategy": {
-                    "type": "string"
-                  },
-                  "selectedState": {
-                    "type": "object",
-                    "properties": {
-                      "method": {
-                        "type": "string",
-                        "enum": [
-                          "accessibility",
-                          "visual"
-                        ]
-                      },
-                      "confidence": {
-                        "type": "number"
-                      },
-                      "reason": {
-                        "type": "string"
-                      }
-                    },
-                    "required": [
-                      "method",
-                      "confidence"
-                    ],
-                    "additionalProperties": false
-                  }
-                },
-                "additionalProperties": {}
-              }
-            },
-            "focusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
-                  ],
-                  "additionalProperties": false
-                },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "accessibilityFocusedElement": {
-              "type": "object",
-              "properties": {
-                "bounds": {
-                  "type": "object",
-                  "properties": {
-                    "left": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "top": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "right": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "bottom": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerX": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    },
-                    "centerY": {
-                      "type": "integer",
-                      "minimum": -9007199254740991,
-                      "maximum": 9007199254740991
-                    }
-                  },
-                  "required": [
-                    "left",
-                    "top",
-                    "right",
-                    "bottom"
-                  ],
-                  "additionalProperties": false
-                },
-                "text": {
-                  "type": "string"
-                },
-                "resource-id": {
-                  "type": "string"
-                },
-                "content-desc": {
-                  "type": "string"
-                },
-                "class": {
-                  "type": "string"
-                },
-                "package": {
-                  "type": "string"
-                },
-                "checkable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "checked": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "clickable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "enabled": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focusable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "accessibility-focused": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "scrollable": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                },
-                "selected": {
-                  "anyOf": [
-                    {
-                      "type": "boolean"
-                    },
-                    {
-                      "type": "string",
-                      "const": "true"
-                    },
-                    {
-                      "type": "string",
-                      "const": "false"
-                    }
-                  ]
-                }
-              },
-              "required": [
-                "bounds"
-              ],
-              "additionalProperties": {}
-            },
-            "activeWindow": {
-              "type": "object",
-              "properties": {
-                "appId": {
-                  "type": "string"
-                },
-                "activityName": {
-                  "type": "string"
-                },
-                "layoutSeqSum": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "type": {
-                  "type": "string"
-                }
-              },
-              "additionalProperties": {}
-            }
-          },
-          "additionalProperties": {}
-        },
-        "selectedElement": {
-          "type": "object",
-          "properties": {
-            "text": {
-              "type": "string"
-            },
-            "resourceId": {
-              "type": "string"
-            },
-            "contentDesc": {
-              "type": "string"
-            },
-            "bounds": {
-              "type": "object",
-              "properties": {
-                "left": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "top": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "right": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "bottom": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerX": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                },
-                "centerY": {
-                  "type": "integer",
-                  "minimum": -9007199254740991,
-                  "maximum": 9007199254740991
-                }
-              },
-              "required": [
-                "left",
-                "top",
-                "right",
-                "bottom"
-              ],
-              "additionalProperties": false
-            },
-            "indexInMatches": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "totalMatches": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "selectionStrategy": {
-              "type": "string"
-            },
-            "selectedState": {
-              "type": "object",
-              "properties": {
-                "method": {
-                  "type": "string",
-                  "enum": [
-                    "accessibility",
-                    "visual"
-                  ]
-                },
-                "confidence": {
-                  "type": "number"
-                },
-                "reason": {
-                  "type": "string"
-                }
-              },
-              "required": [
-                "method",
-                "confidence"
-              ],
-              "additionalProperties": false
-            }
-          },
-          "additionalProperties": {}
-        },
-        "selectedElements": {
-          "type": "array",
-          "items": {
-            "type": "object",
-            "properties": {
-              "text": {
-                "type": "string"
-              },
-              "resourceId": {
-                "type": "string"
-              },
-              "contentDesc": {
-                "type": "string"
-              },
-              "bounds": {
-                "type": "object",
-                "properties": {
-                  "left": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "top": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "right": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "bottom": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerX": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  },
-                  "centerY": {
-                    "type": "integer",
-                    "minimum": -9007199254740991,
-                    "maximum": 9007199254740991
-                  }
-                },
-                "required": [
-                  "left",
-                  "top",
-                  "right",
-                  "bottom"
-                ],
-                "additionalProperties": false
-              },
-              "indexInMatches": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "totalMatches": {
-                "type": "integer",
-                "minimum": -9007199254740991,
-                "maximum": 9007199254740991
-              },
-              "selectionStrategy": {
-                "type": "string"
-              },
-              "selectedState": {
-                "type": "object",
-                "properties": {
-                  "method": {
-                    "type": "string",
-                    "enum": [
-                      "accessibility",
-                      "visual"
-                    ]
-                  },
-                  "confidence": {
-                    "type": "number"
-                  },
-                  "reason": {
-                    "type": "string"
-                  }
-                },
-                "required": [
-                  "method",
-                  "confidence"
-                ],
-                "additionalProperties": false
-              }
-            },
-            "additionalProperties": {}
-          }
-        },
-        "error": {
-          "type": "string"
-        },
-        "pressRecognized": {
-          "type": "boolean"
-        },
-        "contextMenuOpened": {
-          "type": "boolean"
-        },
-        "selectionStarted": {
-          "type": "boolean"
-        },
-        "searchUntil": {
-          "type": "object",
-          "properties": {
-            "durationMs": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "requestCount": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            },
-            "changeCount": {
-              "type": "integer",
-              "minimum": -9007199254740991,
-              "maximum": 9007199254740991
-            }
-          },
-          "additionalProperties": false
-        },
-        "debug": {}
-      },
-      "required": [
-        "success",
-        "action"
-      ],
-      "additionalProperties": {}
     }
   },
   {
@@ -7176,7 +4061,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -7184,7 +4069,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -7207,13 +4092,7 @@
           "type": "boolean"
         },
         "action": {
-          "type": "string",
-          "enum": [
-            "tap",
-            "doubleTap",
-            "longPress",
-            "focus"
-          ]
+          "type": "string"
         },
         "message": {
           "type": "string"
@@ -8163,13 +5042,17 @@
               "maximum": 9007199254740991
             }
           },
-          "additionalProperties": false
+          "required": [
+            "durationMs",
+            "requestCount",
+            "changeCount"
+          ],
+          "additionalProperties": {}
         },
         "debug": {}
       },
       "required": [
-        "success",
-        "action"
+        "success"
       ],
       "additionalProperties": {}
     }
@@ -8194,7 +5077,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -8202,7 +5085,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -8240,7 +5123,7 @@
           "description": "Target platform"
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -8248,7 +5131,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         },
         "deviceId": {
@@ -8956,7 +5839,7 @@
           }
         },
         "sessionUuid": {
-          "description": "Session UUID",
+          "description": "Session ID",
           "type": "string"
         },
         "keepScreenAwake": {
@@ -8964,7 +5847,7 @@
           "type": "boolean"
         },
         "device": {
-          "description": "Device label for multi-device plans (e.g., \"A\", \"B\")",
+          "description": "Plan device label",
           "type": "string"
         }
       },

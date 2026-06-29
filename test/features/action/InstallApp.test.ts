@@ -1,4 +1,4 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, afterEach } from "bun:test";
 import { InstallApp, type DeviceAppInstaller } from "../../../src/features/action/InstallApp";
 import { createPerformanceTracker, type TimingEntry } from "../../../src/utils/PerformanceTracker";
 import type { BootedDevice, ExecResult } from "../../../src/models";
@@ -9,6 +9,9 @@ import { FakeAndroidBuildToolsLocator } from "../../fakes/FakeAndroidBuildToolsL
 import { FakeTimer } from "../../fakes/FakeTimer";
 import { FakeSimctl } from "../../fakes/FakeSimctl";
 import path from "path";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../../src/utils/workingDirectory";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -27,6 +30,19 @@ class SequencedFakeSimctl extends FakeSimctl {
 
   override async listApps(deviceId?: string): Promise<any[]> {
     return this.listResponses.shift() ?? super.listApps(deviceId);
+  }
+}
+
+class DowngradeFakeSimctl extends SequencedFakeSimctl {
+  public installError: Error | null = null;
+  private installCalls = 0;
+
+  override async installApp(appPath: string, deviceId?: string): Promise<void> {
+    this.installCalls++;
+    if (this.installCalls === 1 && this.installError) {
+      throw this.installError;
+    }
+    return super.installApp(appPath, deviceId);
   }
 }
 
@@ -64,6 +80,8 @@ describe("InstallApp", () => {
   let fakeHost: FakeHostCommandExecutor;
   let fakeLocator: FakeAndroidBuildToolsLocator;
   let fakeTimer: FakeTimer;
+  const tempDirs: string[] = [];
+  const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
 
   beforeEach(() => {
     fakeAdb = new FakeAdbExecutor();
@@ -72,6 +90,18 @@ describe("InstallApp", () => {
     fakeLocator = new FakeAndroidBuildToolsLocator();
     fakeTimer = new FakeTimer();
     fakeTimer.enableAutoAdvance();
+  });
+
+  afterEach(() => {
+    if (originalLaunchCwd === undefined) {
+      delete process.env[DAEMON_LAUNCH_CWD_ENV];
+    } else {
+      process.env[DAEMON_LAUNCH_CWD_ENV] = originalLaunchCwd;
+    }
+    for (const dir of tempDirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+    tempDirs.length = 0;
   });
 
   test("installs using aapt2 and targets work profile user", async () => {
@@ -347,6 +377,26 @@ describe("InstallApp", () => {
     expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${expectedAbsolute}"`)).toBe(true);
   });
 
+  test("resolves relative artifact path from daemon launch cwd when daemon cwd is stable", async () => {
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const launchCwd = mkdtempSync(path.join(tmpdir(), "install-app-launch-cwd-"));
+    tempDirs.push(launchCwd);
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
+
+    const expectedAbsolute = path.resolve(launchCwd, "relative", "path", "app.apk");
+    fakeAdb.setCommandResponse(`install --user 0 -r "${expectedAbsolute}"`, createExecResult("Success"));
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const result = await installApp.execute(path.join("relative", "path", "app.apk"));
+
+    expect(result.success).toBe(true);
+    expect(fakeAdb.wasCommandExecuted(`install --user 0 -r "${expectedAbsolute}"`)).toBe(true);
+  });
+
   test("detects iOS simulator upgrade when bundle already installed", async () => {
     const appPath = "/tmp/MyApp.app";
     const perf = createPerformanceTracker(true, fakeTimer);
@@ -390,8 +440,9 @@ describe("InstallApp", () => {
       [],
       [{ bundleId: "com.example.a" }, { bundleId: "com.example.b" }]
     ]);
+    fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
@@ -407,13 +458,31 @@ describe("InstallApp", () => {
       [{ bundleId: "com.example.existing" }],
       [{ bundleId: "com.example.existing" }]
     ]);
+    fakeHost.setCommandResponse("plutil", createExecResult(""));
 
-    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, null, null, () => perf, sequencedSimctl);
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
     const result = await installApp.execute(appPath);
 
     expect(result.success).toBe(true);
     expect(result.packageName).toBeUndefined();
     expect(result.warning).toContain("bundle ID could not be determined");
+  });
+
+  test("iOS simulator install fails when expected bundle is absent after simctl success", async () => {
+    const appPath = "/tmp/MyApp.app";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const sequencedSimctl = new SequencedFakeSimctl();
+    sequencedSimctl.setListResponses([
+      [],
+      []
+    ]);
+    fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
+
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, sequencedSimctl);
+
+    await expect(installApp.execute(appPath)).rejects.toThrow(
+      "Install reported success, but bundle com.example.app was not present"
+    );
   });
 
   test("propagates devicectl failure for iOS physical device install", async () => {
@@ -547,5 +616,107 @@ describe("InstallApp", () => {
 
     expect(result.warning).toContain("Bundle ID detection is not available");
     expect(result.upgrade).toBe(false);
+  });
+
+  test("Android recovers from version downgrade by uninstalling then reinstalling", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setUsers([{ userId: 0, name: "Owner", flags: 13, running: true }]);
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("1"));
+    fakeAdb.setCommandResponseSequence(`install --user 0 -r "${apkPath}"`, [
+      createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]"),
+      createExecResult("Success")
+    ]);
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+    const result = await installApp.execute(apkPath);
+
+    expect(result.success).toBe(true);
+    expect(result.upgrade).toBe(false);
+    expect(result.packageName).toBe("com.example.app");
+    expect(result.warning).toContain("uninstalled it and reinstalled");
+    expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(true);
+  });
+
+  test("Android downgrade without a resolvable package name surfaces a clear error", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+
+    fakeLocator.setTool(null); // no aapt2 → package name cannot be determined
+    fakeAdb.setCommandResponse(
+      `install --user 0 -r "${apkPath}"`,
+      createExecResult("", "Failure [INSTALL_FAILED_VERSION_DOWNGRADE]")
+    );
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+
+    await expect(installApp.execute(apkPath)).rejects.toThrow("INSTALL_FAILED_VERSION_DOWNGRADE");
+    expect(fakeAdb.wasCommandExecuted("uninstall")).toBe(false);
+  });
+
+  test("Android non-downgrade install failure throws the original error without uninstalling", async () => {
+    const apkPath = "/tmp/app-debug.apk";
+    const perf = createPerformanceTracker(true, fakeTimer);
+
+    fakeLocator.setTool({ tool: "aapt2", path: "/sdk/build-tools/35.0.0/aapt2" });
+    fakeHost.setCommandResponse("aapt2", createExecResult("package: name='com.example.app' versionCode='1'"));
+    fakeAdb.setCommandResponse("shell pm list packages --user 0 -f com.example.app", createExecResult("0"));
+    fakeAdb.setCommandError(`install --user 0 -r "${apkPath}"`, new Error("Failure [INSTALL_FAILED_INVALID_APK]"));
+
+    const installApp = new InstallApp(device, fakeAdbFactory, fakeHost, fakeLocator, () => perf);
+
+    await expect(installApp.execute(apkPath)).rejects.toThrow("INSTALL_FAILED_INVALID_APK");
+    expect(fakeAdb.wasCommandExecuted("uninstall com.example.app")).toBe(false);
+  });
+
+  test("iOS simulator recovers from version downgrade by uninstalling then reinstalling", async () => {
+    const appPath = "/tmp/MyApp.app";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const simctl = new DowngradeFakeSimctl();
+    simctl.installError = new Error("Unable to install. A newer version of this application is already installed.");
+    simctl.setListResponses([
+      [{ bundleId: "com.example.app", bundlePath: "/tmp/MyApp.app" }],
+      [{ bundleId: "com.example.app", bundlePath: "/tmp/MyApp.app" }]
+    ]);
+    fakeHost.setCommandResponse("plutil", createExecResult("com.example.app\n"));
+
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl);
+    const result = await installApp.execute(appPath);
+
+    expect(result.success).toBe(true);
+    expect(result.upgrade).toBe(false);
+    expect(result.warning).toContain("uninstalled it and reinstalled");
+    expect(simctl.wasMethodCalled("uninstallApp")).toBe(true);
+    expect(simctl.getMethodCalls("uninstallApp")[0].bundleId).toBe("com.example.app");
+    // Only the successful reinstall is recorded; the first attempt threw before recording.
+    expect(simctl.getMethodCallCount("installApp")).toBe(1);
+  });
+
+  test("iOS simulator downgrade fails clearly when bundle ID cannot be read", async () => {
+    const appPath = "/tmp/MyApp.app";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const simctl = new DowngradeFakeSimctl();
+    simctl.installError = new Error("A newer version of this application is already installed.");
+    simctl.setListResponses([[], []]);
+    fakeHost.setCommandResponse("plutil", createExecResult("")); // empty → unresolved bundle id
+
+    const installApp = new InstallApp(iosSimulatorDevice, fakeAdbFactory, fakeHost, null, () => perf, simctl);
+
+    await expect(installApp.execute(appPath)).rejects.toThrow("bundle identifier could not be read");
+    expect(simctl.wasMethodCalled("uninstallApp")).toBe(false);
+  });
+
+  test("iOS physical downgrade surfaces actionable uninstall guidance", async () => {
+    const ipaPath = "/tmp/MyApp.ipa";
+    const perf = createPerformanceTracker(true, fakeTimer);
+    const fakeInstaller = new FakeDeviceAppInstaller();
+    fakeInstaller.shouldThrow = new Error("Unable to Install. A newer version of this application is already installed.");
+
+    const installApp = new InstallApp(iosPhysicalDevice, fakeAdbFactory, null, null, () => perf, undefined, fakeInstaller);
+
+    await expect(installApp.execute(ipaPath)).rejects.toThrow("Uninstall the app first with uninstallApp");
   });
 });

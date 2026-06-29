@@ -3,11 +3,12 @@ import type { SnapshotRestoreProvider } from "../../utils/interfaces/SnapshotPro
 import type { RestoreSnapshotArgs, RestoreSnapshotResult } from "./RestoreSnapshot";
 import { DeviceSnapshotStore, SnapshotPathOptions } from "../../utils/DeviceSnapshotStore";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { getAppDataContainerPath, IOS_APP_DATA_FOLDERS, terminateAppIfRunning } from "../../utils/ios-cmdline-tools/iosAppContainer";
+import { restoreIosSettings } from "../../utils/ios-cmdline-tools/iosSettings";
+import { pathExists } from "../../utils/filesystem/DefaultFileSystem";
 import { logger } from "../../utils/logger";
 import { promises as fs } from "fs";
 import * as path from "path";
-
-const IOS_APP_DATA_FOLDERS = ["Documents", "Library", "tmp"];
 
 export class RestoreSnapshotIos implements SnapshotRestoreProvider {
   private device: BootedDevice;
@@ -54,6 +55,11 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
     }
 
     await this.validateSnapshotCompatibility(manifest);
+
+    if (manifest.includeSettings && manifest.iosSettings) {
+      await restoreIosSettings(this.simctl, this.device.deviceId, manifest.iosSettings);
+    }
+
     await this.restoreAppData(snapshotName, manifest);
 
     logger.info(`[iOS] Snapshot '${snapshotName}' restored successfully`);
@@ -80,11 +86,11 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
     const manifestPathOptions = this.getPathOptions(manifest.deviceId);
     let appDataPath = this.store.getAppDataPath(snapshotName, manifestPathOptions);
 
-    if (!(await this.pathExists(appDataPath))) {
+    if (!(await pathExists(appDataPath))) {
       const fallbackPathOptions = this.getPathOptions(this.device.deviceId);
       if (manifest.deviceId && manifest.deviceId !== this.device.deviceId) {
         const fallbackPath = this.store.getAppDataPath(snapshotName, fallbackPathOptions);
-        if (await this.pathExists(fallbackPath)) {
+        if (await pathExists(fallbackPath)) {
           logger.info(
             `[iOS] App data not found for '${manifest.deviceId}', using current device path '${this.device.deviceId}'`
           );
@@ -124,8 +130,8 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
 
     for (const bundleId of bundleIds) {
       try {
-        await this.terminateAppIfRunning(bundleId);
-        const containerPath = await this.getAppContainerPath(bundleId);
+        await terminateAppIfRunning(this.simctl, this.device.deviceId, bundleId);
+        const containerPath = await getAppDataContainerPath(this.simctl, this.device.deviceId, bundleId);
         if (!containerPath) {
           continue;
         }
@@ -133,7 +139,7 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
         const snapshotBundlePath = path.join(appDataPath, bundleId);
         for (const folder of IOS_APP_DATA_FOLDERS) {
           const sourcePath = path.join(snapshotBundlePath, folder);
-          if (!(await this.pathExists(sourcePath))) {
+          if (!(await pathExists(sourcePath))) {
             continue;
           }
           const destinationPath = path.join(containerPath, folder);
@@ -225,14 +231,6 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
     }
   }
 
-  private async terminateAppIfRunning(bundleId: string): Promise<void> {
-    try {
-      await this.simctl.terminateApp(bundleId, this.device.deviceId);
-    } catch (error) {
-      logger.warn(`[iOS] Failed to terminate ${bundleId} before restore: ${error}`);
-    }
-  }
-
   private async resolveSnapshotBundleIds(
     appDataPath: string,
     manifest: DeviceSnapshotManifest
@@ -253,32 +251,4 @@ export class RestoreSnapshotIos implements SnapshotRestoreProvider {
     }
   }
 
-  private async getAppContainerPath(bundleId: string): Promise<string | null> {
-    try {
-      const command = `get_app_container ${this.quoteArg(this.device.deviceId)} ${this.quoteArg(bundleId)} data`;
-      const result = await this.simctl.executeCommand(command);
-      const containerPath = result.stdout.trim();
-      if (!containerPath) {
-        logger.warn(`[iOS] No data container path for ${bundleId}`);
-        return null;
-      }
-      return containerPath;
-    } catch (error) {
-      logger.warn(`[iOS] Failed to resolve container for ${bundleId}: ${error}`);
-      return null;
-    }
-  }
-
-  private async pathExists(targetPath: string): Promise<boolean> {
-    try {
-      await fs.access(targetPath);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private quoteArg(value: string): string {
-    return JSON.stringify(value);
-  }
 }

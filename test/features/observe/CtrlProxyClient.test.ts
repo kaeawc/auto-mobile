@@ -13,6 +13,7 @@ import {
 } from "../../fakes/FakeWebSocket";
 import { FakeInstalledAppsRepository } from "../../fakes/FakeInstalledAppsRepository";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import type { DeviceConnectionLostNotifier } from "../../../src/features/observe/DeviceConnectionLostNotifier";
 
 describe("AndroidCtrlProxyClient", function() {
   let accessibilityServiceClient: AndroidCtrlProxyClient;
@@ -131,6 +132,31 @@ describe("AndroidCtrlProxyClient", function() {
       await new Promise(resolve => setImmediate(resolve));
     }
   };
+
+  describe("connection lifecycle", function() {
+    test("notifies the observation stream when the WebSocket connection closes", function() {
+      const lostDeviceIds: string[] = [];
+      const notifier: DeviceConnectionLostNotifier = {
+        onDeviceConnectionLost: deviceId => {
+          lostDeviceIds.push(deviceId);
+        },
+      };
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        undefined,
+        undefined,
+        notifier
+      );
+
+      (testClient as any).onConnectionClosed();
+
+      expect(lostDeviceIds).toEqual(["test-device"]);
+    });
+  });
 
   describe("getLatestHierarchy", function() {
     test("should return hierarchy data when WebSocket receives fresh data", async function() {
@@ -314,6 +340,76 @@ describe("AndroidCtrlProxyClient", function() {
       }
     });
 
+    test("tracks concurrent suppressed hierarchy syncs independently", async function() {
+      const testTimer = new FakeTimer();
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = AndroidCtrlProxyClient.createForTesting(
+        testDevice,
+        fakeAdb,
+        factory,
+        testTimer
+      );
+      const suppressionCount = (): number =>
+        (testClient as unknown as {
+          hierarchyObservationStreamSuppressions: Set<unknown>;
+        }).hierarchyObservationStreamSuppressions.size;
+
+      try {
+        const firstRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+        const secondRequest = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 2);
+
+        expect(suppressionCount()).toBe(2);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: 100,
+            packageName: "com.example",
+            hierarchy: { text: "First sync" },
+          },
+        }));
+
+        expect(suppressionCount()).toBe(1);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          timestamp: testTimer.now(),
+          data: {
+            updatedAt: 200,
+            packageName: "com.example",
+            hierarchy: { text: "Second sync" },
+          },
+        }));
+
+        expect(suppressionCount()).toBe(0);
+
+        const [firstResult, secondResult] = await Promise.all([
+          testTimer.resolvePromise(firstRequest),
+          testTimer.resolvePromise(secondRequest),
+        ]);
+        expect(firstResult?.hierarchy).not.toBeNull();
+        expect(secondResult?.hierarchy).not.toBeNull();
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("should handle WebSocket connection failure gracefully", async function() {
       // Use FakeWebSocket with instant failure and FakeTimer for fast, reliable test execution
       // See issues #68 (timeout race condition) and #72 (cache contamination)
@@ -491,7 +587,12 @@ describe("AndroidCtrlProxyClient", function() {
       expect(result.hierarchy).toBeDefined();
       expect(result.hierarchy.text).toBe("6:43 AM");
       expect(result.hierarchy["content-desc"]).toBe("6:43 AM");
-      expect(result.hierarchy.bounds).toBe("[175,687][692,973]");
+      expect(result.hierarchy.bounds).toEqual({
+        left: 175,
+        top: 687,
+        right: 692,
+        bottom: 973
+      });
       expect(result.hierarchy.clickable).toBeUndefined();
       expect(result.hierarchy.enabled).toBe("true");
       expect(result.intentChooserDetected).toBe(true);
@@ -500,7 +601,12 @@ describe("AndroidCtrlProxyClient", function() {
       // Check child node conversion
       expect(typeof result.hierarchy.node).toBe("object");
       expect(result.hierarchy.node.text).toBe("Child Node");
-      expect(result.hierarchy.node.bounds).toBe("[0,0][100,50]");
+      expect(result.hierarchy.node.bounds).toEqual({
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 50
+      });
       expect(result.hierarchy.node.clickable).toBe("true");
     });
 

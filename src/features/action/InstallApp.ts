@@ -8,7 +8,10 @@ import { DefaultAndroidBuildToolsLocator, type AndroidBuildToolsLocator } from "
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
 import { DeviceAppInspector } from "../../utils/ios-cmdline-tools/DeviceAppInspector";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { logger } from "../../utils/logger";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 export interface DeviceAppInstaller {
   installApp(deviceUdid: string, artifactPath: string): Promise<void>;
@@ -22,8 +25,6 @@ export class InstallApp {
   private simctl: SimCtlClient;
   private device: BootedDevice;
   private deviceAppInstaller: DeviceAppInstaller;
-
-  private static readonly SIMULATOR_UUID_PATTERN = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
 
   constructor(
     device: BootedDevice,
@@ -44,7 +45,7 @@ export class InstallApp {
   }
 
   private isSimulator(): boolean {
-    return InstallApp.SIMULATOR_UUID_PATTERN.test(this.device.deviceId);
+    return isIosSimulatorUdid(this.device.deviceId);
   }
 
   async execute(
@@ -56,7 +57,7 @@ export class InstallApp {
     perf.serial("installApp");
 
     if (!path.isAbsolute(artifactPath)) {
-      artifactPath = path.resolve(process.cwd(), artifactPath);
+      artifactPath = resolvePathFromDaemonLaunchWorkingDirectory(artifactPath);
     }
 
     const ext = path.extname(artifactPath).toLowerCase();
@@ -145,10 +146,36 @@ export class InstallApp {
       });
     }
 
-    const success = await perf.track("adbInstall", async () => {
-      const installOutput = await this.adb.executeCommand(`install --user ${targetUserId} -r "${artifactPath}"`, undefined, undefined, undefined, signal);
-      return installOutput.includes("Success");
-    });
+    const installArgs = `install --user ${targetUserId} -r "${artifactPath}"`;
+    let installAttempt = await perf.track("adbInstall", () => this.runAndroidInstall(installArgs, signal));
+
+    if (!installAttempt.success && this.isAndroidDowngradeError(installAttempt.output)) {
+      // The installed version is newer than the artifact. `adb install -r` cannot
+      // downgrade a package, so the default behavior is to uninstall the existing
+      // app and reinstall the provided version.
+      if (!packageName) {
+        throw new Error(
+          "Install failed because the installed version is newer (INSTALL_FAILED_VERSION_DOWNGRADE), " +
+          "but the package name could not be determined in order to uninstall it first."
+        );
+      }
+      logger.warn(`[InstallApp] Version downgrade detected for ${packageName}; uninstalling existing version and reinstalling.`);
+      await perf.track("downgradeUninstall", () => this.uninstallAndroidForDowngrade(packageName!, targetUserId, signal));
+      installAttempt = await perf.track("adbReinstall", () => this.runAndroidInstall(installArgs, signal));
+      if (installAttempt.success) {
+        warnings.push(
+          `Installed version of ${packageName} was newer than the artifact; uninstalled it and reinstalled the provided version.`
+        );
+        isInstalled = false; // The app was removed, so this is effectively a fresh install.
+      }
+    }
+
+    // Preserve prior behavior: a hard install failure (non-zero exit) surfaces as a thrown error.
+    if (!installAttempt.success && installAttempt.threw && installAttempt.error !== undefined) {
+      throw installAttempt.error;
+    }
+
+    const success = installAttempt.success;
 
     if (!packageName && beforePackages) {
       const afterPackages = success ? await perf.track("listPackagesAfter", async () => {
@@ -177,6 +204,88 @@ export class InstallApp {
     };
   }
 
+  private static readonly ANDROID_DOWNGRADE_MARKER = "INSTALL_FAILED_VERSION_DOWNGRADE";
+
+  /**
+   * Run an `adb install` command, capturing failures (whether reported as a
+   * non-zero exit / thrown error or as a "Failure [...]" line in the output)
+   * so the caller can inspect the reason without losing the original error.
+   */
+  private async runAndroidInstall(
+    installArgs: string,
+    signal?: AbortSignal
+  ): Promise<{ success: boolean; output: string; threw: boolean; error?: unknown }> {
+    try {
+      const result = await this.adb.executeCommand(installArgs, undefined, undefined, undefined, signal);
+      const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+      return { success: output.includes("Success"), output, threw: false };
+    } catch (error) {
+      if (signal?.aborted) {
+        throw error;
+      }
+      return { success: false, output: this.extractErrorText(error), threw: true, error };
+    }
+  }
+
+  private isAndroidDowngradeError(output: string): boolean {
+    return output.includes(InstallApp.ANDROID_DOWNGRADE_MARKER);
+  }
+
+  /**
+   * Fully uninstall an Android package so a lower-versioned artifact can be
+   * installed over a newer one. The uninstall is package-wide (not per-user)
+   * because the installed APK version is shared across users.
+   */
+  private async uninstallAndroidForDowngrade(packageName: string, userId: number, signal?: AbortSignal): Promise<void> {
+    try {
+      await this.adb.executeCommand(`shell am force-stop --user ${userId} ${packageName}`, undefined, undefined, true, signal);
+    } catch {
+      // Best-effort stop; proceed with uninstall regardless.
+    }
+    await this.adb.executeCommand(`uninstall ${packageName}`, undefined, undefined, undefined, signal);
+  }
+
+  private extractErrorText(error: unknown): string {
+    if (error instanceof Error) {
+      const details = error as Error & { stderr?: unknown; stdout?: unknown };
+      return [error.message, details.stderr, details.stdout]
+        .filter(value => typeof value === "string" && value.length > 0)
+        .join("\n");
+    }
+    return String(error);
+  }
+
+  /**
+   * Detect an iOS install failure caused by the installed version being newer
+   * than the artifact (simctl/devicectl downgrade rejection).
+   */
+  private isiOSDowngradeError(text: string): boolean {
+    const lower = text.toLowerCase();
+    if (lower.includes("downgrade")) {
+      return true;
+    }
+    return lower.includes("newer version") && lower.includes("already installed");
+  }
+
+  /**
+   * Read CFBundleIdentifier from a simulator .app bundle's Info.plist so the
+   * existing (newer) version can be uninstalled before a downgrade reinstall.
+   */
+  private async resolveAppBundleId(appPath: string): Promise<string | undefined> {
+    try {
+      const plistPath = path.join(appPath, "Info.plist");
+      const result = await this.hostExecutor.executeCommand(
+        "plutil",
+        ["-extract", "CFBundleIdentifier", "raw", "-o", "-", plistPath]
+      );
+      const bundleId = result.stdout.trim();
+      return bundleId || undefined;
+    } catch (error) {
+      logger.warn(`[InstallApp] Failed to read bundle identifier from ${appPath}: ${error instanceof Error ? error.message : String(error)}`);
+      return undefined;
+    }
+  }
+
   private validateiOSArtifact(ext: string): void {
     const isSimulator = this.isSimulator();
     if (isSimulator && ext === ".ipa") {
@@ -202,7 +311,7 @@ export class InstallApp {
     const beforeApps = await perf.track("listAppsBefore", () => this.simctl.listApps(this.device.deviceId));
     const beforeBundleIds = this.extractBundleIds(beforeApps);
 
-    await perf.track("simctlInstall", () => this.simctl.installApp(appPath, this.device.deviceId));
+    const downgraded = await perf.track("simctlInstall", () => this.installiOSSimulatorWithDowngradeRecovery(appPath, signal));
 
     if (signal?.aborted) {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
@@ -214,7 +323,24 @@ export class InstallApp {
     const newBundles = this.diffSets(beforeBundleIds, afterBundleIds);
     let packageName = this.findBundleIdByPath(afterApps, appPath);
 
+    if (!packageName) {
+      const expectedBundleId = await perf.track("resolveBundleId", () => this.resolveAppBundleId(appPath));
+      if (expectedBundleId) {
+        if (!afterBundleIds.has(expectedBundleId)) {
+          throw new Error(
+            `Install reported success, but bundle ${expectedBundleId} was not present on iOS simulator ` +
+            `${this.device.deviceId} after installation.`
+          );
+        }
+        packageName = expectedBundleId;
+      }
+    }
+
     const warnings: string[] = [];
+
+    if (downgraded) {
+      warnings.push("Installed version was newer than the artifact; uninstalled it and reinstalled the provided version.");
+    }
 
     if (!packageName) {
       if (newBundles.length === 1) {
@@ -226,7 +352,7 @@ export class InstallApp {
       }
     }
 
-    const upgrade = packageName ? beforeBundleIds.has(packageName) : false;
+    const upgrade = downgraded ? false : (packageName ? beforeBundleIds.has(packageName) : false);
 
     return {
       success: true,
@@ -234,6 +360,42 @@ export class InstallApp {
       packageName,
       warning: warnings.length > 0 ? warnings.join(" ") : undefined
     };
+  }
+
+  /**
+   * Install on an iOS simulator, recovering from a version-downgrade rejection
+   * by uninstalling the existing (newer) app and reinstalling the artifact.
+   * Returns true if a downgrade recovery was performed.
+   */
+  private async installiOSSimulatorWithDowngradeRecovery(appPath: string, signal?: AbortSignal): Promise<boolean> {
+    try {
+      await this.simctl.installApp(appPath, this.device.deviceId);
+      return false;
+    } catch (error) {
+      const text = this.extractErrorText(error);
+      if (!this.isiOSDowngradeError(text)) {
+        throw error;
+      }
+      const bundleId = await this.resolveAppBundleId(appPath);
+      if (!bundleId) {
+        throw new Error(
+          `Install failed because the installed version is newer than the artifact, and the bundle ` +
+          `identifier could not be read from ${appPath} in order to uninstall it first. Original error: ${text}`
+        );
+      }
+      logger.warn(`[InstallApp] Version downgrade detected for ${bundleId}; uninstalling existing version and reinstalling.`);
+      try {
+        await this.simctl.terminateApp(bundleId, this.device.deviceId);
+      } catch {
+        // Best-effort terminate; proceed with uninstall regardless.
+      }
+      await this.simctl.uninstallApp(bundleId, this.device.deviceId);
+      if (signal?.aborted) {
+        throw new Error(OPERATION_CANCELLED_MESSAGE);
+      }
+      await this.simctl.installApp(appPath, this.device.deviceId);
+      return true;
+    }
   }
 
   private async executeiOSPhysical(
@@ -245,7 +407,20 @@ export class InstallApp {
       throw new Error(OPERATION_CANCELLED_MESSAGE);
     }
 
-    await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+    try {
+      await perf.track("devicectlInstall", () => this.deviceAppInstaller.installApp(this.device.deviceId, ipaPath));
+    } catch (error) {
+      const text = this.extractErrorText(error);
+      if (this.isiOSDowngradeError(text)) {
+        // devicectl has no downgrade flag and the bundle identifier cannot be
+        // reliably derived from the .ipa, so guide the user to uninstall first.
+        throw new Error(
+          `Install failed because a newer version is already installed on the device. ` +
+          `Uninstall the app first with uninstallApp, then reinstall. Original error: ${text}`
+        );
+      }
+      throw error;
+    }
 
     return {
       success: true,

@@ -2,17 +2,30 @@ import { describe, expect, test, beforeEach, afterEach } from "bun:test";
 import { SessionManager } from "../../src/daemon/sessionManager";
 import { FakeTimer } from "../fakes/FakeTimer";
 
+const HEARTBEAT_ENV_KEYS = [
+  "AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+  "AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS",
+] as const;
+
+function clearHeartbeatEnv(): void {
+  for (const key of HEARTBEAT_ENV_KEYS) {
+    delete process.env[key];
+  }
+}
+
 describe("SessionManager", () => {
   let sessionManager: SessionManager;
   let fakeTimer: FakeTimer;
 
   beforeEach(() => {
+    clearHeartbeatEnv();
     fakeTimer = new FakeTimer();
     sessionManager = new SessionManager(fakeTimer);
   });
 
   afterEach(() => {
     sessionManager.stopCleanupTimer();
+    clearHeartbeatEnv();
   });
 
   describe("createSession", () => {
@@ -46,6 +59,22 @@ describe("SessionManager", () => {
       expect(session.sessionTimeoutMs).toBe(5000);
       expect(session.expiresAt).toBe(fakeTimer.now() + 5000);
     });
+
+    test("should use configured default heartbeat timeout", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android");
+
+      expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("default");
+    });
+
+    test("should mark explicitly provided heartbeat timeout as custom", async () => {
+      process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS = "15000";
+      const session = await sessionManager.createSession("session-1", "emulator-5554", "android", 30_000, 15_000);
+
+      expect(session.heartbeatTimeoutMs).toBe(15_000);
+      expect(session.heartbeatTimeoutSource).toBe("custom");
+    });
   });
 
   describe("getOrCreateSession", () => {
@@ -64,6 +93,21 @@ describe("SessionManager", () => {
       const session2 = await sessionManager.getOrCreateSession("session-1");
       expect(session2.lastUsedAt).toBe(initialLastUsed + 10);
       expect(session2.expiresAt).toBe(initialExpiry + 10);
+    });
+
+    test("should bump lastHeartbeat when resolving an existing session", async () => {
+      // The daemon heartbeat watchdog reaps sessions on a stale lastHeartbeat.
+      // Resolving a session for a tool call must count as activity, otherwise an
+      // actively-used autolock client (which sends no explicit heartbeats) would
+      // be reaped mid-use.
+      const session1 = await sessionManager.createSession("session-1", "emulator-5554", "android", 60_000, 60_000);
+      const initialHeartbeat = session1.lastHeartbeat;
+      fakeTimer.advanceTime(30_000);
+
+      const session2 = await sessionManager.getOrCreateSession("session-1");
+
+      expect(session2.lastHeartbeat).toBe(initialHeartbeat + 30_000);
+      expect(session2.lastHeartbeat).toBe(fakeTimer.now());
     });
 
     test("should preserve custom timeout when getting existing session", async () => {

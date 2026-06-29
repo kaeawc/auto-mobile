@@ -1,4 +1,5 @@
 import Foundation
+import ObjCExceptionCatcher
 #if canImport(os)
 import os
 #endif
@@ -331,13 +332,70 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func multiFingerSwipe(
+            startX: Double,
+            startY: Double,
+            endX: Double,
+            endY: Double,
+            fingerCount: Int,
+            fingerSpacing: Double,
+            duration: TimeInterval
+        ) throws {
+            guard application != nil else {
+                throw GestureError.noApplication
+            }
+
+            try runOnMainThread {
+                let orientation = GesturePerformer.currentInterfaceOrientation()
+                var errorMessage: NSString?
+                let succeeded = ObjCExceptionCatcher_synthesizeMultiFingerSwipe(
+                    CGFloat(startX),
+                    CGFloat(startY),
+                    CGFloat(endX),
+                    CGFloat(endY),
+                    fingerCount,
+                    CGFloat(fingerSpacing),
+                    duration,
+                    orientation.rawValue,
+                    &errorMessage
+                )
+
+                if !succeeded {
+                    throw GestureError.gestureFailed(errorMessage as String? ?? "multi-finger swipe synthesis failed")
+                }
+            }
+        }
+
+        private static func currentInterfaceOrientation() -> UIInterfaceOrientation {
+            let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+            if let activeScene = scenes.first(where: { $0.activationState == .foregroundActive }) {
+                return activeScene.interfaceOrientation
+            }
+            if let scene = scenes.first {
+                return scene.interfaceOrientation
+            }
+
+            switch UIDevice.current.orientation {
+            case .portrait:
+                return .portrait
+            case .portraitUpsideDown:
+                return .portraitUpsideDown
+            case .landscapeLeft:
+                return .landscapeLeft
+            case .landscapeRight:
+                return .landscapeRight
+            default:
+                return .portrait
+            }
+        }
+
         // MARK: - Drag Gestures
 
         public func drag(
             startX: Double, startY: Double,
             endX: Double, endY: Double,
             pressDuration: TimeInterval,
-            dragDuration _: TimeInterval,
+            dragDuration: TimeInterval,
             holdDuration: TimeInterval
         )
             throws
@@ -352,11 +410,21 @@ public class GesturePerformer: GesturePerforming {
                 let endCoordinate = app.coordinate(withNormalizedOffset: .zero)
                     .withOffset(CGVector(dx: endX, dy: endY))
 
+                // XCUICoordinate's drag API takes a velocity (points/second), not a duration,
+                // so honor the caller's dragDuration by converting it into the velocity that
+                // covers the source→target distance in that time. This gives iOS the same
+                // drag-speed control Android has. Fall back to .default when the duration or
+                // distance is non-positive (avoids divide-by-zero / infinite velocity).
+                let distance = hypot(endX - startX, endY - startY)
+                let velocity: XCUIGestureVelocity = (dragDuration > 0 && distance > 0)
+                    ? XCUIGestureVelocity(distance / dragDuration)
+                    : .default
+
                 // Press, drag, and hold
                 startCoordinate.press(
                     forDuration: pressDuration,
                     thenDragTo: endCoordinate,
-                    withVelocity: .default,
+                    withVelocity: velocity,
                     thenHoldForDuration: holdDuration
                 )
             }
@@ -388,6 +456,13 @@ public class GesturePerformer: GesturePerforming {
         /// Coordinate-based gestures (tap/swipe/drag/pinch) deliberately use
         /// the SpringBoard anchor and do NOT go through this method.
         private func resolveTextInputApp() -> XCUIApplication? {
+            if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
+                return XCUIApplication(bundleIdentifier: bundleId)
+            }
+            return application
+        }
+
+        private func resolveNavigationApp() -> XCUIApplication? {
             if let bundleId = elementLocator.foregroundBundleId, !bundleId.isEmpty {
                 return XCUIApplication(bundleIdentifier: bundleId)
             }
@@ -559,6 +634,63 @@ public class GesturePerformer: GesturePerforming {
                 }
             default:
                 throw GestureError.notSupported("IME action: \(action)")
+            }
+        }
+
+        public func keyboard(action: String) throws -> Bool {
+            guard let app = resolveTextInputApp() else {
+                throw GestureError.noApplication
+            }
+
+            switch action.lowercased() {
+            case "detect":
+                return isKeyboardVisible(app: app)
+            case "open":
+                if isKeyboardVisible(app: app) {
+                    return true
+                }
+                guard let focused = resolveFocusedTextElement(app: app) else {
+                    throw GestureError.notSupported("No focused text input to open keyboard")
+                }
+                try runOnMainThread {
+                    focused.tap()
+                }
+                return waitForKeyboardVisibility(app: app, expected: true)
+            case "close":
+                if !isKeyboardVisible(app: app) {
+                    return false
+                }
+                try typeKeyboardKey(.escape, app: app)
+                return waitForKeyboardVisibility(app: app, expected: false)
+            default:
+                throw GestureError.notSupported("Keyboard action: \(action)")
+            }
+        }
+
+        private func waitForKeyboardVisibility(
+            app: XCUIApplication,
+            expected: Bool,
+            timeout: TimeInterval = 1.0,
+            interval: TimeInterval = 0.05
+        ) -> Bool {
+            let deadline = Date().addingTimeInterval(timeout)
+            var visible = isKeyboardVisible(app: app)
+            while visible != expected && Date() < deadline {
+                RunLoop.current.run(until: Date().addingTimeInterval(interval))
+                visible = isKeyboardVisible(app: app)
+            }
+            return visible
+        }
+
+        private func isKeyboardVisible(app: XCUIApplication) -> Bool {
+            return (try? runOnMainThread {
+                app.keyboards.firstMatch.exists || self.springboard.keyboards.firstMatch.exists
+            }) ?? false
+        }
+
+        private func typeKeyboardKey(_ key: XCUIKeyboardKey, app: XCUIApplication) throws {
+            try runOnMainThread {
+                app.typeKey(key, modifierFlags: [])
             }
         }
 
@@ -760,6 +892,202 @@ public class GesturePerformer: GesturePerforming {
             }
         }
 
+        public func shake() throws {
+            try runOnMainThread {
+                let notificationName = CFNotificationName("com.apple.UIKit.SimulatorShake" as CFString)
+                CFNotificationCenterPostNotification(
+                    CFNotificationCenterGetDarwinNotifyCenter(),
+                    notificationName,
+                    nil,
+                    nil,
+                    true
+                )
+            }
+        }
+
+        public func pressBack() throws {
+            guard let app = resolveNavigationApp() else {
+                throw GestureError.noApplication
+            }
+
+            try runOnMainThread {
+                if self.tapExplicitNavigationBarBackButton(in: app) {
+                    return
+                }
+                try self.swipeFromLeftEdge(in: app)
+            }
+        }
+
+        private func tapExplicitNavigationBarBackButton(in app: XCUIApplication) -> Bool {
+            for navigationBar in app.navigationBars.allElementsBoundByIndex where navigationBar.exists {
+                let midpoint = navigationBar.frame.midX
+                for button in navigationBar.buttons.allElementsBoundByIndex where button.exists && button.isHittable {
+                    if button.frame.midX <= midpoint && self.isExplicitBackButton(button) {
+                        button.tap()
+                        return true
+                    }
+                }
+            }
+            return false
+        }
+
+        private func isExplicitBackButton(_ button: XCUIElement) -> Bool {
+            let candidates = [button.label, button.identifier]
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() }
+                .filter { !$0.isEmpty }
+            return candidates.contains { value in
+                value == "back" || value.contains("back button") || value.contains("go back")
+            }
+        }
+
+        private func swipeFromLeftEdge(in app: XCUIApplication) throws {
+            let frame = app.frame
+            guard frame.width > 0, frame.height > 0 else {
+                throw GestureError.gestureFailed("Cannot determine application frame for back gesture")
+            }
+
+            let start = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: 2, dy: frame.height / 2))
+            let end = app.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: min(frame.width * 0.75, frame.width - 2), dy: frame.height / 2))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: end,
+                withVelocity: .default,
+                thenHoldForDuration: 0
+            )
+        }
+
+        public func pressButton(_ button: String) throws {
+            switch button.lowercased() {
+            case "home":
+                try pressHome()
+            case "recent":
+                try openRecentApps()
+            case "back":
+                try pressBack()
+            case "volume_up", "volume_down":
+                #if targetEnvironment(simulator)
+                    throw GestureError.notSupported("Volume buttons are unavailable on the iOS simulator: \(button)")
+                #else
+                    try runOnMainThread {
+                        let deviceButton: XCUIDevice.Button
+                        if button.lowercased() == "volume_up" {
+                            deviceButton = .volumeUp
+                        } else {
+                            deviceButton = .volumeDown
+                        }
+                        XCUIDevice.shared.press(deviceButton)
+                    }
+                #endif
+            case "power":
+                #if targetEnvironment(simulator)
+                    throw GestureError.notSupported("Power/lock button is unavailable on the iOS simulator")
+                #else
+                    try pressPowerViaHID()
+                #endif
+            case "menu":
+                throw GestureError.notSupported("iOS has no menu hardware button")
+            default:
+                throw GestureError.notSupported("Button: \(button)")
+            }
+        }
+
+        #if !targetEnvironment(simulator)
+            private typealias IOHIDEventRef = CFTypeRef
+            private typealias IOHIDEventSystemClientRef = CFTypeRef
+            private typealias IOHIDEventCreateKeyboardEventFn = @convention(c) (
+                CFAllocator?,
+                UInt64,
+                UInt32,
+                UInt32,
+                Bool,
+                UInt32
+            )
+                -> IOHIDEventRef?
+            private typealias IOHIDEventSystemClientCreateFn = @convention(c) (
+                CFAllocator?
+            )
+                -> IOHIDEventSystemClientRef?
+            private typealias IOHIDEventSystemClientDispatchEventFn = @convention(c) (
+                IOHIDEventSystemClientRef,
+                IOHIDEventRef
+            )
+                -> Void
+
+            private func pressPowerViaHID() throws {
+                guard let handle = openIOKitHandle() else {
+                    throw GestureError.notSupported("Power/lock button HID support unavailable")
+                }
+                defer { dlclose(handle) }
+
+                let createEventSymbol = dlsym(handle, "IOHIDEventCreateKeyboardEvent")
+                let createClientSymbol = dlsym(handle, "IOHIDEventSystemClientCreate")
+                let dispatchEventSymbol = dlsym(handle, "IOHIDEventSystemClientDispatchEvent")
+
+                guard let createEventSymbol, let createClientSymbol, let dispatchEventSymbol else {
+                    throw GestureError.notSupported("Power/lock button HID symbols unavailable")
+                }
+
+                let createKeyboardEvent = unsafeBitCast(
+                    createEventSymbol,
+                    to: IOHIDEventCreateKeyboardEventFn.self
+                )
+                let createSystemClient = unsafeBitCast(
+                    createClientSymbol,
+                    to: IOHIDEventSystemClientCreateFn.self
+                )
+                let dispatchEvent = unsafeBitCast(
+                    dispatchEventSymbol,
+                    to: IOHIDEventSystemClientDispatchEventFn.self
+                )
+
+                guard let client = createSystemClient(nil) else {
+                    throw GestureError.notSupported("Power/lock button HID client unavailable")
+                }
+                defer { CFRelease(client) }
+
+                let consumerUsagePage: UInt32 = 0x0C
+                let powerUsage: UInt32 = 0x30
+                let eventTimestamp: UInt64 = 0
+                let eventOptions: UInt32 = 0
+
+                guard let keyDown = createKeyboardEvent(
+                    nil,
+                    eventTimestamp,
+                    consumerUsagePage,
+                    powerUsage,
+                    true,
+                    eventOptions
+                ) else {
+                    throw GestureError.notSupported("Power/lock button HID key-down event unavailable")
+                }
+                defer { CFRelease(keyDown) }
+
+                guard let keyUp = createKeyboardEvent(
+                    nil,
+                    eventTimestamp,
+                    consumerUsagePage,
+                    powerUsage,
+                    false,
+                    eventOptions
+                ) else {
+                    throw GestureError.notSupported("Power/lock button HID key-up event unavailable")
+                }
+                defer { CFRelease(keyUp) }
+
+                dispatchEvent(client, keyDown)
+                dispatchEvent(client, keyUp)
+            }
+
+            private func openIOKitHandle() -> UnsafeMutableRawPointer? {
+                [
+                    "/System/Library/Frameworks/IOKit.framework/IOKit",
+                    "/System/Library/PrivateFrameworks/IOKit.framework/IOKit",
+                ].lazy.compactMap { dlopen($0, RTLD_NOW) }.first
+            }
+        #endif
+
         public func openRecentApps() throws {
             try runOnMainThread {
                 let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
@@ -840,6 +1168,20 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
+        public func multiFingerSwipe(
+            startX _: Double,
+            startY _: Double,
+            endX _: Double,
+            endY _: Double,
+            fingerCount _: Int,
+            fingerSpacing _: Double,
+            duration _: TimeInterval
+        )
+            throws
+        {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
         public func drag(
             startX _: Double,
             startY _: Double,
@@ -878,6 +1220,10 @@ public class GesturePerformer: GesturePerforming {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 
+        public func keyboard(action _: String) throws -> Bool {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
         public func performAction(_: String, resourceId _: String?, label _: String?) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
@@ -899,6 +1245,18 @@ public class GesturePerformer: GesturePerforming {
         }
 
         public func pressHome() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func pressBack() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func shake() throws {
+            throw GestureError.notSupported("XCUITest only available on iOS")
+        }
+
+        public func pressButton(_: String) throws {
             throw GestureError.notSupported("XCUITest only available on iOS")
         }
 

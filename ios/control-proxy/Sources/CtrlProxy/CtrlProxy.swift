@@ -16,23 +16,30 @@ public class CtrlProxy {
     private let fpsMonitor: DisplayLinkFPSMonitor
     private let sdkHierarchyCache: SdkHierarchyCache
     private let sdkHierarchyClient: SdkHierarchyClient
+    private let sdkDatabaseClient: SdkDatabaseClient
 
     #if canImport(XCTest) && os(iOS)
         private var application: XCUIApplication?
     #endif
 
     /// Creates the service with specified port
-    public init(port: UInt16 = defaultPort, timer: Timer = SystemTimer(), storageInspector: StorageInspecting? = DefaultStorageInspecting()) {
+    public init(
+        port: UInt16 = defaultPort,
+        timer: Timer = SystemTimer(),
+        storageInspector: StorageInspecting? = DefaultStorageInspecting()
+    ) {
         elementLocator = ElementLocator()
         gesturePerformer = GesturePerformer(elementLocator: elementLocator)
         sdkHierarchyCache = SdkHierarchyCache()
         sdkHierarchyClient = SdkHierarchyClient()
+        sdkDatabaseClient = SdkDatabaseClient()
         commandHandler = CommandHandler(
             elementLocator: elementLocator,
             gesturePerformer: gesturePerformer,
             storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
-            sdkHierarchyCache: sdkHierarchyCache
+            sdkHierarchyCache: sdkHierarchyCache,
+            sdkDatabaseClient: sdkDatabaseClient
         )
         server = WebSocketServer(port: port, commandHandler: commandHandler, sdkHierarchyCache: sdkHierarchyCache)
         hierarchyDebouncer = HierarchyDebouncer(elementLocator: elementLocator, timer: timer)
@@ -74,11 +81,9 @@ public class CtrlProxy {
                     print(
                         "[CtrlProxy] Hierarchy changed (hash=\(hash), extraction=\(extractionTimeMs)ms), broadcasting"
                     )
-                    let enriched = HierarchyMerger.merge(
-                        xcuitest: hierarchy,
-                        sdk: self?.sdkHierarchyCache.latest
-                    )
-                    self?.server.broadcastHierarchyUpdate(enriched)
+                    guard let self else { return }
+                    let enriched = self.commandHandler.enrichWithCachedSdkHierarchy(hierarchy)
+                    self.server.broadcastHierarchyUpdate(enriched)
                 case .unchanged:
                     // Don't broadcast unchanged results (animation mode)
                     break

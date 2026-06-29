@@ -1,6 +1,8 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { IOSCtrlProxyClient, CtrlProxyHierarchy } from "../../../../src/features/observe/ios";
-import { BootedDevice } from "../../../../src/models";
+import { BootedDevice, HighlightShape } from "../../../../src/models";
+import { NetworkState } from "../../../../src/server/NetworkState";
+import { serverConfig } from "../../../../src/utils/ServerConfig";
 import {
   FakeWebSocket,
   createInstantFailureWebSocketFactory,
@@ -8,6 +10,8 @@ import {
   WebSocketState
 } from "../../../fakes/FakeWebSocket";
 import { FakeTimer } from "../../../fakes/FakeTimer";
+import { FakeScreenshotBackoffScheduler } from "../../../../src/features/observe/ScreenshotBackoffScheduler";
+import type { DeviceConnectionLostNotifier } from "../../../../src/features/observe/DeviceConnectionLostNotifier";
 
 describe("IOSCtrlProxyClient", function() {
   let ctrlProxyClient: IOSCtrlProxyClient;
@@ -29,6 +33,8 @@ describe("IOSCtrlProxyClient", function() {
 
     // Reset singleton instances for clean test state
     IOSCtrlProxyClient.resetInstances();
+    NetworkState.resetInstance();
+    serverConfig.setNetworkMockableEnabled(false);
 
     ctrlProxyClient = IOSCtrlProxyClient.createForTesting(
       testDevice,
@@ -43,6 +49,8 @@ describe("IOSCtrlProxyClient", function() {
     if (ctrlProxyClient) {
       await ctrlProxyClient.close();
     }
+    NetworkState.resetInstance();
+    serverConfig.setNetworkMockableEnabled(false);
   });
 
   class CapturingWebSocket extends FakeWebSocket {
@@ -110,6 +118,96 @@ describe("IOSCtrlProxyClient", function() {
     }
   };
 
+  describe("connection lifecycle", function() {
+    test("cancels screenshot backoff when the connection closes", function() {
+      const scheduler = new FakeScreenshotBackoffScheduler();
+
+      (ctrlProxyClient as any).screenshotBackoffScheduler = scheduler;
+      (ctrlProxyClient as any).onConnectionClosed();
+
+      expect(scheduler.cancelPendingCapturesCalls).toBe(1);
+    });
+
+    test("notifies the observation stream when the WebSocket connection closes", function() {
+      const lostDeviceIds: string[] = [];
+      const notifier: DeviceConnectionLostNotifier = {
+        onDeviceConnectionLost: deviceId => {
+          lostDeviceIds.push(deviceId);
+        },
+      };
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createSuccessWebSocketFactory(fakeTimer),
+        fakeTimer,
+        undefined,
+        undefined,
+        notifier
+      );
+
+      (testClient as any).onConnectionClosed();
+
+      expect(lostDeviceIds).toEqual(["A1B2C3D4-E5F6-7890-ABCD-EF1234567890"]);
+    });
+
+    test("restarts screenshot backoff when the connection (re)establishes", function() {
+      // Regression guard: onConnectionClosed() cancels the keepalive, so a
+      // transient reconnect on a static screen must restart it or the live view
+      // freezes forever. startScreenshotBackoff() is itself subscriber-gated.
+      let backoffStarts = 0;
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { backoffStarts++; };
+      // Isolate from SDK polling side effects for this unit.
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(backoffStarts).toBe(1);
+    });
+
+    test("syncs network mock rules when the connection (re)establishes", function() {
+      serverConfig.setNetworkMockableEnabled(true);
+      const state = NetworkState.getInstance();
+      const mock = state.addMock({
+        host: "api\\.example\\.com",
+        path: "/v1/items",
+        method: "GET",
+        limit: 3,
+        remaining: 3,
+        statusCode: 201,
+        responseHeaders: { "X-Test": "yes" },
+        responseBody: "{\"ok\":true}",
+        contentType: "application/json",
+      });
+      const sentMessages: string[] = [];
+
+      (ctrlProxyClient as any).sendMessage = (message: string) => {
+        sentMessages.push(message);
+        return true;
+      };
+      (ctrlProxyClient as any).startSdkEventPolling = () => { /* no-op */ };
+      (ctrlProxyClient as any).startScreenshotBackoff = () => { /* no-op */ };
+
+      (ctrlProxyClient as any).onConnectionEstablished();
+
+      expect(sentMessages).toHaveLength(1);
+      expect(JSON.parse(sentMessages[0])).toEqual({
+        type: "set_network_mock_rules",
+        rules: [{
+          mockId: mock.mockId,
+          host: "api\\.example\\.com",
+          path: "/v1/items",
+          method: "GET",
+          limit: 3,
+          remaining: 3,
+          statusCode: 201,
+          responseHeaders: { "X-Test": "yes" },
+          responseBody: "{\"ok\":true}",
+          contentType: "application/json",
+        }],
+      });
+    });
+  });
+
   describe("getLatestHierarchy", function() {
     test("should return hierarchy data when WebSocket receives fresh data", async function() {
       const mockHierarchyData: CtrlProxyHierarchy = {
@@ -169,6 +267,59 @@ describe("IOSCtrlProxyClient", function() {
         expect(result.hierarchy!.updatedAt).toBe(1750934583218);
         expect(result.hierarchy!.packageName).toBe("com.apple.mobilesafari");
         expect(result.hierarchy!.hierarchy.text).toBe("Welcome");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("suppresses observation stream push for explicit hierarchy sync request", async function() {
+      const mockHierarchyData: CtrlProxyHierarchy = {
+        updatedAt: 1750934584218,
+        packageName: "com.example.ios",
+        hierarchy: {
+          text: "Initial frame",
+        },
+      };
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const suppressionIds = (): string[] =>
+        Array.from((testClient as unknown as {
+          hierarchyObservationStreamSuppressions: Map<string, unknown>;
+        }).hierarchyObservationStreamSuppressions.keys());
+
+      try {
+        const resultPromise = testClient.requestHierarchySyncWithoutObservationStreamPush(
+          undefined,
+          false,
+          undefined,
+          3000
+        );
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_hierarchy_if_stale");
+        expect(suppressionIds()).toEqual([sentMessage.requestId]);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "hierarchy_update",
+          requestId: sentMessage.requestId,
+          timestamp: Date.now(),
+          data: mockHierarchyData,
+        }));
+
+        const result = await resultPromise;
+
+        expect(result?.hierarchy.updatedAt).toBe(1750934584218);
+        expect(suppressionIds()).toHaveLength(0);
       } finally {
         await testClient.close();
       }
@@ -313,7 +464,7 @@ describe("IOSCtrlProxyClient", function() {
       );
 
       try {
-        const resultPromise = testClient.requestSetText("Hello World", "text_field_1", 5000);
+        const resultPromise = testClient.requestSetText("Hello World", { resourceId: "text_field_1", timeoutMs: 5000 });
         const socket = await waitForSocket(getSocket);
         expect(socket).not.toBeNull();
         await waitForSocketOpen(socket);
@@ -332,6 +483,70 @@ describe("IOSCtrlProxyClient", function() {
         }));
 
         const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("highlight requests", function() {
+    test("requestAddHighlight sends payload and resolves highlight response", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+      const shape: HighlightShape = {
+        type: "path",
+        points: [
+          { x: 1.2, y: 3.4 },
+          { x: 5.6, y: 7.8 },
+        ],
+        bounds: {
+          x: 10.2,
+          y: 20.8,
+          width: 100.4,
+          height: 80.6,
+        },
+        style: {
+          strokeColor: "#FF0000",
+          strokeWidth: 4,
+        },
+      };
+
+      try {
+        const requestPromise = testClient.requestAddHighlight("highlight-1", shape, 2000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const highlightMsg = socket!.sentMessages.find(message => {
+          try { return JSON.parse(message).type === "add_highlight"; } catch { return false; }
+        });
+        expect(highlightMsg).toBeDefined();
+        const payload = JSON.parse(highlightMsg!);
+        expect(payload.id).toBe("highlight-1");
+        expect(payload.shape.bounds).toEqual({
+          x: 10,
+          y: 21,
+          width: 100,
+          height: 81,
+        });
+        expect(payload.shape.points).toEqual(shape.points);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "highlight_response",
+          requestId: payload.requestId,
+          success: true,
+          error: null,
+        }));
+
+        const result = await requestPromise;
         expect(result.success).toBe(true);
       } finally {
         await testClient.close();
@@ -420,6 +635,378 @@ describe("IOSCtrlProxyClient", function() {
     });
   });
 
+  describe("requestKeyboard", function() {
+    test("should send keyboard request and return open state", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestKeyboard("detect", 5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_keyboard");
+        expect(sentMessage.action).toBe("detect");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "keyboard_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          open: true,
+          totalTimeMs: 20
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+        expect(result.open).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("returns a clear skew error when advertised runner capabilities exclude keyboard", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const result = await testClient.requestKeyboard("detect", 5000);
+
+        expect(result.success).toBe(false);
+        expect(result.open).toBe(false);
+        expect(result.error).toContain("does not support request_keyboard");
+        expect(result.error).toContain("out of sync");
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("command fallback result shapes", function() {
+    test("preserves required fields for unsupported non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_recent_apps"]
+        }));
+
+        const imeAction = await testClient.requestImeAction("done", 5000);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("does not support request_ime_action");
+
+        const rotate = await testClient.requestRotate("landscape", 5000);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.error).toContain("does not support request_rotate");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 5000);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("does not support request_clipboard");
+
+        const voiceOver = await testClient.requestVoiceOverState(5000);
+        expect(voiceOver.success).toBe(false);
+        expect(voiceOver.enabled).toBe(false);
+        expect(voiceOver.totalTimeMs).toBe(0);
+        expect(voiceOver.error).toContain("does not support get_voiceover_state");
+
+        expect(socket!.sentMessages).toHaveLength(0);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for timed out non-BaseResult command contracts", async function() {
+      const testTimer = new FakeTimer();
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const imeActionPromise = testClient.requestImeAction("done", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        testTimer.advanceTime(100);
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(100);
+        expect(imeAction.error).toContain("IME action timed out");
+
+        const rotatePromise = testClient.requestRotate("landscape", 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        testTimer.advanceTime(100);
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(100);
+        expect(rotate.error).toContain("Rotate timed out");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 100);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        testTimer.advanceTime(100);
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(100);
+        expect(clipboard.error).toContain("Clipboard operation timed out");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for not-connected non-BaseResult command contracts", async function() {
+      const testTimer = fakeTimer;
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        createInstantFailureWebSocketFactory(testTimer),
+        testTimer
+      );
+
+      try {
+        const imeAction = await testClient.requestImeAction("done", 100);
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toBe("Not connected");
+
+        const rotate = await testClient.requestRotate("landscape", 100);
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toBe("Not connected");
+
+        const clipboard = await testClient.requestClipboard("get", undefined, 100);
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toBe("Not connected");
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("preserves required fields for old-runner unknown command errors", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        await testClient.ensureConnected();
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+
+        const keyboardPromise = testClient.requestKeyboard("detect", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 1);
+        const keyboardMessage = JSON.parse(socket!.sentMessages[0]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: keyboardMessage.requestId,
+          error: "Unknown command type: request_keyboard",
+        }));
+        const keyboard = await keyboardPromise;
+        expect(keyboard.success).toBe(false);
+        expect(keyboard.open).toBe(false);
+        expect(keyboard.totalTimeMs).toBe(0);
+        expect(keyboard.error).toContain("runner is likely older");
+
+        const imeActionPromise = testClient.requestImeAction("done", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 2);
+        const imeActionMessage = JSON.parse(socket!.sentMessages[1]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: imeActionMessage.requestId,
+          error: "Unknown command type: request_ime_action",
+        }));
+        const imeAction = await imeActionPromise;
+        expect(imeAction.success).toBe(false);
+        expect(imeAction.action).toBe("done");
+        expect(imeAction.totalTimeMs).toBe(0);
+        expect(imeAction.error).toContain("runner is likely older");
+
+        const rotatePromise = testClient.requestRotate("landscape", 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 3);
+        const rotateMessage = JSON.parse(socket!.sentMessages[2]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: rotateMessage.requestId,
+          error: "Unknown command type: request_rotate",
+        }));
+        const rotate = await rotatePromise;
+        expect(rotate.success).toBe(false);
+        expect(rotate.previousOrientation).toBe("");
+        expect(rotate.currentOrientation).toBe("");
+        expect(rotate.value).toBe(0);
+        expect(rotate.rotationPerformed).toBe(false);
+        expect(rotate.totalTimeMs).toBe(0);
+        expect(rotate.error).toContain("runner is likely older");
+
+        const clipboardPromise = testClient.requestClipboard("get", undefined, 5000);
+        await waitForSentMessages(socket as CapturingWebSocket, 4);
+        const clipboardMessage = JSON.parse(socket!.sentMessages[3]);
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: clipboardMessage.requestId,
+          error: "Unknown command type: request_clipboard",
+        }));
+        const clipboard = await clipboardPromise;
+        expect(clipboard.success).toBe(false);
+        expect(clipboard.action).toBe("get");
+        expect(clipboard.totalTimeMs).toBe(0);
+        expect(clipboard.error).toContain("runner is likely older");
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("requestRecentApps", function() {
+    test("should send recent apps request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestRecentApps(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_recent_apps");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "recent_apps_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 15
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("requestShake", function() {
+    test("should send shake request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestShake(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_shake");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "shake_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 15
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
   describe("requestLaunchApp", function() {
     test("should send launch app request and return result", async function() {
       const testTimer = fakeTimer;
@@ -453,6 +1040,121 @@ describe("IOSCtrlProxyClient", function() {
         const result = await resultPromise;
         expect(result.success).toBe(true);
         expect(result.totalTimeMs).toBe(120);
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("requestPressBack", function() {
+    test("should send press back request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestPressBack(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_press_back");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "press_back_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 80
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+        expect(result.totalTimeMs).toBe(80);
+      } finally {
+        await testClient.close();
+      }
+    });
+
+    test("rewrites old-runner unknown command responses into an actionable skew error", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestPressBack(5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_press_back");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "error",
+          requestId: sentMessage.requestId,
+          error: "Unknown command type: request_press_back",
+          totalTimeMs: 3
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(false);
+        expect(result.totalTimeMs).toBe(3);
+        expect(result.error).toContain("rejected request_press_back as unknown");
+        expect(result.error).toContain("likely older than this daemon");
+      } finally {
+        await testClient.close();
+      }
+    });
+  });
+
+  describe("requestPressButton", function() {
+    test("should send generic press button request and return result", async function() {
+      const testTimer = fakeTimer;
+
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        const resultPromise = testClient.requestPressButton("volume_up", 5000);
+        const socket = await waitForSocket(getSocket);
+        expect(socket).not.toBeNull();
+        await waitForSocketOpen(socket);
+        await waitForSentMessages(socket, 1);
+
+        const sentMessage = JSON.parse(socket!.sentMessages[0]);
+        expect(sentMessage.type).toBe("request_press_button");
+        expect(sentMessage.action).toBe("volume_up");
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "press_button_result",
+          requestId: sentMessage.requestId,
+          success: true,
+          totalTimeMs: 90
+        }));
+
+        const result = await resultPromise;
+        expect(result.success).toBe(true);
+        expect(result.totalTimeMs).toBe(90);
       } finally {
         await testClient.close();
       }
@@ -626,7 +1328,12 @@ describe("IOSCtrlProxyClient", function() {
         expect(result.hierarchy.node.$["content-desc"]).toBe("Submit button");
         expect(result.hierarchy.node.$["resource-id"]).toBe("submit_btn");
         expect(result.hierarchy.node.$["class"]).toBe("UIButton");
-        expect(result.hierarchy.node.$["bounds"]).toBe("[10,20][100,60]");
+        expect(result.hierarchy.node.$["bounds"]).toEqual({
+          left: 10,
+          top: 20,
+          right: 100,
+          bottom: 60
+        });
         expect(result.hierarchy.node.$["clickable"]).toBe("true");
       } finally {
         await testClient.close();

@@ -1,17 +1,11 @@
-import os from "node:os";
-import path from "node:path";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import { PerformanceAuditRepository } from "../db/performanceAuditRepository";
 import {
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse,
 } from "./performanceStreamSocketTypes";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "performance-stream.sock"),
-  externalPath: "/tmp/auto-mobile-performance-stream.sock",
-};
+import { PERFORMANCE_STREAM_SOCKET_CONFIG } from "./daemonFiles";
 
 const DEFAULT_LIMIT = 200;
 const auditRepository = new PerformanceAuditRepository();
@@ -64,7 +58,7 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
   PerformanceStreamSocketRequest,
   PerformanceStreamSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "PerformanceStream");
   }
 
@@ -111,6 +105,10 @@ export class PerformanceStreamSocketServer extends RequestResponseSocketServer<
 }
 
 let socketServer: PerformanceStreamSocketServer | null = null;
+
+export function getPerformanceStreamSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(PERFORMANCE_STREAM_SOCKET_CONFIG);
+}
 
 export async function startPerformanceStreamSocketServer(): Promise<void> {
   if (!socketServer) {

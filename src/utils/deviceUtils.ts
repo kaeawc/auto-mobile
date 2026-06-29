@@ -1,9 +1,23 @@
 import { ChildProcess } from "child_process";
-import { DeviceInfo, ActionableError, SomePlatform, BootedDevice } from "../models";
+import { DeviceInfo, ActionableError, SomePlatform, BootedDevice, Platform } from "../models";
 import { defaultAdbClientFactory } from "./android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "./android-cmdline-tools/interfaces/AdbExecutor";
-import { SimCtlClient } from "./ios-cmdline-tools/SimCtlClient";
+import { SimCtlClient, DOCKER_IOS_UNSUPPORTED_MESSAGE } from "./ios-cmdline-tools/SimCtlClient";
 import { AndroidEmulatorClient } from "./android-cmdline-tools/AndroidEmulatorClient";
+import { logger } from "./logger";
+
+/**
+ * Result of a discovery sweep that distinguishes per-platform success.
+ *
+ * `succeededPlatforms` only contains platforms whose discovery tooling was
+ * reachable and completed (even if it found zero devices). A platform absent
+ * from the set had a failed or unavailable discovery this sweep, so its tracked
+ * devices must not be treated as gone (no pruning / disconnect detection).
+ */
+export interface BootedDeviceDiscovery {
+  devices: BootedDevice[];
+  succeededPlatforms: Set<Platform>;
+}
 
 /**
  * Interface for device utility operations
@@ -30,6 +44,16 @@ export interface PlatformDeviceManager {
    * @returns Promise with array of booted device information
    */
   getBootedDevices(platform: SomePlatform): Promise<BootedDevice[]>;
+
+  /**
+   * Get all currently booted devices along with which platforms were
+   * successfully discovered. Unlike {@link getBootedDevices}, a platform whose
+   * discovery tooling failed or was unavailable is reported as un-discovered
+   * rather than collapsing into an empty device list, so callers can avoid
+   * pruning devices on a transient/partial discovery failure.
+   * @param platform - Target platform ("android", "ios", or "either" for both)
+   */
+  getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery>;
 
   /**
    * Start a device (emulator or simulator)
@@ -59,21 +83,79 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
   private adb: AdbExecutor;
   private emulator: AndroidEmulatorClient;
   private simctl: SimCtlClient;
+  // Ensures the "iOS-in-Docker unsupported" warning is emitted only once per
+  // manager, since discovery polls frequently.
+  private loggedDockerIosUnsupported = false;
 
   /**
    * Create a PlatformDeviceManager instance
    * @param adb - An instance of AdbExecutor for interacting with Android Debug Bridge
-   * @param idb - An instance of SimCtlClient for interacting with iOS simulator controls
+   * @param simctl - An instance of SimCtlClient for interacting with iOS simulator controls
    * @param emulator - An instance of AndroidEmulatorClient for managing Android emulators
    */
   constructor(
     adb: AdbExecutor | null = null,
-    idb: SimCtlClient | null = null,
+    simctl: SimCtlClient | null = null,
     emulator: AndroidEmulatorClient | null = null,
   ) {
     this.adb = adb || defaultAdbClientFactory.create(null);
-    this.simctl = idb || new SimCtlClient();
+    this.simctl = simctl || new SimCtlClient();
     this.emulator = emulator || new AndroidEmulatorClient();
+  }
+
+  private async canDiscoverIosLocallyOrViaHostControl(): Promise<boolean> {
+    if (process.platform === "darwin") {
+      return true;
+    }
+
+    // Distinguish "iOS-in-Docker is intentionally unsupported" from "simctl is
+    // simply absent". Both yield no simulators, but the former is a deliberate
+    // limitation we want to make visible rather than have iOS quietly vanish from
+    // discovery. We log once and stay resilient (return false) so that mixed
+    // Android+iOS Docker setups still discover their Android devices.
+    //
+    // Probe defensively: injected SimCtl fakes in tests may omit this method, and
+    // a missing probe simply means "not the unsupported Docker mode" (the default
+    // for any non-Docker host), so fall through to the normal availability check.
+    if (this.simctl.isUnsupportedDockerHostControlMode?.()) {
+      if (!this.loggedDockerIosUnsupported) {
+        this.loggedDockerIosUnsupported = true;
+        logger.warn(`[DeviceManager] ${DOCKER_IOS_UNSUPPORTED_MESSAGE}`);
+      }
+      return false;
+    }
+
+    try {
+      return await this.simctl.isAvailable();
+    } catch {
+      return false;
+    }
+  }
+
+  private async listIosDeviceImagesIfAvailable(options: { swallowDiscoveryErrors: boolean }): Promise<DeviceInfo[]> {
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return [];
+    }
+    try {
+      return await this.simctl.listSimulatorImages();
+    } catch (error) {
+      logger.warn(`[DeviceManager] iOS simulator image discovery failed: ${error}`);
+      if (!options.swallowDiscoveryErrors) {
+        throw error;
+      }
+      return [];
+    }
+  }
+
+  private async getBootedIosDevicesIfAvailable(): Promise<BootedDevice[]> {
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return [];
+    }
+    try {
+      return await this.simctl.getBootedSimulators();
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -85,10 +167,10 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.listAvds();
       case "ios":
-        return this.simctl.listSimulatorImages();
+        return this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: false });
       case "either":
         const emulators = await this.emulator.listAvds();
-        const simulators = await this.simctl.listSimulatorImages();
+        const simulators = await this.listIosDeviceImagesIfAvailable({ swallowDiscoveryErrors: true });
         return [...emulators, ...simulators];
     }
   }
@@ -103,6 +185,9 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.isAvdRunning(device.name);
       case "ios":
+        if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+          return false;
+        }
         if (device.deviceId) {
           const booted = await this.simctl.getBootedSimulators();
           return booted.some(simulator => simulator.deviceId === device.deviceId);
@@ -120,11 +205,55 @@ export class MultiPlatformDeviceManager implements PlatformDeviceManager {
       case "android":
         return this.emulator.getBootedDevices();
       case "ios":
-        return this.simctl.getBootedSimulators();
+        return this.getBootedIosDevicesIfAvailable();
       case "either":
         const emulators = await this.emulator.getBootedDevices();
-        const simulators = await this.simctl.getBootedSimulators();
+        const simulators = await this.getBootedIosDevicesIfAvailable();
         return [...emulators, ...simulators];
+    }
+  }
+
+  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    const devices: BootedDevice[] = [];
+    const succeededPlatforms = new Set<Platform>();
+
+    if (platform === "android" || platform === "either") {
+      try {
+        const emulators = await this.emulator.getBootedDevicesChecked();
+        devices.push(...emulators);
+        succeededPlatforms.add("android");
+      } catch (error) {
+        logger.warn(
+          `[DeviceManager] Android booted-device discovery failed; retaining tracked Android devices: ${error}`
+        );
+      }
+    }
+
+    if (platform === "ios" || platform === "either") {
+      const ios = await this.discoverBootedIosDevices();
+      if (ios.succeeded) {
+        devices.push(...ios.devices);
+        succeededPlatforms.add("ios");
+      }
+    }
+
+    return { devices, succeededPlatforms };
+  }
+
+  private async discoverBootedIosDevices(): Promise<{ devices: BootedDevice[]; succeeded: boolean }> {
+    // iOS tooling that is genuinely unavailable on this host cannot confirm a
+    // device is gone, so report it as un-discovered rather than empty.
+    if (!(await this.canDiscoverIosLocallyOrViaHostControl())) {
+      return { devices: [], succeeded: false };
+    }
+    try {
+      const devices = await this.simctl.getBootedSimulatorsChecked();
+      return { devices, succeeded: true };
+    } catch (error) {
+      logger.warn(
+        `[DeviceManager] iOS booted-device discovery failed; retaining tracked iOS devices: ${error}`
+      );
+      return { devices: [], succeeded: false };
     }
   }
 

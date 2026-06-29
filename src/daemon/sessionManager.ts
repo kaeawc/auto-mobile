@@ -2,6 +2,7 @@ import { defaultTimer, Timer } from "../utils/SystemTimer";
 import { logger } from "../utils/logger";
 import { BootedDevice, Platform } from "../models";
 import { KeepScreenAwakeManager, KEEP_SCREEN_AWAKE_STATE_KEY, KeepScreenAwakeState } from "../utils/KeepScreenAwakeManager";
+import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 
 /**
  * Session Cache Data
@@ -33,6 +34,7 @@ export interface Session {
   lastHeartbeat: number;       // Timestamp of last heartbeat
   sessionTimeoutMs: number;    // Idle timeout used when extending this session
   heartbeatTimeoutMs: number;  // Heartbeat timeout for this session
+  heartbeatTimeoutSource: "default" | "custom"; // Whether the heartbeat timeout was defaulted or explicitly provided
   hasReceivedHeartbeat: boolean; // Whether any heartbeat has been received
 }
 
@@ -50,6 +52,15 @@ export interface Session {
  */
 export type SessionReleaseCallback = (sessionId: string, deviceId: string) => void;
 
+export function getDefaultSessionHeartbeatTimeoutMs(): number {
+  const rawValue = process.env.AUTOMOBILE_SESSION_HEARTBEAT_TIMEOUT_MS
+    ?? process.env.AUTO_MOBILE_SESSION_HEARTBEAT_TIMEOUT_MS;
+  const parsed = rawValue ? Number.parseInt(rawValue, 10) : NaN;
+  return Number.isFinite(parsed) && parsed > 0
+    ? parsed
+    : SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS;
+}
+
 export class SessionManager {
   private sessions: Map<string, Session> = new Map();
   private sessionDeviceMap: Map<string, string> = new Map(); // sessionId -> deviceId
@@ -57,6 +68,7 @@ export class SessionManager {
   private cleanupTimer: NodeJS.Timeout | null = null;
   private timer: Timer;
   private releaseCallbacks: SessionReleaseCallback[] = [];
+  private deviceSessionRepository: DeviceSessionRepository;
 
   // Session timeout: 30 minutes
   private readonly SESSION_TIMEOUT_MS = 30 * 60 * 1000;
@@ -66,8 +78,9 @@ export class SessionManager {
 
   static readonly DEFAULT_HEARTBEAT_TIMEOUT_MS = 10 * 1000;
 
-  constructor(timer: Timer = defaultTimer) {
+  constructor(timer: Timer = defaultTimer, deviceSessionRepository: DeviceSessionRepository = new DeviceSessionRepository()) {
     this.timer = timer;
+    this.deviceSessionRepository = deviceSessionRepository;
     // Start periodic cleanup of expired sessions
     this.startCleanupTimer();
   }
@@ -91,6 +104,7 @@ export class SessionManager {
     assignedDevice: string,
     platform: Platform,
     timeoutMs?: number,
+    heartbeatTimeoutMs?: number,
   ): Promise<Session> {
     if (this.sessions.has(sessionId)) {
       logger.warn(`Session ${sessionId} already exists, returning existing session`);
@@ -99,6 +113,7 @@ export class SessionManager {
 
     const now = this.timer.now();
     const sessionTimeoutMs = timeoutMs ?? this.SESSION_TIMEOUT_MS;
+    const heartbeatTimeoutSource = heartbeatTimeoutMs === undefined ? "default" : "custom";
     const session: Session = {
       sessionId,
       assignedDevice,
@@ -109,13 +124,15 @@ export class SessionManager {
       cacheData: {},
       lastHeartbeat: now,
       sessionTimeoutMs,
-      heartbeatTimeoutMs: SessionManager.DEFAULT_HEARTBEAT_TIMEOUT_MS,
+      heartbeatTimeoutMs: heartbeatTimeoutMs ?? getDefaultSessionHeartbeatTimeoutMs(),
+      heartbeatTimeoutSource,
       hasReceivedHeartbeat: false,
     };
 
     this.sessions.set(sessionId, session);
     this.sessionDeviceMap.set(sessionId, assignedDevice);
     this.deviceSessionMap.set(assignedDevice, sessionId);
+    await this.persistSession(session);
 
     logger.info(`Created session ${sessionId} with device ${assignedDevice}`);
     return session;
@@ -130,6 +147,7 @@ export class SessionManager {
       logger.info(`Session ${sessionId} has expired, removing`);
       const deviceId = session.assignedDevice;
       this.removeSession(sessionId);
+      void this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "lazy-expiry");
       // Notify release callbacks so session-scoped state is cleaned up
       for (const callback of this.releaseCallbacks) {
         try {
@@ -160,10 +178,16 @@ export class SessionManager {
     const existing = this.getSession(sessionId);
     if (existing) {
       logger.info(`[SessionManager] Found existing session ${sessionId} with device ${existing.assignedDevice}`);
-      // Update last used time
+      // Resolving a session for a tool call is activity: extend both the idle
+      // timeout (expiresAt) and the heartbeat clock (lastHeartbeat). Without the
+      // latter, the daemon heartbeat watchdog would reap an actively-used session
+      // whose tools never write session cache (e.g. autolock CLI/agent clients
+      // that do not send explicit heartbeats).
       const now = this.timer.now();
       existing.lastUsedAt = now;
+      existing.lastHeartbeat = now;
       existing.expiresAt = now + existing.sessionTimeoutMs;
+      await this.recordSessionActivity(existing);
       return existing;
     }
 
@@ -226,6 +250,7 @@ export class SessionManager {
 
     const deviceId = session.assignedDevice;
     this.removeSession(sessionId);
+    await this.deviceSessionRepository.markReleased(sessionId, "released", this.timer.now(), "explicit-release");
 
     // Notify release callbacks for centralized cleanup
     for (const callback of this.releaseCallbacks) {
@@ -263,6 +288,7 @@ export class SessionManager {
     };
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
+    void this.recordSessionActivity(session);
 
     logger.debug(`Updated cache for session ${sessionId}`);
   }
@@ -279,6 +305,7 @@ export class SessionManager {
     // Update last used time when accessing cache
     session.lastUsedAt = this.timer.now();
     session.lastHeartbeat = this.timer.now();
+    void this.recordSessionActivity(session);
 
     return session.cacheData;
   }
@@ -297,6 +324,7 @@ export class SessionManager {
     session.lastUsedAt = now;
     session.expiresAt = now + session.sessionTimeoutMs;
     session.hasReceivedHeartbeat = true;
+    void this.recordSessionActivity(session);
   }
 
   /**
@@ -384,40 +412,55 @@ export class SessionManager {
   }
 
   /**
+   * Remove all expired sessions and fire release callbacks for them.
+   *
+   * Runs on the periodic cleanup timer, but is also invoked by the heartbeat
+   * monitor on its (much shorter) interval so that idle sessions — including
+   * autolocked devices, whose idle timeout equals their heartbeat timeout — are
+   * released promptly instead of waiting for the next 5-minute sweep.
+   */
+  cleanupExpiredSessions(): void {
+    const expiredSessions: string[] = [];
+
+    for (const [sessionId, session] of this.sessions) {
+      if (this.isSessionExpired(session)) {
+        expiredSessions.push(sessionId);
+      }
+    }
+
+    if (expiredSessions.length === 0) {
+      return;
+    }
+
+    logger.info(
+      `Cleaning up ${expiredSessions.length} expired sessions: ` +
+      expiredSessions.join(", ")
+    );
+
+    for (const sessionId of expiredSessions) {
+      const session = this.sessions.get(sessionId);
+      const deviceId = session?.assignedDevice;
+      this.removeSession(sessionId);
+      // Notify release callbacks so session-scoped state is cleaned up
+      if (deviceId) {
+        void this.deviceSessionRepository.markReleased(sessionId, "expired", this.timer.now(), "cleanup-expired");
+        for (const callback of this.releaseCallbacks) {
+          try {
+            callback(sessionId, deviceId);
+          } catch (error) {
+            logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
+          }
+        }
+      }
+    }
+  }
+
+  /**
    * Start periodic cleanup of expired sessions
    */
   private startCleanupTimer(): void {
     this.cleanupTimer = this.timer.setInterval(() => {
-      const expiredSessions: string[] = [];
-
-      for (const [sessionId, session] of this.sessions) {
-        if (this.isSessionExpired(session)) {
-          expiredSessions.push(sessionId);
-        }
-      }
-
-      if (expiredSessions.length > 0) {
-        logger.info(
-          `Cleaning up ${expiredSessions.length} expired sessions: ` +
-          expiredSessions.join(", ")
-        );
-
-        for (const sessionId of expiredSessions) {
-          const session = this.sessions.get(sessionId);
-          const deviceId = session?.assignedDevice;
-          this.removeSession(sessionId);
-          // Notify release callbacks so session-scoped state is cleaned up
-          if (deviceId) {
-            for (const callback of this.releaseCallbacks) {
-              try {
-                callback(sessionId, deviceId);
-              } catch (error) {
-                logger.warn(`Session cleanup callback failed for ${sessionId}: ${error}`);
-              }
-            }
-          }
-        }
-      }
+      this.cleanupExpiredSessions();
     }, this.CLEANUP_INTERVAL_MS);
 
     // Allow process to exit even if timer is running
@@ -434,6 +477,29 @@ export class SessionManager {
       this.timer.clearInterval(this.cleanupTimer);
       this.cleanupTimer = null;
     }
+  }
+
+  private async persistSession(session: Session): Promise<void> {
+    await this.deviceSessionRepository.upsertActiveSession({
+      sessionUuid: session.sessionId,
+      deviceId: session.assignedDevice,
+      platform: session.platform,
+      source: "session-manager",
+      createdAtMs: session.createdAt,
+      lastUsedAtMs: session.lastUsedAt,
+      expiresAtMs: session.expiresAt,
+      sessionTimeoutMs: session.sessionTimeoutMs,
+      heartbeatTimeoutMs: session.heartbeatTimeoutMs,
+      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+    });
+  }
+
+  private async recordSessionActivity(session: Session): Promise<void> {
+    await this.deviceSessionRepository.recordActivity(session.sessionId, {
+      lastUsedAtMs: session.lastUsedAt,
+      expiresAtMs: session.expiresAt,
+      hasReceivedHeartbeat: session.hasReceivedHeartbeat,
+    });
   }
 
   /**

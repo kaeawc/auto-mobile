@@ -1,8 +1,6 @@
-import os from "node:os";
-import path from "node:path";
 import { logger } from "../utils/logger";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   AppearanceSocketRequest,
   AppearanceSocketResponse,
@@ -18,11 +16,7 @@ import { applyAppearanceToDevice } from "../utils/deviceAppearance";
 import { triggerAppearanceSync } from "../utils/appearance/AppearanceSyncScheduler";
 import { DaemonState } from "./daemonState";
 import type { AppearanceMode, BootedDevice } from "../models";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "appearance.sock"),
-  externalPath: "/tmp/auto-mobile-appearance.sock",
-};
+import { APPEARANCE_SOCKET_CONFIG } from "./daemonFiles";
 
 const VALID_MODES = new Set(["light", "dark", "auto"]);
 
@@ -34,7 +28,7 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
   AppearanceSocketRequest,
   AppearanceSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(APPEARANCE_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "Appearance");
   }
 
@@ -157,6 +151,10 @@ export class AppearanceSocketServer extends RequestResponseSocketServer<
 }
 
 let socketServer: AppearanceSocketServer | null = null;
+
+export function getAppearanceSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(APPEARANCE_SOCKET_CONFIG);
+}
 
 export async function startAppearanceSocketServer(): Promise<void> {
   if (!socketServer) {

@@ -26,6 +26,7 @@ mock.module("../../src/utils/planUtils", () => {
 });
 
 import { PlanExecutionOrchestrator, convertDebugStepsToRecords, VideoRecorder } from "../../src/server/planExecutionOrchestrator";
+import { serverConfig } from "../../src/utils/ServerConfig";
 
 const buildVideoRecorder = (
   filePath: string = "/tmp/fake-recording.mp4",
@@ -76,6 +77,52 @@ const baseDeps = () => ({
 describe("PlanExecutionOrchestrator", () => {
   beforeEach(() => {
     executePlanMock.mockClear();
+    // The plan-execution guard is a process-wide singleton; reset between tests
+    // so one run never leaks state into another.
+    serverConfig.setPlanExecutionActive(false);
+  });
+
+  test("keeps the plan-execution guard active during the run and clears it afterward", async () => {
+    let activeDuringRun: boolean | undefined;
+    executePlanMock.mockImplementationOnce(() => {
+      activeDuringRun = serverConfig.isPlanExecutionActive();
+      return Promise.resolve({
+        success: true,
+        executedSteps: 2,
+        totalSteps: 2,
+        debug: { executionTimeMs: 1, steps: [] },
+      });
+    });
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      baseDeps()
+    );
+    await orchestrator.execute();
+
+    // The guard suppresses the device-disconnect monitor across allocation + run.
+    expect(activeDuringRun).toBe(true);
+    // It MUST be cleared in finally, or the monitor stays suppressed forever.
+    expect(serverConfig.isPlanExecutionActive()).toBe(false);
+  });
+
+  test("clears the plan-execution guard even when the plan fails", async () => {
+    executePlanMock.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: false,
+        executedSteps: 0,
+        totalSteps: 2,
+        failedStep: { stepIndex: 0, tool: "observe", error: "boom" },
+      })
+    );
+
+    const orchestrator = new PlanExecutionOrchestrator(
+      { device: iosDevice, request: baseRequest },
+      baseDeps()
+    );
+    await orchestrator.execute();
+
+    expect(serverConfig.isPlanExecutionActive()).toBe(false);
   });
 
   test("execute() returns a structured success result for a simple plan", async () => {

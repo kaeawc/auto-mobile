@@ -4,8 +4,7 @@
  * `IosSystemConfigurationAdapter` (for its locale/timezone/24h ops).
  */
 
-const SIMULATOR_UDID_PATTERN =
-  /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;
+import { isIosSimulatorUdid } from "../../../utils/ios-cmdline-tools/iosDeviceType";
 
 /**
  * Distinguish an iOS Simulator (8-4-4-4-12 UUID) from a physical iPhone
@@ -13,7 +12,7 @@ const SIMULATOR_UDID_PATTERN =
  * the Simulator, so callers gate on this.
  */
 export function isIosSimulator(deviceId: string): boolean {
-  return SIMULATOR_UDID_PATTERN.test(deviceId);
+  return isIosSimulatorUdid(deviceId);
 }
 
 /** Compose an `xcrun simctl spawn <udid> <command>` shell line. */

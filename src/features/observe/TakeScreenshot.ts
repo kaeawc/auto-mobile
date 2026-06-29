@@ -12,6 +12,7 @@ import { ScreenshotJobHandle, ScreenshotJobOptions, ScreenshotJobTracker } from 
 import { OPERATION_CANCELLED_MESSAGE } from "../../utils/constants";
 import { ensureSecureTempDirSync, TEMP_SUBDIRS } from "../../utils/tempDir";
 import type { ScreenshotService } from "./interfaces/ScreenshotService";
+import { selectScreenshotsToEvict, SCREENSHOT_MIN_EVICT_AGE_MS } from "./screenshotCacheEviction";
 import { IOSCtrlProxyClient } from "./ios";
 import { getDeviceDataStreamServer } from "../../daemon/deviceDataStreamSocketServer";
 import { Timer, defaultTimer } from "../../utils/SystemTimer";
@@ -107,22 +108,18 @@ export class TakeScreenshot implements ScreenshotService {
         })
       );
 
-      // Calculate total size
-      const totalSize = fileStats.reduce((sum, file) => sum + file.stats.size, 0);
-
-      // If we're over the limit, remove oldest files until under limit
-      if (totalSize > TakeScreenshot.MAX_CACHE_SIZE_BYTES) {
-        // Sort by modification time (oldest first)
-        fileStats.sort((a, b) => a.mtime - b.mtime);
-
-        let currentSize = totalSize;
-        for (const file of fileStats) {
-          if (currentSize <= TakeScreenshot.MAX_CACHE_SIZE_BYTES) {break;}
-
-          await fsPromises.unlink(file.path);
-          currentSize -= file.stats.size;
-          logger.debug(`Removed cached screenshot: ${file.path}`);
-        }
+      // Evict oldest-first until under the limit, but never a file young enough
+      // to be an in-flight capture from another process sharing this dir (in
+      // production each agent runs its own client process writing here).
+      const toDelete = selectScreenshotsToEvict(
+        fileStats.map(f => ({ path: f.path, size: f.stats.size, mtimeMs: f.mtime })),
+        TakeScreenshot.MAX_CACHE_SIZE_BYTES,
+        SCREENSHOT_MIN_EVICT_AGE_MS,
+        Date.now()
+      );
+      for (const filePath of toDelete) {
+        await fsPromises.unlink(filePath);
+        logger.debug(`Removed cached screenshot: ${filePath}`);
       }
     } catch (err) {
       logger.warn("Failed to cleanup screenshot cache:", err);

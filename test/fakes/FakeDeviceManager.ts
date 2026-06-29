@@ -1,11 +1,14 @@
 import { ChildProcess } from "child_process";
-import { BootedDevice, DeviceInfo, SomePlatform } from "../../src/models";
-import { PlatformDeviceManager } from "../../src/utils/deviceUtils";
+import { BootedDevice, DeviceInfo, Platform, SomePlatform } from "../../src/models";
+import { BootedDeviceDiscovery, PlatformDeviceManager } from "../../src/utils/deviceUtils";
 
 export class FakeDeviceManager implements PlatformDeviceManager {
   deviceImages: DeviceInfo[] = [];
   bootedDevices: BootedDevice[] = [];
   startedDevices: DeviceInfo[] = [];
+  // Platforms whose discovery should report as failed/unavailable (used to
+  // exercise partial-discovery handling). Defaults to all platforms succeeding.
+  failedPlatforms: Set<Platform> = new Set();
 
   constructor(images: DeviceInfo[] = [], booted: BootedDevice[] = []) {
     this.deviceImages = images;
@@ -32,6 +35,20 @@ export class FakeDeviceManager implements PlatformDeviceManager {
       return this.bootedDevices;
     }
     return this.bootedDevices.filter(device => device.platform === platform);
+  }
+
+  async getBootedDevicesDetailed(platform: SomePlatform): Promise<BootedDeviceDiscovery> {
+    const requested: Platform[] = platform === "either" ? ["android", "ios"] : [platform];
+    const devices: BootedDevice[] = [];
+    const succeededPlatforms = new Set<Platform>();
+    for (const p of requested) {
+      if (this.failedPlatforms.has(p)) {
+        continue;
+      }
+      succeededPlatforms.add(p);
+      devices.push(...this.bootedDevices.filter(device => device.platform === p));
+    }
+    return { devices, succeededPlatforms };
   }
 
   async startDevice(device: DeviceInfo): Promise<ChildProcess> {

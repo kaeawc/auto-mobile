@@ -2,7 +2,7 @@
  * Type definitions for interaction tools.
  * Extracted from interactionTools.ts for maintainability.
  */
-import type { Platform, ElementSelectionStrategy } from "../models";
+import type { Platform, ElementSelectionStrategy, ImeAction } from "../models";
 
 // ============================================================================
 // Tool Argument Types
@@ -37,7 +37,8 @@ export interface SystemTrayArgs {
 
 export interface InputTextArgs {
   text: string;
-  imeAction?: "done" | "next" | "search" | "send" | "go" | "previous";
+  mode?: "a11y" | "eventLast" | "eventAll";
+  imeAction?: ImeAction;
   dismissKeyboard?: boolean;
   platform: Platform;
 }
@@ -142,7 +143,7 @@ export interface ShakeArgs {
 }
 
 export interface ImeActionArgs {
-  action: "done" | "next" | "search" | "send" | "go" | "previous";
+  action: ImeAction;
   platform: Platform;
 }
 

@@ -32,12 +32,7 @@ import {
   elementContainerSchema,
   elementSelectionStrategySchema,
 } from "./elementSelectorSchemas";
-import {
-  elementSchema,
-  observationSummarySchema,
-  scrollableCandidateSchema,
-  selectedElementSchema
-} from "./toolOutputSchemas";
+import { tapOnResultSchema } from "./toolOutputSchemas";
 
 // Import from extracted modules
 import type {
@@ -124,8 +119,8 @@ export {
 // ============================================================================
 
 export const shakeSchema = addDeviceTargetingToSchema(z.object({
-  duration: z.number().optional().describe("Shake duration in ms (default: 1000)"),
-  intensity: z.number().optional().describe("Shake acceleration intensity (default: 100)"),
+  duration: z.number().optional().describe("Shake duration in ms (default: 1000). On iOS Simulator this contributes to the runner timeout budget."),
+  intensity: z.number().optional().describe("Shake acceleration intensity (default: 100). Ignored on iOS Simulator because XCTest shake has no intensity parameter."),
   platform: platformSchema
 }));
 
@@ -193,51 +188,6 @@ export const tapAnySchema = addDeviceTargetingToSchema(z.object({
   }).optional().describe("Poll for clickable element before tapping"),
   platform: platformSchema
 }).strict());
-
-const tapOnResultSchema = z.object({
-  success: z.boolean(),
-  action: z.enum(["tap", "doubleTap", "longPress", "focus"]),
-  message: z.string().optional(),
-  element: elementSchema.optional(),
-  observation: observationSummarySchema.optional(),
-  selectedElement: selectedElementSchema.optional(),
-  selectedElements: z.array(selectedElementSchema).optional(),
-  error: z.string().optional(),
-  pressRecognized: z.boolean().optional(),
-  contextMenuOpened: z.boolean().optional(),
-  selectionStarted: z.boolean().optional(),
-  searchUntil: z.object({
-    durationMs: z.number().int(),
-    requestCount: z.number().int(),
-    changeCount: z.number().int()
-  }).partial().optional(),
-  debug: z.any().optional()
-}).passthrough();
-
-const swipeOnResultSchema = z.object({
-  success: z.boolean(),
-  error: z.string().optional(),
-  warning: z.string().optional(),
-  scrollableCandidates: z.array(scrollableCandidateSchema).optional(),
-  targetType: z.enum(["screen", "element"]),
-  element: elementSchema.optional(),
-  x1: z.number().int(),
-  y1: z.number().int(),
-  x2: z.number().int(),
-  y2: z.number().int(),
-  duration: z.number().int(),
-  easing: z.enum(["linear", "decelerate", "accelerate", "accelerateDecelerate"]).optional(),
-  path: z.number().optional(),
-  found: z.boolean().optional(),
-  scrollIterations: z.number().int().optional(),
-  elapsedMs: z.number().int().optional(),
-  hierarchyChanged: z.boolean().optional(),
-  observation: observationSummarySchema.optional(),
-  a11yTotalTimeMs: z.number().int().optional(),
-  a11yGestureTimeMs: z.number().int().optional(),
-  fallbackReason: z.string().optional(),
-  debug: z.any().optional()
-}).passthrough();
 
 const dragAndDropSelectorSchema = (label: "Source" | "Target") =>
   createElementIdTextSelectorSchema({
@@ -370,6 +320,8 @@ export const clearStateSchema = addDeviceTargetingToSchema(z.object({
 
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
   text: z.string().min(1).describe("Text to input"),
+  mode: z.enum(["a11y", "eventLast", "eventAll"]).optional()
+    .describe("(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default."),
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
@@ -400,11 +352,36 @@ export const rotateSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema
 }));
 
-export const clipboardSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["copy", "paste", "clear", "get"]).describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
-  text: z.string().optional().describe("Text to copy (required for 'copy' action)"),
-  platform: platformSchema
-}));
+const clipboardTextRequiredMessage = "text is required when action is copy";
+const optionalClipboardTextSchema = z.string().min(1).optional().describe("Text to copy (required for 'copy' action)");
+const clipboardPlatformSchema = {
+  platform: platformSchema,
+};
+
+export const clipboardSchema = z.discriminatedUnion("action", [
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("copy").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: z.string({ error: clipboardTextRequiredMessage })
+      .min(1, clipboardTextRequiredMessage)
+      .describe("Text to copy (required for 'copy' action)"),
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("paste").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("clear").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  })),
+  addDeviceTargetingToSchema(z.object({
+    action: z.literal("get").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    text: optionalClipboardTextSchema,
+    ...clipboardPlatformSchema,
+  }))
+]);
 
 // ============================================================================
 // Tool Registration
@@ -805,8 +782,9 @@ export function registerInteractionTools() {
   const inputTextHandler = async (device: BootedDevice, args: InputTextArgs) => {
     RecompositionTracker.getInstance().recordInteraction();
     const dismissKeyboard = args.dismissKeyboard ?? serverConfig.isDismissKeyboardAfterInputEnabled();
+    const mode = device.platform === "android" ? args.mode : undefined;
     const inputText = new InputText(device);
-    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard);
+    const result = await inputText.execute(args.text, args.imeAction, dismissKeyboard, mode);
     return createJSONToolResponse({
       message: `Input text`,
       observation: result.observation,
@@ -836,7 +814,9 @@ export function registerInteractionTools() {
       }, progress);
 
       return createJSONToolResponse({
-        message: `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`,
+        message: result.success
+          ? `Shook device for ${args.duration ?? 1000}ms with intensity ${args.intensity ?? 100}`
+          : `Failed to shake device: ${result.error ?? "unknown error"}`,
         observation: result.observation,
         ...result
       });
@@ -978,7 +958,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "pressButton",
-    "Press hardware button",
+    "Press device or navigation button",
     pressButtonSchema,
     pressButtonHandler,
     true // Supports progress notifications
@@ -994,7 +974,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "inputText",
-    "Input text",
+    "Input text. The optional mode field is Android-only and ignored on iOS.",
     inputTextSchema,
     inputTextHandler,
     false // Does not support progress notifications
@@ -1029,9 +1009,7 @@ export function registerInteractionTools() {
     "scrollableContainer: true to limit to list/RecyclerView items.",
     tapAnySchema,
     tapAnyHandler,
-    true,
-    false,
-    { outputSchema: tapOnResultSchema }
+    true
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1047,9 +1025,7 @@ export function registerInteractionTools() {
     "Swipe/scroll on screen or elements",
     swipeOnSchema,
     swipeOnHandler,
-    true, // Supports progress notifications
-    false,
-    { outputSchema: swipeOnResultSchema }
+    true // Supports progress notifications
   );
 
   ToolRegistry.registerDeviceAware(
@@ -1062,7 +1038,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "shake",
-    "Shake device",
+    "Shake device. iOS support is Simulator-only; physical iOS devices are not supported by XCTest.",
     shakeSchema,
     shakeHandler,
     true // Supports progress notifications

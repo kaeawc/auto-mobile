@@ -16,7 +16,7 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
     const h = hierarchyWithNode({
       "resource-id": "com.app:id/progress_bar_loading",
       "class": "android.view.View",
-      "bounds": "[0,0][10,10]"
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -24,7 +24,7 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
   test("true for ProgressBar class", () => {
     const h = hierarchyWithNode({
       class: "android.widget.ProgressBar",
-      bounds: "[0,0][10,10]"
+      bounds: { left: 0, top: 0, right: 10, bottom: 10 }
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(true);
   });
@@ -34,7 +34,7 @@ describe("androidViewHierarchyIndicatesLikelyBlockingLoading", () => {
       "resource-id": "com.app:id/title",
       "class": "android.widget.TextView",
       "text": "Hello",
-      "bounds": "[0,0][10,10]"
+      "bounds": { left: 0, top: 0, right: 10, bottom: 10 }
     });
     expect(androidViewHierarchyIndicatesLikelyBlockingLoading(h, parser)).toBe(false);
   });

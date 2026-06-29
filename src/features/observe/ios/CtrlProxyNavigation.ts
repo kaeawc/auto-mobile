@@ -9,6 +9,9 @@ import type { PerformanceTracker } from "../../../utils/PerformanceTracker";
 import type {
   DelegateContext,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
+  CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyRotateResult,
@@ -45,6 +48,65 @@ export class CtrlProxyNavigation {
   }
 
   /**
+   * Request app-level back navigation.
+   */
+  async requestPressBack(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult> {
+    return sendCommand<CtrlProxyPressBackResult>(this.context, {
+      idPrefix: "pressBack",
+      responseType: "press_back",
+      messageType: "request_press_back",
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Press back",
+    });
+  }
+
+  /**
+   * Request a synthetic device shake.
+   */
+  async requestShake(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyShakeResult> {
+    return sendCommand<CtrlProxyShakeResult>(this.context, {
+      idPrefix: "shake",
+      responseType: "shake",
+      messageType: "request_shake",
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Shake",
+    });
+  }
+
+  /**
+   * Request to press a named iOS hardware or navigation button.
+   */
+  async requestPressButton(
+    button: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult> {
+    return sendCommand<CtrlProxyPressButtonResult>(this.context, {
+      idPrefix: "pressButton",
+      responseType: "press_button",
+      messageType: "request_press_button",
+      params: { action: button },
+      timeoutMs,
+      perf,
+      cancelScreenshotBackoff: false,
+      notConnectedMessage: "Not connected to CtrlProxy",
+      errorLabel: "Press button",
+    });
+  }
+
+  /**
    * Request to rotate device orientation.
    */
   async requestRotate(
@@ -64,6 +126,15 @@ export class CtrlProxyNavigation {
         success: false,
         totalTimeMs: 0,
         error: "Not connected",
+        previousOrientation: "",
+        currentOrientation: "",
+        value: 0,
+        rotationPerformed: false,
+      }),
+      unsupportedCommandError: (_messageType, error) => ({
+        success: false,
+        totalTimeMs: 0,
+        error,
         previousOrientation: "",
         currentOrientation: "",
         value: 0,

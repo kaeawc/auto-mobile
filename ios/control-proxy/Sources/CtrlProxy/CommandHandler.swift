@@ -1,6 +1,6 @@
 import Foundation
 #if canImport(os)
-import os
+    import os
 #endif
 #if canImport(XCTest) && os(iOS)
     import XCTest
@@ -21,6 +21,8 @@ public class CommandHandler: CommandHandling {
     private let storageInspector: StorageInspecting?
     private let sdkHierarchyClient: (any SdkHierarchyFetching)?
     private let sdkHierarchyCache: (any SdkHierarchyCaching)?
+    private let highlightOverlayManager: HighlightOverlayManaging
+    private let sdkDatabaseClient: (any SdkDatabaseFetching)?
 
     public init(
         elementLocator: ElementLocating,
@@ -28,7 +30,9 @@ public class CommandHandler: CommandHandling {
         perfProvider: PerfProvider = PerfProvider.instance,
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
-        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
+        sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     ) {
         self.elementLocator = elementLocator
         self.gesturePerformer = gesturePerformer
@@ -36,6 +40,8 @@ public class CommandHandler: CommandHandling {
         self.storageInspector = storageInspector
         self.sdkHierarchyClient = sdkHierarchyClient
         self.sdkHierarchyCache = sdkHierarchyCache
+        self.highlightOverlayManager = highlightOverlayManager
+        self.sdkDatabaseClient = sdkDatabaseClient
     }
 
     /// Factory for testing - allows injecting fakes
@@ -45,7 +51,9 @@ public class CommandHandler: CommandHandling {
         perfProvider: PerfProvider,
         storageInspector: StorageInspecting? = nil,
         sdkHierarchyClient: (any SdkHierarchyFetching)? = nil,
-        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil
+        sdkHierarchyCache: (any SdkHierarchyCaching)? = nil,
+        highlightOverlayManager: HighlightOverlayManaging = HighlightOverlayManager(),
+        sdkDatabaseClient: (any SdkDatabaseFetching)? = nil
     )
         -> CommandHandler
     {
@@ -55,7 +63,9 @@ public class CommandHandler: CommandHandling {
             perfProvider: perfProvider,
             storageInspector: storageInspector,
             sdkHierarchyClient: sdkHierarchyClient,
-            sdkHierarchyCache: sdkHierarchyCache
+            sdkHierarchyCache: sdkHierarchyCache,
+            highlightOverlayManager: highlightOverlayManager,
+            sdkDatabaseClient: sdkDatabaseClient
         )
     }
 
@@ -83,6 +93,9 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestTwoFingerSwipe.rawValue:
                 return try handleTwoFingerSwipe(request, startTime: startTime)
 
+            case RequestType.requestMultiFingerSwipe.rawValue:
+                return try handleMultiFingerSwipe(request, startTime: startTime)
+
             case RequestType.requestDrag.rawValue:
                 return try handleDrag(request, startTime: startTime)
 
@@ -102,8 +115,20 @@ public class CommandHandler: CommandHandling {
             case RequestType.requestSelectAll.rawValue:
                 return try handleSelectAll(request, startTime: startTime)
 
+            case RequestType.requestKeyboard.rawValue:
+                return try handleKeyboard(request, startTime: startTime)
+
+            case RequestType.requestPressButton.rawValue:
+                return try handlePressButton(request, startTime: startTime)
+
             case RequestType.requestPressHome.rawValue:
                 return try handlePressHome(request, startTime: startTime)
+
+            case RequestType.requestPressBack.rawValue:
+                return try handlePressBack(request, startTime: startTime)
+
+            case RequestType.requestShake.rawValue:
+                return try handleShake(request, startTime: startTime)
 
             case RequestType.requestRecentApps.rawValue:
                 return try handleRecentApps(request, startTime: startTime)
@@ -155,6 +180,26 @@ public class CommandHandler: CommandHandling {
             case RequestType.clearPreferences.rawValue:
                 return try handleClearPreferences(request, startTime: startTime)
 
+            // Network mocking
+            case RequestType.setNetworkMockRules.rawValue:
+                return try handleSetNetworkMockRules(request, startTime: startTime)
+
+            // Database commands
+            case RequestType.executeSql.rawValue:
+                return handleExecuteSql(request, startTime: startTime)
+
+            case RequestType.listDatabases.rawValue:
+                return handleListDatabases(request, startTime: startTime)
+
+            case RequestType.listTables.rawValue:
+                return handleListTables(request, startTime: startTime)
+
+            case RequestType.getTableData.rawValue:
+                return handleGetTableData(request, startTime: startTime)
+
+            case RequestType.getTableStructure.rawValue:
+                return handleGetTableStructure(request, startTime: startTime)
+
             default:
                 return WebSocketResponse.error(
                     type: "error",
@@ -171,6 +216,25 @@ public class CommandHandler: CommandHandling {
                 totalTimeMs: totalTimeMs(from: startTime)
             )
         }
+    }
+
+    // MARK: - Network Mocking
+
+    private func handleSetNetworkMockRules(
+        _ request: WebSocketRequest,
+        startTime: Date
+    )
+        throws -> SetNetworkMockRulesResponse
+    {
+        guard let rules = request.rules else {
+            throw CommandError.missingParameter("rules")
+        }
+        let succeeded = sdkHierarchyClient?.setMockRules(rules) ?? false
+        return SetNetworkMockRulesResponse(
+            requestId: request.requestId,
+            ok: succeeded,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
     }
 
     // MARK: - View Hierarchy
@@ -195,10 +259,7 @@ public class CommandHandler: CommandHandling {
             throw CommandError.executionFailed("Failed to get view hierarchy: \(error.localizedDescription)")
         }
 
-        // Merge with SDK hierarchy: prefer cached (fast), fall back to fresh pull if no cache
-        let sdkHierarchy: SdkViewHierarchy? = sdkHierarchyCache?.latest
-            ?? sdkHierarchyClient?.fetchFreshHierarchy()
-        let enriched = HierarchyMerger.merge(xcuitest: hierarchy, sdk: sdkHierarchy)
+        let enriched = enrichWithMatchingSdkHierarchy(hierarchy)
 
         // Get accumulated timing for this operation
         let perfTimings = perfProvider.flush()
@@ -208,6 +269,83 @@ public class CommandHandler: CommandHandling {
             data: enriched,
             perfTiming: perfTimings?.first
         )
+    }
+
+    func enrichWithMatchingSdkHierarchy(_ hierarchy: ViewHierarchy) -> ViewHierarchy {
+        HierarchyMerger.merge(xcuitest: hierarchy, sdk: matchingSdkHierarchy(for: hierarchy))
+    }
+
+    func enrichWithCachedSdkHierarchy(_ hierarchy: ViewHierarchy) -> ViewHierarchy {
+        HierarchyMerger.merge(xcuitest: hierarchy, sdk: matchingCachedSdkHierarchy(for: hierarchy))
+    }
+
+    private func matchingCachedSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
+        guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName),
+              let cached = sdkHierarchyCache?.latest
+        else {
+            return nil
+        }
+        guard sdkHierarchy(cached, matches: foregroundBundleId) else {
+            sdkHierarchyCache?.clear()
+            return nil
+        }
+        return cached
+    }
+
+    private func matchingSdkHierarchy(for hierarchy: ViewHierarchy) -> SdkViewHierarchy? {
+        guard let foregroundBundleId = normalizedBundleId(hierarchy.packageName) else {
+            return nil
+        }
+
+        if let cached = sdkHierarchyCache?.latest {
+            if sdkHierarchy(cached, matches: foregroundBundleId) {
+                return cached
+            }
+            guard sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+                sdkHierarchyCache?.clear()
+                return nil
+            }
+        } else if sdkHierarchyClient != nil {
+            guard sdkServerMatchesForegroundBundleId(foregroundBundleId) else {
+                return nil
+            }
+        }
+
+        guard let fresh = sdkHierarchyClient?.fetchFreshHierarchy(),
+              sdkHierarchy(fresh, matches: foregroundBundleId)
+        else {
+            sdkHierarchyCache?.clear()
+            return nil
+        }
+        sdkHierarchyCache?.update(fresh)
+        return fresh
+    }
+
+    private func sdkServerMatchesForegroundBundleId(_ foregroundBundleId: String) -> Bool {
+        guard let serverBundleId = normalizedBundleId(sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {
+            return false
+        }
+        return serverBundleId == foregroundBundleId
+    }
+
+    private func sdkServerMatchesTrackedForegroundApp() -> Bool {
+        guard let foregroundBundleId = normalizedBundleId(elementLocator.foregroundBundleId) else {
+            return false
+        }
+        return sdkServerMatchesForegroundBundleId(foregroundBundleId)
+    }
+
+    private func sdkHierarchy(_ sdkHierarchy: SdkViewHierarchy, matches foregroundBundleId: String) -> Bool {
+        normalizedBundleId(sdkHierarchy.bundleId) == foregroundBundleId
+    }
+
+    private func normalizedBundleId(_ bundleId: String?) -> String? {
+        guard let normalized = bundleId?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !normalized.isEmpty
+        else {
+            return nil
+        }
+        return normalized
     }
 
     private func handleRequestScreenshot(_ request: WebSocketRequest, startTime _: Date) throws -> ScreenshotResponse {
@@ -260,11 +398,39 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleTwoFingerSwipe(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Two-finger swipe not yet implemented on iOS
-        return WebSocketResponse.error(
-            type: ResponseType.swipeResult.rawValue,
+        try handleMultiFingerSwipe(request, startTime: startTime, defaultFingers: 2)
+    }
+
+    private func handleMultiFingerSwipe(
+        _ request: WebSocketRequest,
+        startTime: Date,
+        defaultFingers: Int = 2
+    )
+        throws -> WebSocketResponse
+    {
+        guard let x1 = request.x1, let y1 = request.y1,
+              let x2 = request.x2, let y2 = request.y2
+        else {
+            throw CommandError.missingParameter("x1, y1, x2, y2")
+        }
+
+        let fingerCount = request.fingerCount ?? defaultFingers
+        let duration = request.duration ?? 300
+        let fingerSpacing = request.offset ?? 25
+
+        try gesturePerformer.multiFingerSwipe(
+            startX: Double(x1),
+            startY: Double(y1),
+            endX: Double(x2),
+            endY: Double(y2),
+            fingerCount: fingerCount,
+            fingerSpacing: fingerSpacing,
+            duration: TimeInterval(duration) / 1000.0
+        )
+
+        return WebSocketResponse.success(
+            type: ResponseType.multiFingerSwipeResult.rawValue,
             requestId: request.requestId,
-            error: "Two-finger swipe not yet implemented on iOS",
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
@@ -330,7 +496,10 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.debug("handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleSetText begin resourceId=\(resourceId ?? "nil", privacy: .public) textLength=\(text.count, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             if let resourceId = resourceId {
@@ -343,15 +512,23 @@ public class CommandHandler: CommandHandling {
                 }
             }
         } catch {
-            textInputLog.error("handleSetText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleSetText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleSetText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.setTextResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -360,22 +537,33 @@ public class CommandHandler: CommandHandling {
         defer { perfProvider.end() }
 
         let resourceId = request.resourceId
-        textInputLog.debug("handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleClearText begin resourceId=\(resourceId ?? "nil", privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             try perfProvider.track("clearText") {
                 try gesturePerformer.clearText(resourceId: resourceId)
             }
         } catch {
-            textInputLog.error("handleClearText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleClearText FAILED resourceId=\(resourceId ?? "nil", privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleClearText OK resourceId=\(resourceId ?? "nil", privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.clearTextResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -387,22 +575,33 @@ public class CommandHandler: CommandHandling {
         perfProvider.serial("handleImeAction")
         defer { perfProvider.end() }
 
-        textInputLog.debug("handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)")
+        textInputLog
+            .debug(
+                "handleImeAction begin action=\(action, privacy: .public) requestId=\(request.requestId ?? "nil", privacy: .public)"
+            )
 
         do {
             try perfProvider.track("imeAction") {
                 try gesturePerformer.performImeAction(action)
             }
         } catch {
-            textInputLog.error("handleImeAction FAILED action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleImeAction FAILED action=\(action, privacy: .public) error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog
+            .debug(
+                "handleImeAction OK action=\(action, privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+            )
         return WebSocketResponse.success(
             type: ResponseType.imeActionResult.rawValue,
             requestId: request.requestId,
-            totalTimeMs: totalTimeMs(from: startTime)
+            totalTimeMs: elapsedMs
         )
     }
 
@@ -417,13 +616,81 @@ public class CommandHandler: CommandHandling {
                 try gesturePerformer.selectAll()
             }
         } catch {
-            textInputLog.error("handleSelectAll FAILED error=\(String(describing: error), privacy: .public) elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+            let elapsedMs = totalTimeMs(from: startTime)
+            textInputLog
+                .error(
+                    "handleSelectAll FAILED error=\(String(describing: error), privacy: .public) elapsedMs=\(elapsedMs, privacy: .public)"
+                )
             throw error
         }
 
-        textInputLog.debug("handleSelectAll OK elapsedMs=\(self.totalTimeMs(from: startTime), privacy: .public)")
+        let elapsedMs = totalTimeMs(from: startTime)
+        textInputLog.debug("handleSelectAll OK elapsedMs=\(elapsedMs, privacy: .public)")
         return WebSocketResponse.success(
             type: ResponseType.selectAllResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: elapsedMs
+        )
+    }
+
+    private func handleKeyboard(_ request: WebSocketRequest, startTime: Date) throws -> KeyboardResponse {
+        guard let action = request.action else {
+            throw CommandError.missingParameter("action")
+        }
+
+        perfProvider.serial("handleKeyboard")
+        defer { perfProvider.end() }
+
+        let open = try perfProvider.track("keyboard") {
+            try gesturePerformer.keyboard(action: action)
+        }
+        let success = keyboardActionSucceeded(action: action, open: open)
+
+        return KeyboardResponse(
+            requestId: request.requestId,
+            success: success,
+            open: open,
+            totalTimeMs: totalTimeMs(from: startTime),
+            error: success ? nil : "Keyboard did not \(action.lowercased())"
+        )
+    }
+
+    private func keyboardActionSucceeded(action: String, open: Bool) -> Bool {
+        switch action.lowercased() {
+        case "detect":
+            return true
+        case "open":
+            return open
+        case "close":
+            return !open
+        default:
+            return false
+        }
+    }
+
+    private func handlePressButton(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        guard let button = request.action else {
+            throw CommandError.missingParameter("action")
+        }
+
+        perfProvider.serial("handlePressButton")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressButton") {
+            try gesturePerformer.pressButton(button)
+        }
+
+        if button.lowercased() == "home" || button.lowercased() == "recent" {
+            perfProvider.track("switchForegroundApp") {
+                elementLocator.switchForegroundApp(bundleId: "com.apple.springboard")
+            }
+            perfProvider.track("updateApplication") {
+                gesturePerformer.updateApplication(bundleId: "com.apple.springboard")
+            }
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pressButtonResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )
@@ -447,6 +714,36 @@ public class CommandHandler: CommandHandling {
 
         return WebSocketResponse.success(
             type: ResponseType.pressHomeResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handlePressBack(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handlePressBack")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("pressBack") {
+            try gesturePerformer.pressBack()
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.pressBackResult.rawValue,
+            requestId: request.requestId,
+            totalTimeMs: totalTimeMs(from: startTime)
+        )
+    }
+
+    private func handleShake(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
+        perfProvider.serial("handleShake")
+        defer { perfProvider.end() }
+
+        try perfProvider.track("shake") {
+            try gesturePerformer.shake()
+        }
+
+        return WebSocketResponse.success(
+            type: ResponseType.shakeResult.rawValue,
             requestId: request.requestId,
             totalTimeMs: totalTimeMs(from: startTime)
         )
@@ -521,7 +818,9 @@ public class CommandHandler: CommandHandling {
 
         if coldBoot {
             // Cold boot: always terminate then launch fresh
-            if appState == .runningForeground || appState == .runningBackground || appState == .runningBackgroundSuspended {
+            if appState == .runningForeground || appState == .runningBackground || appState ==
+                .runningBackgroundSuspended
+            {
                 try perfProvider.track("terminateApp") {
                     try gesturePerformer.terminateApp(bundleId: bundleId)
                 }
@@ -558,7 +857,7 @@ public class CommandHandler: CommandHandling {
         // activate() is synchronous and the app is guaranteed to remain foreground.
         if !alreadyForeground || coldBoot {
             perfProvider.track("awaitForeground") {
-                let _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
+                _ = elementLocator.awaitAppState(bundleId: bundleId, expectedState: .foreground)
             }
         }
 
@@ -666,11 +965,35 @@ public class CommandHandler: CommandHandling {
     }
 
     private func handleAddHighlight(_ request: WebSocketRequest, startTime: Date) throws -> WebSocketResponse {
-        // Stub: Highlights not yet implemented
-        return WebSocketResponse.error(
+        guard let shape = request.shape else {
+            return WebSocketResponse.error(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                error: "add_highlight requires a shape",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        let highlightId = request.id ?? request.requestId ?? UUID().uuidString
+        if sdkHierarchyClient != nil,
+           sdkServerMatchesTrackedForegroundApp(),
+           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true {
+            return WebSocketResponse.success(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard highlightOverlayManager.show(id: highlightId, shape: shape) else {
+            return WebSocketResponse.error(
+                type: ResponseType.highlightResponse.rawValue,
+                requestId: request.requestId,
+                error: "Unable to render highlight on iOS: target app SDK highlight bridge unavailable and runner overlay fallback disabled.",
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        return WebSocketResponse.success(
             type: ResponseType.highlightResponse.rawValue,
             requestId: request.requestId,
-            error: "Highlights not yet implemented on iOS",
             totalTimeMs: totalTimeMs(from: startTime)
         )
     }
@@ -854,7 +1177,248 @@ public class CommandHandler: CommandHandling {
         )
     }
 
+    // MARK: - Database
+
+    private func handleExecuteSql(_ request: WebSocketRequest, startTime: Date) -> ExecuteSqlResponse {
+        guard let client = sdkDatabaseClient else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let query = request.query else {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("query").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request)
+            let result = try client.executeSQL(databasePath: databasePath, query: query)
+            if let error = result.error {
+                return ExecuteSqlResponse(
+                    requestId: request.requestId,
+                    success: false,
+                    error: error,
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            }
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: true,
+                queryType: result.queryType,
+                columns: result.columns,
+                rows: result.rows,
+                rowsAffected: result.rowsAffected,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ExecuteSqlResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleListDatabases(_ request: WebSocketRequest, startTime: Date) -> ListDatabasesResponse {
+        guard let client = sdkDatabaseClient else {
+            return ListDatabasesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request)
+            return try ListDatabasesResponse(
+                requestId: request.requestId,
+                success: true,
+                databases: client.listDatabases(),
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ListDatabasesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleListTables(_ request: WebSocketRequest, startTime: Date) -> ListTablesResponse {
+        guard let client = sdkDatabaseClient else {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request)
+            return try ListTablesResponse(
+                requestId: request.requestId,
+                success: true,
+                tables: client.listTables(databasePath: databasePath),
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return ListTablesResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleGetTableData(_ request: WebSocketRequest, startTime: Date) -> TableDataResponse {
+        guard let client = sdkDatabaseClient else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let table = request.table else {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("table").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request)
+            let data = try client.getTableData(
+                databasePath: databasePath,
+                table: table,
+                limit: request.limit ?? 50,
+                offset: Int(request.offset ?? 0)
+            )
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: true,
+                columns: data.columns,
+                rows: data.rows,
+                total: data.total,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return TableDataResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
+    private func handleGetTableStructure(_ request: WebSocketRequest, startTime: Date) -> TableStructureResponse {
+        guard let client = sdkDatabaseClient else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: databaseUnavailableMessage,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let databasePath = request.databasePath else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("databasePath").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+        guard let table = request.table else {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: CommandError.missingParameter("table").localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+
+        do {
+            try validateDatabaseAppId(request)
+            let structure = try client.getTableStructure(databasePath: databasePath, table: table)
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: true,
+                columns: structure.columns,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        } catch {
+            return TableStructureResponse(
+                requestId: request.requestId,
+                success: false,
+                error: error.localizedDescription,
+                totalTimeMs: totalTimeMs(from: startTime)
+            )
+        }
+    }
+
     // MARK: - Helpers
+
+    private var databaseUnavailableMessage: String {
+        "database inspection unavailable - embed the AutoMobile SDK and call DatabaseInspector.shared.setEnabled(true)"
+    }
+
+    private func validateDatabaseAppId(_ request: WebSocketRequest) throws {
+        guard let requestedAppId = normalizedBundleId(request.appId) else {
+            throw CommandError.missingParameter("appId")
+        }
+
+        guard let serverAppId = normalizedBundleId(sdkHierarchyClient?.fetchServerInfo()?.bundleId) else {
+            throw CommandError.executionFailed(
+                "\(databaseUnavailableMessage); unable to verify SDK server bundle for requested appId \(requestedAppId)"
+            )
+        }
+
+        guard serverAppId == requestedAppId else {
+            throw CommandError.executionFailed(
+                "SDK server bundle \(serverAppId) does not match requested appId \(requestedAppId)"
+            )
+        }
+    }
 
     private func totalTimeMs(from startTime: Date) -> Int64 {
         return Int64(Date().timeIntervalSince(startTime) * 1000)
@@ -869,9 +1433,11 @@ public class CommandHandler: CommandHandling {
             return ResponseType.screenshot.rawValue
         case RequestType.requestTapCoordinates.rawValue:
             return ResponseType.tapCoordinatesResult.rawValue
-        case RequestType.requestSwipe.rawValue,
-             RequestType.requestTwoFingerSwipe.rawValue:
+        case RequestType.requestSwipe.rawValue:
             return ResponseType.swipeResult.rawValue
+        case RequestType.requestTwoFingerSwipe.rawValue,
+             RequestType.requestMultiFingerSwipe.rawValue:
+            return ResponseType.multiFingerSwipeResult.rawValue
         case RequestType.requestDrag.rawValue:
             return ResponseType.dragResult.rawValue
         case RequestType.requestPinch.rawValue:
@@ -884,8 +1450,18 @@ public class CommandHandler: CommandHandling {
             return ResponseType.imeActionResult.rawValue
         case RequestType.requestSelectAll.rawValue:
             return ResponseType.selectAllResult.rawValue
+        case RequestType.requestKeyboard.rawValue:
+            return ResponseType.keyboardResult.rawValue
+        case RequestType.requestPressButton.rawValue:
+            return ResponseType.pressButtonResult.rawValue
         case RequestType.requestPressHome.rawValue:
             return ResponseType.pressHomeResult.rawValue
+        case RequestType.requestPressBack.rawValue:
+            return ResponseType.pressBackResult.rawValue
+        case RequestType.requestShake.rawValue:
+            return ResponseType.shakeResult.rawValue
+        case RequestType.requestRecentApps.rawValue:
+            return ResponseType.recentAppsResult.rawValue
         case RequestType.requestAction.rawValue:
             return ResponseType.actionResult.rawValue
         case RequestType.requestLaunchApp.rawValue:
@@ -908,6 +1484,18 @@ public class CommandHandler: CommandHandling {
             return ResponseType.removePreferenceResult.rawValue
         case RequestType.clearPreferences.rawValue:
             return ResponseType.clearPreferencesResult.rawValue
+        case RequestType.setNetworkMockRules.rawValue:
+            return ResponseType.setNetworkMockRulesResult.rawValue
+        case RequestType.executeSql.rawValue:
+            return ResponseType.executeSqlResult.rawValue
+        case RequestType.listDatabases.rawValue:
+            return ResponseType.listDatabasesResult.rawValue
+        case RequestType.listTables.rawValue:
+            return ResponseType.listTablesResult.rawValue
+        case RequestType.getTableData.rawValue:
+            return ResponseType.tableDataResult.rawValue
+        case RequestType.getTableStructure.rawValue:
+            return ResponseType.tableStructureResult.rawValue
         default:
             return "error"
         }

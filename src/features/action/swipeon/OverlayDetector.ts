@@ -338,37 +338,13 @@ export class OverlayDetector implements OverlayAnalyzer {
     }
 
     if (!containerElement["resource-id"] && !containerElement.text && !containerElement["content-desc"]) {
-      const parsedBounds = this.parseBoundsFromProperties(nodeProperties);
+      const parsedBounds = this.elementParser.parseBounds(node.bounds ?? nodeProperties.bounds);
       if (parsedBounds && boundsEqual(parsedBounds, containerBounds)) {
         return true;
       }
     }
 
     return false;
-  }
-
-  private parseBoundsFromProperties(nodeProperties: Record<string, unknown>): Element["bounds"] | null {
-    const bounds = nodeProperties.bounds;
-    if (bounds && typeof bounds === "object") {
-      const candidate = bounds as Element["bounds"];
-      if (
-        typeof candidate.left === "number" &&
-        typeof candidate.top === "number" &&
-        typeof candidate.right === "number" &&
-        typeof candidate.bottom === "number"
-      ) {
-        return candidate;
-      }
-    }
-
-    if (typeof bounds === "string") {
-      const parsed = this.elementParser.parseBounds(bounds);
-      if (parsed) {
-        return parsed;
-      }
-    }
-
-    return null;
   }
 
 }

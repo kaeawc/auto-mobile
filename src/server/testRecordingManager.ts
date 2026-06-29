@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import yaml from "js-yaml";
+import * as yaml from "js-yaml";
 import { BootedDevice, Plan, PlanStep } from "../models";
 import { logger } from "../utils/logger";
 import { getMcpServerVersion } from "../utils/mcpVersion";

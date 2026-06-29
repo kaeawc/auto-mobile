@@ -86,5 +86,6 @@ echo ""
 # simctl spawn requires SIMCTL_CHILD_ prefixed env vars (--setenv is not supported)
 SIMCTL_CHILD_CTRL_PROXY_IOS_PORT="${PORT}" \
 SIMCTL_CHILD_CTRL_PROXY_IOS_TIMEOUT="${TIMEOUT}" \
+SIMCTL_CHILD_AUTOMOBILE_DEVICE_ID="${SIMULATOR_ID}" \
 xcrun simctl spawn "${SIMULATOR_ID}" \
     "${RUNNER_BINARY}"

@@ -1,13 +1,15 @@
-import { expect, describe, test, beforeEach } from "bun:test";
+import { expect, describe, test, beforeEach, spyOn } from "bun:test";
 import { Shake } from "../../../src/features/action/Shake";
 import { BootedDevice, ObserveResult } from "../../../src/models";
 
 const testDevice: BootedDevice = { name: "test-device", platform: "android", deviceId: "emulator-5554" };
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
 import { FakeAdbExecutor } from "../../fakes/FakeAdbExecutor";
 import { FakeObserveScreen } from "../../fakes/FakeObserveScreen";
 import { FakeWindow } from "../../fakes/FakeWindow";
 import { FakeAwaitIdle } from "../../fakes/FakeAwaitIdle";
 import { FakeTimer } from "../../fakes/FakeTimer";
+import { FakeIOSCtrlProxy } from "../../fakes/FakeIOSCtrlProxy";
 
 describe("Shake", () => {
   let shake: Shake;
@@ -179,6 +181,85 @@ describe("Shake", () => {
       expect(result.success).toBe(true);
       // Progress callback should be called by BaseVisualChange
       expect(callbackCalled || fakeObserveScreen.wasMethodCalled("execute")).toBe(true);
+    });
+
+    test("should use CtrlProxy shake on iOS simulator without invoking adb", async () => {
+      const iosSimulator: BootedDevice = {
+        name: "iPhone 16 Simulator",
+        platform: "ios",
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+      };
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
+      (iosShake as any).observeScreen = fakeObserveScreen;
+      (iosShake as any).window = fakeWindow;
+      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIOSCtrlProxy as any);
+
+      try {
+        const result = await iosShake.execute({ duration: 250, intensity: 77 });
+
+        expect(result.success).toBe(true);
+        expect(result.duration).toBe(250);
+        expect(result.intensity).toBe(77);
+        expect(result.observation).toBeDefined();
+        expect(fakeIOSCtrlProxy.getShakeRequestCount()).toBe(1);
+        expect(fakeIOSCtrlProxy.getShakeTimeoutHistory()).toEqual([2250]);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("should reject physical iOS devices without invoking adb or CtrlProxy", async () => {
+      const physicalIosDevice: BootedDevice = {
+        name: "Jason's iPhone",
+        platform: "ios",
+        deviceId: "00008110-0012345678901234"
+      };
+      const iosShake = new Shake(physicalIosDevice, fakeAdb, fakeTimer);
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance");
+
+      try {
+        const result = await iosShake.execute({ duration: 250, intensity: 77 });
+
+        expect(result.success).toBe(false);
+        expect(result.duration).toBe(250);
+        expect(result.intensity).toBe(77);
+        expect(result.error).toContain("not supported on physical iOS devices");
+        expect(getInstanceSpy).not.toHaveBeenCalled();
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
+    });
+
+    test("should map CtrlProxy shake failure to an unsuccessful result", async () => {
+      const iosSimulator: BootedDevice = {
+        name: "iPhone 16 Simulator",
+        platform: "ios",
+        deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890"
+      };
+      const iosShake = new Shake(iosSimulator, fakeAdb, fakeTimer);
+      (iosShake as any).observeScreen = fakeObserveScreen;
+      (iosShake as any).window = fakeWindow;
+      (iosShake as any).awaitIdle = fakeAwaitIdle;
+      const fakeIOSCtrlProxy = new FakeIOSCtrlProxy();
+      fakeIOSCtrlProxy.setFailureMode("shake", new Error("runner disconnected"));
+      const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue(fakeIOSCtrlProxy as any);
+
+      try {
+        const result = await iosShake.execute({ duration: 250, intensity: 77 });
+
+        expect(result.success).toBe(false);
+        expect(result.duration).toBe(250);
+        expect(result.intensity).toBe(77);
+        expect(result.error).toContain("runner disconnected");
+        expect(fakeIOSCtrlProxy.getShakeRequestCount()).toBe(1);
+        expect(fakeAdb.getExecutedCommands()).toEqual([]);
+      } finally {
+        getInstanceSpy.mockRestore();
+      }
     });
 
     test("should handle ADB command failure during shake start", async () => {

@@ -4,6 +4,8 @@ import { join } from "path";
 import { promisify } from "util";
 import type { BootedDevice, ExecResult } from "../../models";
 import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
+import { quoteSimctlArg } from "../../utils/ios-cmdline-tools/iosAppContainer";
 
 export type IosSimulatorPermissionAction = "grant" | "revoke" | "reset";
 
@@ -83,11 +85,7 @@ const TCC_SERVICE_BY_PERMISSION = new Map<string, string>([
 ]);
 
 export function isIosSimulatorDevice(device: BootedDevice): boolean {
-  return /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(device.deviceId);
-}
-
-function quoteSimctlArg(value: string): string {
-  return `"${value.replace(/(["\\])/g, "\\$1")}"`;
+  return isIosSimulatorUdid(device.deviceId);
 }
 
 export function normalizePermissions(permissions: string[] | undefined): string[] {

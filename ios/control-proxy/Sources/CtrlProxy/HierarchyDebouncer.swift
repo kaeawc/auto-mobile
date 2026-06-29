@@ -123,7 +123,6 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         // Schedule first poll
         scheduleNextPoll()
 
-        print("[HierarchyDebouncer] Started with \(pollIntervalMs)ms polling interval")
     }
 
     public func stop() {
@@ -132,7 +131,6 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         pollScheduled = false
         lock.unlock()
 
-        print("[HierarchyDebouncer] Stopped")
     }
 
     public func extractNow() {
@@ -213,14 +211,13 @@ public class HierarchyDebouncer: HierarchyDebouncing {
             let callback = onResult
             lock.unlock()
 
-            print("[HierarchyDebouncer] Initial state captured (hash=\(hash)), broadcasting")
-
             // Broadcast initial state so the IDE receives hierarchy immediately
             let result = HierarchyResult.changed(
                 hierarchy: hierarchy,
                 hash: hash,
                 extractionTimeMs: extractionTime
             )
+            print("[HierarchyDebouncer] Initial hierarchy broadcast hash=\(hash) extractionMs=\(extractionTime)")
             callback?(result)
         } catch {
             print("[HierarchyDebouncer] Failed to capture initial state: \(error)")
@@ -249,10 +246,8 @@ public class HierarchyDebouncer: HierarchyDebouncing {
         // Exit animation mode if window expired
         if animationMode, now >= animationEnd {
             lock.lock()
-            let skipped = skippedPollCount
             inAnimationMode = false
             lock.unlock()
-            print("[HierarchyDebouncer] Exiting animation mode after skipping \(skipped) polls")
         }
 
         extractAndCompare(skipBroadcast: false)
@@ -318,7 +313,7 @@ public class HierarchyDebouncer: HierarchyDebouncing {
                     )
 
                     print(
-                        "[HierarchyDebouncer] Structure changed (oldHash=\(oldHash), newHash=\(newHash)), broadcasting"
+                        "[HierarchyDebouncer] Hierarchy changed oldHash=\(oldHash) newHash=\(newHash) extractionMs=\(extractionTime)"
                     )
                     callback?(result)
                 }

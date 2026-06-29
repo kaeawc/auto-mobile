@@ -10,6 +10,14 @@ describe("PlanExecutor - Session-based Device Routing", () => {
 
   beforeEach(() => {
     planExecutor = new DefaultPlanExecutor();
+    // Reset daemon state up front so these tests do not depend on cleanup from
+    // other test files. bun shares singleton state across files and file
+    // execution order is platform-dependent, so a prior file that constructs a
+    // Daemon can leave the global DaemonState initialized.
+    const daemonState = DaemonState.getInstance();
+    if (daemonState.isInitialized()) {
+      daemonState.reset();
+    }
   });
 
   afterEach(() => {

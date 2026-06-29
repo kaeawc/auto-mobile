@@ -8,7 +8,11 @@ import {
   CtrlProxySetTextResult,
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
+  CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
+  CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
@@ -22,6 +26,7 @@ import type {
   CtrlProxyVoiceOverActionResult,
   CtrlProxyActionResult,
 } from "../../src/features/observe/ios/types";
+import type { SetTextOptions } from "../../src/features/observe/DeviceService";
 import { ViewHierarchyResult } from "../../src/models";
 import { ViewHierarchyQueryOptions } from "../../src/models/ViewHierarchyQueryOptions";
 import { PerformanceTracker } from "../../src/utils/PerformanceTracker";
@@ -40,6 +45,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
   private performanceTiming: CtrlProxyPerfTiming | null = null;
   private isConnectedState: boolean = true;
   private hasCachedHierarchyState: boolean = false;
+  public clearCacheCallCount: number = 0;
 
   // Failure modes
   private failureMap: Map<string, Error> = new Map();
@@ -94,7 +100,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   private screenshotRequestCount: number = 0;
   private hierarchyRequestCount: number = 0;
+  private keyboardOpen: boolean = false;
+  private keyboardHistory: Array<{ action: "open" | "close" | "detect" }> = [];
   private pressHomeRequestCount: number = 0;
+  private pressBackRequestCount: number = 0;
+  private shakeRequestCount: number = 0;
+  private shakeTimeoutHistory: number[] = [];
   private recentAppsRequestCount: number = 0;
   private rotateHistory: Array<{ orientation: string }> = [];
   private currentOrientation: string = "portrait";
@@ -134,6 +145,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number;
     fingerCount: number;
     duration: number;
+    fingerSpacing?: number;
   }> = [];
 
   // MARK: - Configuration Methods
@@ -285,6 +297,22 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     return this.pressHomeRequestCount;
   }
 
+  getKeyboardHistory(): Array<{ action: "open" | "close" | "detect" }> {
+    return [...this.keyboardHistory];
+  }
+
+  getPressBackRequestCount(): number {
+    return this.pressBackRequestCount;
+  }
+
+  getShakeRequestCount(): number {
+    return this.shakeRequestCount;
+  }
+
+  getShakeTimeoutHistory(): number[] {
+    return [...this.shakeTimeoutHistory];
+  }
+
   getRecentAppsRequestCount(): number {
     return this.recentAppsRequestCount;
   }
@@ -395,6 +423,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     y2: number;
     fingerCount: number;
     duration: number;
+    fingerSpacing?: number;
   }> {
     return [...this.multiFingerSwipeHistory];
   }
@@ -411,6 +440,11 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.imeActionHistory = [];
     this.screenshotRequestCount = 0;
     this.hierarchyRequestCount = 0;
+    this.keyboardOpen = false;
+    this.keyboardHistory = [];
+    this.pressHomeRequestCount = 0;
+    this.pressBackRequestCount = 0;
+    this.recentAppsRequestCount = 0;
     this.launchAppHistory = [];
     this.rotateHistory = [];
     this.currentOrientation = "portrait";
@@ -652,14 +686,12 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   async requestSetText(
     text: string,
-    resourceId?: string,
-    timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    options?: SetTextOptions
   ): Promise<CtrlProxySetTextResult> {
     await this.applyDelay("setText");
     this.checkFailure("setText");
 
-    this.setTextHistory.push({ text, resourceId });
+    this.setTextHistory.push({ text, resourceId: options?.resourceId });
 
     return {
       success: true,
@@ -727,6 +759,29 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     };
   }
 
+  async requestKeyboard(
+    action: "open" | "close" | "detect",
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyKeyboardResult> {
+    await this.applyDelay("keyboard");
+    this.checkFailure("keyboard");
+
+    this.keyboardHistory.push({ action });
+    if (action === "open") {
+      this.keyboardOpen = true;
+    } else if (action === "close") {
+      this.keyboardOpen = false;
+    }
+
+    return {
+      success: true,
+      open: this.keyboardOpen,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
   async requestPressHome(
     timeoutMs: number = 5000,
     perf?: PerformanceTracker
@@ -734,6 +789,52 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     this.pressHomeRequestCount++;
     await this.applyDelay("pressHome");
     this.checkFailure("pressHome");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestPressBack(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressBackResult> {
+    this.pressBackRequestCount++;
+    await this.applyDelay("pressBack");
+    this.checkFailure("pressBack");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestShake(
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyShakeResult> {
+    this.shakeRequestCount++;
+    this.shakeTimeoutHistory.push(timeoutMs);
+    await this.applyDelay("shake");
+    this.checkFailure("shake");
+
+    return {
+      success: true,
+      totalTimeMs: 100,
+      perfTiming: this.performanceTiming || undefined
+    };
+  }
+
+  async requestPressButton(
+    button: string,
+    timeoutMs: number = 5000,
+    perf?: PerformanceTracker
+  ): Promise<CtrlProxyPressButtonResult> {
+    await this.applyDelay("pressButton");
+    this.checkFailure("pressButton");
 
     return {
       success: true,
@@ -866,12 +967,13 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
     fingerCount: number,
     duration: number = 300,
     timeoutMs: number = 5000,
-    perf?: PerformanceTracker
+    perf?: PerformanceTracker,
+    fingerSpacing?: number
   ): Promise<CtrlProxySwipeResult> {
     await this.applyDelay("multiFingerSwipe");
     this.checkFailure("multiFingerSwipe");
 
-    this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration });
+    this.multiFingerSwipeHistory.push({ x1, y1, x2, y2, fingerCount, duration, fingerSpacing });
 
     if (this.multiFingerSwipeResult) {
       return this.multiFingerSwipeResult;
@@ -958,6 +1060,7 @@ export class FakeIOSCtrlProxy implements IOSCtrlProxy {
 
   clearCache(): void {
     this.hasCachedHierarchyState = false;
+    this.clearCacheCallCount++;
   }
 
   async close(): Promise<void> {

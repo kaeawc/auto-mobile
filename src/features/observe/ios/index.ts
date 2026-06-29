@@ -17,6 +17,9 @@ export { CtrlProxyScreenshot } from "./CtrlProxyScreenshot";
 export { CtrlProxyNavigation } from "./CtrlProxyNavigation";
 export { CtrlProxyClipboard } from "./CtrlProxyClipboard";
 export { CtrlProxyStorage } from "./CtrlProxyStorage";
+export { CtrlProxyKeyboard } from "./CtrlProxyKeyboard";
+export { CtrlProxyHighlights } from "./CtrlProxyHighlights";
+export { CtrlProxyDatabase } from "./CtrlProxyDatabase";
 
 // Types
 export type {
@@ -37,12 +40,17 @@ export type {
   CtrlProxySetTextResult,
   CtrlProxyImeActionResult,
   CtrlProxySelectAllResult,
+  CtrlProxyKeyboardResult,
   CtrlProxyPressHomeResult,
+  CtrlProxyPressBackResult,
+  CtrlProxyShakeResult,
+  CtrlProxyPressButtonResult,
   CtrlProxyRecentAppsResult,
   CtrlProxyRotateResult,
   CtrlProxyLaunchAppResult,
   CtrlProxyClipboardResult,
   CtrlProxyActionResult,
+  CtrlProxyHighlightResult,
 
   // Delegate context types
   DelegateContext,

@@ -86,7 +86,7 @@ const createClosedHierarchy = (text: string = ""): ViewHierarchyResult => ({
         "class": "Launcher",
         "packageName": "com.google.android.apps.nexuslauncher",
         text,
-        "bounds": "[0,0][100,100]"
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
       }
     }
   }
@@ -100,7 +100,7 @@ const createTrayHierarchy = (title: string): ViewHierarchyResult => ({
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
         "class": "NotificationShade",
         "packageName": SYSTEM_TRAY_PACKAGE,
-        "bounds": "[0,0][100,100]"
+        "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
       },
       node: [{
         $: {
@@ -108,7 +108,7 @@ const createTrayHierarchy = (title: string): ViewHierarchyResult => ({
           "class": "ExpandableNotificationRow",
           "packageName": SYSTEM_TRAY_PACKAGE,
           "text": title,
-          "bounds": "[0,0][100,50]"
+          "bounds": { left: 0, top: 0, right: 100, bottom: 50 }
         }
       }]
     }
@@ -398,7 +398,7 @@ const createIosAppHierarchy = (): ViewHierarchyResult => ({
       $: {
         className: "UIWindow",
         packageName: "com.example.app",
-        bounds: "[0,0][390,844]"
+        bounds: { left: 0, top: 0, right: 390, bottom: 844 }
       }
     }
   }
@@ -411,7 +411,7 @@ const createIosNotificationCenterHierarchy = (title: string, body?: string): Vie
       $: {
         className: "NotificationCenter",
         packageName: IOS_SPRINGBOARD_PACKAGE,
-        bounds: "[0,0][390,844]"
+        bounds: { left: 0, top: 0, right: 390, bottom: 844 }
       },
       node: [{
         $: {
@@ -419,7 +419,7 @@ const createIosNotificationCenterHierarchy = (title: string, body?: string): Vie
           "packageName": IOS_SPRINGBOARD_PACKAGE,
           "text": title,
           "content-desc": body ?? "",
-          "bounds": "[10,100][380,200]"
+          "bounds": { left: 10, top: 100, right: 380, bottom: 200 }
         }
       }]
     }
@@ -440,32 +440,32 @@ const createTrayWithGroupedNotifications = (
       $: {
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
         "packageName": SYSTEM_TRAY_PACKAGE,
-        "bounds": "[0,0][1080,1920]"
+        "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 }
       },
       node: [{
         $: {
           "resource-id": "com.android.systemui:id/expandableNotificationRow",
-          "bounds": "[48,663][1296,993]"
+          "bounds": { left: 48, top: 663, right: 1296, bottom: 993 }
         },
         node: {
           $: {
             "resource-id": "com.android.systemui:id/notification_children_container",
             "className": "android.view.ViewGroup",
-            "bounds": "[48,663][1296,993]"
+            "bounds": { left: 48, top: 663, right: 1296, bottom: 993 }
           },
           node: [
             {
               $: {
                 "resource-id": "android:id/notification_header",
                 "className": "android.widget.RelativeLayout",
-                "bounds": "[48,663][1296,731]"
+                "bounds": { left: 48, top: 663, right: 1296, bottom: 731 }
               },
               node: [
                 {
                   $: {
                     "text": appLabel,
                     "resource-id": "android:id/app_name_text",
-                    "bounds": "[204,672][391,721]"
+                    "bounds": { left: 204, top: 672, right: 391, bottom: 721 }
                   }
                 },
                 {
@@ -474,7 +474,7 @@ const createTrayWithGroupedNotifications = (
                     "resource-id": "android:id/expand_button",
                     "className": "android.widget.Button",
                     "clickable": "true",
-                    "bounds": "[1084,663][1296,731]"
+                    "bounds": { left: 1084, top: 663, right: 1296, bottom: 731 }
                   }
                 }
               ]
@@ -516,31 +516,31 @@ const createTrayWithGroupedNotificationsNoExpandButton = (
       $: {
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
         "packageName": SYSTEM_TRAY_PACKAGE,
-        "bounds": "[0,0][1080,1920]"
+        "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 }
       },
       node: [{
         $: {
           "resource-id": "com.android.systemui:id/expandableNotificationRow",
-          "bounds": "[48,663][1296,993]"
+          "bounds": { left: 48, top: 663, right: 1296, bottom: 993 }
         },
         node: {
           $: {
             "resource-id": "com.android.systemui:id/notification_children_container",
             "className": "android.view.ViewGroup",
-            "bounds": "[48,663][1296,993]"
+            "bounds": { left: 48, top: 663, right: 1296, bottom: 993 }
           },
           node: [
             {
               $: {
                 "resource-id": "android:id/notification_header",
                 "className": "android.widget.RelativeLayout",
-                "bounds": "[48,663][1296,731]"
+                "bounds": { left: 48, top: 663, right: 1296, bottom: 731 }
               },
               node: {
                 $: {
                   "text": appLabel,
                   "resource-id": "android:id/app_name_text",
-                  "bounds": "[204,672][391,721]"
+                  "bounds": { left: 204, top: 672, right: 391, bottom: 721 }
                 }
               }
             },
@@ -580,7 +580,7 @@ const createTrayWithExpandedNotifications = (
       $: {
         "resource-id": "com.android.systemui:id/notification_stack_scroller",
         "packageName": SYSTEM_TRAY_PACKAGE,
-        "bounds": "[0,0][1080,1920]"
+        "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 }
       },
       node: titles.map((title, i) => ({
         $: {
@@ -679,34 +679,34 @@ describe("systemTray grouped notifications", () => {
           $: {
             "resource-id": "com.android.systemui:id/notification_panel",
             "packageName": SYSTEM_TRAY_PACKAGE,
-            "bounds": "[0,0][1344,2992]"
+            "bounds": { left: 0, top: 0, right: 1344, bottom: 2992 }
           },
           node: {
             $: {
               "resource-id": "com.android.systemui:id/shared_notification_container",
-              "bounds": "[0,0][1344,2992]"
+              "bounds": { left: 0, top: 0, right: 1344, bottom: 2992 }
             },
             node: {
               $: {
                 "resource-id": "com.android.systemui:id/notification_container_parent",
-                "bounds": "[0,0][1344,2992]"
+                "bounds": { left: 0, top: 0, right: 1344, bottom: 2992 }
               },
               node: {
                 $: {
                   "resource-id": "com.android.systemui:id/notification_stack_scroller",
-                  "bounds": "[0,0][1344,2896]"
+                  "bounds": { left: 0, top: 0, right: 1344, bottom: 2896 }
                 },
                 node: {
                   $: {
                     "resource-id": "com.android.systemui:id/expandableNotificationRow",
                     "clickable": "true",
-                    "bounds": "[48,663][1296,1073]"
+                    "bounds": { left: 48, top: 663, right: 1296, bottom: 1073 }
                   },
                   node: {
                     $: {
                       "text": "Zillow Real-Time Tour request",
                       "resource-id": "android:id/title",
-                      "bounds": "[204,813][1248,878]"
+                      "bounds": { left: 204, top: 813, right: 1248, bottom: 878 }
                     }
                   }
                 }
@@ -819,19 +819,19 @@ describe("systemTray group expansion", () => {
           $: {
             "resource-id": "com.android.systemui:id/notification_stack_scroller",
             "packageName": SYSTEM_TRAY_PACKAGE,
-            "bounds": "[0,0][1080,1920]"
+            "bounds": { left: 0, top: 0, right: 1080, bottom: 1920 }
           },
           node: {
             $: {
               "resource-id": "com.android.systemui:id/expandableNotificationRow",
               "clickable": "true",
-              "bounds": "[48,663][1296,1073]"
+              "bounds": { left: 48, top: 663, right: 1296, bottom: 1073 }
             },
             node: {
               $: {
                 "text": "Zillow Real-Time Tour request",
                 "resource-id": "android:id/title",
-                "bounds": "[204,813][1248,878]"
+                "bounds": { left: 204, top: 813, right: 1248, bottom: 878 }
               }
             }
           }

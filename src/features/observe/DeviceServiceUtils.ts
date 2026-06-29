@@ -203,7 +203,29 @@ export function createMessage(
  *   cancelScreenshotBackoff → ensureConnected → register → send → await
  * flow used by WebSocket delegate methods.
  */
-export interface SendCommandOptions<T> {
+type RequiredKeys<T> = {
+  [K in keyof T]-?: object extends Pick<T, K> ? never : K
+}[keyof T];
+
+type RequiredNonBaseResultKeys<T> = Exclude<RequiredKeys<T>, keyof BaseResult>;
+
+type NotConnectedErrorBuilder<T> = () => T;
+type TimeoutErrorBuilder<T> = (timeoutMs: number) => T;
+type UnsupportedCommandErrorBuilder<T> = (messageType: string, error: string) => T;
+
+type CommandFallbackBuilders<T> = [RequiredNonBaseResultKeys<T>] extends [never]
+  ? {
+    notConnectedError?: NotConnectedErrorBuilder<T>;
+    timeoutError?: TimeoutErrorBuilder<T>;
+    unsupportedCommandError?: UnsupportedCommandErrorBuilder<T>;
+  }
+  : {
+    notConnectedError: NotConnectedErrorBuilder<T>;
+    timeoutError: TimeoutErrorBuilder<T>;
+    unsupportedCommandError: UnsupportedCommandErrorBuilder<T>;
+  };
+
+interface SendCommandBaseOptions {
   idPrefix: string;
   responseType: string;
   messageType: string;
@@ -212,15 +234,13 @@ export interface SendCommandOptions<T> {
   perf?: PerformanceTracker;
   /** Defaults to true. Set false for endpoints that should not interrupt screenshot backoff. */
   cancelScreenshotBackoff?: boolean;
-  /** Custom timeout-error builder. Defaults to `{success:false, totalTimeMs, error: "<errorLabel> timed out after <ms>ms"}`. */
-  timeoutError?: (timeoutMs: number) => T;
-  /** Custom not-connected-error builder for non-BaseResult shapes (e.g. carries `action` or `enabled`). */
-  notConnectedError?: () => T;
   /** Overrides the default "Not connected" message. Ignored when `notConnectedError` is set. */
   notConnectedMessage?: string;
   /** Human-readable label used in the default timeout error. Defaults to `responseType`. */
   errorLabel?: string;
 }
+
+export type SendCommandOptions<T> = SendCommandBaseOptions & CommandFallbackBuilders<T>;
 
 export async function sendCommand<T>(
   context: DelegateContext,
@@ -245,6 +265,20 @@ export async function sendCommand<T>(
     } as T;
   }
 
+  if (context.isCommandSupported && !context.isCommandSupported(options.messageType)) {
+    const error = context.unsupportedCommandError
+      ? context.unsupportedCommandError(options.messageType)
+      : `${options.messageType} is not supported by the connected device service`;
+    if (options.unsupportedCommandError) {
+      return options.unsupportedCommandError(options.messageType, error);
+    }
+    return {
+      success: false,
+      totalTimeMs: 0,
+      error,
+    } as T;
+  }
+
   const requestId = context.requestManager.generateId(options.idPrefix);
   const label = options.errorLabel ?? options.responseType;
   const timeoutFactory = options.timeoutError
@@ -254,12 +288,20 @@ export async function sendCommand<T>(
       totalTimeMs: timeout,
       error: `${label} timed out after ${timeout}ms`,
     } as T);
+  const responseErrorFactory = (error: string, totalTimeMs: number): T => options.unsupportedCommandError
+    ? options.unsupportedCommandError(options.messageType, error)
+    : ({
+      success: false,
+      totalTimeMs,
+      error,
+    } as T);
 
   const promise = context.requestManager.register<T>(
     requestId,
     options.responseType,
     options.timeoutMs,
     timeoutFactory,
+    responseErrorFactory,
   );
 
   const msg = createMessage(options.messageType, requestId, options.params);

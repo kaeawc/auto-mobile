@@ -1,7 +1,9 @@
 package dev.jasonpearson.automobile.junit
 
 import org.junit.After
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -13,6 +15,7 @@ class DaemonSocketPathsFlagWiringTest {
       "automobile.daemon.no.ui.perf.mode",
       "automobile.daemon.no.navigation.screenshots",
       "automobile.daemon.no.waitfor.polling.overhead",
+      "automobile.daemon.package.version",
   )
 
   @Before
@@ -144,6 +147,68 @@ class DaemonSocketPathsFlagWiringTest {
     assertTrue(
         "restart subcommand should be present",
         command.contains("restart"),
+    )
+  }
+
+  @Test
+  fun `bunx package command pins configured AutoMobile version`() {
+    val command =
+        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "0.0.32")
+
+    assertEquals(
+        listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+        command,
+    )
+  }
+
+  @Test
+  fun `npx package command pins configured AutoMobile version with yes flag`() {
+    val command =
+        DaemonSocketPaths.buildPackageDaemonCommand("npx", "restart", "0.0.32")
+
+    assertEquals(
+        listOf("npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "restart"),
+        command,
+    )
+  }
+
+  @Test
+  fun `npx command detection handles resolved executable paths`() {
+    val command =
+        DaemonSocketPaths.buildPackageDaemonCommand("/usr/local/bin/npx", "start", "0.0.32")
+
+    assertEquals(
+        listOf("/usr/local/bin/npx", "-y", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+        command,
+    )
+  }
+
+  @Test
+  fun `package command reads configured AutoMobile version from system property`() {
+    System.setProperty("automobile.daemon.package.version", " 0.0.32 ")
+    SystemPropertyCache.clear()
+
+    val command = DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start")
+
+    assertEquals(
+        listOf("bunx", "@kaeawc/auto-mobile@0.0.32", "--daemon", "start"),
+        command,
+    )
+  }
+
+  @Test
+  fun `package command does not fall back to latest when version is absent`() {
+    assertNull(
+        "blank versions should not produce a package command",
+        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", " "),
+    )
+    assertNull(
+        "unknown versions should not produce a package command",
+        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "unknown"),
+    )
+    assertNull(
+        "latest should not be used as a daemon package version",
+        DaemonSocketPaths.buildPackageDaemonCommand("bunx", "start", "latest"),
     )
   }
 }

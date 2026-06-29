@@ -195,7 +195,7 @@ function createFakeAccessibilityClient() {
           "text": "Mock Button",
           "resource-id": "com.example:id/mock",
           "clickable": "true",
-          "bounds": "[0,0][100,100]"
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 }
         }
       }
     },

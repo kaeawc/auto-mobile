@@ -6,6 +6,7 @@
  */
 
 import type { ViewHierarchyWindowInfo } from "../../../models";
+import type { HighlightOperationResult } from "../../../models";
 import type {
   PerfTiming,
   BaseResult,
@@ -107,10 +108,13 @@ export interface WebSocketMessage {
   type: string;
   timestamp?: number;
   requestId?: string;
+  id?: number;
+  supportedCommands?: string[];
   data?: CtrlProxyHierarchy;
   performanceData?: CtrlProxyPerformanceSnapshot;
   format?: string;
   success?: boolean;
+  open?: boolean;
   totalTimeMs?: number;
   error?: string;
   perfTiming?: CtrlProxyPerfTiming | CtrlProxyPerfTiming[];
@@ -152,8 +156,22 @@ export type CtrlProxyImeActionResult = ActionTimingResult;
 /** Select all result from CtrlProxy iOS */
 export type CtrlProxySelectAllResult = BaseResult;
 
+/** Keyboard action result from CtrlProxy iOS */
+export interface CtrlProxyKeyboardResult extends BaseResult {
+  open: boolean;
+}
+
 /** Press home result from CtrlProxy iOS */
 export type CtrlProxyPressHomeResult = BaseResult;
+
+/** Press back result from CtrlProxy iOS */
+export type CtrlProxyPressBackResult = BaseResult;
+
+/** Shake result from CtrlProxy iOS */
+export type CtrlProxyShakeResult = BaseResult;
+
+/** Generic press button result from CtrlProxy iOS */
+export type CtrlProxyPressButtonResult = BaseResult;
 
 /** Rotate result from CtrlProxy iOS */
 export interface CtrlProxyRotateResult extends BaseResult {
@@ -202,6 +220,9 @@ export interface CtrlProxyVoiceOverActionResult {
   error?: string;
 }
 
+/** Highlight result from CtrlProxy iOS */
+export type CtrlProxyHighlightResult = HighlightOperationResult;
+
 /**
  * Interface for cached hierarchy with metadata
  */
@@ -232,4 +253,6 @@ export interface HierarchyDelegateContext extends DelegateContext {
   getCachedHierarchy(): CtrlProxyCachedHierarchy | null;
   /** Set the cached hierarchy data */
   setCachedHierarchy(h: CtrlProxyCachedHierarchy | null): void;
+  /** Prevent the response for this request from being forwarded to the observation stream. */
+  suppressHierarchyObservationStreamPush?(requestId: string, timeoutMs: number): void;
 }

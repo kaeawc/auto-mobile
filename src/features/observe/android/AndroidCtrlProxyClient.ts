@@ -21,6 +21,7 @@ import type { AdbClient } from "../../../utils/android-cmdline-tools/AdbClient";
 import { logger } from "../../../utils/logger";
 import {
   BootedDevice,
+  ImeAction,
   ViewHierarchyResult,
   CurrentFocusResult,
   TraversalOrderResult,
@@ -71,6 +72,11 @@ import {
   WebSocketFactory,
   defaultWebSocketFactory,
 } from "../DeviceServiceClient";
+import {
+  observationStreamDeviceConnectionLostNotifier,
+  type DeviceConnectionLostNotifier,
+} from "../DeviceConnectionLostNotifier";
+import type { SetTextOptions } from "../DeviceService";
 import type { CtrlProxyClient } from "../interfaces/CtrlProxyClient";
 import { RetryExecutor, defaultRetryExecutor } from "../../../utils/retry/RetryExecutor";
 
@@ -188,6 +194,10 @@ interface WsRequestBase extends WsMessageBase {
 
 interface WsConnectedMessage extends WsMessageBase {
   type: "connected";
+}
+
+interface ObservationStreamSuppression {
+  timeoutHandle: NodeJS.Timeout;
 }
 
 interface WsHierarchyUpdateMessage extends WsMessageBase {
@@ -623,6 +633,13 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
     timeoutMs?: number
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
 
+  requestHierarchySyncWithoutObservationStreamPush(
+    perf?: PerformanceTracker,
+    disableAllFiltering?: boolean,
+    signal?: AbortSignal,
+    timeoutMs?: number
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null>;
+
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult;
 
   requestSwipe(
@@ -642,7 +659,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11yPinchResult>;
 
   requestSetText(
-    text: string, resourceId?: string, timeoutMs?: number, perf?: PerformanceTracker, dismissKeyboard?: boolean
+    text: string, options?: SetTextOptions
   ): Promise<A11ySetTextResult>;
 
   requestClearText(
@@ -650,7 +667,7 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<A11ySetTextResult>;
 
   requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs?: number, perf?: PerformanceTracker
   ): Promise<A11yImeActionResult>;
 
@@ -706,6 +723,8 @@ export interface AndroidCtrlProxy extends CtrlProxyClient {
   ): Promise<HighlightOperationResult>;
 
   requestScreenshot(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
+
+  requestScreenshotWithoutObservationStreamPush(timeoutMs?: number, perf?: PerformanceTracker): Promise<ScreenshotResult>;
 
   requestInstalledPackages(
     includeSystem?: boolean,
@@ -772,6 +791,11 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Screenshot backoff scheduler
   private screenshotBackoffScheduler: ScreenshotBackoffScheduler | null = null;
   private cachedScreenDimensions: { width: number; height: number } | null = null;
+  private hierarchyObservationStreamSuppressions: Set<ObservationStreamSuppression> = new Set();
+  // Request ids whose screenshot responses must not be auto-pushed to the
+  // observation stream. Scoped per-request so an unrelated in-flight screenshot
+  // (e.g. backoff capture or MCP screenshot) cannot consume the suppression.
+  private screenshotObservationStreamSuppressions: Set<string> = new Set();
   // Track whether the device supports accessibility service screenshots (API 30+).
   // null = unknown, true = supported, false = unsupported (fall back to ADB screencap).
   // Only marked unsupported after consecutive failures to avoid disabling on transient timeouts.
@@ -787,6 +811,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   private lastLayoutTelemetryTimestamp = 0;
 
   private readonly crashEventSink: CrashEventSink;
+  private readonly deviceConnectionLostNotifier: DeviceConnectionLostNotifier;
 
   // Logging tag for base class
   protected readonly logTag = "ACCESSIBILITY_SERVICE";
@@ -801,13 +826,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink
+    crashEventSink?: CrashEventSink,
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
   ) {
     super(timer ?? defaultTimer, webSocketFactory ?? defaultWebSocketFactory, {}, retryExecutor ?? defaultRetryExecutor);
     this.device = device;
     this.adb = adb;
     this.installedAppsRepository = installedAppsRepository ?? null;
     this.crashEventSink = crashEventSink ?? new FailureEventRepository();
+    this.deviceConnectionLostNotifier =
+      deviceConnectionLostNotifier ?? observationStreamDeviceConnectionLostNotifier;
     this.localPort = PortManager.allocate(device.deviceId);
     AndroidCtrlProxyManager.getInstance(device);
   }
@@ -874,9 +902,19 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timer?: Timer,
     installedAppsRepository?: InstalledAppsStore,
     retryExecutor?: RetryExecutor,
-    crashEventSink?: CrashEventSink
+    crashEventSink?: CrashEventSink,
+    deviceConnectionLostNotifier?: DeviceConnectionLostNotifier
   ): AndroidCtrlProxyClient {
-    return new AndroidCtrlProxyClient(device, adb, webSocketFactory, timer, installedAppsRepository, retryExecutor, crashEventSink);
+    return new AndroidCtrlProxyClient(
+      device,
+      adb,
+      webSocketFactory,
+      timer,
+      installedAppsRepository,
+      retryExecutor,
+      crashEventSink,
+      deviceConnectionLostNotifier
+    );
   }
 
   // ===========================================================================
@@ -1010,6 +1048,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   protected onConnectionEstablished(): void {
     this.syncNetworkStateToDevice();
     this.syncAccessibilityFlagsToDevice();
+    // Resume the screenshot keepalive after a (re)connect. onConnectionClosed()
+    // cancels it; without restarting here, a transient drop on a STATIC screen
+    // leaves the live view frozen forever (no UI change to retrigger a capture).
+    // Subscriber-gated and idempotent, so this is a no-op when nobody is
+    // watching and safe to call on every reconnect.
+    this.startScreenshotBackoff();
   }
 
   private syncNetworkStateToDevice(): void {
@@ -1077,7 +1121,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   protected onConnectionClosed(): void {
+    this.cancelScreenshotBackoff();
     void this.markInstalledAppsStale("websocket_closed");
+    this.deviceConnectionLostNotifier.onDeviceConnectionLost(this.device.deviceId);
 
     if (this.hierarchyNavigationDetector) {
       this.hierarchyNavigationDetector.dispose();
@@ -1129,6 +1175,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     timeoutMs: number = 10000
   ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
     return this.hierarchy.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
+  }
+
+  async requestHierarchySyncWithoutObservationStreamPush(
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    disableAllFiltering: boolean = false,
+    signal?: AbortSignal,
+    timeoutMs: number = 10000
+  ): Promise<{ hierarchy: AccessibilityHierarchy; perfTiming?: AndroidPerfTiming[] } | null> {
+    const suppression: ObservationStreamSuppression = {
+      timeoutHandle: this.timer.setTimeout(() => {
+        this.hierarchyObservationStreamSuppressions.delete(suppression);
+      }, timeoutMs),
+    };
+    this.hierarchyObservationStreamSuppressions.add(suppression);
+    return this.requestHierarchySync(perf, disableAllFiltering, signal, timeoutMs);
   }
 
   convertToViewHierarchyResult(accessibilityHierarchy: AccessibilityHierarchy): ViewHierarchyResult {
@@ -1187,9 +1248,9 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // ===========================================================================
 
   async requestSetText(
-    text: string, resourceId?: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker(), dismissKeyboard: boolean = false
+    text: string, options?: SetTextOptions
   ): Promise<A11ySetTextResult> {
-    return this.text.requestSetText(text, resourceId, timeoutMs, perf, dismissKeyboard);
+    return this.text.requestSetText(text, options);
   }
 
   async requestClearText(
@@ -1199,7 +1260,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   }
 
   async requestImeAction(
-    action: "done" | "next" | "search" | "send" | "go" | "previous",
+    action: ImeAction,
     timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
   ): Promise<A11yImeActionResult> {
     return this.text.requestImeAction(action, timeoutMs, perf);
@@ -1289,12 +1350,16 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
   // Delegated Public Methods - Focus
   // ===========================================================================
 
-  async clearAccessibilityFocus(): Promise<void> {
-    return this.focus.clearAccessibilityFocus();
+  async clearAccessibilityFocus(
+    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    return this.focus.clearAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
-  async setAccessibilityFocus(resourceId: string): Promise<void> {
-    return this.focus.setAccessibilityFocus(resourceId);
+  async setAccessibilityFocus(
+    resourceId: string, timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<void> {
+    return this.focus.setAccessibilityFocus(resourceId, timeoutMs, perf);
   }
 
   async requestCurrentFocus(
@@ -1594,8 +1659,13 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     }
   }
 
-  async requestScreenshot(timeoutMs: number = 5000, perf: PerformanceTracker = new NoOpPerformanceTracker()): Promise<ScreenshotResult> {
+  async requestScreenshot(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker(),
+    suppressObservationStreamPush: boolean = false
+  ): Promise<ScreenshotResult> {
     const startTime = this.timer.now();
+    let suppressedRequestId: string | undefined;
 
     try {
       const connected = await perf.track("ensureConnection", () => this.connectWebSocket(perf));
@@ -1605,6 +1675,10 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       }
 
       const requestId = this.requestManager.generateId("screenshot");
+      if (suppressObservationStreamPush) {
+        this.screenshotObservationStreamSuppressions.add(requestId);
+        suppressedRequestId = requestId;
+      }
 
       const screenshotPromise = this.requestManager.register<ScreenshotResult>(
         requestId, "screenshot", timeoutMs,
@@ -1635,7 +1709,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
       const duration = this.timer.now() - startTime;
       logger.warn(`[CTRL_PROXY] Screenshot request failed after ${duration}ms: ${error}`);
       return { success: false, error: `${error}` };
+    } finally {
+      // Clean up the suppression token in case the response never arrived
+      // (timeout/error). The message handler deletes it on a normal response;
+      // this guards against leaking ids for in-flight requests that never resolve.
+      if (suppressedRequestId !== undefined) {
+        this.screenshotObservationStreamSuppressions.delete(suppressedRequestId);
+      }
     }
+  }
+
+  async requestScreenshotWithoutObservationStreamPush(
+    timeoutMs: number = 5000,
+    perf: PerformanceTracker = new NoOpPerformanceTracker()
+  ): Promise<ScreenshotResult> {
+    return this.requestScreenshot(timeoutMs, perf, true);
   }
 
   async verifyServiceReady(maxAttempts: number = 5, delayMs: number = 500, timeoutMs: number = 3000): Promise<boolean> {
@@ -1834,7 +1922,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
       // Handle screenshot response
       if (message.type === "screenshot" && message.requestId) {
-        this.pushScreenshotToObservationStream(message.data);
+        const suppressObservationStreamPush = this.screenshotObservationStreamSuppressions.delete(message.requestId);
+        if (!suppressObservationStreamPush) {
+          this.pushScreenshotToObservationStream(message.data);
+        } else {
+          logger.debug("[CTRL_PROXY] Suppressed screenshot observation stream push for explicit initial-frame request");
+        }
         this.requestManager.resolve<ScreenshotResult>(message.requestId, {
           success: true, data: message.data, format: message.format || "jpeg", timestamp: message.timestamp
         });
@@ -2404,11 +2497,21 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
     // Update cached screen dimensions
     this.updateCachedScreenDimensions(data);
 
-    // Push to observation stream
-    this.pushHierarchyToObservationStream(data);
+    const suppression = this.hierarchyObservationStreamSuppressions.values().next().value;
+    const suppressObservationStreamPush = suppression !== undefined;
+    if (suppression) {
+      this.hierarchyObservationStreamSuppressions.delete(suppression);
+      this.timer.clearTimeout(suppression.timeoutHandle);
+    }
+    if (!suppressObservationStreamPush) {
+      // Push to observation stream
+      this.pushHierarchyToObservationStream(data);
 
-    // Start screenshot backoff
-    this.startScreenshotBackoff();
+      // Start screenshot backoff
+      this.startScreenshotBackoff();
+    } else {
+      logger.debug("[CTRL_PROXY] Suppressed hierarchy observation stream push for explicit initial-frame request");
+    }
 
     // Track foreground package for context and start performance monitoring
     if (data.packageName && data.packageName !== this.lastForegroundPackage) {
@@ -2534,8 +2637,12 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
         (data: string) => {
           this.pushScreenshotToObservationStream(data);
         },
-        { intervals: [0, 100, 300, 500, 800, 1300] },
-        this.timer
+        { intervals: [0, 100, 300, 500, 800, 1300], keepAliveIntervalMs: 3000 },
+        this.timer,
+        () => {
+          const server = getDeviceDataStreamServer();
+          return !!server && server.hasSubscriberForDevice(this.device.deviceId);
+        }
       );
     }
     return this.screenshotBackoffScheduler;
@@ -2543,7 +2650,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private async captureScreenshotForBackoff(): Promise<ScreenshotCaptureResult> {
     const server = getDeviceDataStreamServer();
-    if (!server || server.getSubscriberCount() === 0) {
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return { success: false, error: "No subscribers" };
     }
 
@@ -2616,7 +2723,7 @@ export class AndroidCtrlProxyClient extends DeviceServiceClient implements Andro
 
   private startScreenshotBackoff(): void {
     const server = getDeviceDataStreamServer();
-    if (!server || server.getSubscriberCount() === 0) {
+    if (!server || !server.hasSubscriberForDevice(this.device.deviceId)) {
       return;
     }
 

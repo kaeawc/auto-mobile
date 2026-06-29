@@ -25,7 +25,9 @@ import { registerSnapshotTools } from "../src/server/snapshotTools";
 import { registerBiometricTools } from "../src/server/biometricTools";
 import { registerTelephonyTools } from "../src/server/telephonyTools";
 import { registerHighlightTools } from "../src/server/highlightTools";
+import { registerAccessibilityFocusTools } from "../src/server/accessibilityFocusTools";
 import { registerDebugTools } from "../src/server/debugTools";
+import { registerAppFileTools } from "../src/server/appFileTools";
 
 const OUTPUT_PATH = "schemas/tool-definitions.json";
 
@@ -46,6 +48,8 @@ function registerAllTools(): void {
   registerBiometricTools();
   registerTelephonyTools();
   registerHighlightTools();
+  registerAccessibilityFocusTools();
+  registerAppFileTools();
   registerDebugTools();
 }
 

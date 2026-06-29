@@ -18,6 +18,15 @@ export interface DeviceSnapshotManifest {
     secure?: Record<string, string>;
     system?: Record<string, string>;
   };
+  /**
+   * iOS simulator settings captured via `defaults`/`simctl ui`. Distinct from the
+   * Android `settings` triplet because iOS `(domain, key)` exports do not fit that
+   * shape. Present only when an iOS snapshot was captured with `includeSettings`.
+   */
+  iosSettings?: {
+    values: Record<string, string>;
+    ui?: { appearance?: "light" | "dark"; contentSize?: string };
+  };
   appDataBackup?: {
     backupFile?: string;
     backedUpPackages?: string[];

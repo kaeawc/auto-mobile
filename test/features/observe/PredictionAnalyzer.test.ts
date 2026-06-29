@@ -27,7 +27,7 @@ const baseObservation: ObserveResult = {
     hierarchy: {
       node: {
         $: {
-          "bounds": "[0,0][1,1]",
+          "bounds": { left: 0, top: 0, right: 1, bottom: 1 },
           "text": "Settings",
           "resource-id": "id/settings"
         }
@@ -70,7 +70,7 @@ describe("PredictionAnalyzer", () => {
         hierarchy: {
           node: {
             $: {
-              "bounds": "[0,0][1,1]",
+              "bounds": { left: 0, top: 0, right: 1, bottom: 1 },
               "text": "Settings",
               "resource-id": "id/settings",
               "content-desc": "Settings"

@@ -43,7 +43,7 @@ export class DeviceDetection implements DeviceDetection {
       return "android";
     }
 
-    // iOS device patterns (UUIDs from idb/iOS Simulator)
+    // iOS device patterns (UUIDs from the iOS Simulator)
     // iOS devices typically use UUIDs like: 569C0F94-5D53-40D2-AF8F-F4AA5BAA7D5E
     // iOS simulators also use similar UUID patterns
     const iosPattern = /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i;

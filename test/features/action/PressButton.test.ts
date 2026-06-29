@@ -1,0 +1,145 @@
+import { describe, expect, spyOn, test } from "bun:test";
+import { PressButton } from "../../../src/features/action/PressButton";
+import { IOSCtrlProxyClient } from "../../../src/features/observe/ios";
+import { BootedDevice } from "../../../src/models";
+
+describe("PressButton", () => {
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-device",
+    platform: "ios",
+    name: "iPhone"
+  };
+
+  const iosSimulator: BootedDevice = {
+    deviceId: "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+    platform: "ios",
+    name: "iPhone Simulator"
+  };
+
+  test("ios back delegates to CtrlProxy pressBack", async () => {
+    let backCalls = 0;
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => {
+        backCalls++;
+        return { success: true, totalTimeMs: 5 };
+      },
+      requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 })
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      const result = await (pressButton as any).executeiOSButtonPress("back");
+
+      expect(result.success).toBe(true);
+      expect(backCalls).toBe(1);
+      expect(getInstanceSpy).toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios recent delegates to CtrlProxy recent apps", async () => {
+    let recentCalls = 0;
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
+      requestRecentApps: async () => {
+        recentCalls++;
+        return { success: true, totalTimeMs: 5 };
+      }
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      const result = await (pressButton as any).executeiOSButtonPress("recent");
+
+      expect(result.success).toBe(true);
+      expect(recentCalls).toBe(1);
+      expect(getInstanceSpy).toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios menu remains unsupported", async () => {
+    const pressButton = new PressButton(iosDevice);
+    const result = await (pressButton as any).executeiOSButtonPress("menu");
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain("no menu hardware button");
+  });
+
+  test("ios hardware buttons delegate to generic CtrlProxy pressButton on physical devices", async () => {
+    const pressButtonCalls: string[] = [];
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressBack: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressHome: async () => ({ success: true, totalTimeMs: 5 }),
+      requestRecentApps: async () => ({ success: true, totalTimeMs: 5 }),
+      requestPressButton: async (button: string) => {
+        pressButtonCalls.push(button);
+        return { success: true, totalTimeMs: 5 };
+      }
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+
+      for (const button of ["volume_up", "volume_down", "power"]) {
+        const result = await (pressButton as any).executeiOSButtonPress(button);
+        expect(result).toEqual({ success: true, button, keyCode: -1 });
+      }
+
+      expect(pressButtonCalls).toEqual(["volume_up", "volume_down", "power"]);
+      expect(getInstanceSpy).toHaveBeenCalledTimes(3);
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios simulator rejects hardware buttons without contacting CtrlProxy", async () => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressButton: async () => {
+        throw new Error("should not be called");
+      }
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosSimulator);
+
+      for (const button of ["volume_up", "volume_down", "power"]) {
+        const result = await (pressButton as any).executeiOSButtonPress(button);
+        expect(result.success).toBe(false);
+        expect(result.button).toBe(button);
+        expect(result.keyCode).toBe(-1);
+        expect(result.error).toContain("unavailable on the iOS simulator");
+      }
+
+      expect(getInstanceSpy).not.toHaveBeenCalled();
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+
+  test("ios hardware button runner failures return structured errors", async () => {
+    const getInstanceSpy = spyOn(IOSCtrlProxyClient, "getInstance").mockReturnValue({
+      requestPressButton: async () => ({
+        success: false,
+        error: "Power/lock button is not supported on this device",
+        totalTimeMs: 5
+      })
+    } as any);
+
+    try {
+      const pressButton = new PressButton(iosDevice);
+      const result = await (pressButton as any).executeiOSButtonPress("power");
+
+      expect(result.success).toBe(false);
+      expect(result.button).toBe("power");
+      expect(result.keyCode).toBe(-1);
+      expect(result.error).toBe("Power/lock button is not supported on this device");
+    } finally {
+      getInstanceSpy.mockRestore();
+    }
+  });
+});

@@ -31,6 +31,8 @@ npm-debug.log*
 
 # Places to locally write while thinking or planning
 /scratch
+/research
+/ci-logs
 /roadmap
 /blog
 /presentation

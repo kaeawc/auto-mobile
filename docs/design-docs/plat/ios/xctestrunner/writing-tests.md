@@ -261,17 +261,20 @@ Types into the currently focused input field.
 
 ### `pressButton`
 
-Presses a hardware or soft button.
+Presses a device or navigation button.
 
 ```yaml
 - tool: pressButton
-  button: home
+  button: back
 ```
 
-!!! warning "Only `home` is supported on iOS"
-    The iOS runtime only supports `button: home`. Other values (`lock`, `volumeUp`, `volumeDown`)
-    are rejected with "Unsupported iOS button" at execution time. iOS has no back button —
-    use `launchApp` with `clearAppData: false` to bring an app back to the foreground.
+!!! note "Supported iOS buttons"
+    The iOS runtime supports `button: home`, `button: back`, and `button: recent`.
+    `back` performs app-level navigation through CtrlProxy because iOS has no hardware
+    back button. On physical iOS devices, `volume_up`, `volume_down`, and `power` are
+    routed through hardware-button support. On iOS simulators, those hardware buttons
+    return an explicit "unavailable on the iOS simulator" error. `menu` has no iOS
+    hardware analogue and is unsupported.
 
 ### `terminateApp`
 
@@ -438,7 +441,7 @@ Plans are validated against a JSON schema before execution. Common validation er
 | Error | Cause | Fix |
 |---|---|---|
 | `Missing required property 'tool'` | A step is missing the `tool` key | Add `tool: <toolName>` to the step |
-| `Invalid option for 'button'` | Unsupported button name | Only `home` is supported on iOS |
+| `Invalid option for 'button'` | Unsupported button name | Use `home` or `back` on iOS |
 | `waitFor` with only `timeout` | Missing `text` or `elementId` in `waitFor` | Add `text: "…"` or `elementId: "…"` |
 | `Unknown property 'foo'` | Misspelled or Android-only field | Check the [MCP Tools](../../../mcp/tools.md) reference |
 

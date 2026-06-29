@@ -330,9 +330,6 @@ public class PerfProvider {
         }
         entryStack.append(entry)
 
-        #if DEBUG
-            print("[PerfProvider] Started serial block: \(name)")
-        #endif
     }
 
     /// Start a new independent root block, ending any currently open blocks first.
@@ -353,9 +350,6 @@ public class PerfProvider {
         currentRoot = entry
         entryStack.append(entry)
 
-        #if DEBUG
-            print("[PerfProvider] Started independent root: \(name)")
-        #endif
     }
 
     /// Start a parallel block (operations run concurrently).
@@ -373,9 +367,6 @@ public class PerfProvider {
         }
         entryStack.append(entry)
 
-        #if DEBUG
-            print("[PerfProvider] Started parallel block: \(name)")
-        #endif
     }
 
     /// End the current block.
@@ -390,17 +381,11 @@ public class PerfProvider {
         let now = timeProvider.currentTimeMillis()
 
         guard let entry = entryStack.popLast() else {
-            #if DEBUG
-                print("[PerfProvider] end() called with no active block")
-            #endif
             return
         }
 
         entry.endTime = now
 
-        #if DEBUG
-            print("[PerfProvider] Ended block: \(entry.name) (\(now - entry.startTime)ms)")
-        #endif
 
         // If this was the root entry, move it to completed
         if entryStack.isEmpty, currentRoot === entry {
@@ -444,9 +429,6 @@ public class PerfProvider {
             entryStack.append(entry)
         }
 
-        #if DEBUG
-            print("[PerfProvider] Started operation: \(name)")
-        #endif
     }
 
     /// End tracking an operation manually.
@@ -458,20 +440,12 @@ public class PerfProvider {
 
         // Find the matching entry in the stack
         guard let entry = entryStack.last, entry.name == name else {
-            #if DEBUG
-                print(
-                    "[PerfProvider] endOperation(\(name)) called but current entry is \(entryStack.last?.name ?? "nil")"
-                )
-            #endif
             return
         }
 
         entry.endTime = now
         _ = entryStack.popLast()
 
-        #if DEBUG
-            print("[PerfProvider] Ended operation: \(name) (\(now - entry.startTime)ms)")
-        #endif
 
         // If this was the root entry, move it to completed
         if entryStack.isEmpty, currentRoot === entry {
@@ -490,9 +464,6 @@ public class PerfProvider {
         debounceCount += 1
         lastDebounceTime = timeProvider.currentTimeMillis()
 
-        #if DEBUG
-            print("[PerfProvider] Debounce recorded (total: \(debounceCount))")
-        #endif
     }
 
     // MARK: - Flush and Query

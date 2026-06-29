@@ -4,6 +4,7 @@ import type { IosVoiceOverDetector } from "../../utils/interfaces/IosVoiceOverDe
 import { iosVoiceOverDetector } from "../../utils/IosVoiceOverDetector";
 import type { ProcessExecutor } from "../../utils/ProcessExecutor";
 import { DefaultProcessExecutor } from "../../utils/ProcessExecutor";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 
 export class VoiceOverToggle {
   constructor(
@@ -44,8 +45,6 @@ export class VoiceOverToggle {
   }
 
   private isSimulator(): boolean {
-    return /^[0-9A-F]{8}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{4}-[0-9A-F]{12}$/i.test(
-      this.device.deviceId
-    );
+    return isIosSimulatorUdid(this.device.deviceId);
   }
 }

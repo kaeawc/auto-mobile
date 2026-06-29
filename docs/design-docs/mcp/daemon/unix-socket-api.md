@@ -34,7 +34,7 @@ All messages are newline-delimited JSON sent over the Unix socket. Each request 
 | `type` | `"mcp_request" \| "daemon_request"` | Yes | Request category |
 | `method` | `string` | Yes | Endpoint name (e.g. `ide/ping`, `daemon/availableDevices`) |
 | `params` | `object` | Yes | Method-specific parameters; pass `{}` when none are needed |
-| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000) |
+| `timeoutMs` | `number` | No | Per-request timeout in milliseconds (default: 30 000). Long-running `tools/call` requests may be raised to a tool-specific minimum timeout by the daemon. `openLink` can be configured with `AUTOMOBILE_OPEN_LINK_MCP_TIMEOUT_MS` (legacy alias: `AUTO_MOBILE_OPEN_LINK_MCP_TIMEOUT_MS`), defaulting to 30 000 ms. |
 
 **Response**
 
@@ -102,6 +102,33 @@ Returns daemon version and bundled service artifact information.
   }
 }
 ```
+
+### Version mismatch handling
+
+The stdio MCP server and daemon are shipped from the same package version. When
+the stdio proxy finds an already-running daemon, it compares the daemon version
+from the PID metadata with the MCP server package version before connecting.
+
+- Matching versions connect normally.
+- If the MCP server version is newer than the daemon version, the proxy restarts
+  the daemon when daemon auto-start/restart is enabled and the daemon has been
+  running longer than the restart cooldown.
+- If the running daemon is newer than the MCP server, the proxy fails before
+  connecting and reports both versions rather than attaching an older client to
+  newer daemon behavior.
+- If auto-start/restart is disabled, the proxy fails before connecting and
+  reports the client and daemon versions.
+- If the daemon is inside the restart cooldown, the proxy fails before
+  connecting and asks the client to retry after the cooldown or manually restart
+  the daemon.
+- Missing daemon version metadata is treated as stale and restarted when restart
+  is allowed. Non-numeric versions such as prerelease tags or `unknown` fail
+  before connecting because ordering is ambiguous.
+
+The restart cooldown deliberately prevents multiple concurrent clients pinned to
+different package versions from repeatedly restarting the shared daemon. During
+that cooldown, mismatched clients must retry later rather than sending requests
+to daemon code from another package version.
 
 ---
 

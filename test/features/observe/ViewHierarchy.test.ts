@@ -389,7 +389,7 @@ describe("ViewHierarchy", function() {
         "resource-id": "com.app:id/splash_animation",
         "long-clickable": "true",
         "clickable": "false",
-        "bounds": "[192,1036][1088,2364]"
+        "bounds": { left: 192, top: 1036, right: 1088, bottom: 2364 }
       };
 
       expect(viewHierarchy.meetsBooleanFilterCriteria(longClickableImageView)).toBe(true);
@@ -399,7 +399,12 @@ describe("ViewHierarchy", function() {
       expect(filtered).toBeDefined();
       expect(filtered).toHaveProperty("long-clickable", "true");
       expect(filtered).toHaveProperty("resource-id", "com.app:id/splash_animation");
-      expect(filtered).toHaveProperty("bounds", "[192,1036][1088,2364]");
+      expect(filtered).toHaveProperty("bounds", {
+        left: 192,
+        top: 1036,
+        right: 1088,
+        bottom: 2364
+      });
     });
 
     test("should clean node properties correctly with various edge cases", function() {
@@ -413,7 +418,7 @@ describe("ViewHierarchy", function() {
           "scrollable": "true", // should be kept
           "class": "android.widget.View", // not in allowed properties
           "content-desc": "", // empty string should be filtered out
-          "bounds": "[0,0][100,100]" // should be kept
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 } // should be kept
         }
       };
 
@@ -424,7 +429,12 @@ describe("ViewHierarchy", function() {
       expect(filteredNode).toHaveProperty("resource-id", "valid_id");
       expect(filteredNode).toHaveProperty("content-desc", "valid desc");
       expect(filteredNode).toHaveProperty("scrollable", "true");
-      expect(filteredNode).toHaveProperty("bounds", "[0,0][100,100]");
+      expect(filteredNode).toHaveProperty("bounds", {
+        left: 0,
+        top: 0,
+        right: 100,
+        bottom: 100
+      });
       expect(filteredNode).not.toHaveProperty("enabled");
       expect(filteredNode).not.toHaveProperty("clickable");
       expect(filteredNode).not.toHaveProperty("class");
@@ -477,14 +487,14 @@ describe("findFocusedElement", function() {
           {
             "text": "Button 1",
             "resource-id": "com.example:id/button1",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": "false"
           },
           {
             "text": "Input Field",
             "resource-id": "com.example:id/input",
-            "bounds": "[0,60][200,100]",
+            "bounds": { left: 0, top: 60, right: 200, bottom: 100 },
             "clickable": "true",
             "focused": "true"
           }
@@ -507,14 +517,14 @@ describe("findFocusedElement", function() {
           {
             "text": "Button 1",
             "resource-id": "com.example:id/button1",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": "false"
           },
           {
             "text": "Button 2",
             "resource-id": "com.example:id/button2",
-            "bounds": "[0,110][100,160]",
+            "bounds": { left: 0, top: 110, right: 100, bottom: 160 },
             "clickable": "true",
             "focused": "false"
           }
@@ -539,25 +549,25 @@ describe("findFocusedElement", function() {
         node: {
           "text": "Container",
           "resource-id": "com.example:id/container",
-          "bounds": "[0,0][300,200]",
+          "bounds": { left: 0, top: 0, right: 300, bottom: 200 },
           "focused": "false",
           "node": {
             "text": "SubContainer",
             "resource-id": "com.example:id/sub_container",
-            "bounds": "[10,10][290,190]",
+            "bounds": { left: 10, top: 10, right: 290, bottom: 190 },
             "focused": "false",
             "node": [
               {
                 "text": "Deep Button",
                 "resource-id": "com.example:id/deep_button",
-                "bounds": "[20,20][80,50]",
+                "bounds": { left: 20, top: 20, right: 80, bottom: 50 },
                 "clickable": "true",
                 "focused": "false"
               },
               {
                 "text": "Deep Input",
                 "resource-id": "com.example:id/deep_input",
-                "bounds": "[20,60][200,90]",
+                "bounds": { left: 20, top: 60, right: 200, bottom: 90 },
                 "clickable": "true",
                 "focused": "true"
               }
@@ -581,7 +591,7 @@ describe("findFocusedElement", function() {
         node: {
           "text": "Button",
           "resource-id": "com.example:id/button",
-          "bounds": "[0,0][100,50]",
+          "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
           "clickable": "true",
           "focused": true  // Boolean instead of string
         }
@@ -602,7 +612,7 @@ describe("findFocusedElement", function() {
           "$": {
             "text": "Button with $",
             "resource-id": "com.example:id/button_dollar",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": "true"
           }
@@ -625,14 +635,14 @@ describe("findFocusedElement", function() {
           {
             "text": "First Focused",
             "resource-id": "com.example:id/first",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": "true"
           },
           {
             "text": "Second Focused",
             "resource-id": "com.example:id/second",
-            "bounds": "[0,60][100,110]",
+            "bounds": { left: 0, top: 60, right: 100, bottom: 110 },
             "clickable": "true",
             "focused": "true"
           }
@@ -684,11 +694,11 @@ describe("Offscreen Node Filtering", function() {
   test("should filter out nodes completely below the screen", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         node: [
-          { text: "Visible", bounds: "[0,100][500,200]" },
-          { text: "Below Screen", bounds: "[0,2600][500,2800]" },
-          { text: "Way Below", bounds: "[0,3000][500,3200]" }
+          { text: "Visible", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          { text: "Below Screen", bounds: { left: 0, top: 2600, right: 500, bottom: 2800 } },
+          { text: "Way Below", bounds: { left: 0, top: 3000, right: 500, bottom: 3200 } }
         ]
       }
     };
@@ -714,10 +724,10 @@ describe("Offscreen Node Filtering", function() {
   test("should filter out nodes completely above the screen", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         node: [
-          { text: "Visible", bounds: "[0,100][500,200]" },
-          { text: "Above Screen", bounds: "[0,-500][500,-300]" }
+          { text: "Visible", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          { text: "Above Screen", bounds: { left: 0, top: -500, right: 500, bottom: -300 } }
         ]
       }
     };
@@ -741,10 +751,10 @@ describe("Offscreen Node Filtering", function() {
   test("should keep nodes within margin of screen edge", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         node: [
-          { text: "JustBelow", bounds: "[0,2450][500,2550]" },  // Within 100px margin
-          { text: "FarBelow", bounds: "[0,2600][500,2800]" }    // Beyond margin
+          { text: "JustBelow", bounds: { left: 0, top: 2450, right: 500, bottom: 2550 } },  // Within 100px margin
+          { text: "FarBelow", bounds: { left: 0, top: 2600, right: 500, bottom: 2800 } }    // Beyond margin
         ]
       }
     };
@@ -768,11 +778,11 @@ describe("Offscreen Node Filtering", function() {
   test("should handle negative coordinates in bounds", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         node: [
-          { text: "Visible", bounds: "[0,100][500,200]" },
-          { text: "PartiallyLeft", bounds: "[-50,100][100,200]" },  // Partially visible
-          { text: "CompletelyLeft", bounds: "[-500,-300][-200,100]" }  // Completely offscreen
+          { text: "Visible", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+          { text: "PartiallyLeft", bounds: { left: -50, top: 100, right: 100, bottom: 200 } },  // Partially visible
+          { text: "CompletelyLeft", bounds: { left: -500, top: -300, right: -200, bottom: 100 } }  // Completely offscreen
         ]
       }
     };
@@ -797,8 +807,8 @@ describe("Offscreen Node Filtering", function() {
   test("should return original hierarchy if screen dimensions are invalid", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
-        node: { text: "Test", bounds: "[0,100][500,200]" }
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+        node: { text: "Test", bounds: { left: 0, top: 100, right: 500, bottom: 200 } }
       }
     };
 
@@ -810,12 +820,12 @@ describe("Offscreen Node Filtering", function() {
   test("should preserve visible children of offscreen parents", function() {
     const hierarchy = {
       hierarchy: {
-        bounds: "[0,0][1080,2400]",
+        bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
         node: {
           text: "OffscreenParent",
-          bounds: "[0,3000][1080,4000]",
+          bounds: { left: 0, top: 3000, right: 1080, bottom: 4000 },
           node: [
-            { text: "VisibleChild", bounds: "[0,100][500,200]" }
+            { text: "VisibleChild", bounds: { left: 0, top: 100, right: 500, bottom: 200 } }
           ]
         }
       }
@@ -849,9 +859,9 @@ describe("Offscreen Node Filtering", function() {
           "bounds": { left: 100, top: 200, right: 300, bottom: 250 }
         },
         "hierarchy": {
-          bounds: "[0,0][1080,2400]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
-            { text: "Other Button", bounds: "[0,100][500,200]" }
+            { text: "Other Button", bounds: { left: 0, top: 100, right: 500, bottom: 200 } }
           ]
         }
       };
@@ -868,15 +878,15 @@ describe("Offscreen Node Filtering", function() {
     test("should find accessibility-focused element by traversing hierarchy", function() {
       const hierarchy = {
         hierarchy: {
-          bounds: "[0,0][1080,2400]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
-            { text: "Button 1", bounds: "[0,100][500,200]" },
+            { text: "Button 1", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
             {
               text: "Container",
-              bounds: "[0,300][500,600]",
+              bounds: { left: 0, top: 300, right: 500, bottom: 600 },
               node: [
-                { "text": "Button 2", "accessibility-focused": "true", "bounds": "[10,310][490,350]" },
-                { text: "Button 3", bounds: "[10,360][490,400]" }
+                { "text": "Button 2", "accessibility-focused": "true", "bounds": { left: 10, top: 310, right: 490, bottom: 350 } },
+                { text: "Button 3", bounds: { left: 10, top: 360, right: 490, bottom: 400 } }
               ]
             }
           ]
@@ -893,10 +903,10 @@ describe("Offscreen Node Filtering", function() {
     test("should return null when no accessibility-focused element exists", function() {
       const hierarchy = {
         hierarchy: {
-          bounds: "[0,0][1080,2400]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
-            { text: "Button 1", bounds: "[0,100][500,200]" },
-            { text: "Button 2", bounds: "[0,300][500,400]" }
+            { text: "Button 1", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
+            { text: "Button 2", bounds: { left: 0, top: 300, right: 500, bottom: 400 } }
           ]
         }
       };
@@ -919,9 +929,9 @@ describe("Offscreen Node Filtering", function() {
           bounds: { left: 100, top: 200, right: 300, bottom: 250 }
         },
         "hierarchy": {
-          bounds: "[0,0][1080,2400]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
-            { "text": "Hierarchy Focused", "accessibility-focused": "true", "bounds": "[0,100][500,200]" }
+            { "text": "Hierarchy Focused", "accessibility-focused": "true", "bounds": { left: 0, top: 100, right: 500, bottom: 200 } }
           ]
         }
       };
@@ -936,13 +946,13 @@ describe("Offscreen Node Filtering", function() {
     test("should search across top-level root nodes for accessibility-focused element", function() {
       const hierarchy = {
         hierarchy: {
-          bounds: "[0,0][1080,2400]",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
           node: [
-            { text: "Main Window Button", bounds: "[0,100][500,200]" },
+            { text: "Main Window Button", bounds: { left: 0, top: 100, right: 500, bottom: 200 } },
             {
-              bounds: "[0,0][500,300]",
+              bounds: { left: 0, top: 0, right: 500, bottom: 300 },
               node: [
-                { "text": "Popup Button", "accessibility-focused": "true", "bounds": "[10,10][490,50]" }
+                { "text": "Popup Button", "accessibility-focused": "true", "bounds": { left: 10, top: 10, right: 490, bottom: 50 } }
               ]
             }
           ]

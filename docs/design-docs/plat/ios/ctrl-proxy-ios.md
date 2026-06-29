@@ -15,6 +15,7 @@ service and focuses on reliable observation delivery.
 - Provide element bounds for touch injection.
 - Emit view hierarchy updates when the UI changes.
 - Track first responder and focus state.
+- Perform coordinate gestures (tap, swipe, drag) via `GesturePerformer`.
 
 ## WebSocket protocol
 
@@ -52,6 +53,41 @@ Server to client response:
   }
 }
 ```
+
+## Gestures
+
+`GesturePerformer` injects coordinate gestures through `XCUICoordinate` anchored on
+SpringBoard: tap, long-press, swipe, and **drag**
+(`press(forDuration:thenDragTo:withVelocity:thenHoldForDuration:)`). The `dragAndDrop` MCP
+tool resolves source/target element centers from a freshly-refreshed view hierarchy and
+dispatches through `IOSCtrlProxyClient.requestDrag()` to this path, reaching parity with the
+Android accessibility-service drag. The refresh uses `requestHierarchySync` to force a fresh
+runner round-trip rather than `getAccessibilityHierarchy`, bypassing the client's (<500ms)
+hierarchy cache so a drag started just after a navigation/scroll can't resolve against a
+stale snapshot.
+
+The XCUICoordinate drag API takes a velocity (points/second) rather than a duration, so
+`GesturePerformer.drag` converts the caller's `dragDurationMs` into the velocity that covers
+the source→target distance in that time (`velocity = distance / dragDuration`), falling back
+to `.default` when the duration or distance is non-positive. This gives iOS the same
+drag-speed control as Android.
+
+`shake` is implemented through the same CtrlProxy command path and posts the
+`com.apple.UIKit.SimulatorShake` Darwin notification from the XCUITest runner. This is
+simulator-only: XCTest does not expose a public shake API for physical iOS devices. The MCP
+`duration` value is used as part of the runner timeout budget on iOS, and `intensity` is
+ignored because the simulator shake path does not accept intensity.
+
+Multi-finger swipes use XCTest's private event-synthesis classes
+(`XCPointerEventPath` and `XCSynthesizedEventRecord`) so VoiceOver three-finger
+scrolls and `executeGesture` `FingerPath[]` input can produce simultaneous
+touches. The wrapper checks for the private classes/selectors at runtime and
+converts synthesis failures or Objective-C exceptions into normal CtrlProxy
+error responses. These APIs are undocumented by Apple, so Xcode or iOS updates
+can still change their behavior.
+
+> Caveat: on the Simulator the post-drop `thenHoldForDuration:` hold may be a no-op; press
+> and drag are reliable. Verify hold-dependent flows on a physical device.
 
 ## Limitations
 

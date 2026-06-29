@@ -5,6 +5,9 @@ import { FakeTimer } from "../../fakes/FakeTimer";
 import { ObserveResult } from "../../../src/models/ObserveResult";
 import { BootedDevice } from "../../../src/models/DeviceInfo";
 import { logger } from "../../../src/utils/logger";
+import { FakeObserveCacheStore } from "../../fakes/FakeObserveCacheStore";
+import { FakeViewHierarchy } from "../../fakes/FakeViewHierarchy";
+import { resetObserveCacheStore } from "../../../src/features/observe/cache/ObserveCacheRegistry";
 
 describe("ObserveScreen", function() {
   describe("Unit Tests for Extracted Methods", function() {
@@ -106,6 +109,52 @@ describe("ObserveScreen", function() {
 
       expect(result.error).toBe("");
     });
+
+    test("should populate observable element lists", async function() {
+      const viewHierarchy = new FakeViewHierarchy();
+      viewHierarchy.configureHierarchy({
+        updatedAt: 123,
+        screenWidth: 1080,
+        screenHeight: 1920,
+        systemInsets: { top: 24, right: 0, bottom: 48, left: 0 },
+        wakefulness: "Awake",
+        hierarchy: {
+          node: {
+            bounds: { left: 0, top: 0, right: 1080, bottom: 1920 },
+            node: [
+              {
+                "resource-id": "com.example:id/action",
+                "bounds": { left: 900, top: 1700, right: 1020, bottom: 1820 },
+                "actions": ["click"],
+              },
+              {
+                text: "Ready",
+                bounds: { left: 0, top: 100, right: 200, bottom: 160 },
+              },
+            ],
+          },
+        },
+      } as any);
+
+      try {
+        const screen = new RealObserveScreen(mockDevice, fakeAdb, {
+          viewHierarchy,
+          cacheStore: new FakeObserveCacheStore(new FakeTimer()),
+          performanceAuditor: { run: async () => undefined } as any,
+          accessibilityAuditor: { run: async () => undefined } as any,
+          accessibilityStateDetector: { run: async () => undefined } as any,
+        });
+
+        const result = await screen.execute({ skipScreenshot: true, skipBackStack: true });
+
+        expect(result.elements?.clickable).toHaveLength(1);
+        expect(result.elements?.clickable[0]["resource-id"]).toBe("com.example:id/action");
+        expect(result.elements?.text).toHaveLength(1);
+        expect(result.elements?.text[0].text).toBe("Ready");
+      } finally {
+        resetObserveCacheStore();
+      }
+    });
   });
 
   describe("Unit Tests for Focused Element Functionality", function() {
@@ -130,21 +179,21 @@ describe("ObserveScreen", function() {
             {
               "text": "Button 1",
               "resource-id": "com.example:id/button1",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "false"
             },
             {
               "text": "Input Field",
               "resource-id": "com.example:id/input",
-              "bounds": "[0,60][200,100]",
+              "bounds": { left: 0, top: 60, right: 200, bottom: 100 },
               "clickable": "true",
               "focused": "true"
             },
             {
               "text": "Button 2",
               "resource-id": "com.example:id/button2",
-              "bounds": "[0,110][100,160]",
+              "bounds": { left: 0, top: 110, right: 100, bottom: 160 },
               "clickable": "true",
               "focused": "false"
             }
@@ -167,14 +216,14 @@ describe("ObserveScreen", function() {
             {
               "text": "Button 1",
               "resource-id": "com.example:id/button1",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "false"
             },
             {
               "text": "Button 2",
               "resource-id": "com.example:id/button2",
-              "bounds": "[0,110][100,160]",
+              "bounds": { left: 0, top: 110, right: 100, bottom: 160 },
               "clickable": "true",
               "focused": "false"
             }
@@ -203,20 +252,20 @@ describe("ObserveScreen", function() {
           node: {
             "text": "Container",
             "resource-id": "com.example:id/container",
-            "bounds": "[0,0][300,200]",
+            "bounds": { left: 0, top: 0, right: 300, bottom: 200 },
             "focused": "false",
             "node": [
               {
                 "text": "Nested Button",
                 "resource-id": "com.example:id/nested_button",
-                "bounds": "[10,10][90,40]",
+                "bounds": { left: 10, top: 10, right: 90, bottom: 40 },
                 "clickable": "true",
                 "focused": "false"
               },
               {
                 "text": "Nested Input",
                 "resource-id": "com.example:id/nested_input",
-                "bounds": "[10,50][200,80]",
+                "bounds": { left: 10, top: 50, right: 200, bottom: 80 },
                 "clickable": "true",
                 "focused": "true"
               }
@@ -239,7 +288,7 @@ describe("ObserveScreen", function() {
           node: {
             "text": "Button",
             "resource-id": "com.example:id/button",
-            "bounds": "[0,0][100,50]",
+            "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
             "clickable": "true",
             "focused": true  // Boolean instead of string
           }
@@ -260,7 +309,7 @@ describe("ObserveScreen", function() {
             "$": {
               "text": "Button with $",
               "resource-id": "com.example:id/button_dollar",
-              "bounds": "[0,0][100,50]",
+              "bounds": { left: 0, top: 0, right: 100, bottom: 50 },
               "clickable": "true",
               "focused": "true"
             }
@@ -464,10 +513,10 @@ describe("ObserveScreen", function() {
     const extract = (viewHierarchy: any) =>
       (observeScreen as any).extractScreenSizeFromHierarchy(viewHierarchy);
 
-    test("should extract from Android-style bounds string", function() {
+    test("should extract from Android-style object bounds", function() {
       const result = extract({
         hierarchy: {
-          node: { $: { bounds: "[0,0][1080,2400]" } }
+          node: { $: { bounds: { left: 0, top: 0, right: 1080, bottom: 2400 } } }
         }
       });
       expect(result).toEqual({ width: 1080, height: 2400 });

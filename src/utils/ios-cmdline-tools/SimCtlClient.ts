@@ -1,5 +1,8 @@
 import { ChildProcess, execFile } from "child_process";
 import { promisify } from "util";
+import { promises as fsPromises } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 import { logger } from "../logger";
 import { createExecResult } from "../execResult";
 import { isRunningInDocker } from "../dockerEnv";
@@ -7,6 +10,15 @@ import { isHostControlAvailable, runSimctlExec, shouldUseHostControl } from "../
 import { ExecResult, ActionableError, DeviceInfo, BootedDevice, ScreenSize } from "../../models";
 import { defaultTimer, Timer } from "../SystemTimer";
 import { createGlobalPerformanceTracker } from "../PerformanceTracker";
+
+/**
+ * Shared message for the intentionally-unsupported "drive iOS simulator from
+ * inside Docker via host-control" mode. Used by both the hard failure in
+ * executeCommand and by callers (e.g. device discovery) that surface the reason.
+ */
+export const DOCKER_IOS_UNSUPPORTED_MESSAGE =
+  "Driving the iOS simulator from inside Docker (host-control mode) is not " +
+  "supported yet. Run AutoMobile directly on a macOS host for iOS simulator automation.";
 
 export interface AppleDevice {
   udid: string;
@@ -215,6 +227,14 @@ export interface SimCtl {
    * @param udid - Optional device UDID to focus
    */
   openSimulatorApp(udid?: string): Promise<void>;
+
+  /**
+   * Deliver a simulated remote push notification to a booted simulator.
+   * @param deviceId - Simulator UDID
+   * @param bundleId - Target app bundle identifier
+   * @param payloadJson - APNs payload JSON (must contain a top-level `aps` key, <=4096 bytes)
+   */
+  pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }>;
 }
 
 interface SimctlHostControlRunner {
@@ -326,12 +346,14 @@ export class SimCtlClient implements SimCtl {
   device: BootedDevice | null;
   execAsync: (file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>;
   private hostControl: SimctlHostControlRunner;
-  private hostControlAvailability: Promise<boolean> | null = null;
   private timer: Timer;
+  private platform: NodeJS.Platform;
+  private readonly usesInjectedExecAsync: boolean;
 
   // Static cache for device list
   private static deviceListCache: { devices: DeviceInfo[], timestamp: number } | null = null;
   private static readonly DEVICE_LIST_CACHE_TTL = 5000; // 5 seconds
+  private static localSimctlAvailability: Promise<void> | null = null;
 
   /**
    * Create an IosUtils instance
@@ -344,11 +366,14 @@ export class SimCtlClient implements SimCtl {
     device: BootedDevice | null = null,
     execAsyncFn: ((file: string, args: string[], maxBuffer?: number) => Promise<ExecResult>) | null = null,
     hostControlRunner: SimctlHostControlRunner | null = null,
-    timer: Timer = defaultTimer
+    timer: Timer = defaultTimer,
+    platform: NodeJS.Platform = process.platform
   ) {
     this.device = device;
+    this.usesInjectedExecAsync = execAsyncFn !== null;
     this.execAsync = execAsyncFn || execAsync;
     this.timer = timer;
+    this.platform = platform;
     this.hostControl = hostControlRunner || {
       isAvailable: () => isHostControlAvailable(),
       isRunningInDocker,
@@ -380,30 +405,35 @@ export class SimCtlClient implements SimCtl {
   async executeCommand(command: string, timeoutMs?: number): Promise<ExecResult> {
     const hostArgs = splitCommandArgs(command);
     const localArgs = ["simctl", ...hostArgs];
-    const wantsHostControl = this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
-    const hostControlAvailable = wantsHostControl ? await this.isHostControlAvailable() : false;
-    const useHostControl = wantsHostControl && hostControlAvailable;
-    const fullCommand = useHostControl ? `host-control simctl ${command}` : `xcrun simctl ${command}`;
+
+    // Driving the iOS simulator from inside Docker (host-control mode) is
+    // intentionally unsupported right now — see the deferral note on
+    // pushNotification(). Forwarding simctl to the host "works" for stdout-only
+    // commands but silently breaks any command that references a container-local
+    // path (`push`, `install`, ...), because the file lives in the container while
+    // simctl runs on the host. Rather than expose that half-working surface, fail
+    // fast with a clear message. When the iOS roadmap picks this up, restore the
+    // host-control routing that previously lived here.
+    if (this.isUnsupportedDockerHostControlMode()) {
+      throw new ActionableError(DOCKER_IOS_UNSUPPORTED_MESSAGE);
+    }
+
+    const fullCommand = `xcrun simctl ${command}`;
     const startTime = this.timer.now();
 
     logger.debug(`[iOS] Executing command: ${fullCommand}`);
 
-    if (wantsHostControl && !hostControlAvailable) {
-      throw new ActionableError(
-        "simctl is not available via host control. " +
-        "Ensure the host control daemon is running and reachable from the container."
-      );
+    try {
+      await this.ensureLocalSimctlAvailable();
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      const message = this.platform === "darwin"
+        ? `simctl is not available. Please install Xcode command line tools to continue. ${detail}`
+        : "iOS simulator tooling is only available on macOS.";
+      throw new ActionableError(message);
     }
 
-    if (!useHostControl && !(await this.isLocalSimctlAvailable())) {
-      throw new ActionableError("simctl is not available. Please install Xcode command line tools to continue.");
-    }
-
-    const runCommand = () => (
-      useHostControl
-        ? this.hostControl.runSimctl(hostArgs)
-        : this.execAsync("xcrun", localArgs)
-    );
+    const runCommand = () => this.execAsync("xcrun", localArgs);
 
     // Use Promise.race to implement timeout if specified
     if (timeoutMs) {
@@ -448,34 +478,57 @@ export class SimCtlClient implements SimCtl {
    * @returns Promise with boolean indicating availability
    */
   async isAvailable(): Promise<boolean> {
-    const wantsHostControl = this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
-    if (wantsHostControl) {
-      return this.isHostControlAvailable();
-    }
-
-    try {
-      await this.execAsync("xcrun", ["simctl", "--version"]);
-      return true;
-    } catch (error) {
-      logger.warn("simctl is not available - iOS functionality requires Xcode command line tools to be installed.");
+    // iOS simulator control is unavailable in Docker host-control mode — it is
+    // intentionally unsupported for now (see executeCommand). Report unavailable
+    // rather than probing the host so callers fail fast instead of half-working.
+    // Callers that need to tell this apart from "simctl is simply absent" should
+    // check isUnsupportedDockerHostControlMode() so they can surface the reason.
+    if (this.isUnsupportedDockerHostControlMode()) {
       return false;
     }
+
+    return this.isLocalSimctlAvailable();
   }
 
-  private async isHostControlAvailable(): Promise<boolean> {
-    if (!this.hostControlAvailability) {
-      this.hostControlAvailability = this.hostControl.isAvailable();
+  /**
+   * True when iOS control is being requested from inside a Docker container in
+   * host-control mode, which AutoMobile intentionally does not support yet (see
+   * executeCommand / pushNotification). Exposed so discovery and diagnostics can
+   * distinguish "deliberately unsupported here" from "simctl is absent" and
+   * surface the difference instead of silently reporting no simulators.
+   */
+  isUnsupportedDockerHostControlMode(): boolean {
+    return this.hostControl.shouldUseHostControl() && this.hostControl.isRunningInDocker();
+  }
+
+  private async ensureLocalSimctlAvailable(): Promise<void> {
+    if (this.usesInjectedExecAsync) {
+      await this.execAsync("xcrun", ["simctl", "--version"]);
+      return;
     }
-    return this.hostControlAvailability;
+
+    if (this.platform !== "darwin") {
+      throw new ActionableError("iOS simulator tooling is only available on macOS.");
+    }
+
+    if (!SimCtlClient.localSimctlAvailability) {
+      SimCtlClient.localSimctlAvailability = this.execAsync("xcrun", ["simctl", "--version"])
+        .then(() => undefined)
+        .catch(err => {
+          SimCtlClient.localSimctlAvailability = null;
+          logger.debug(`[iOS] simctl unavailable: ${err instanceof Error ? err.message : String(err)}`);
+          throw err;
+        });
+    }
+
+    await SimCtlClient.localSimctlAvailability;
   }
 
   private async isLocalSimctlAvailable(): Promise<boolean> {
     try {
-      await this.execAsync("xcrun", ["simctl", "--version"]);
+      await this.ensureLocalSimctlAvailable();
       return true;
-    } catch (err) {
-      logger.warn(`[iOS] isLocalSimctlAvailable failed: ${err instanceof Error ? `${err.message} (code=${(err as NodeJS.ErrnoException).code}, syscall=${(err as NodeJS.ErrnoException).syscall}, path=${(err as NodeJS.ErrnoException).path})` : String(err)}`);
-      logger.warn(`[iOS] PATH at failure: ${process.env.PATH ?? "(unset)"}`);
+    } catch {
       return false;
     }
   }
@@ -639,17 +692,21 @@ export class SimCtlClient implements SimCtl {
         }
       }
 
-      // Cache the result
-      SimCtlClient.deviceListCache = {
-        devices,
-        timestamp: this.timer.now()
-      };
-
       devices.sort((a, b) => (a.deviceId || "").localeCompare(b.deviceId || ""));
+      if (devices.length > 0) {
+        SimCtlClient.deviceListCache = {
+          devices,
+          timestamp: this.timer.now()
+        };
+      } else {
+        SimCtlClient.deviceListCache = null;
+      }
       return devices;
     } catch (error) {
-      logger.warn(`Failed to get iOS devices: ${error}`);
-      return [];
+      SimCtlClient.deviceListCache = null;
+      const detail = error instanceof Error ? error.message : String(error);
+      logger.warn(`Failed to get iOS devices: ${detail}`);
+      throw new ActionableError(`Failed to list iOS simulator devices: ${detail}`);
     }
   }
 
@@ -659,33 +716,42 @@ export class SimCtlClient implements SimCtl {
    */
   async getBootedSimulators(): Promise<BootedDevice[]> {
     try {
-      const simulatorList = await this.listSimulators();
-      logger.debug(`Found simulator list: ${simulatorList}`);
-      const bootedDevices: BootedDevice[] = [];
-
-      // Extract booted devices from all runtime versions
-      for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
-        for (const device of runtimeDevices) {
-          if (device.isAvailable && device.state === "Booted") {
-            const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
-            bootedDevices.push({
-              name: device.name,
-              platform: "ios",
-              deviceId: device.udid,
-              iosVersion,
-              osVersion: iosVersion,
-              formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
-            } as BootedDevice);
-          }
-        }
-      }
-
-      bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
-      return bootedDevices;
+      return await this.getBootedSimulatorsChecked();
     } catch (error) {
-      logger.warn(`Failed to get booted iOS devices: ${error}`);
+      logger.debug(`Failed to get booted iOS devices: ${error}`);
       return [];
     }
+  }
+
+  /**
+   * Like {@link getBootedSimulators} but rethrows discovery failures instead of
+   * swallowing them into an empty list. Callers that must distinguish "no
+   * simulators are booted" from "simctl discovery failed" should use this.
+   */
+  async getBootedSimulatorsChecked(): Promise<BootedDevice[]> {
+    const simulatorList = await this.listSimulators();
+    logger.debug(`Found simulator list: ${simulatorList}`);
+    const bootedDevices: BootedDevice[] = [];
+
+    // Extract booted devices from all runtime versions
+    for (const [runtimeId, runtimeDevices] of Object.entries(simulatorList.devices)) {
+      for (const device of runtimeDevices) {
+        if (device.isAvailable && device.state === "Booted") {
+          const iosVersion = normalizeIosVersion(runtimeId, device.os_version);
+          bootedDevices.push({
+            name: device.name,
+            platform: "ios",
+            deviceId: device.udid,
+            iosVersion,
+            osVersion: iosVersion,
+            formFactor: inferIosFormFactor(device.deviceTypeIdentifier),
+          } as BootedDevice);
+        }
+      }
+    }
+
+    bootedDevices.sort((a, b) => a.deviceId.localeCompare(b.deviceId));
+    return bootedDevices;
   }
 
   /**
@@ -984,6 +1050,41 @@ export class SimCtlClient implements SimCtl {
   async setAppearance(mode: "light" | "dark", deviceId?: string): Promise<void> {
     const targetDevice = deviceId || this.device?.deviceId || "booted";
     await this.executeCommand(`ui ${targetDevice} appearance ${mode}`);
+  }
+
+  /**
+   * Deliver a simulated remote push to a booted simulator via `simctl push`.
+   * Writes the payload to a temp .apns file because executeCommand cannot stream stdin.
+   *
+   * KNOWN LIMITATION — Docker host-control mode (intentionally deferred):
+   * When AutoMobile runs inside a container with host-control enabled,
+   * `executeCommand` forwards `simctl push ...` to the macOS host daemon, but the
+   * `.apns` temp file below is created on the *container's* filesystem. The host
+   * cannot see that path, so the push fails in that configuration. Fixing it
+   * properly (stream the payload over host-control/stdin, create the temp file on
+   * the host side, or share a mount) is real container<->host plumbing that is
+   * easy to get subtly wrong, and Docker-driven iOS control is not a use case we
+   * support right now. We are deferring this until the iOS roadmap items that
+   * actually depend on it land. Local (non-Docker) macOS — the supported path —
+   * works correctly because the temp file and `simctl` share one filesystem.
+   */
+  async pushNotification(deviceId: string, bundleId: string, payloadJson: string): Promise<{ success: boolean; error?: string }> {
+    const dir = await fsPromises.mkdtemp(join(tmpdir(), "automobile-apns-"));
+    const file = join(dir, "payload.apns");
+    try {
+      await fsPromises.writeFile(file, payloadJson, "utf-8");
+      // `xcrun simctl push <udid> <bundleId> <file>`; bundleId may be omitted when the
+      // payload carries "Simulator Target Bundle", but passing it explicitly is harmless.
+      const result = await this.executeCommand(`push ${deviceId} ${bundleId} "${file}"`);
+      if ((result.stderr || "").trim().length > 0) {
+        return { success: false, error: result.stderr.trim() };
+      }
+      return { success: true };
+    } catch (error) {
+      return { success: false, error: error instanceof Error ? error.message : String(error) };
+    } finally {
+      await fsPromises.rm(dir, { recursive: true, force: true }).catch(() => {});
+    }
   }
 
   async openSimulatorApp(udid?: string): Promise<void> {

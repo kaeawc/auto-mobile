@@ -12,6 +12,7 @@ import type { ElementGeometry } from "../../utils/interfaces/ElementGeometry";
 import { DefaultElementFinder } from "../utility/ElementFinder";
 import { DefaultElementGeometry } from "../utility/ElementGeometry";
 import { AndroidCtrlProxyClient } from "../observe/android";
+import { IOSCtrlProxyClient } from "../observe/ios";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { throwIfAborted } from "../../utils/toolUtils";
 import { AndroidCtrlProxyManager } from "../../utils/CtrlProxyManager";
@@ -33,6 +34,10 @@ const HOLD_DURATION_MAX_MS = 3000;
 const DROP_DURATION_MS = 100;
 const DRAG_TIMEOUT_BUFFER_MS = 500;
 const HIERARCHY_REFRESH_TIMEOUT_MS = 5000;
+// XCUITest hierarchy extraction is slow (can take 5-15s), so the iOS refresh uses the same
+// 15s budget as CtrlProxyHierarchy.getAccessibilityHierarchy rather than the 5s Android value.
+// A shorter timeout would fall back to the (possibly stale) observe cache on slow screens.
+const IOS_HIERARCHY_REFRESH_TIMEOUT_MS = 15000;
 
 interface DragAndDropDeps {
   visionConfig?: VisionFallbackConfig;
@@ -70,28 +75,33 @@ export class DragAndDrop extends BaseVisualChange {
     progress?: ProgressCallback,
     signal?: AbortSignal
   ): Promise<DragAndDropResult> {
-    if (this.device.platform === "ios") {
-      return {
-        success: false,
-        duration: 0,
-        distance: 0,
-        error: "dragAndDrop is not supported on iOS yet"
-      };
-    }
-
     const perf = createGlobalPerformanceTracker();
     perf.serial("dragAndDrop");
 
-    const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
-    const isAvailable = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
-    if (!isAvailable) {
+    if (this.device.platform !== "android" && this.device.platform !== "ios") {
       perf.end();
       return {
         success: false,
         duration: 0,
         distance: 0,
-        error: "dragAndDrop requires the Android accessibility service to be installed and enabled."
+        error: `dragAndDrop is not supported on ${this.device.platform}`
       };
+    }
+
+    // The Android accessibility service is only required for the Android gesture path.
+    // iOS dispatches the drag through the XCUITest CtrlProxy runner (no a11y service).
+    if (this.device.platform === "android") {
+      const a11yManager = AndroidCtrlProxyManager.getInstance(this.device, this.adb);
+      const isAvailable = await perf.track("a11yAvailable", () => a11yManager.isAvailable());
+      if (!isAvailable) {
+        perf.end();
+        return {
+          success: false,
+          duration: 0,
+          distance: 0,
+          error: "dragAndDrop requires the Android accessibility service to be installed and enabled."
+        };
+      }
     }
 
     const validationError = this.validateOptions(options);
@@ -123,7 +133,7 @@ export class DragAndDrop extends BaseVisualChange {
           const sourcePoint = this.geometry.getElementCenter(source);
           const targetPoint = this.geometry.getElementCenter(target);
 
-          const dragResult = await this.executeAndroidDrag(
+          const dragResult = await this.executeDrag(
             sourcePoint.x,
             sourcePoint.y,
             targetPoint.x,
@@ -266,8 +276,13 @@ export class DragAndDrop extends BaseVisualChange {
     observeResult: ObserveResult,
     signal?: AbortSignal
   ): Promise<ViewHierarchyResult | null> {
-    // Prefer a fresh hierarchy to avoid stale drag coordinates after navigation/scrolling.
-    const refreshed = await this.refreshViewHierarchy(signal);
+    // Prefer a freshly-captured hierarchy on both platforms so drag endpoints are not
+    // resolved against stale coordinates after the UI navigated/scrolled since the last
+    // observe. Android refreshes via the accessibility service; iOS via the XCUITest
+    // CtrlProxy runner's hierarchy snapshot.
+    const refreshed = this.device.platform === "ios"
+      ? await this.refreshIosViewHierarchy(signal)
+      : await this.refreshViewHierarchy(signal);
     if (refreshed && !refreshed.hierarchy?.error) {
       return refreshed;
     }
@@ -277,6 +292,22 @@ export class DragAndDrop extends BaseVisualChange {
     }
 
     return null;
+  }
+
+  private async refreshIosViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
+    // Bypass the IOSCtrlProxyClient hierarchy cache entirely. getAccessibilityHierarchy /
+    // getLatestHierarchy would return any client-cached snapshot younger than its (<500ms)
+    // TTL before issuing a fresh request, so a drag started shortly after a navigation/scroll
+    // could still resolve against stale coordinates. requestHierarchySync always performs a
+    // fresh runner round-trip, guaranteeing the drag endpoints come from a current snapshot.
+    // Use the 15s iOS budget: XCUITest extraction can take 5-15s, and a shorter timeout would
+    // fall back to the stale observe cache on slow screens.
+    const client = IOSCtrlProxyClient.getInstance(this.device);
+    const synced = await client.requestHierarchySync(undefined, false, signal, IOS_HIERARCHY_REFRESH_TIMEOUT_MS);
+    if (!synced?.hierarchy) {
+      return null;
+    }
+    return client.convertToViewHierarchyResult(synced.hierarchy);
   }
 
   private async refreshViewHierarchy(signal?: AbortSignal): Promise<ViewHierarchyResult | null> {
@@ -339,7 +370,7 @@ export class DragAndDrop extends BaseVisualChange {
     return pressDurationMs + dragDurationMs + holdDurationMs + DROP_DURATION_MS + DRAG_TIMEOUT_BUFFER_MS;
   }
 
-  private async executeAndroidDrag(
+  private async executeDrag(
     startX: number,
     startY: number,
     endX: number,
@@ -356,16 +387,18 @@ export class DragAndDrop extends BaseVisualChange {
   }> {
     throwIfAborted(signal);
 
-    const result = await this.accessibilityService.requestDrag(
-      startX,
-      startY,
-      endX,
-      endY,
-      pressDurationMs,
-      dragDurationMs,
-      holdDurationMs,
-      this.getDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs)
-    );
+    const timeoutMs = this.getDragTimeoutMs(pressDurationMs, dragDurationMs, holdDurationMs);
+
+    // Both clients expose requestDrag with an identical signature/return shape. iOS routes
+    // through the XCUITest CtrlProxy runner (XCUICoordinate.press/thenDragTo/thenHold);
+    // Android through the accessibility service. iOS preserves exact (non-rounded) coordinates.
+    const result = this.device.platform === "ios"
+      ? await IOSCtrlProxyClient.getInstance(this.device).requestDrag(
+        startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs
+      )
+      : await this.accessibilityService.requestDrag(
+        startX, startY, endX, endY, pressDurationMs, dragDurationMs, holdDurationMs, timeoutMs
+      );
 
     if (result.success) {
       return {
@@ -377,7 +410,7 @@ export class DragAndDrop extends BaseVisualChange {
 
     return {
       success: false,
-      error: result.error ?? "Drag failed via accessibility service"
+      error: result.error ?? "Drag failed via CtrlProxy"
     };
   }
 }

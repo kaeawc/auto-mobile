@@ -1,5 +1,6 @@
 import { platform } from "node:os";
 import { getMcpServerVersion } from "../utils/mcpVersion";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 /**
  * Get the user ID for the current process
@@ -36,7 +37,9 @@ const socketPathOverride =
   process.env.AUTOMOBILE_DAEMON_SOCKET_PATH ??
   process.env.AUTO_MOBILE_DAEMON_SOCKET_PATH;
 export const SOCKET_PATH =
-  socketPathOverride ?? `/tmp/auto-mobile-daemon-${uid}.sock`;
+  socketPathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(socketPathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.sock`;
 
 /**
  * PID lock file path
@@ -46,7 +49,9 @@ const pidFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_PID_FILE_PATH ??
   process.env.AUTO_MOBILE_DAEMON_PID_FILE_PATH;
 export const PID_FILE_PATH =
-  pidFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.pid`;
+  pidFilePathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(pidFilePathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.pid`;
 
 /**
  * Lock file path for coordinating concurrent daemon start operations.
@@ -57,7 +62,9 @@ const lockFilePathOverride =
   process.env.AUTOMOBILE_DAEMON_LOCK_FILE_PATH ??
   process.env.AUTO_MOBILE_DAEMON_LOCK_FILE_PATH;
 export const LOCK_FILE_PATH =
-  lockFilePathOverride ?? `/tmp/auto-mobile-daemon-${uid}.lock`;
+  lockFilePathOverride
+    ? resolvePathFromDaemonLaunchWorkingDirectory(lockFilePathOverride)
+    : `/tmp/auto-mobile-daemon-${uid}.lock`;
 
 /**
  * Connection timeout in milliseconds
@@ -103,6 +110,19 @@ export const DAEMON_SHUTDOWN_TIMEOUT_MS = 5000;
  * each try to "fix" the daemon to their own version.
  */
 export const DAEMON_VERSION_RESTART_COOLDOWN_MS = 10000;
+
+/**
+ * Readiness probe retry budget.
+ *
+ * A single failed socket-connect probe is NOT authoritative: a live daemon under
+ * load can transiently refuse a connection (listen backlog overflow, slow first
+ * accept right after a (re)start). The readiness loop must retry a few times
+ * before treating the socket as dead — otherwise it unlinks a healthy daemon's
+ * socket and every subsequent client connect throws "Daemon socket not found",
+ * surfacing to the user as "devices not found after start/restart".
+ */
+export const READINESS_PROBE_MAX_ATTEMPTS = 3;
+export const READINESS_PROBE_BACKOFF_MS = 150;
 
 /**
  * MCP streamable endpoint path

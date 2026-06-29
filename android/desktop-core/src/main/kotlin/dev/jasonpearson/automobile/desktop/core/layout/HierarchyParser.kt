@@ -16,7 +16,7 @@ private val log = dev.jasonpearson.automobile.desktop.core.logging.LoggerFactory
  *
  * Supports two JSON formats:
  * 1. MCP format with attributes in "$" object:
- *    { "hierarchy": { "node": { "$": { "class": "...", "bounds": "..." }, "node": [...] } } }
+ *    { "hierarchy": { "node": { "$": { "class": "...", "bounds": {...} }, "node": [...] } } }
  * 2. Direct format with attributes at root:
  *    { "hierarchy": { "node": { "className": "...", "bounds": {...} } } }
  */
@@ -83,7 +83,7 @@ private fun parseJsonObjectNode(
     val text = attrs.getString("text")
     val contentDesc = attrs.getString("content-desc") ?: attrs.getString("contentDesc")
 
-    // Parse bounds - can be string format or object format
+    // Parse bounds from the repository's object format.
     val bounds = parseBounds(attrs, nodeObj)
 
     // Parse boolean attributes (stored as "true"/"false" strings)
@@ -142,38 +142,31 @@ private fun parseJsonObjectNode(
  * Parse bounds from either the attributes object or a separate bounds object.
  */
 private fun parseBounds(attrs: JsonObject, nodeObj: JsonObject): ElementBounds {
-    // Try bounds string in attributes "[left,top][right,bottom]"
-    attrs.getString("bounds")?.let { boundsStr ->
-        val parsed = parseBoundsString(boundsStr)
-        if (parsed.width > 0 || parsed.height > 0) return parsed
-    }
+    return parseBoundsElement(attrs["bounds"])
+        ?: parseBoundsElement(nodeObj["bounds"])
+        ?: ElementBounds(0, 0, 0, 0)
+}
 
-    // Try bounds object in node
-    nodeObj["bounds"]?.let { boundsElement ->
-        when (boundsElement) {
-            is JsonPrimitive -> {
-                boundsElement.contentOrNull?.let { return parseBoundsString(it) }
-            }
-            is JsonObject -> {
-                return ElementBounds(
-                    left = boundsElement.getInt("left") ?: 0,
-                    top = boundsElement.getInt("top") ?: 0,
-                    right = boundsElement.getInt("right") ?: 0,
-                    bottom = boundsElement.getInt("bottom") ?: 0,
-                )
-            }
-            else -> {}
+private fun parseBoundsElement(boundsElement: JsonElement?): ElementBounds? {
+    return when (boundsElement) {
+        is JsonObject -> {
+            ElementBounds(
+                left = boundsElement.getInt("left") ?: 0,
+                top = boundsElement.getInt("top") ?: 0,
+                right = boundsElement.getInt("right") ?: 0,
+                bottom = boundsElement.getInt("bottom") ?: 0,
+            )
         }
+        is JsonPrimitive -> boundsElement.contentOrNull?.let { parseBoundsString(it) }
+        else -> null
     }
-
-    return ElementBounds(0, 0, 0, 0)
 }
 
 /**
- * Parse bounds string format "[left,top][right,bottom]".
+ * Parse legacy uiautomator bounds string format "[left,top][right,bottom]".
  */
 private fun parseBoundsString(boundsStr: String): ElementBounds {
-    val regex = """\[(\d+),(\d+)\]\[(\d+),(\d+)\]""".toRegex()
+    val regex = """\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]""".toRegex()
     val match = regex.find(boundsStr)
     return if (match != null) {
         val (left, top, right, bottom) = match.destructured

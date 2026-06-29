@@ -2,14 +2,27 @@ import { defaultAdbClientFactory, type AdbClientFactory } from "../../utils/andr
 import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
 import type { BootedDevice } from "../../models";
 import { SetAndroidNotificationPolicyAccess } from "../action/SetAndroidNotificationPolicyAccess";
+import {
+  defaultBulletinBoardReader,
+  type IosNotificationAuthorizationReader,
+} from "./ios/IosNotificationAuthorizationReader";
 
 export interface NotificationPolicyAccessState {
   supported: boolean;
   allowed?: boolean | null;
-  method?: "android_cmd_notification" | "android_dumpsys_notification" | "unsupported";
+  method?:
+    | "android_cmd_notification"
+    | "android_dumpsys_notification"
+    | "ios_bulletinboard_plist"
+    | "unsupported";
   rawValue?: string;
   warning?: string;
   error?: string;
+  // iOS-only enrichment (all optional so the Android shape is unchanged):
+  authorizationStatus?: "notDetermined" | "denied" | "authorized" | "provisional" | "ephemeral";
+  lockScreen?: boolean;
+  notificationCenter?: boolean;
+  alerts?: boolean;
 }
 
 export interface NotificationPolicyResult {
@@ -27,6 +40,7 @@ export interface SetNotificationPolicyInput {
 
 export interface NotificationPolicyDependencies {
   adbFactory?: AdbClientFactory;
+  iosReader?: IosNotificationAuthorizationReader;
 }
 
 function escapeRegExp(value: string): string {
@@ -87,12 +101,28 @@ export class NotificationPolicy {
 
   private adbFactory: AdbClientFactory;
 
+  private iosReader?: IosNotificationAuthorizationReader;
+
   constructor(device: BootedDevice, dependencies: NotificationPolicyDependencies = {}) {
     this.device = device;
     this.adbFactory = dependencies.adbFactory ?? defaultAdbClientFactory;
+    this.iosReader = dependencies.iosReader;
   }
 
   async getPolicy(appId: string): Promise<NotificationPolicyResult> {
+    if (this.device.platform === "ios") {
+      const reader = this.iosReader ?? defaultBulletinBoardReader();
+      const policyAccess = await reader.read(this.device.deviceId, appId);
+      return {
+        success: !policyAccess.error,
+        appId,
+        deviceId: this.device.deviceId,
+        platform: "ios",
+        policyAccess,
+        ...(policyAccess.error ? { error: policyAccess.error } : {}),
+      };
+    }
+
     if (this.device.platform !== "android") {
       const error = "iOS does not expose app notification policy access for simulators or physical devices";
       return {

@@ -258,6 +258,9 @@ internal object DaemonSocketClientManager {
 
 internal object DaemonSocketPaths {
   private const val DEFAULT_DAEMON_STARTUP_TIMEOUT_MS = 10000L
+  private const val DAEMON_PACKAGE_NAME = "@kaeawc/auto-mobile"
+  private const val DAEMON_PACKAGE_VERSION_PROPERTY = "automobile.daemon.package.version"
+  private val ignoredPackageVersions = setOf("latest", "unknown")
 
   fun socketPath(): String {
     val userId = getUserId()
@@ -306,11 +309,41 @@ internal object DaemonSocketPaths {
 
   private fun resolvePackageCommand(subCommand: String): List<String>? {
     val runner = resolvePackageRunner() ?: return null
-    return if (runner.endsWith("npx")) {
-      listOf(runner, "-y", "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+    return buildPackageDaemonCommand(runner, subCommand)
+  }
+
+  internal fun buildPackageDaemonCommand(
+      runner: String,
+      subCommand: String,
+      packageVersion: String? = resolveDaemonPackageVersion(),
+  ): List<String>? {
+    val packageSpecifier = resolveDaemonPackageSpecifier(packageVersion) ?: return null
+    return if (File(runner).nameWithoutExtension == "npx") {
+      listOf(runner, "-y", packageSpecifier, "--daemon", subCommand)
     } else {
-      listOf(runner, "@kaeawc/auto-mobile@latest", "--daemon", subCommand)
+      listOf(runner, packageSpecifier, "--daemon", subCommand)
     }
+  }
+
+  private fun resolveDaemonPackageSpecifier(packageVersion: String?): String? {
+    val trimmedVersion = packageVersion?.trim().orEmpty()
+    if (trimmedVersion.isEmpty() || ignoredPackageVersions.contains(trimmedVersion.lowercase())) {
+      return null
+    }
+    return "$DAEMON_PACKAGE_NAME@$trimmedVersion"
+  }
+
+  private fun resolveDaemonPackageVersion(): String? {
+    val sysProp = SystemPropertyCache.get(DAEMON_PACKAGE_VERSION_PROPERTY, "").trim()
+    if (sysProp.isNotEmpty()) return sysProp
+
+    val daemonPackageEnv = System.getenv("AUTOMOBILE_DAEMON_PACKAGE_VERSION")?.trim().orEmpty()
+    if (daemonPackageEnv.isNotEmpty()) return daemonPackageEnv
+
+    val automobileVersionEnv = System.getenv("AUTOMOBILE_VERSION")?.trim().orEmpty()
+    if (automobileVersionEnv.isNotEmpty()) return automobileVersionEnv
+
+    return DaemonSocketPaths::class.java.`package`?.implementationVersion?.trim()
   }
 
   /**

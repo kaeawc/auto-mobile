@@ -108,6 +108,7 @@ nav:
           - 'Daemon':
              - 'Overview': design-docs/mcp/daemon/index.md
              - 'Critical Section': design-docs/mcp/daemon/critical-section.md
+             - 'Multi-Agent Filesystem Contract': design-docs/mcp/daemon/multi-agent-filesystem-contract.md
              - 'Unix Socket API': design-docs/mcp/daemon/unix-socket-api.md
           - 'Multi-device': design-docs/mcp/multi-device.md
           - 'Navigation Graph':
@@ -154,6 +155,7 @@ nav:
             - 'Desktop App': design-docs/plat/android/desktop-app.md
             - 'Work Profiles': design-docs/plat/android/work-profiles.md
             - 'Device Tools':
+              - 'accessibilityFocus': design-docs/plat/android/accessibility-focus.md
               - 'takeScreenshot fallback': design-docs/plat/android/take-screenshot.md
               - 'Biometrics stubbing': design-docs/plat/android/biometrics.md
               - 'Notification triggering': design-docs/plat/android/notifications.md

@@ -30,7 +30,7 @@ describe("SetUIState", () => {
     hierarchy: {
       node: [{
         $: {
-          bounds: "[0,0][100,50]",
+          bounds: { left: 0, top: 0, right: 100, bottom: 50 },
           ...element
         }
       }]
@@ -459,18 +459,18 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,0][100,50]", "resource-id": "username", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,60][100,110]", "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
-            { $: { "bounds": "[0,120][100,170]", "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "false" } }
+            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "username", "text": "", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
+            { $: { "bounds": { left: 0, top: 120, right: 100, bottom: 170 }, "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "false" } }
           ]
         }
       };
       const updatedHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,0][100,50]", "resource-id": "username", "text": "user@test.com", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,60][100,110]", "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
-            { $: { "bounds": "[0,120][100,170]", "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "true" } }
+            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "username", "text": "user@test.com", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 60, right: 100, bottom: 110 }, "resource-id": "password", "text": "", "class": "android.widget.EditText", "password": "true" } },
+            { $: { "bounds": { left: 0, top: 120, right: 100, bottom: 170 }, "resource-id": "remember", "class": "android.widget.CheckBox", "checkable": "true", "checked": "true" } }
           ]
         }
       };
@@ -512,24 +512,24 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,0][100,50]", "resource-id": "top_field", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,200][100,250]", "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
           ]
         }
       };
       const afterTopFieldEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,0][100,50]", "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,200][100,250]", "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "", "class": "android.widget.EditText" } }
           ]
         }
       };
       const afterBothEdits: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,0][100,50]", "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,200][100,250]", "resource-id": "bottom_field", "text": "second", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 0, right: 100, bottom: 50 }, "resource-id": "top_field", "text": "first", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "bottom_field", "text": "second", "class": "android.widget.EditText" } }
           ]
         }
       };
@@ -600,8 +600,8 @@ describe("SetUIState", () => {
       const initialHierarchy: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,100][100,150]", "resource-id": "field_a", "text": "", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,200][100,250]", "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 200, right: 100, bottom: 250 }, "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
           ]
         }
       };
@@ -609,16 +609,16 @@ describe("SetUIState", () => {
       const afterFirstEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,100][100,150]", "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,160][100,210]", "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 160, right: 100, bottom: 210 }, "resource-id": "field_b", "text": "", "class": "android.widget.EditText" } }
           ]
         }
       };
       const afterSecondEdit: ViewHierarchyResult = {
         hierarchy: {
           node: [
-            { $: { "bounds": "[0,100][100,150]", "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
-            { $: { "bounds": "[0,160][100,210]", "resource-id": "field_b", "text": "bbb", "class": "android.widget.EditText" } }
+            { $: { "bounds": { left: 0, top: 100, right: 100, bottom: 150 }, "resource-id": "field_a", "text": "aaa", "class": "android.widget.EditText" } },
+            { $: { "bounds": { left: 0, top: 160, right: 100, bottom: 210 }, "resource-id": "field_b", "text": "bbb", "class": "android.widget.EditText" } }
           ]
         }
       };

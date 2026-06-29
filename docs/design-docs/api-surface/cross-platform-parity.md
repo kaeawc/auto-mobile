@@ -117,9 +117,9 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `setCaptureBodies` | -- | `setCaptureBodies(Bool)` | iOS-only config |
 | `setMaxBodyBytes` | -- | `setMaxBodyBytes(Int)` | iOS-only config |
 | `setEnabled` | -- | `setEnabled(Bool)` | iOS-only toggle |
-| `NetworkMockRuleStore` | Yes (with BroadcastReceiver) | -- | Android-only network mocking |
+| `NetworkMockRuleStore` | Yes (with BroadcastReceiver) | Yes (via CtrlProxy relay to SDK server) | iOS requires sessions to register `protocolClass()` |
 
-**Why these differ:** Network interception is inherently platform-specific. Android uses OkHttp interceptors; iOS uses URLProtocol. The mock rule store on Android uses broadcast intents which have no iOS equivalent.
+**Why these differ:** Network interception is inherently platform-specific. Android uses OkHttp interceptors; iOS uses URLProtocol. Mock-rule transport also differs: Android uses broadcast intents, while iOS relays through CtrlProxy to the SDK server.
 
 ## 10. ANR / Hang Detection
 
@@ -176,6 +176,7 @@ Side-by-side comparison of every public API symbol on Android and iOS.
 | `getDriver` | `getDriver()` (internal) | `getDriver()` | Aligned |
 | `closeAll` | `closeAll()` | -- | Android-only |
 | Driver interface | `DatabaseDriver` | `DatabaseDriver` | Aligned methods |
+| Host access | ContentProvider bridge | DEBUG in-app SDK HTTP server relayed by CtrlProxy | `sqlQuery` and database resources share the same JSON shape |
 
 ## 16. Compose / SwiftUI View Tracking
 
@@ -219,11 +220,12 @@ These APIs exist on only one platform due to inherent platform differences:
 - `CircuitAdapter`, `Navigation3Adapter` -- Android navigation framework adapters
 - `SdkConstants` (CTRL_PROXY_PACKAGE, PERMISSION_NETWORK_CONTROL) -- Android IPC
 - `ConfigurationOverrideHelper` -- Android Configuration override for testing
-- `NetworkMockRuleStore` -- Uses Android BroadcastReceiver for mock rule delivery
+- Network mock delivery -- Android uses BroadcastReceiver IPC
 - `AutoMobileNetworkInterceptor` / `AutoMobileWebSocketListener` -- OkHttp specific
 
 ### iOS-Only
 - `AutoMobileURLProtocol` -- URLSession interception
+- Network mock delivery -- iOS uses CtrlProxy relay to the SDK server
 - `BreadcrumbTrail.writeToDisk` / `loadFromDisk` / `clearDisk` -- Disk persistence for crash resilience
 - `AutoMobileCrashes.enableSignalHandlers` -- POSIX signal handler installation
 - `SwiftUINavigationAdapter` -- SwiftUI navigation tracking

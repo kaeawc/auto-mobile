@@ -82,6 +82,29 @@ final class HierarchyMergerTests: XCTestCase {
         )
     }
 
+    private func countResourceId(_ resourceId: String, in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        let current = element.resourceId == resourceId ? 1 : 0
+        return current + (element.node ?? []).reduce(0) { $0 + countResourceId(resourceId, in: $1) }
+    }
+
+    private func countClassName(_ className: String, in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        let current = element.className == className ? 1 : 0
+        return current + (element.node ?? []).reduce(0) { $0 + countClassName(className, in: $1) }
+    }
+
+    private func countText(_ text: String, in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        let current = element.text == text ? 1 : 0
+        return current + (element.node ?? []).reduce(0) { $0 + countText(text, in: $1) }
+    }
+
+    private func countNodes(in element: UIElementInfo?) -> Int {
+        guard let element else { return 0 }
+        return 1 + (element.node ?? []).reduce(0) { $0 + countNodes(in: $1) }
+    }
+
     // MARK: - No SDK Hierarchy (graceful fallback)
 
     func testMergeWithNilSdkReturnsUnchanged() {
@@ -605,6 +628,52 @@ final class HierarchyMergerTests: XCTestCase {
         XCTAssertNil(children?[0].extras?["sdk.source"])
         XCTAssertEqual(children?[1].resourceId, "sdk-only-view")
         XCTAssertEqual(children?[1].extras?["sdk.source"], "sdkWalker")
+    }
+
+    func testSdkOnlyChildrenAreNotDuplicatedUnderContainmentMatches() {
+        let xcuiChildren = (0..<3).map { index in
+            makeElement(
+                className: "ListCollectionViewCell",
+                bounds: ElementBounds(left: 0, top: 100 + index * 60, right: 390, bottom: 150 + index * 60),
+                text: "Cell \(index)"
+            )
+        }
+        let xcuiRoot = makeElement(
+            className: "UIView",
+            bounds: ElementBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: xcuiChildren
+        )
+        let tabLabels: [String] = ["Discover", "Demos", "Settings"]
+        let sdkTabLabels = tabLabels.enumerated().map { index, label in
+            makeSdkNode(
+                className: "UITabBarButtonLabel",
+                bounds: SdkBounds(left: 20 + index * 120, top: 760, right: 120 + index * 120, bottom: 790),
+                accessibilityLabel: label,
+                accessibilityIdentifier: "sdk-only-tab-label-\(label)",
+                isAccessibilityElement: true
+            )
+        }
+        let sdkRoot = makeSdkNode(
+            className: "UIView",
+            bounds: SdkBounds(left: 0, top: 0, right: 390, bottom: 844),
+            children: sdkTabLabels
+        )
+
+        let result = HierarchyMerger.merge(
+            xcuitest: makeHierarchy(root: xcuiRoot),
+            sdk: makeSdkHierarchy(root: sdkRoot)
+        )
+
+        XCTAssertEqual(
+            countResourceId("sdk-only-tab-label-Discover", in: result.hierarchy),
+            1,
+            "SDK-only children should be injected once under the direct parent, not repeated under each contained XCUITest cell"
+        )
+        XCTAssertEqual(countClassName("UITabBarButtonLabel", in: result.hierarchy), 3)
+        XCTAssertEqual(countText("Discover", in: result.hierarchy), 1)
+        XCTAssertEqual(countText("Demos", in: result.hierarchy), 1)
+        XCTAssertEqual(countText("Settings", in: result.hierarchy), 1)
+        XCTAssertEqual(countNodes(in: result.hierarchy), 7)
     }
 
     // MARK: - Hierarchy Metadata Preserved

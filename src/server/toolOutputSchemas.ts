@@ -62,6 +62,28 @@ export const observationSummarySchema = z.object({
   activeWindow: activeWindowSchema.optional()
 }).passthrough();
 
+const tapOnSearchUntilSchema = z.object({
+  durationMs: z.number().int(),
+  requestCount: z.number().int(),
+  changeCount: z.number().int()
+}).passthrough();
+
+export const tapOnResultSchema = z.object({
+  success: z.boolean(),
+  action: z.string().optional(),
+  message: z.string().optional(),
+  element: elementSchema.optional(),
+  observation: observationSummarySchema.optional(),
+  selectedElement: selectedElementSchema.optional(),
+  selectedElements: z.array(selectedElementSchema).optional(),
+  error: z.string().optional(),
+  pressRecognized: z.boolean().optional(),
+  contextMenuOpened: z.boolean().optional(),
+  selectionStarted: z.boolean().optional(),
+  searchUntil: tapOnSearchUntilSchema.optional(),
+  debug: z.any().optional()
+}).passthrough();
+
 export const screenSizeSchema = z.object({
   width: z.number().int(),
   height: z.number().int()
@@ -131,4 +153,11 @@ export const freshnessSchema = z.object({
 export const accessibilityStateSchema = z.object({
   enabled: z.boolean(),
   service: z.enum(["talkback", "voiceover", "unknown"])
+}).passthrough();
+
+export const accessibilityFocusResultSchema = z.object({
+  success: z.boolean(),
+  error: z.string().optional(),
+  warning: z.string().optional(),
+  focusedElement: elementSchema.optional()
 }).passthrough();

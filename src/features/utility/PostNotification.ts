@@ -4,9 +4,12 @@ import { BootedDevice, PostNotificationResult } from "../../models";
 import { Window } from "../observe/Window";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
+import { SimCtlClient } from "../../utils/ios-cmdline-tools/SimCtlClient";
+import { isIosSimulatorUdid } from "../../utils/ios-cmdline-tools/iosDeviceType";
 import { fileURLToPath } from "url";
 import fs from "fs/promises";
 import path from "path";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../../utils/workingDirectory";
 
 interface PostNotificationAction {
   label: string;
@@ -20,6 +23,8 @@ export interface PostNotificationOptions {
   imagePath?: string;
   actions?: PostNotificationAction[];
   channelId?: string;
+  /** iOS bundle identifier to target (required on iOS; maps to APNs "Simulator Target Bundle"). */
+  appId?: string;
 }
 
 const NOTIFICATION_ACTION = "dev.jasonpearson.automobile.sdk.NOTIFICATION_POST";
@@ -32,8 +37,14 @@ export class PostNotification {
   private adb: AdbExecutor;
   private adbFactory: AdbClientFactory;
   private window: Window;
+  private simctl: SimCtlClient;
 
-  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory, window: Window | null = null) {
+  constructor(
+    device: BootedDevice,
+    adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = defaultAdbClientFactory,
+    window: Window | null = null,
+    simctl: SimCtlClient | null = null
+  ) {
     this.device = device;
     // Detect if the argument is a factory (has create method) or an executor
     if (adbFactoryOrExecutor && typeof (adbFactoryOrExecutor as AdbClientFactory).create === "function") {
@@ -49,6 +60,7 @@ export class PostNotification {
       this.adb = this.adbFactory.create(device);
     }
     this.window = window || new Window(device, this.adbFactory);
+    this.simctl = simctl || new SimCtlClient(device);
   }
 
   async execute(options: PostNotificationOptions, signal?: AbortSignal): Promise<PostNotificationResult> {
@@ -56,14 +68,102 @@ export class PostNotification {
     perf.serial("postNotification");
 
     try {
-      if (this.device.platform !== "android") {
-        return {
-          success: false,
-          supported: false,
-          error: "postNotification is only supported on Android devices."
-        };
+      switch (this.device.platform) {
+        case "android":
+          return await this.executeAndroid(options, signal);
+        case "ios":
+          return await this.executeIos(options);
+        default:
+          return {
+            success: false,
+            supported: false,
+            error: `postNotification is not supported on platform: ${this.device.platform}`
+          };
       }
+    } catch (error) {
+      return {
+        success: false,
+        supported: false,
+        error: `Failed to post notification: ${error instanceof Error ? error.message : String(error)}`
+      };
+    } finally {
+      perf.end();
+    }
+  }
 
+  /** iOS: deliver a simulated remote push via `simctl push` (simulator only). */
+  private async executeIos(options: PostNotificationOptions): Promise<PostNotificationResult> {
+    const bundleId = options.appId;
+    if (!bundleId) {
+      return {
+        success: false,
+        supported: false,
+        error: "appId (bundle identifier) is required to post a notification on iOS."
+      };
+    }
+
+    // simctl push is simulator-only. Use the repo's UDID-shape convention (NOT device.source).
+    if (!isIosSimulatorUdid(this.device.deviceId)) {
+      return {
+        success: false,
+        supported: false,
+        appId: bundleId,
+        error: "postNotification on iOS is only supported on simulators (simctl push); physical iOS devices are not supported."
+      };
+    }
+
+    const warnings: string[] = [];
+    if (options.imageType === "bigPicture" || options.imagePath) {
+      warnings.push("bigPicture/image attachments are not supported via simctl push and were ignored.");
+    }
+    if (options.actions && options.actions.length > 0) {
+      warnings.push("action buttons require a pre-registered UNNotificationCategory and were ignored.");
+    }
+    const warning = warnings.join(" ") || undefined;
+
+    const aps: Record<string, unknown> = {
+      alert: { title: options.title, body: options.body },
+      sound: "default"
+    };
+    if (options.channelId) {
+      aps.category = options.channelId; // reuse channelId as the APNs category
+    }
+    const payload = { "Simulator Target Bundle": bundleId, aps };
+    const json = JSON.stringify(payload);
+
+    if (Buffer.byteLength(json, "utf8") > 4096) {
+      return {
+        success: false,
+        supported: true,
+        appId: bundleId,
+        error: "APNs payload exceeds the 4096-byte simctl push limit.",
+        warning
+      };
+    }
+
+    const result = await this.simctl.pushNotification(this.device.deviceId, bundleId, json);
+    if (!result.success) {
+      return {
+        success: false,
+        supported: true,
+        appId: bundleId,
+        error: result.error ?? "simctl push failed.",
+        warning
+      };
+    }
+    return {
+      success: true,
+      supported: true,
+      method: "simctlPush",
+      appId: bundleId,
+      channelId: options.channelId,
+      warning
+    };
+  }
+
+  /** Android: post a local notification through the AutoMobile SDK BroadcastReceiver. */
+  private async executeAndroid(options: PostNotificationOptions, signal?: AbortSignal): Promise<PostNotificationResult> {
+    try {
       const imageType = options.imageType ?? "normal";
 
       let imagePath = options.imagePath;
@@ -104,8 +204,6 @@ export class PostNotification {
         supported: false,
         error: `Failed to post notification: ${error instanceof Error ? error.message : String(error)}`
       };
-    } finally {
-      perf.end();
     }
   }
 
@@ -294,7 +392,7 @@ export class PostNotification {
       return null;
     }
 
-    return path.resolve(imagePath);
+    return resolvePathFromDaemonLaunchWorkingDirectory(imagePath);
   }
 
   private async getActiveAppId(): Promise<string | null> {

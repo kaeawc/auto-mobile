@@ -1,23 +1,36 @@
-import { AdbClient } from "../../utils/android-cmdline-tools/AdbClient";
 import { BaseVisualChange } from "./BaseVisualChange";
-import { BootedDevice, SendTextResult } from "../../models";
+import { BootedDevice, ImeAction, SendTextResult } from "../../models";
 import { logger } from "../../utils/logger";
 import { createGlobalPerformanceTracker } from "../../utils/PerformanceTracker";
 import { AndroidCtrlProxyClient } from "../observe/android";
 import { IOSCtrlProxyClient } from "../observe/ios";
 import { defaultTimer } from "../../utils/SystemTimer";
+import { readAndroidDeviceApiLevel } from "../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
+import type { AdbClientFactory } from "../../utils/android-cmdline-tools/AdbClientFactory";
+import type { AdbExecutor } from "../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+
+export type InputTextMode = "a11y" | "eventLast" | "eventAll";
+
+interface KeyEventPlan {
+  commands: string[];
+}
+
+const ANDROID_KEYCOMBINATION_MIN_API_LEVEL = 31;
 
 export class InputText extends BaseVisualChange {
-  constructor(device: BootedDevice, adb: AdbClient | null = null) {
-    super(device, adb);
+  private androidInputKeyCombinationSupported: boolean | undefined;
+
+  constructor(device: BootedDevice, adbFactoryOrExecutor: AdbClientFactory | AdbExecutor | null = null) {
+    super(device, adbFactoryOrExecutor);
     this.device = device;
   }
 
   async execute(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
-    dismissKeyboard: boolean = false
-  ): Promise<SendTextResult & { method?: "a11y" }> {
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false,
+    mode: InputTextMode = "a11y"
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
     const perf = createGlobalPerformanceTracker();
     perf.serial("inputText");
 
@@ -39,7 +52,7 @@ export class InputText extends BaseVisualChange {
           switch (this.device.platform) {
             case "android":
               return await perf.track("androidTextInput", () =>
-                this.executeAndroidTextInput(text, imeAction, dismissKeyboard)
+                this.executeAndroidTextInput(text, imeAction, dismissKeyboard, mode)
               );
             case "ios":
               // dismissKeyboard is Android-only — it works around an emulator
@@ -59,7 +72,7 @@ export class InputText extends BaseVisualChange {
             success: false,
             text,
             error: `Failed to send text input: ${errorMessage}`,
-            method: "a11y"
+            method: this.device.platform === "android" ? mode : "a11y"
           };
         }
       },
@@ -81,13 +94,22 @@ export class InputText extends BaseVisualChange {
    */
   private async executeAndroidTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous",
-    dismissKeyboard: boolean = false
-  ): Promise<SendTextResult & { method?: "a11y" }> {
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false,
+    mode: InputTextMode = "a11y"
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    if (mode === "eventLast") {
+      return this.executeAndroidEventLastTextInput(text, imeAction, dismissKeyboard);
+    }
+
+    if (mode === "eventAll") {
+      return this.executeAndroidEventAllTextInput(text, imeAction, dismissKeyboard);
+    }
+
     // Use accessibility service exclusively (fastest method, ~10-30ms vs ~200-300ms for ADB)
     // It also natively supports Unicode without needing virtual keyboard
     const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
-    const a11yResult = await a11yClient.requestSetText(text, undefined, undefined, undefined, dismissKeyboard);
+    const a11yResult = await a11yClient.requestSetText(text, { dismissKeyboard });
 
     if (a11yResult.success) {
       logger.info(`[InputText] Text input via accessibility service: ${a11yResult.totalTimeMs}ms`);
@@ -115,6 +137,266 @@ export class InputText extends BaseVisualChange {
     };
   }
 
+  private async executeAndroidEventLastTextInput(
+    text: string,
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const split = this.findLastPrintableAsciiNonWhitespace(text);
+
+    if (!split) {
+      logger.info("[InputText] eventLast requested but no printable non-whitespace ASCII character was found; using a11y");
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      return { ...result, method: "a11y" };
+    }
+
+    const { index, char } = split;
+    const prefix = text.slice(0, index);
+    const suffix = text.slice(index + 1);
+    const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+    if (!keyEventPlan) {
+      logger.info(`[InputText] eventLast could not map ASCII character ${JSON.stringify(char)} to a key event; using a11y`);
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      return { ...result, method: "a11y" };
+    }
+
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+
+    const prefixResult = await a11yClient.requestSetText(prefix);
+    if (!prefixResult.success) {
+      return this.setTextFailure(text, "eventLast prefix", "before real key event", prefixResult.error, "eventLast");
+    }
+
+    await this.executeKeyEventPlan(keyEventPlan);
+
+    if (suffix.length > 0 || dismissKeyboard) {
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard });
+      if (!finalResult.success) {
+        return this.setTextFailure(text, "eventLast final", "after real key event", finalResult.error, "eventLast");
+      }
+    }
+
+    if (imeAction) {
+      await this.executeImeAction(imeAction);
+    }
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "eventLast"
+    };
+  }
+
+  private async executeAndroidEventAllTextInput(
+    text: string,
+    imeAction?: ImeAction,
+    dismissKeyboard: boolean = false
+  ): Promise<SendTextResult & { method?: InputTextMode }> {
+    const chars = Array.from(text);
+    if (!await this.hasAsciiKeyEventPlan(chars)) {
+      const result = await this.executeAndroidTextInput(text, imeAction, dismissKeyboard, "a11y");
+      return { ...result, method: "a11y" };
+    }
+
+    const a11yClient = AndroidCtrlProxyClient.getInstance(this.device, this.adbFactory);
+    const clearResult = await a11yClient.requestSetText("");
+    if (!clearResult.success) {
+      return this.setTextFailure(text, "eventAll initial clear", "before eventAll input", clearResult.error, "eventAll");
+    }
+
+    let targetText = "";
+    for (let index = 0; index < chars.length; index++) {
+      const char = chars[index] ?? "";
+      const keyEventPlan = await this.getAsciiKeyEventPlan(char);
+
+      if (keyEventPlan) {
+        await this.executeKeyEventPlan(keyEventPlan);
+        targetText += char;
+        continue;
+      }
+
+      let unsupportedRun = char;
+      while (index + 1 < chars.length && !(await this.getAsciiKeyEventPlan(chars[index + 1] ?? ""))) {
+        index++;
+        unsupportedRun += chars[index] ?? "";
+      }
+
+      targetText += unsupportedRun;
+      const setTextResult = await a11yClient.requestSetText(targetText);
+      if (!setTextResult.success) {
+        return this.setTextFailure(text, "eventAll unsupported text run", "during eventAll input", setTextResult.error, "eventAll");
+      }
+    }
+
+    if (dismissKeyboard) {
+      const finalResult = await a11yClient.requestSetText(text, { dismissKeyboard: true });
+      if (!finalResult.success) {
+        return this.setTextFailure(text, "eventAll final", "after eventAll input", finalResult.error, "eventAll");
+      }
+    }
+
+    if (imeAction) {
+      await this.executeImeAction(imeAction);
+    }
+
+    return {
+      success: true,
+      text,
+      imeAction,
+      method: "eventAll"
+    };
+  }
+
+  /**
+   * Build a uniform failure result for an accessibility setText call that failed
+   * partway through an event-mode input sequence.
+   * @param text - The full text the caller was attempting to input
+   * @param stage - Short label for which setText call failed (used in the warning log)
+   * @param phase - Where in the sequence it failed, e.g. "before real key event"
+   * @param cause - The underlying setText error
+   * @param method - The input mode that was in effect
+   */
+  private setTextFailure(
+    text: string,
+    stage: string,
+    phase: string,
+    cause: string | undefined,
+    method: InputTextMode
+  ): SendTextResult & { method?: InputTextMode } {
+    logger.warn(`[InputText] ${stage} setText failed: ${cause}`);
+    return {
+      success: false,
+      text,
+      error: `Accessibility service setText failed ${phase}: ${cause}`,
+      method
+    };
+  }
+
+  private findLastPrintableAsciiNonWhitespace(text: string): { index: number; char: string } | null {
+    for (let index = text.length - 1; index >= 0; index--) {
+      const char = text[index];
+      if (!char) {
+        continue;
+      }
+
+      const code = char.charCodeAt(0);
+      if (code >= 0x21 && code <= 0x7e && !/\s/.test(char)) {
+        return { index, char };
+      }
+    }
+
+    return null;
+  }
+
+  private async hasAsciiKeyEventPlan(chars: string[]): Promise<boolean> {
+    for (const char of chars) {
+      if (await this.getAsciiKeyEventPlan(char)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async getAsciiKeyEventPlan(char: string): Promise<KeyEventPlan | null> {
+    if (/^[a-z]$/.test(char)) {
+      return {
+        commands: [`shell input keyevent KEYCODE_${char.toUpperCase()}`]
+      };
+    }
+
+    if (/^[A-Z]$/.test(char)) {
+      return this.createShiftedKeyEventPlan(`KEYCODE_${char}`);
+    }
+
+    if (/^[0-9]$/.test(char)) {
+      return {
+        commands: [`shell input keyevent KEYCODE_${char}`]
+      };
+    }
+
+    const directKeyCodes: Record<string, string> = {
+      " ": "KEYCODE_SPACE",
+      "-": "KEYCODE_MINUS",
+      "=": "KEYCODE_EQUALS",
+      "[": "KEYCODE_LEFT_BRACKET",
+      "]": "KEYCODE_RIGHT_BRACKET",
+      "\\": "KEYCODE_BACKSLASH",
+      ";": "KEYCODE_SEMICOLON",
+      "'": "KEYCODE_APOSTROPHE",
+      ",": "KEYCODE_COMMA",
+      ".": "KEYCODE_PERIOD",
+      "/": "KEYCODE_SLASH",
+      "`": "KEYCODE_GRAVE",
+      "@": "KEYCODE_AT"
+    };
+
+    const shiftedKeyCodes: Record<string, string> = {
+      "!": "KEYCODE_1",
+      "#": "KEYCODE_3",
+      "$": "KEYCODE_4",
+      "%": "KEYCODE_5",
+      "^": "KEYCODE_6",
+      "&": "KEYCODE_7",
+      "*": "KEYCODE_8",
+      "(": "KEYCODE_9",
+      ")": "KEYCODE_0",
+      "_": "KEYCODE_MINUS",
+      "+": "KEYCODE_EQUALS",
+      "{": "KEYCODE_LEFT_BRACKET",
+      "}": "KEYCODE_RIGHT_BRACKET",
+      "|": "KEYCODE_BACKSLASH",
+      ":": "KEYCODE_SEMICOLON",
+      "\"": "KEYCODE_APOSTROPHE",
+      "<": "KEYCODE_COMMA",
+      ">": "KEYCODE_PERIOD",
+      "?": "KEYCODE_SLASH",
+      "~": "KEYCODE_GRAVE"
+    };
+
+    const direct = directKeyCodes[char];
+    if (direct) {
+      return {
+        commands: [`shell input keyevent ${direct}`]
+      };
+    }
+
+    const shifted = shiftedKeyCodes[char];
+    if (shifted) {
+      return this.createShiftedKeyEventPlan(shifted);
+    }
+
+    return null;
+  }
+
+  private async createShiftedKeyEventPlan(baseKeyCode: string): Promise<KeyEventPlan | null> {
+    if (await this.supportsAndroidInputKeyCombination()) {
+      return {
+        commands: [`shell input keycombination KEYCODE_SHIFT_LEFT ${baseKeyCode}`]
+      };
+    }
+
+    return null;
+  }
+
+  private async supportsAndroidInputKeyCombination(): Promise<boolean> {
+    if (this.androidInputKeyCombinationSupported !== undefined) {
+      return this.androidInputKeyCombinationSupported;
+    }
+
+    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
+    this.androidInputKeyCombinationSupported =
+      apiLevel !== null && apiLevel >= ANDROID_KEYCOMBINATION_MIN_API_LEVEL;
+    return this.androidInputKeyCombinationSupported;
+  }
+
+  private async executeKeyEventPlan(plan: KeyEventPlan): Promise<void> {
+    for (const command of plan.commands) {
+      await this.adb.executeCommand(command);
+    }
+  }
+
   /**
    * Execute iOS-specific text input
    * @param text - Text to input
@@ -123,7 +405,7 @@ export class InputText extends BaseVisualChange {
    */
   private async executeiOSTextInput(
     text: string,
-    imeAction?: "done" | "next" | "search" | "send" | "go" | "previous"
+    imeAction?: ImeAction
   ): Promise<SendTextResult & { method?: "a11y" }> {
     const startMs = Date.now();
     logger.debug(`[InputText] iOS begin textLength=${text.length} imeAction=${imeAction ?? "none"}`);

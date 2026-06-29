@@ -298,6 +298,7 @@ SQLite database inspection using the `sqlite3` C API directly:
 - Table listing, paginated data retrieval, schema inspection via `PRAGMA table_info`
 - Raw SQL execution with read/write detection (SELECT/EXPLAIN/PRAGMA = read-only, opens with `SQLITE_OPEN_READONLY`)
 - Connection caching, 5-second busy timeout, identifier sanitization
+- MCP `sqlQuery` and database resources are available on iOS through the DEBUG-only in-app SDK HTTP server on port 8766, relayed by CtrlProxy on port 8765. Apps must call `DatabaseInspector.shared.setEnabled(true)`.
 
 ## Other Subsystems
 
@@ -391,7 +392,7 @@ The SDK uses protocol + fake pattern throughout for testability:
 | Notifications | `AutoMobileNotifications` | `AutoMobileNotifications` | Platform notification APIs |
 | OS events | `AutoMobileOsEvents` | `AutoMobileOsEvents` | Lifecycle, battery, connectivity |
 | Broadcast / System events | `AutoMobileBroadcastInterceptor` | `AutoMobileNotificationObserver` | BroadcastReceiver vs NotificationCenter |
-| Network mock rules | `NetworkMockRuleStore` | -- | Android only |
+| Network mock rules | `NetworkMockRuleStore` | `NetworkMockRuleStore` | iOS requires sessions to register `AutoMobileNetwork.shared.protocolClass()` |
 
 ## See also
 

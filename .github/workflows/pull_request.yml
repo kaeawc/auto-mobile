@@ -29,6 +29,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.filter.outputs.docs_only }}
       sha256_only: ${{ steps.check-sha256.outputs.sha256_only }}
+      auto_chore: ${{ steps.check-auto-chore.outputs.auto_chore }}
       desktop_core_changed: ${{ steps.filter-desktop-core.outputs.desktop_core }}
       ide_plugin_changed: ${{ steps.filter-ide-plugin.outputs.ide_plugin }}
       desktop_app_changed: ${{ steps.filter-desktop-app.outputs.desktop_app }}
@@ -124,6 +125,61 @@ jobs:
             core.setOutput('sha256_only', sha256Only.toString());
             return sha256Only;
 
+      - name: "Check for auto chore changes"
+        id: check-auto-chore
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const prNumber = context.issue.number;
+
+            const { data: pr } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const files = await github.paginate(github.rest.pulls.listFiles, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: prNumber,
+            });
+
+            const labels = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const docPatterns = [
+              /\.md$/,
+              /^docs\//,
+              /^docs\/.*\.(gif|png|webp)$/i,
+              /^mkdocs\.yml$/,
+              /^\.lychee\.toml$/
+            ];
+            const isDocFile = (filename) => docPatterns.some(pattern => pattern.test(filename));
+
+            const labelNames = labels.map(label => label.name);
+            const sameRepo = pr.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            const automated = labelNames.includes('automated');
+            const documentation = labelNames.includes('documentation');
+            const titleMatches = pr.title.startsWith('chore:');
+            const branchMatches = pr.head.ref.startsWith('auto-update/');
+            const allFilesAreDocs = files.length > 0 && files.every(file => isDocFile(file.filename));
+            const autoChore = sameRepo && automated && documentation && titleMatches && branchMatches && allFilesAreDocs;
+
+            console.log('PR Title:', pr.title);
+            console.log('Head branch:', pr.head.ref);
+            console.log('Same repository:', sameRepo);
+            console.log('Automated label:', automated);
+            console.log('Documentation label:', documentation);
+            console.log('Files changed:', files.map(f => f.filename).join(', '));
+            console.log('All files are docs:', allFilesAreDocs);
+            console.log('Result - auto chore:', autoChore);
+
+            core.setOutput('auto_chore', autoChore.toString());
+            return autoChore;
+
       - name: "Check for Desktop Core module changes"
         id: filter-desktop-core
         uses: dorny/paths-filter@v3
@@ -196,7 +252,7 @@ jobs:
       - name: "Decide if Android jobs should run"
         id: android_should_run
         run: |
-          if [[ "${{ steps.filter-android.outputs.android }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" ]]; then
+          if [[ "${{ steps.filter-android.outputs.android }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -205,7 +261,7 @@ jobs:
       - name: "Decide if iOS jobs should run"
         id: ios_should_run
         run: |
-          if [[ "${{ steps.filter-ios.outputs.ios }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" ]]; then
+          if [[ "${{ steps.filter-ios.outputs.ios }}" == "true" && "${{ steps.filter.outputs.docs_only }}" != "true" && "${{ steps.check-sha256.outputs.sha256_only }}" != "true" && "${{ steps.check-auto-chore.outputs.auto_chore }}" != "true" ]]; then
             echo "should_run=true" >> "$GITHUB_OUTPUT"
           else
             echo "should_run=false" >> "$GITHUB_OUTPUT"
@@ -392,9 +448,11 @@ jobs:
           name: desktop-app-test-results
           path: android/desktop-app/build/reports/tests/test/
 
-  validate-yaml:
-    name: "Validate YAML Test Plans"
+  fast-validation:
+    name: "Fast Validation"
     runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -403,68 +461,55 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Validate YAML Test Plans"
-        run: bun run validate:yaml
-
-  validate-xml:
-    name: "Validate XML"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Run XMLStarlet"
-        shell: "bash"
+      - name: "Install fast validation dependencies"
+        shell: bash
         run: |
           sudo apt-get update
-          sudo apt-get install xmlstarlet
-          scripts/xml/validate_xml.sh
+          sudo apt-get install -y xmlstarlet
+          if ! command -v bats &>/dev/null; then
+            git clone --depth 1 https://github.com/bats-core/bats-core.git /tmp/bats-core
+            sudo /tmp/bats-core/install.sh /usr/local
+          fi
+          scripts/lychee/install_lychee.sh
 
-  ktfmt:
-    name: "ktfmt"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Run ktfmt"
-        shell: "bash"
+      - name: "Run fast validation checks"
+        shell: bash
+        env:
+          INSTALL_KTFMT_WHEN_MISSING: "true"
+          KTFMT_ONLY_TOUCHED_FILES: "false"
         run: |
-          INSTALL_KTFMT_WHEN_MISSING=true ONLY_TOUCHED_FILES=false scripts/ktfmt/validate_ktfmt.sh
+          scripts/all_fast_validate_checks.sh \
+            --only yaml,xml,shellcheck,mkdocs-nav,ktfmt,claude-plugin,lychee \
+            --max-parallel 4
 
-  validate-shell-scripts:
-    name: "Validate Shell Scripts"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
+      - name: "Run BATS Tests (Ubuntu)"
+        shell: bash
+        run: bats test/bats/
+
+      - name: "Run hadolint"
+        uses: hadolint/hadolint-action@v3.1.0
         with:
-          lfs: false
+          dockerfile: Dockerfile
+          config: .hadolint.yaml
+          failure-threshold: error
 
-      - name: "Run ShellCheck"
-        shell: "bash"
-        run: |
-          scripts/shellcheck/validate_shell_scripts.sh
+      - name: "Upload Fast Validation Logs"
+        if: failure()
+        uses: actions/upload-artifact@v6
+        with:
+          name: fast-validation-logs
+          path: scratch/fast-validate-*/
+          retention-days: 7
 
   bats-tests:
     name: "BATS Shell Tests (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
+    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [macos-latest]
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -488,85 +533,29 @@ jobs:
       - name: "Run BATS Tests"
         run: bats test/bats/
 
-  validate-mkdocs-nav:
-    name: "Validate MkDocs Navigation"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Validate MkDocs Navigation"
-        shell: "bash"
-        run: |
-          scripts/validate_mkdocs_nav.sh
-
-  validate-claude-plugin:
-    name: "Validate Claude Plugin"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Validate Claude Plugin"
-        shell: "bash"
-        run: |
-          scripts/claude/validate_plugin.sh
-
-  validate-documentation-links:
-    name: "Validate Documentation Links"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Create contributing file"
-        shell: "bash"
-        run: |
-          touch docs/contributing.md
-
-      - name: "Install Lychee"
-        shell: "bash"
-        run: |
-          scripts/lychee/install_lychee.sh
-
-      - name: "Validate Links"
-        shell: "bash"
-        run: |
-          scripts/lychee/validate_lychee.sh
-
   installer-minimal:
     name: "Installer Minimal (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
+    env:
+      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: "Skip for docs-only changes"
-        if: needs.detect-changes.outputs.docs_only == 'true'
-        run: echo "Skipping - documentation only changes"
+      - name: "Skip installer validation"
+        if: env.RUN_INSTALLER != 'true'
+        run: echo "Skipping installer validation for documentation-only changes"
 
       - name: "Git Checkout"
-        if: needs.detect-changes.outputs.docs_only != 'true'
+        if: env.RUN_INSTALLER == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Run Installer (minimal)"
-        if: needs.detect-changes.outputs.docs_only != 'true'
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -576,7 +565,7 @@ jobs:
           echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Run Uninstaller"
-        if: needs.detect-changes.outputs.docs_only != 'true'
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -585,7 +574,7 @@ jobs:
           echo "UNINSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Upload Logs"
-        if: needs.detect-changes.outputs.docs_only != 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure())
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0' || failure())
         uses: actions/upload-artifact@v6
         with:
           name: installer-minimal-${{ matrix.os }}-logs
@@ -593,7 +582,7 @@ jobs:
           retention-days: 7
 
       - name: "Fail on error"
-        if: needs.detect-changes.outputs.docs_only != 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0')
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || env.UNINSTALL_EXIT_CODE != '0')
         shell: bash
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
@@ -604,23 +593,25 @@ jobs:
     name: "Installer Development (${{ matrix.os }})"
     runs-on: ${{ matrix.os }}
     needs: detect-changes
+    env:
+      RUN_INSTALLER: ${{ needs.detect-changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, macos-latest]
     steps:
-      - name: "Skip for docs-only changes"
-        if: needs.detect-changes.outputs.docs_only == 'true'
-        run: echo "Skipping - documentation only changes"
+      - name: "Skip installer validation"
+        if: env.RUN_INSTALLER != 'true'
+        run: echo "Skipping installer validation for documentation-only changes"
 
       - name: "Git Checkout"
-        if: needs.detect-changes.outputs.docs_only != 'true'
+        if: env.RUN_INSTALLER == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Run Installer (development)"
-        if: needs.detect-changes.outputs.docs_only != 'true'
+        if: env.RUN_INSTALLER == 'true'
         shell: bash
         continue-on-error: true
         run: |
@@ -630,11 +621,11 @@ jobs:
           echo "INSTALL_EXIT_CODE=${PIPESTATUS[0]}" >> "$GITHUB_ENV"
 
       - name: "Verify runtime dependencies"
-        if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         run: ./scripts/ci/verify-runtime-deps.sh
 
       - name: "Build from source"
-        if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         shell: bash
         run: |
           export PATH="${HOME}/.bun/bin:${PATH}"
@@ -642,11 +633,11 @@ jobs:
           bunx turbo run build --output-logs=errors-only
 
       - name: "Daemon lifecycle (start → health → doctor → stop)"
-        if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE == '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE == '0'
         run: ./scripts/ci/daemon-lifecycle.sh
 
       - name: "Upload Logs"
-        if: needs.detect-changes.outputs.docs_only != 'true' && (env.INSTALL_EXIT_CODE != '0' || failure())
+        if: env.RUN_INSTALLER == 'true' && (env.INSTALL_EXIT_CODE != '0' || failure())
         uses: actions/upload-artifact@v6
         with:
           name: installer-development-${{ matrix.os }}-logs
@@ -654,7 +645,7 @@ jobs:
           retention-days: 7
 
       - name: "Fail on error"
-        if: needs.detect-changes.outputs.docs_only != 'true' && env.INSTALL_EXIT_CODE != '0'
+        if: env.RUN_INSTALLER == 'true' && env.INSTALL_EXIT_CODE != '0'
         shell: bash
         run: |
           echo "Installer exit code: ${INSTALL_EXIT_CODE:-0}"
@@ -709,7 +700,7 @@ jobs:
     name: "Bun Security Audit"
     runs-on: ubuntu-latest
     needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
+    if: needs.detect-changes.outputs.sha256_only != 'true' && needs.detect-changes.outputs.auto_chore != 'true'
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -739,26 +730,27 @@ jobs:
     runs-on: ${{ matrix.os }}
     needs: detect-changes
     timeout-minutes: 10
+    env:
+      RUN_MCP_BUILD_TEST: ${{ needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
         os:
-          - ubuntu-latest
           - macos-latest
           - windows-latest
     steps:
-      - name: "Skip for docs-only or SHA256-only changes"
-        if: needs.detect-changes.outputs.docs_only == 'true' || needs.detect-changes.outputs.sha256_only == 'true'
-        run: echo "Skipping - documentation or SHA256 only changes"
+      - name: "Skip Node TypeScript build and test"
+        if: env.RUN_MCP_BUILD_TEST != 'true'
+        run: echo "Skipping Node TypeScript build and test for documentation-only or SHA256-only changes"
 
       - name: "Git Checkout"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/checkout@v6
         with:
           lfs: false
 
       - name: "Cache Bun dependencies"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
         with:
           path: |
@@ -769,7 +761,7 @@ jobs:
             bun-${{ matrix.os }}-
 
       - name: "Cache Turborepo"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: actions/cache@v5
         with:
           path: .turbo
@@ -779,11 +771,11 @@ jobs:
             turbo-${{ matrix.os }}-
 
       - name: "Setup Auto Mobile"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         uses: ./.github/actions/setup-auto-mobile-npm-package
 
       - name: "Run Lint"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         env:
           TURBO_TELEMETRY_DISABLED: "1"
           TURBO_NO_UPDATE_NOTIFIER: "1"
@@ -792,7 +784,7 @@ jobs:
         run: turbo run lint --output-logs=errors-only --log-order=grouped
 
       - name: "Run Build"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         env:
           TURBO_TELEMETRY_DISABLED: "1"
@@ -805,7 +797,7 @@ jobs:
           turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-${{ matrix.os }}.log"
 
       - name: "Run Tests"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+        if: env.RUN_MCP_BUILD_TEST == 'true'
         shell: bash
         env:
           # Enable debug logging on Windows to trace what's starting the adb daemon
@@ -822,7 +814,7 @@ jobs:
           turbo run test --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-test-${{ matrix.os }}.log"
 
       - name: "Upload Build/Test Logs"
-        if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
+        if: env.RUN_MCP_BUILD_TEST == 'true' && (failure() || cancelled() || matrix.os == 'windows-latest')
         uses: actions/upload-artifact@v6
         with:
           name: mcp-build-test-logs-${{ matrix.os }}
@@ -874,23 +866,78 @@ jobs:
   # =============================================================================
 
   ts-code-coverage:
-    name: "TypeScript Code Coverage"
+    name: "Node TypeScript Build and Test (ubuntu-latest)"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
+    timeout-minutes: 10
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
         with:
           lfs: false
 
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
+      - name: "Cache Bun dependencies"
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-ubuntu-latest-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-ubuntu-latest-
+
+      - name: "Cache Turborepo"
+        uses: actions/cache@v5
+        with:
+          path: .turbo
+          key: turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-${{ github.sha }}
+          restore-keys: |
+            turbo-ubuntu-latest-${{ hashFiles('bun.lock') }}-
+            turbo-ubuntu-latest-
+
+      - name: "Setup Auto Mobile"
+        uses: ./.github/actions/setup-auto-mobile-npm-package
+
+      - name: "Run Lint"
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          TURBO_NO_UPDATE_NOTIFIER: "1"
+          DO_NOT_TRACK: "1"
+          NO_COLOR: "1"
+        run: turbo run lint --output-logs=errors-only --log-order=grouped
+
+      - name: "Run Build"
+        shell: bash
+        env:
+          TURBO_TELEMETRY_DISABLED: "1"
+          TURBO_NO_UPDATE_NOTIFIER: "1"
+          DO_NOT_TRACK: "1"
+          NO_COLOR: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p ci-logs
+          turbo run build --output-logs=errors-only --log-order=grouped 2>&1 | tee "ci-logs/bun-build-ubuntu-latest.log"
+
+      - name: "Run Bun MCP startup smoke"
+        run: bun run test:startup:bun
+
+      - name: "Run Bun sharp runtime smoke"
+        run: bun run test:sharp:bun
 
       - name: "Run Tests with Coverage"
         run: bash scripts/ci/run-ts-coverage.sh
 
       - name: "Verify Coverage Output"
         run: bash scripts/ci/verify-ts-coverage-output.sh
+
+      - name: "Upload Build/Test Logs"
+        if: failure() || cancelled()
+        uses: actions/upload-artifact@v6
+        with:
+          name: mcp-build-test-logs-ubuntu-latest
+          path: ci-logs/*.log
+          retention-days: 7
 
       - name: "Upload Coverage"
         uses: actions/upload-artifact@v6
@@ -905,7 +952,7 @@ jobs:
   # =============================================================================
 
   kotlin-code-coverage:
-    name: "Kotlin Code Coverage"
+    name: "Run CtrlProxy Unit Tests"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.android_should_run == 'true'
@@ -967,8 +1014,8 @@ jobs:
   # iOS Build and Test Jobs (Skip for docs-only changes)
   # =============================================================================
 
-  ios-swift-build:
-    name: "Build Swift Packages (${{ matrix.config.name }})"
+  ios-swift-packages:
+    name: "Swift Packages (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
@@ -1021,17 +1068,19 @@ jobs:
           IOS_SIGNING_STRICT: ${{ env.IOS_SIGNING_ENABLED }}
         run: ./scripts/ios/swift-build.sh
 
-  ios-swift-test:
-    name: "Test Swift Packages (${{ matrix.config.name }})"
+      - name: "Test Swift Packages"
+        run: ./scripts/ios/swift-test.sh
+
+  ios-xcode-build:
+    name: "Build Xcode Projects (${{ matrix.config.name }})"
     runs-on: ${{ matrix.config.runner }}
-    needs: [detect-changes, ios-swift-build]
+    needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
         config:
           - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26", runner: "macos-26", xcode: "26.0" }
           - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
     steps:
       - name: "Git Checkout"
@@ -1043,20 +1092,6 @@ jobs:
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: ${{ matrix.config.xcode }}
-
-      - name: "Test Swift Packages"
-        run: ./scripts/ios/swift-test.sh
-
-  ios-xcodegen:
-    name: "Generate Xcode Projects"
-    runs-on: macos-26
-    needs: detect-changes
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
 
       - name: "Install XcodeGen"
         run: brew install xcodegen
@@ -1064,39 +1099,18 @@ jobs:
       - name: "Generate Xcode Projects"
         run: ./scripts/ios/xcodegen-generate.sh
 
-  ios-xcode-build:
-    name: "Build Xcode Projects (${{ matrix.config.name }})"
-    runs-on: ${{ matrix.config.runner }}
-    needs: [detect-changes, ios-xcodegen]
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        config:
-          - { name: "Xcode 15", runner: "macos-14", xcode: "15.4" }
-          - { name: "Xcode 26.3", runner: "macos-26", xcode: "26.3" }
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.config.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.config.xcode }}
-
       - name: "Ensure iOS Simulator runtime"
         uses: ./.github/actions/ensure-ios-simulator-runtime
 
       - name: "Build Xcode Projects"
         run: ./scripts/ios/xcode-build.sh
 
-  ios-ctrl-proxy-build:
-    name: "Build CtrlProxy iOS for Testing"
+  ios-xctest-runner-simulator-tests:
+    name: "XCTestRunner Simulator Tests"
     runs-on: macos-26
     needs: detect-changes
     if: needs.detect-changes.outputs.ios_should_run == 'true'
+    timeout-minutes: 45
     steps:
       - name: "Git Checkout"
         uses: actions/checkout@v6
@@ -1117,52 +1131,12 @@ jobs:
       - name: "Build CtrlProxy iOS for Testing"
         run: ./scripts/ios/ctrl-proxy-build-for-testing.sh
 
-      - name: "Upload CtrlProxy iOS Artifacts"
-        uses: actions/upload-artifact@v6
-        with:
-          name: ctrl-proxy-simulator-xcode26
-          path: /tmp/automobile-ctrl-proxy/Build/Products
-          retention-days: 1
-
-  ios-xctest-runner-simulator-tests:
-    name: "XCTestRunner Simulator Tests (Xcode ${{ matrix.xcode }})"
-    runs-on: macos-26
-    needs: [detect-changes, ios-ctrl-proxy-build]
-    if: needs.detect-changes.outputs.ios_should_run == 'true'
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        xcode: ["26.2", "26.3"]
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Select Xcode ${{ matrix.xcode }}"
-        uses: maxim-lobanov/setup-xcode@v1
-        with:
-          xcode-version: ${{ matrix.xcode }}
-
-      - name: "Download CtrlProxy iOS Artifacts"
-        uses: actions/download-artifact@v7
-        with:
-          name: ctrl-proxy-simulator-xcode26
-          path: /tmp/automobile-ctrl-proxy/Build/Products
-
       - name: "Setup Bun"
         uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.9
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Ensure iOS Simulator runtime"
-        uses: ./.github/actions/ensure-ios-simulator-runtime
-
-      - name: "Boot iOS Simulator"
-        run: ./scripts/ios/boot-simulator.sh
 
       - name: "Verify CtrlProxy iOS Artifacts"
         run: |
@@ -1172,7 +1146,41 @@ jobs:
           XCTESTRUN=$(find /tmp/automobile-ctrl-proxy/Build/Products -name "*.xctestrun" | head -1)
           echo "xctestrun file: ${XCTESTRUN}"
 
-      - name: "Run Reminders integration tests"
+      - name: "Select Xcode 26.2"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.2"
+
+      - name: "Ensure iOS Simulator runtime (Xcode 26.2)"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Boot iOS Simulator (Xcode 26.2)"
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run Reminders integration tests (Xcode 26.2)"
+        timeout-minutes: 10
+        env:
+          AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
+        run: |
+          cd ios/XCTestRunner
+          swift test --filter RemindersLaunchPlanTests 2>&1
+
+      - name: "Shutdown iOS Simulators"
+        if: always()
+        run: xcrun simctl shutdown all || true
+
+      - name: "Select Xcode 26.3"
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: "26.3"
+
+      - name: "Ensure iOS Simulator runtime (Xcode 26.3)"
+        uses: ./.github/actions/ensure-ios-simulator-runtime
+
+      - name: "Boot iOS Simulator (Xcode 26.3)"
+        run: ./scripts/ios/boot-simulator.sh
+
+      - name: "Run Reminders integration tests (Xcode 26.3)"
         timeout-minutes: 10
         env:
           AUTOMOBILE_TEST_PLAN: "Plans/launch-reminders-app.yaml"
@@ -1416,32 +1424,6 @@ jobs:
           check_name: "Playground Automobile Emulator Test Report"
           report_paths: '**/build/test-results/**/*.xml'
 
-  android-control-proxy-unit-tests:
-    name: "Run CtrlProxy Unit Tests"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.android_should_run == 'true'
-    defaults:
-      run:
-        working-directory: android
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/gradle-task-run
-        with:
-          gradle-tasks: ":control-proxy:testDebugUnitTest"
-          gradle-project-directory: "android"
-          gradle-home-directory: "~/.gradle/${{ github.job }}"
-          reuse-configuration-cache: true
-          gradle-encryption-key: ${{ secrets.GRADLE_ENCRYPTION_KEY }}
-          release-keystore-base64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
-          release-keystore-password: ${{ secrets.RELEASE_KEYSTORE_PASSWORD }}
-          release-key-alias: ${{ secrets.RELEASE_KEY_ALIAS }}
-          release-key-password: ${{ secrets.RELEASE_KEY_PASSWORD }}
-
   build-junit-runner-library:
     name: "Build JUnitRunner Library"
     runs-on: ubuntu-latest
@@ -1544,33 +1526,11 @@ jobs:
           path: android/playground/app/build/outputs/apk/debug/playground-app-debug.apk
 
   # =============================================================================
-  # Docker Build and Validation
+  # MCP Benchmarks
   # =============================================================================
 
-  hadolint:
-    name: "Lint Dockerfile"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - name: "Run hadolint"
-        uses: hadolint/hadolint-action@v3.1.0
-        with:
-          dockerfile: Dockerfile
-          config: .hadolint.yaml
-          failure-threshold: error
-
-  # =============================================================================
-  # MCP Context Thresholds
-  # =============================================================================
-
-  benchmark-context-thresholds:
-    name: "Benchmark MCP Context Thresholds"
+  benchmarks:
+    name: "MCP Benchmarks"
     runs-on: ubuntu-latest
     needs: detect-changes
     if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
@@ -1582,19 +1542,28 @@ jobs:
 
       - uses: ./.github/actions/setup-auto-mobile-npm-package
 
-      - name: "Run Context Threshold Benchmark"
-        id: benchmark
+      - name: "Run MCP Benchmarks"
+        shell: bash
         run: |
-          # Create reports directory
           mkdir -p reports
 
-          # Run benchmark and capture exit code
-          bun run benchmark-context --output reports/context-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
+          if ! bun run benchmark-context --output reports/context-benchmark.json; then
+            echo "CONTEXT_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
 
-          # Always preserve the report file even if benchmark failed
-          exit 0
+          if ! bun run benchmark-tools --output reports/tool-benchmark.json; then
+            echo "TOOL_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
 
-      - name: "Upload Benchmark Report"
+          if ! timeout 60s bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json; then
+            echo "STARTUP_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+          if ! bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json; then
+            echo "NPM_UNPACKED_SIZE_BENCHMARK_FAILED=true" >> "$GITHUB_ENV"
+          fi
+
+      - name: "Upload Context Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1602,46 +1571,7 @@ jobs:
           path: reports/context-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
-            cat reports/context-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
-
-  # =============================================================================
-  # MCP Tool Call Throughput
-  # =============================================================================
-
-  benchmark-tool-throughput:
-    name: "Benchmark MCP Tool Throughput"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run Tool Throughput Benchmark"
-        id: benchmark
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-tools --output reports/tool-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload Tool Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1649,47 +1579,7 @@ jobs:
           path: reports/tool-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
-            cat reports/tool-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP tool throughput benchmark passed - no regressions"
-
-  # =============================================================================
-  # MCP Startup Benchmark
-  # =============================================================================
-
-  benchmark-startup:
-    name: "Benchmark MCP Startup"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run Startup Benchmark"
-        id: benchmark
-        timeout-minutes: 1
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-startup --compare benchmark/startup-baseline.json --output reports/startup-benchmark.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload Startup Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
@@ -1697,100 +1587,13 @@ jobs:
           path: reports/startup-benchmark.json
           retention-days: 90
 
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::MCP startup benchmark failed - regressions detected"
-            cat reports/startup-benchmark.json
-            exit 1
-          fi
-          echo "::notice::MCP startup benchmark passed - no regressions"
-
-  # =============================================================================
-  # NPM Unpacked Size Benchmark
-  # =============================================================================
-
-  benchmark-npm-unpacked-size:
-    name: "Benchmark NPM Unpacked Size"
-    runs-on: ubuntu-latest
-    needs: detect-changes
-    if: needs.detect-changes.outputs.docs_only != 'true' && needs.detect-changes.outputs.sha256_only != 'true'
-    steps:
-      - name: "Git Checkout"
-        uses: actions/checkout@v6
-        with:
-          lfs: false
-
-      - uses: ./.github/actions/setup-auto-mobile-npm-package
-
-      - name: "Run NPM Unpacked Size Benchmark"
-        id: benchmark
-        run: |
-          # Create reports directory
-          mkdir -p reports
-
-          # Run benchmark and capture exit code
-          bun run benchmark-npm-unpacked-size --output reports/npm-unpacked-size.json || echo "FAILED=true" >> $GITHUB_ENV
-
-          # Always preserve the report file even if benchmark failed
-          exit 0
-
-      - name: "Upload Benchmark Report"
+      - name: "Upload NPM Unpacked Size Benchmark Report"
         uses: actions/upload-artifact@v6
         if: always()
         with:
           name: npm-unpacked-size-report
           path: reports/npm-unpacked-size.json
           retention-days: 90
-
-      - name: "Check Benchmark Result"
-        if: always()
-        run: |
-          if [ "$FAILED" = "true" ]; then
-            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
-            cat reports/npm-unpacked-size.json
-            exit 1
-          fi
-          echo "::notice::NPM unpacked size benchmark passed - within threshold"
-
-  # =============================================================================
-  # Consolidated MCP Benchmark Comment
-  # =============================================================================
-
-  post-benchmark-results:
-    name: "Post Consolidated Benchmark Results"
-    runs-on: ubuntu-latest
-    needs: [benchmark-context-thresholds, benchmark-tool-throughput, benchmark-startup, benchmark-npm-unpacked-size]
-    if: always()
-    steps:
-      - name: "Download Context Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: context-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download Tool Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: tool-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download Startup Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: startup-benchmark-report
-          path: reports
-        continue-on-error: true
-
-      - name: "Download NPM Unpacked Size Benchmark Report"
-        uses: actions/download-artifact@v7
-        with:
-          name: npm-unpacked-size-report
-          path: reports
-        continue-on-error: true
 
       - name: "Post Consolidated Comment"
         if: github.event.pull_request.head.repo.full_name == github.repository
@@ -2120,6 +1923,49 @@ jobs:
               });
             }
 
+      - name: "Check Benchmark Results"
+        if: always()
+        shell: bash
+        run: |
+          failed=false
+
+          if [ "${CONTEXT_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP context threshold benchmark failed - one or more thresholds were exceeded"
+            cat reports/context-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP context threshold benchmark passed - all thresholds satisfied"
+          fi
+
+          if [ "${TOOL_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP tool throughput benchmark failed - performance regressions detected"
+            cat reports/tool-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP tool throughput benchmark passed - no regressions"
+          fi
+
+          if [ "${STARTUP_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::MCP startup benchmark failed - regressions detected"
+            cat reports/startup-benchmark.json || true
+            failed=true
+          else
+            echo "::notice::MCP startup benchmark passed - no regressions"
+          fi
+
+          if [ "${NPM_UNPACKED_SIZE_BENCHMARK_FAILED:-false}" = "true" ]; then
+            echo "::error::NPM unpacked size benchmark failed - threshold exceeded"
+            cat reports/npm-unpacked-size.json || true
+            failed=true
+          else
+            echo "::notice::NPM unpacked size benchmark passed - within threshold"
+          fi
+
+          if [ "$failed" = "true" ]; then
+            exit 1
+          fi
+
+
   # =============================================================================
   # Gate Jobs for Branch Protection
   # =============================================================================
@@ -2130,13 +1976,11 @@ jobs:
 
   ios-gate:
     name: "iOS"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
-      - ios-swift-build
-      - ios-swift-test
-      - ios-xcodegen
+      - detect-changes
+      - ios-swift-packages
       - ios-xcode-build
-      - ios-ctrl-proxy-build
       - ios-xctest-runner-simulator-tests
       - ios-spm-root-package-build
     runs-on: ubuntu-latest
@@ -2144,11 +1988,9 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
-            "${{ needs.ios-swift-build.result }}" \
-            "${{ needs.ios-swift-test.result }}" \
-            "${{ needs.ios-xcodegen.result }}" \
+            "${{ needs.detect-changes.result }}" \
+            "${{ needs.ios-swift-packages.result }}" \
             "${{ needs.ios-xcode-build.result }}" \
-            "${{ needs.ios-ctrl-proxy-build.result }}" \
             "${{ needs.ios-xctest-runner-simulator-tests.result }}" \
             "${{ needs.ios-spm-root-package-build.result }}" \
           )
@@ -2161,8 +2003,9 @@ jobs:
 
   android-gate:
     name: "Android"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
+      - detect-changes
       - build-android-control-proxy
       - build-junit-runner-library
       - build-playground-app
@@ -2170,12 +2013,13 @@ jobs:
       - junit-runner-emulator-tests
       - junit-runner-emulator-wtf-tests
       - playground-automobile-emulator-tests
-      - android-control-proxy-unit-tests
+      - kotlin-code-coverage
     runs-on: ubuntu-latest
     steps:
       - name: "Check results"
         run: |
           results=( \
+            "${{ needs.detect-changes.result }}" \
             "${{ needs.build-android-control-proxy.result }}" \
             "${{ needs.build-junit-runner-library.result }}" \
             "${{ needs.build-playground-app.result }}" \
@@ -2183,7 +2027,7 @@ jobs:
             "${{ needs.junit-runner-emulator-tests.result }}" \
             "${{ needs.junit-runner-emulator-wtf-tests.result }}" \
             "${{ needs.playground-automobile-emulator-tests.result }}" \
-            "${{ needs.android-control-proxy-unit-tests.result }}" \
+            "${{ needs.kotlin-code-coverage.result }}" \
           )
           for r in "${results[@]}"; do
             if [[ "$r" == "failure" || "$r" == "cancelled" ]]; then
@@ -2194,8 +2038,9 @@ jobs:
 
   ide-plugin-gate:
     name: "IDE Plugin"
-    if: always()
+    if: always() && needs.detect-changes.outputs.auto_chore != 'true'
     needs:
+      - detect-changes
       - build-ide-plugin
       - ide-plugin-unit-tests
     runs-on: ubuntu-latest
@@ -2203,6 +2048,7 @@ jobs:
       - name: "Check results"
         run: |
           results=( \
+            "${{ needs.detect-changes.result }}" \
             "${{ needs.build-ide-plugin.result }}" \
             "${{ needs.ide-plugin-unit-tests.result }}" \
           )

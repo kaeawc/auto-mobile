@@ -39,6 +39,7 @@ export class CtrlProxyVoiceOver {
       perf,
       cancelScreenshotBackoff: false,
       notConnectedError: () => ({ success: false, enabled: false, error: "Not connected to CtrlProxy" }),
+      unsupportedCommandError: (_messageType, error) => ({ success: false, enabled: false, totalTimeMs: 0, error }),
       timeoutError: () => ({ success: false, enabled: false, error: "Timeout waiting for voiceover_state_result" }),
     });
   }

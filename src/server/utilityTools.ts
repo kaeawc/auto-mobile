@@ -24,7 +24,7 @@ const changeLocalizationBaseSchema = z.object({
   textDirection: z.enum(["ltr", "rtl"]).optional().describe("Text direction"),
   timeFormat: z.enum(["12", "24"]).optional().describe("Time format"),
   calendarSystem: z.string().min(1).optional().describe("Calendar system (e.g., gregory, japanese, buddhist, islamic-civil)"),
-  restartApp: z.string().min(1).optional().describe("Bundle ID of app to terminate and relaunch after locale change (iOS only). Running apps cache locale at launch, so restart is needed for the app to pick up new settings.")
+  restartApp: z.string().min(1).optional().describe("iOS bundle ID to relaunch after locale change")
 });
 
 export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocalizationBaseSchema).refine(values =>
@@ -33,8 +33,8 @@ export const changeLocalizationSchema = addDeviceTargetingToSchema(changeLocaliz
 });
 
 const doNotDisturbStateInputSchema = z.object({
-  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb. If true without mode, uses the strictest available DND mode."),
-  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode: off, none/total silence, priority, or alarms.")
+  enabled: z.boolean().optional().describe("Enable or disable Do Not Disturb"),
+  mode: z.enum(["off", "none", "priority", "alarms"]).optional().describe("Do Not Disturb mode")
 }).refine(values => values.enabled !== undefined || values.mode !== undefined, {
   message: "Provide enabled or mode for doNotDisturb"
 });
@@ -82,9 +82,21 @@ export function registerUtilityTools() {
         // Session-scoped: bind the specific requested device to this session
         const sessionManager = DaemonState.getInstance().getSessionManager();
         const devicePool = DaemonState.getInstance().getDevicePool();
-        const pooledDevice = devicePool.getDevice(args.deviceId);
+        let pooledDevice = devicePool.getDevice(args.deviceId);
+        if (!pooledDevice) {
+          await devicePool.refreshDevices();
+          pooledDevice = devicePool.getDevice(args.deviceId);
+        }
         if (!pooledDevice) {
           throw new ActionableError(`Device '${args.deviceId}' not found in device pool`);
+        }
+        if (pooledDevice.sessionId && pooledDevice.sessionId !== args.sessionUuid) {
+          const owningSession = sessionManager.getSession(pooledDevice.sessionId);
+          if (owningSession) {
+            throw new ActionableError(
+              `Device '${args.deviceId}' is already assigned to session ${pooledDevice.sessionId}`
+            );
+          }
         }
         // Release any existing session for this sessionUuid before rebinding
         const existing = sessionManager.getSession(args.sessionUuid);
@@ -93,7 +105,12 @@ export function registerUtilityTools() {
           await devicePool.releaseDevice(existing.assignedDevice);
         }
         if (!existing || existing.assignedDevice !== args.deviceId) {
-          await sessionManager.createSession(args.sessionUuid, args.deviceId, args.platform);
+          const boundSession = await devicePool.bindOrReuseDeviceSession(args.sessionUuid, args.deviceId, args.platform);
+          if (boundSession !== args.sessionUuid) {
+            throw new ActionableError(
+              `Device '${args.deviceId}' is already assigned to session ${boundSession}`
+            );
+          }
         }
         logger.info(`[setActiveDevice] Bound device ${args.deviceId} to session ${args.sessionUuid}`);
       } else {
@@ -254,7 +271,7 @@ export function registerUtilityTools() {
 
   ToolRegistry.registerDeviceAware(
     "setDeviceState",
-    "Set device-level state such as Do Not Disturb",
+    "Set device-level state such as Do Not Disturb. Android supports off/none/priority/alarms; iOS simulators support binary DND only.",
     setDeviceStateSchema,
     setDeviceStateHandler
   );

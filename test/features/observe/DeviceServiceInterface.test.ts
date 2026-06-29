@@ -169,10 +169,12 @@ describe("DeviceService Interface Compliance", () => {
       );
 
       // Verify Apple-specific interface methods exist
-      // Note: AndroidCtrlProxyClient (iOS) currently implements requestLaunchApp and requestPressHome
-      // but not all AppleDeviceService methods (requestTerminateApp, requestPressButton)
       expect(typeof client.requestLaunchApp).toBe("function");
       expect(typeof client.requestPressHome).toBe("function");
+      expect(typeof client.requestPressBack).toBe("function");
+      expect(typeof client.requestPressButton).toBe("function");
+      expect(typeof client.requestRecentApps).toBe("function");
+      expect(typeof client.requestKeyboard).toBe("function");
 
       // Cleanup
       void client.close();

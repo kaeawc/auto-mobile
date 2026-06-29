@@ -23,6 +23,7 @@ const result = await Bun.build({
   outdir: "./dist/src",
   target: "bun",
   format: "esm",
+  external: ["sharp", "@img/sharp-*"],
   sourcemap: "external",
   minify: true,
   splitting: false,

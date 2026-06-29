@@ -448,6 +448,29 @@ interface TestEdgeCoverageTable {
   created_at: Generated<string>;
 }
 
+export type DeviceSessionStatus = "active" | "released" | "expired";
+
+export interface DeviceSessionsTable {
+  session_uuid: string;
+  device_id: string;
+  platform: "android" | "ios";
+  status: DeviceSessionStatus;
+  source: string | null;
+  autolock_enabled: number;
+  mcp_session_id: string | null;
+  daemon_session_id: string | null;
+  created_at_ms: number;
+  last_used_at_ms: number;
+  expires_at_ms: number;
+  released_at_ms: number | null;
+  release_reason: string | null;
+  session_timeout_ms: number;
+  heartbeat_timeout_ms: number;
+  has_received_heartbeat: number;
+  created_at: Generated<string>;
+  updated_at: string;
+}
+
 // Feature flags table
 export interface FeatureFlagsTable {
   key: string;
@@ -659,11 +682,16 @@ export interface Database {
   navigation_events: NavigationEventsTable;
   storage_events: StorageEventsTable;
   layout_events: LayoutEventsTable;
+  device_sessions: DeviceSessionsTable;
 }
 
 // Convenience types for each table
 export type InstalledApp = Selectable<InstalledAppsTable>;
 export type NewInstalledApp = Insertable<InstalledAppsTable>;
+
+export type DeviceSession = Selectable<DeviceSessionsTable>;
+export type NewDeviceSession = Insertable<DeviceSessionsTable>;
+export type DeviceSessionUpdate = Updateable<DeviceSessionsTable>;
 
 export type PerformanceThresholds = Selectable<PerformanceThresholdsTable>;
 export type NewPerformanceThresholds = Insertable<PerformanceThresholdsTable>;

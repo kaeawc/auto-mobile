@@ -1,17 +1,11 @@
-import os from "node:os";
-import path from "node:path";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
-import { RequestResponseSocketServer, getSocketPath, SocketServerConfig } from "./socketServer/index";
+import { RequestResponseSocketServer, getSocketPath } from "./socketServer/index";
 import {
   VideoRecordingSocketRequest,
   VideoRecordingSocketResponse,
 } from "./videoRecordingSocketTypes";
 import { getVideoRecordingConfig, updateVideoRecordingConfig } from "../server/videoRecordingManager";
-
-const SOCKET_CONFIG: SocketServerConfig = {
-  defaultPath: path.join(os.homedir(), ".auto-mobile", "video-recording.sock"),
-  externalPath: "/tmp/auto-mobile-video-recording.sock",
-};
+import { VIDEO_RECORDING_SOCKET_CONFIG } from "./daemonFiles";
 
 /**
  * Socket server for video recording configuration.
@@ -21,7 +15,7 @@ export class VideoRecordingSocketServer extends RequestResponseSocketServer<
   VideoRecordingSocketRequest,
   VideoRecordingSocketResponse
 > {
-  constructor(socketPath: string = getSocketPath(SOCKET_CONFIG), timer: Timer = defaultTimer) {
+  constructor(socketPath: string = getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG), timer: Timer = defaultTimer) {
     super(socketPath, timer, "VideoRecording");
   }
 
@@ -70,6 +64,10 @@ export class VideoRecordingSocketServer extends RequestResponseSocketServer<
 }
 
 let socketServer: VideoRecordingSocketServer | null = null;
+
+export function getVideoRecordingSocketPath(): string {
+  return socketServer?.getSocketPath() ?? getSocketPath(VIDEO_RECORDING_SOCKET_CONFIG);
+}
 
 export async function startVideoRecordingSocketServer(): Promise<void> {
   if (!socketServer) {

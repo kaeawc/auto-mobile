@@ -49,7 +49,7 @@ describe("ExploreElementExtraction", () => {
         "resource-id": "com.test:id/button",
         "clickable": "true",
         "enabled": "true",
-        "bounds": "[0,0][100,50]"
+        "bounds": { left: 0, top: 0, right: 100, bottom: 50 }
       }
     };
 
@@ -205,7 +205,7 @@ describe("ExploreElementExtraction", () => {
       const nodes = [
         createMockNode({
           scrollable: "true",
-          bounds: "[0,0][300,500]"
+          bounds: { left: 0, top: 0, right: 300, bottom: 500 }
         })
       ];
       // Manually set bounds for the test
@@ -221,7 +221,7 @@ describe("ExploreElementExtraction", () => {
       const nodes = [
         createMockNode({
           scrollable: "true",
-          bounds: "[0,0][30,30]"
+          bounds: { left: 0, top: 0, right: 30, bottom: 30 }
         })
       ];
       nodes[0].bounds = { left: 0, top: 0, right: 30, bottom: 30 };

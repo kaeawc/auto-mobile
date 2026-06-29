@@ -34,7 +34,7 @@ describe("NotificationUIDetector", () => {
           "resource-id": "com.android.systemui:id/notification_stack_scroller",
           "class": "NotificationShade",
           "packageName": "com.android.systemui",
-          "bounds": "[0,0][100,100]",
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
         },
       },
     },
@@ -48,7 +48,7 @@ describe("NotificationUIDetector", () => {
           "resource-id": "launcher_root",
           "class": "Launcher",
           "packageName": "com.google.android.apps.nexuslauncher",
-          "bounds": "[0,0][100,100]",
+          "bounds": { left: 0, top: 0, right: 100, bottom: 100 },
         },
       },
     },
@@ -60,7 +60,7 @@ describe("NotificationUIDetector", () => {
       node: {
         $: {
           class: "NotificationCenter",
-          bounds: "[0,0][375,812]",
+          bounds: { left: 0, top: 0, right: 375, bottom: 812 },
         },
       },
     },
@@ -72,7 +72,7 @@ describe("NotificationUIDetector", () => {
       node: {
         $: {
           class: "RootView",
-          bounds: "[0,0][375,812]",
+          bounds: { left: 0, top: 0, right: 375, bottom: 812 },
         },
       },
     },

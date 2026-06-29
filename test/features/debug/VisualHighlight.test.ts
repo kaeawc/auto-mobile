@@ -9,6 +9,11 @@ describe("VisualHighlight", () => {
     isEmulator: true,
     name: "Test Device"
   };
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-device",
+    platform: "ios",
+    name: "iPhone Simulator"
+  };
 
   const highlightShape: HighlightShape = {
     type: "box",
@@ -69,6 +74,24 @@ describe("VisualHighlight", () => {
     expect(result.success).toBe(true);
   });
 
+  test("addHighlight sends iOS highlight requests through the injected client", async () => {
+    const calls: Array<{ id: string; shape: HighlightShape; timeoutMs: number | undefined }> = [];
+    const fakeClient = {
+      requestAddHighlight: async (id: string, shape: HighlightShape, timeoutMs?: number) => {
+        calls.push({ id, shape, timeoutMs });
+        return { success: true };
+      }
+    };
+
+    const highlight = new VisualHighlight(iosDevice, null, fakeClient);
+    const result = await highlight.addHighlight("ios-highlight-1", highlightShape, { timeoutMs: 1234 });
+
+    expect(result.success).toBe(true);
+    expect(calls).toEqual([
+      { id: "ios-highlight-1", shape: highlightShape, timeoutMs: 1234 }
+    ]);
+  });
+
   test("addHighlight rejects invalid shapes", async () => {
     const invalidShape: HighlightShape = {
       type: "box",
@@ -109,6 +132,11 @@ describe("VisualHighlightClient", () => {
     isEmulator: true,
     name: "Test Device"
   };
+  const iosDevice: BootedDevice = {
+    deviceId: "ios-device",
+    platform: "ios",
+    name: "iPhone Simulator"
+  };
 
   const highlightShape: HighlightShape = {
     type: "circle",
@@ -145,5 +173,32 @@ describe("VisualHighlightClient", () => {
       deviceId: androidDevice.deviceId,
       platform: "android"
     })).rejects.toThrow("Service error");
+  });
+
+  test("addHighlight accepts an iOS device option", async () => {
+    const calls: Array<{ device: BootedDevice; shape: HighlightShape }> = [];
+    const fakeHighlight = {
+      addHighlight: async (_id: string, shape: HighlightShape) => {
+        calls.push({ device: iosDevice, shape });
+        return { success: true };
+      }
+    };
+
+    const client = new VisualHighlightClient(
+      {} as any,
+      device => {
+        calls.push({ device, shape: highlightShape });
+        return fakeHighlight as any;
+      }
+    );
+
+    const result = await client.addHighlight("highlight-1", highlightShape, {
+      device: iosDevice,
+      deviceId: iosDevice.deviceId,
+      platform: "ios"
+    });
+
+    expect(result.success).toBe(true);
+    expect(calls[0]?.device).toEqual(iosDevice);
   });
 });

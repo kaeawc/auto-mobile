@@ -1,8 +1,8 @@
-import { spawn, execSync } from "node:child_process";
-import { readFile, unlink } from "node:fs/promises";
-import { existsSync, openSync, closeSync, mkdtempSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawn as nodeSpawn, execSync, type ChildProcess, type SpawnOptions } from "node:child_process";
+import { open, readFile, unlink } from "node:fs/promises";
+import { existsSync, openSync, closeSync, mkdtempSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { logger } from "../utils/logger";
 import { ActionableError } from "../models";
 import {
@@ -11,6 +11,9 @@ import {
   LOCK_FILE_PATH,
   DAEMON_STARTUP_TIMEOUT_MS,
   DAEMON_SHUTDOWN_TIMEOUT_MS,
+  DAEMON_VERSION,
+  READINESS_PROBE_MAX_ATTEMPTS,
+  READINESS_PROBE_BACKOFF_MS,
 } from "./constants";
 import { DaemonStatus, PidFileData, DaemonOptions } from "./types";
 import {
@@ -22,6 +25,13 @@ import {
 import { DaemonClient, type DaemonClientFactory, type DaemonClientLike } from "./client";
 import { DaemonState, type DaemonStateLike } from "./daemonState";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { cleanupDaemonFiles } from "./daemonFiles";
+import {
+  DAEMON_LAUNCH_CWD_ENV,
+  resolveDaemonLaunchWorkingDirectory,
+  resolvePathFromDaemonLaunchWorkingDirectory,
+  resolveStableDaemonWorkingDirectory,
+} from "../utils/workingDirectory";
 
 /**
  * Check that bunx is available on PATH.
@@ -45,6 +55,118 @@ function stderrLog(message: string): void {
   process.stderr.write(message + "\n");
 }
 
+export interface DaemonLaunchCommand {
+  command: string;
+  args: string[];
+}
+
+export interface DaemonProcessRecord {
+  pid: number;
+  ppid: number;
+  command: string;
+}
+
+export interface DaemonProcessFinder {
+  findDaemonProcesses(): DaemonProcessRecord[];
+}
+
+export const DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES = 16 * 1024 * 1024;
+
+type ProcessTableCommandRunner = (
+  command: string,
+  options: { encoding: "utf-8"; maxBuffer: number }
+) => string;
+
+function isAutoMobileDaemonCommand(command: string): boolean {
+  return command.includes("--daemon-mode") &&
+    (command.includes("auto-mobile") || command.includes("dist/src/index.js"));
+}
+
+function isShellCommandWrapper(command: string): boolean {
+  const executable = command.trim().split(/\s+/, 1)[0] ?? "";
+  return /(^|\/)(?:ba|da|z)?sh$/.test(executable) && command.includes(" -c ");
+}
+
+export function parseDaemonProcessTable(psOutput: string): DaemonProcessRecord[] {
+  const records: DaemonProcessRecord[] = [];
+
+  for (const line of psOutput.split("\n")) {
+    const match = line.match(/^\s*(\d+)\s+(\d+)\s+(.+?)\s*$/);
+    if (!match) {
+      continue;
+    }
+
+    const pid = parseInt(match[1], 10);
+    const ppid = parseInt(match[2], 10);
+    const command = match[3];
+
+    if (!Number.isFinite(pid) || !Number.isFinite(ppid) || !isAutoMobileDaemonCommand(command)) {
+      continue;
+    }
+
+    records.push({ pid, ppid, command });
+  }
+
+  return records;
+}
+
+export class PsDaemonProcessFinder implements DaemonProcessFinder {
+  constructor(private readonly runCommand: ProcessTableCommandRunner = execSync) {}
+
+  findDaemonProcesses(): DaemonProcessRecord[] {
+    const psOutput = this.runCommand("ps -eo pid=,ppid=,command=", {
+      encoding: "utf-8",
+      maxBuffer: DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
+    });
+    return parseDaemonProcessTable(psOutput);
+  }
+}
+
+export interface DaemonProcessSpawner {
+  spawn(command: string, args: string[], options: SpawnOptions): ChildProcess;
+}
+
+const nodeDaemonProcessSpawner: DaemonProcessSpawner = {
+  spawn: nodeSpawn,
+};
+
+const MAX_DAEMON_STARTUP_LOG_BYTES = 4000;
+
+function resolvePackageSpecifier(version: string): string {
+  const trimmedVersion = version.trim();
+  if (trimmedVersion.length === 0 || trimmedVersion === "unknown") {
+    throw new ActionableError(
+      "Cannot spawn AutoMobile daemon via bunx because the current package version is unknown. Run from an installed auto-mobile binary or set MCP_SERVER_VERSION."
+    );
+  }
+  return `@kaeawc/auto-mobile@${trimmedVersion}`;
+}
+
+export function resolveDaemonLaunchCommand(
+  entryScript: string | undefined = process.argv[1],
+  packageRunner: string | null = resolvePackageRunner(),
+  version: string = DAEMON_VERSION
+): DaemonLaunchCommand {
+  if (entryScript) {
+    return {
+      command: process.execPath,
+      args: [entryScript, "--daemon-mode"],
+    };
+  }
+
+  if (packageRunner) {
+    return {
+      command: packageRunner,
+      args: ["-y", resolvePackageSpecifier(version), "--daemon-mode"],
+    };
+  }
+
+  return {
+    command: "auto-mobile",
+    args: ["--daemon-mode"],
+  };
+}
+
 /**
  * Surface of DaemonManager used by clients (e.g. DaemonMcpProxy).
  * Allows injecting fakes in tests without subclassing the concrete class.
@@ -53,7 +175,7 @@ export interface DaemonManagerLike {
   status(): Promise<DaemonStatus>;
   start(options?: DaemonOptions): Promise<void>;
   restart(options?: DaemonOptions): Promise<void>;
-  waitForReady(timeout: number): Promise<boolean>;
+  waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean>;
 }
 
 /**
@@ -71,19 +193,33 @@ export class DaemonManager implements DaemonManagerLike {
   private readonly timer: Timer;
   private readonly lockFilePath: string;
   private readonly pidFilePath: string;
+  private readonly socketPath: string;
+  private readonly processFinder: DaemonProcessFinder;
+  private readonly processSpawner: DaemonProcessSpawner;
 
   constructor(
-    clientFactory: DaemonClientFactory = () => new DaemonClient(),
+    clientFactory: DaemonClientFactory | undefined = undefined,
     stateProvider: () => DaemonStateLike = () => DaemonState.getInstance(),
     timer: Timer = defaultTimer,
     lockFilePath: string = LOCK_FILE_PATH,
-    pidFilePath: string = PID_FILE_PATH
+    pidFilePath: string = PID_FILE_PATH,
+    socketPath: string = SOCKET_PATH,
+    processFinderOrSpawner: DaemonProcessFinder | DaemonProcessSpawner = new PsDaemonProcessFinder(),
+    processSpawner: DaemonProcessSpawner = nodeDaemonProcessSpawner
   ) {
-    this.clientFactory = clientFactory;
     this.stateProvider = stateProvider;
     this.timer = timer;
-    this.lockFilePath = lockFilePath;
-    this.pidFilePath = pidFilePath;
+    this.lockFilePath = resolvePathFromDaemonLaunchWorkingDirectory(lockFilePath);
+    this.pidFilePath = resolvePathFromDaemonLaunchWorkingDirectory(pidFilePath);
+    this.socketPath = resolvePathFromDaemonLaunchWorkingDirectory(socketPath);
+    if ("findDaemonProcesses" in processFinderOrSpawner) {
+      this.processFinder = processFinderOrSpawner;
+      this.processSpawner = processSpawner;
+    } else {
+      this.processFinder = new PsDaemonProcessFinder();
+      this.processSpawner = processFinderOrSpawner;
+    }
+    this.clientFactory = clientFactory ?? (() => new DaemonClient(this.socketPath));
   }
 
   /**
@@ -124,6 +260,7 @@ export class DaemonManager implements DaemonManagerLike {
    */
   private writeLockFile(): boolean {
     try {
+      mkdirSync(dirname(this.lockFilePath), { recursive: true });
       const fd = openSync(this.lockFilePath, "wx", 0o600);
       writeFileSync(fd, String(process.pid));
       closeSync(fd);
@@ -151,36 +288,53 @@ export class DaemonManager implements DaemonManagerLike {
   getDaemonState(): DaemonStateLike {
     return this.stateProvider();
   }
+
+  private cleanupSocketPaths(primarySocketPath?: string): string[] | undefined {
+    if (this.pidFilePath === PID_FILE_PATH) {
+      return undefined;
+    }
+    return primarySocketPath ? [primarySocketPath] : [];
+  }
+
   /**
    * Find all running auto-mobile daemon processes (including those from other worktrees)
    */
   findAllDaemonProcesses(): number[] {
     try {
-      // Use ps to find all auto-mobile daemon processes for current user
-      const psOutput = execSync(
-        `ps aux | grep -E "auto-mobile.*--daemon-mode|dist/src/index.js --daemon-mode" | grep -v grep`,
-        { encoding: "utf-8" }
-      );
-
-      const pids: number[] = [];
-      const lines = psOutput.trim().split("\n").filter(line => line.trim());
-
-      for (const line of lines) {
-        // Parse PID from ps output (second column)
-        const parts = line.trim().split(/\s+/);
-        if (parts.length >= 2) {
-          const pid = parseInt(parts[1], 10);
-          if (!isNaN(pid) && pid !== process.pid) {
-            pids.push(pid);
-          }
-        }
-      }
-
-      return pids;
+      return this.normalizeDaemonProcessRecords(this.processFinder.findDaemonProcesses());
     } catch (error) {
       // No matching processes found or command failed
       return [];
     }
+  }
+
+  findOtherDaemonProcesses(activeDaemonPid: number | undefined): number[] {
+    return this.findAllDaemonProcesses().filter(pid => pid !== activeDaemonPid);
+  }
+
+  private normalizeDaemonProcessRecords(records: DaemonProcessRecord[]): number[] {
+    const wrapperPids = new Set<number>();
+    const childPpids = new Set(records.map(record => record.ppid));
+
+    for (const record of records) {
+      if (isShellCommandWrapper(record.command) && childPpids.has(record.pid)) {
+        wrapperPids.add(record.pid);
+      }
+    }
+
+    const pids: number[] = [];
+    const seen = new Set<number>();
+
+    for (const record of records) {
+      if (record.pid === process.pid || wrapperPids.has(record.pid) || seen.has(record.pid)) {
+        continue;
+      }
+
+      pids.push(record.pid);
+      seen.add(record.pid);
+    }
+
+    return pids;
   }
 
   /**
@@ -272,44 +426,14 @@ export class DaemonManager implements DaemonManagerLike {
     }
 
     // Clean up stale socket and PID files from previous sessions
-    if (existsSync(SOCKET_PATH)) {
-      logger.debug("Removing stale socket file");
-      try {
-        await unlink(SOCKET_PATH);
-      } catch (error) {
-        logger.warn(`Failed to remove stale socket file: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
-    if (existsSync(this.pidFilePath)) {
-      logger.debug("Removing stale PID file");
-      try {
-        await unlink(this.pidFilePath);
-      } catch (error) {
-        logger.warn(`Failed to remove stale PID file: ${error instanceof Error ? error.message : String(error)}`);
-      }
-    }
+    await cleanupDaemonFiles({ pidFilePath: this.pidFilePath });
 
     stderrLog("Starting AutoMobile daemon...");
 
     // Resolve the current binary so the daemon uses the same version.
     // process.argv[1] is the entry script (e.g. dist/src/index.js).
     // Falls back to bunx to avoid requiring a global install.
-    const entryScript = process.argv[1];
-    let autoMobileCmd: string;
-    let args: string[];
-    if (entryScript) {
-      autoMobileCmd = process.execPath;
-      args = [entryScript, "--daemon-mode"];
-    } else {
-      const runner = resolvePackageRunner();
-      if (runner) {
-        autoMobileCmd = runner;
-        args = ["-y", "@kaeawc/auto-mobile@latest", "--daemon-mode"];
-      } else {
-        autoMobileCmd = "auto-mobile";
-        args = ["--daemon-mode"];
-      }
-    }
+    const { command: autoMobileCmd, args } = resolveDaemonLaunchCommand();
     if (options.port) {
       args.push("--port", options.port.toString());
     }
@@ -398,15 +522,20 @@ export class DaemonManager implements DaemonManagerLike {
     // Propagate any non-default file paths to the child so its constants module
     // resolves to the same locations this manager polls.
     const childEnv = { ...process.env };
+    childEnv[DAEMON_LAUNCH_CWD_ENV] = resolveDaemonLaunchWorkingDirectory();
     if (this.pidFilePath !== PID_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_PID_FILE_PATH = this.pidFilePath;
     }
     if (this.lockFilePath !== LOCK_FILE_PATH) {
       childEnv.AUTOMOBILE_DAEMON_LOCK_FILE_PATH = this.lockFilePath;
     }
+    if (this.socketPath !== SOCKET_PATH) {
+      childEnv.AUTOMOBILE_DAEMON_SOCKET_PATH = this.socketPath;
+    }
 
-    const daemonProcess = spawn(autoMobileCmd, args, {
+    const daemonProcess = this.processSpawner.spawn(autoMobileCmd, args, {
       detached: true,
+      cwd: resolveStableDaemonWorkingDirectory(),
       stdio: ["ignore", logFd, logFd], // Write stdout/stderr to log file
       shell: true, // Use shell to resolve command from PATH
       env: childEnv,
@@ -418,13 +547,7 @@ export class DaemonManager implements DaemonManagerLike {
     // Unref so parent process can exit
     daemonProcess.unref();
 
-    // Wait for daemon to be ready
-    const ready = await this.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
-    if (!ready) {
-      throw new ActionableError(
-        `Daemon failed to start within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
-      );
-    }
+    await this.waitForDaemonStartup(daemonProcess, logPath, DAEMON_STARTUP_TIMEOUT_MS);
 
     const newStatus = await this.status();
     stderrLog(
@@ -432,6 +555,105 @@ export class DaemonManager implements DaemonManagerLike {
     );
     stderrLog(`Socket: ${newStatus.socketPath}`);
     stderrLog(`Logs: ${logPath}`);
+  }
+
+  private async waitForDaemonStartup(
+    daemonProcess: ChildProcess,
+    logPath: string,
+    timeoutMs: number
+  ): Promise<void> {
+    let cleanupProcessListeners = () => {};
+
+    const readinessAbort = new AbortController();
+    const processFailure = new Promise<never>((_, reject) => {
+      const rejectWithContext = (summary: string) => {
+        void this.formatDaemonStartupFailure(summary, logPath).then(
+          message => {
+            reject(new ActionableError(message));
+            readinessAbort.abort();
+          },
+          () => {
+            reject(new ActionableError(summary));
+            readinessAbort.abort();
+          }
+        );
+      };
+
+      const onError = (error: Error) => {
+        rejectWithContext(`Daemon subprocess failed to spawn: ${this.formatRawSpawnError(error)}`);
+      };
+      const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
+        const exitCode = code === null ? "unknown" : code.toString();
+        const signalDetail = signal ? `, signal ${signal}` : "";
+        rejectWithContext(`Daemon subprocess exited before becoming ready (exit code ${exitCode}${signalDetail})`);
+      };
+
+      daemonProcess.once("error", onError);
+      daemonProcess.once("exit", onExit);
+      cleanupProcessListeners = () => {
+        daemonProcess.off("error", onError);
+        daemonProcess.off("exit", onExit);
+      };
+    });
+
+    try {
+      const ready = await Promise.race([
+        this.waitForReady(timeoutMs, readinessAbort.signal),
+        processFailure,
+      ]);
+      if (!ready) {
+        throw new ActionableError(
+          await this.formatDaemonStartupFailure(
+            `Daemon failed to start within ${timeoutMs}ms`,
+            logPath
+          )
+        );
+      }
+    } finally {
+      readinessAbort.abort();
+      cleanupProcessListeners();
+    }
+  }
+
+  private formatRawSpawnError(error: Error): string {
+    const details = error as NodeJS.ErrnoException;
+    const additions = [
+      details.code && !error.message.includes(details.code) ? `code ${details.code}` : undefined,
+      details.syscall && !error.message.includes(details.syscall) ? `syscall ${details.syscall}` : undefined,
+      details.path && !error.message.includes(details.path) ? `path ${details.path}` : undefined,
+    ].filter((value): value is string => value !== undefined);
+    return additions.length > 0 ? `${error.message} (${additions.join(", ")})` : error.message;
+  }
+
+  private async formatDaemonStartupFailure(summary: string, logPath: string): Promise<string> {
+    const logExcerpt = await this.readDaemonStartupLogExcerpt(logPath);
+    if (logExcerpt.length === 0) {
+      return `${summary}\nLogs: ${logPath} (empty)`;
+    }
+    return [
+      summary,
+      `Logs: ${logPath}`,
+      `Daemon stdout/stderr log excerpt (last ${MAX_DAEMON_STARTUP_LOG_BYTES} bytes):`,
+      logExcerpt,
+    ].join("\n");
+  }
+
+  private async readDaemonStartupLogExcerpt(logPath: string): Promise<string> {
+    let file: Awaited<ReturnType<typeof open>> | undefined;
+    try {
+      file = await open(logPath, "r");
+      const { size } = await file.stat();
+      const start = Math.max(0, size - MAX_DAEMON_STARTUP_LOG_BYTES);
+      const length = size - start;
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await file.read(buffer, 0, length, start);
+      const log = buffer.subarray(0, bytesRead).toString("utf-8").trim();
+      return start > 0 ? `...${log}` : log;
+    } catch (error) {
+      return `Unable to read daemon stdout/stderr log: ${error instanceof Error ? error.message : String(error)}`;
+    } finally {
+      await file?.close();
+    }
   }
 
   /**
@@ -464,10 +686,11 @@ export class DaemonManager implements DaemonManagerLike {
         await this.timer.sleep(1000);
       }
 
-      // Clean up stale PID file if it exists
-      if (existsSync(this.pidFilePath)) {
-        await unlink(this.pidFilePath);
-      }
+      await cleanupDaemonFiles({
+        pidFilePath: this.pidFilePath,
+        socketPaths: this.cleanupSocketPaths(status.socketPath),
+        expectedPid: pid,
+      });
 
       stderrLog("Daemon stopped");
     } catch (error) {
@@ -476,10 +699,11 @@ export class DaemonManager implements DaemonManagerLike {
         error instanceof Error &&
         (error.message.includes("ESRCH") || error.message.includes("EPERM"))
       ) {
-        // Clean up stale PID file
-        if (existsSync(this.pidFilePath)) {
-          await unlink(this.pidFilePath);
-        }
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(status.socketPath),
+          expectedPid: pid,
+        });
         stderrLog("Daemon was not running (cleaned up stale PID file)");
       } else {
         throw error;
@@ -505,8 +729,11 @@ export class DaemonManager implements DaemonManagerLike {
       const running = this.isProcessRunning(pidData.pid);
 
       if (!running) {
-        // Clean up stale PID file
-        await unlink(this.pidFilePath);
+        await cleanupDaemonFiles({
+          pidFilePath: this.pidFilePath,
+          socketPaths: this.cleanupSocketPaths(pidData.socketPath),
+          expectedPid: pidData.pid,
+        });
         return { running: false };
       }
 
@@ -515,6 +742,7 @@ export class DaemonManager implements DaemonManagerLike {
         pid: pidData.pid,
         port: pidData.port,
         socketPath: pidData.socketPath,
+        sockets: pidData.sockets,
         startedAt: pidData.startedAt,
         version: pidData.version,
       };
@@ -538,24 +766,109 @@ export class DaemonManager implements DaemonManagerLike {
   /**
    * Wait for daemon to be ready (socket listening)
    */
-  async waitForReady(timeout: number): Promise<boolean> {
+  async waitForReady(timeout: number, signal?: AbortSignal): Promise<boolean> {
     const startTime = this.timer.now();
     const pollInterval = 100; // Poll every 100ms
 
     while (this.timer.now() - startTime < timeout) {
-      // Check if socket exists
-      if (existsSync(SOCKET_PATH)) {
-        // Check if daemon is responding
+      if (signal?.aborted) {
+        return false;
+      }
+      if (existsSync(this.socketPath)) {
         const status = await this.status();
         if (status.running) {
-          return true;
+          if (await this.verifyDaemonConnection()) {
+            return true;
+          }
+          if (signal?.aborted) {
+            return false;
+          }
+          await this.removeInvalidSocketPath();
         }
       }
 
-      await this.timer.sleep(pollInterval);
+      await this.sleepUnlessAborted(pollInterval, signal);
     }
 
     return false;
+  }
+
+  private sleepUnlessAborted(ms: number, signal?: AbortSignal): Promise<void> {
+    if (!signal) {
+      return this.timer.sleep(ms);
+    }
+    if (signal.aborted) {
+      return Promise.resolve();
+    }
+
+    return new Promise(resolve => {
+      function done() {
+        signal.removeEventListener("abort", onAbort);
+        resolve();
+      }
+      const onAbort = () => {
+        this.timer.clearTimeout(timeout);
+        done();
+      };
+
+      const timeout = this.timer.setTimeout(done, ms);
+      signal.addEventListener("abort", onAbort, { once: true });
+    });
+  }
+
+  private async verifyDaemonConnection(): Promise<boolean> {
+    // Retry the connect probe before declaring the socket dead. A single failed
+    // probe is not authoritative — a live daemon under load can transiently
+    // refuse a connection. Only a socket that fails every attempt is treated as
+    // stale (which then triggers removeInvalidSocketPath). This is what keeps a
+    // healthy daemon's socket from being unlinked on a flaky probe, the dominant
+    // cause of "devices not found after daemon start/restart".
+    for (let attempt = 1; attempt <= READINESS_PROBE_MAX_ATTEMPTS; attempt++) {
+      const client = this.createClient();
+      try {
+        await client.connect();
+        return true;
+      } catch (error) {
+        logger.debug(
+          `Daemon socket readiness probe failed (attempt ${attempt}/${READINESS_PROBE_MAX_ATTEMPTS}): ${error instanceof Error ? error.message : String(error)}`
+        );
+      } finally {
+        try {
+          await client.close();
+        } catch (error) {
+          logger.debug(`Failed to close daemon readiness probe client: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+
+      if (attempt < READINESS_PROBE_MAX_ATTEMPTS) {
+        await this.timer.sleep(READINESS_PROBE_BACKOFF_MS);
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Remove a daemon socket path that failed the readiness probe.
+   *
+   * This is only invoked after {@link verifyDaemonConnection} could not connect,
+   * which is the authoritative signal that the path is unusable. A stale socket
+   * inode left behind by a SIGKILL'd daemon is still an `isSocket()` inode, so we
+   * must remove it regardless of file type — otherwise a reused PID makes
+   * `status()` report running and the readiness loop spins until it times out.
+   * This mirrors the unconditional stale-socket cleanup in {@link start}.
+   */
+  private async removeInvalidSocketPath(): Promise<void> {
+    if (!existsSync(this.socketPath)) {
+      return;
+    }
+
+    try {
+      await unlink(this.socketPath);
+      logger.debug(`Removed invalid daemon socket path: ${this.socketPath}`);
+    } catch (error) {
+      logger.debug(`Failed to remove invalid daemon socket path: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   /**
@@ -623,7 +936,7 @@ function parseDaemonArgs(args: string[]): DaemonOptions {
       i++;
     } else if (args[i] === "--debug") {
       options.debug = true;
-    } else if (args[i] === "--debug-perf") {
+    } else if (args[i] === "--debug-perf" || args[i] === "--ui-perf-debug") {
       options.debugPerf = true;
     } else if (args[i] === "--plan-execution-lock-scope") {
       const scope = args[i + 1];
@@ -726,7 +1039,7 @@ export async function runDaemonCommand(
           );
 
           // Check for other daemon processes (exclude current daemon)
-          const otherDaemons = manager.findAllDaemonProcesses().filter(pid => pid !== status.pid);
+          const otherDaemons = manager.findOtherDaemonProcesses(status.pid);
           if (otherDaemons.length > 0) {
             console.log(
               `\n⚠️  WARNING: Found ${otherDaemons.length} other daemon process(es) from other worktrees:`

@@ -10,6 +10,7 @@ import type { ViewHierarchy } from "../interfaces/ViewHierarchy";
 import type { Timer } from "../../../utils/SystemTimer";
 import type { AdbClientFactory } from "../../../utils/android-cmdline-tools/AdbClientFactory";
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
+import { parseBounds } from "../../../utils/bounds";
 
 export interface HierarchyCollectorOptions {
   device: BootedDevice;
@@ -168,34 +169,24 @@ export class HierarchyCollector {
 
   /**
    * Extract screen size from view hierarchy root node bounds.
-   * Supports both Android format ("[left,top][right,bottom]") and iOS format
-   * ({left, top, right, bottom}).
    */
   extractScreenSize(viewHierarchy: ObserveResult["viewHierarchy"]): { width: number; height: number } | null {
-    // Android format: hierarchy.node.$.bounds = "[0,0][402,874]"
     const rootNode = viewHierarchy?.hierarchy?.node;
-    if (rootNode?.$?.bounds) {
-      const boundsStr = rootNode.$.bounds;
-      const match = boundsStr.match(/\[(-?\d+),(-?\d+)\]\[(-?\d+),(-?\d+)\]/);
-      if (match) {
-        const width = parseInt(match[3], 10) - parseInt(match[1], 10);
-        const height = parseInt(match[4], 10) - parseInt(match[2], 10);
-        if (width > 0 && height > 0) {
-          return { width, height };
-        }
+    const rootBounds = parseBounds(rootNode?.bounds ?? rootNode?.$?.bounds);
+    if (rootBounds) {
+      const width = rootBounds.right - rootBounds.left;
+      const height = rootBounds.bottom - rootBounds.top;
+      if (width > 0 && height > 0) {
+        return { width, height };
       }
     }
 
-    // iOS format: hierarchy is the root XCTestNode with bounds as {left, top, right, bottom}
-    const iosHierarchy = viewHierarchy?.hierarchy;
-    if (iosHierarchy?.bounds && typeof iosHierarchy.bounds === "object" && !Array.isArray(iosHierarchy.bounds)) {
-      const { left, top, right, bottom } = iosHierarchy.bounds;
-      if (typeof right === "number" && typeof bottom === "number") {
-        const width = right - (left ?? 0);
-        const height = bottom - (top ?? 0);
-        if (width > 0 && height > 0) {
-          return { width, height };
-        }
+    const hierarchyBounds = parseBounds(viewHierarchy?.hierarchy?.bounds);
+    if (hierarchyBounds) {
+      const width = hierarchyBounds.right - hierarchyBounds.left;
+      const height = hierarchyBounds.bottom - hierarchyBounds.top;
+      if (width > 0 && height > 0) {
+        return { width, height };
       }
     }
 

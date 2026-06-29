@@ -101,7 +101,7 @@ describe("DefaultAppCleanupService", () => {
     expect(terminate.calls).toHaveLength(0);
   });
 
-  test("skips clear app data on iOS", async () => {
+  test("clears app data on iOS via the injected clear action", async () => {
     const terminate = new FakeTerminateApp({
       success: true,
       packageName: "com.example.app",
@@ -113,14 +113,10 @@ describe("DefaultAppCleanupService", () => {
       success: true,
       packageName: "com.example.app",
     });
-    const warnings: string[] = [];
+    const clearDevices: BootedDevice[] = [];
     const cleanupService = new DefaultAppCleanupService({
       createTerminateApp: () => terminate,
-      createClearAppData: () => clear,
-      logger: {
-        info: () => {},
-        warn: message => warnings.push(message),
-      },
+      createClearAppData: device => { clearDevices.push(device); return clear; },
     });
 
     await cleanupService.cleanup(iosDevice, {
@@ -128,8 +124,9 @@ describe("DefaultAppCleanupService", () => {
       clearAppData: true,
     });
 
-    expect(warnings.length).toBe(1);
-    expect(clear.calls).toHaveLength(0);
+    // iOS now flows through the shared clear path instead of being skipped.
+    expect(clearDevices).toEqual([iosDevice]);
+    expect(clear.calls).toEqual(["com.example.app"]);
     expect(terminate.calls).toHaveLength(0);
   });
 });

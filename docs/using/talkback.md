@@ -52,7 +52,7 @@ AutoMobile reads the active accessibility services from ADB secure settings when
 | `tapOn` | Coordinate-based tap | `ACTION_CLICK` on the target element |
 | `swipeOn` / scroll | Single-finger swipe | `ACTION_SCROLL_FORWARD`/`BACKWARD` or two-finger swipe |
 | `inputText` / `clearText` | `ACTION_SET_TEXT` | `ACTION_SET_TEXT` (unchanged) |
-| `pressButton` | Hardware keycode | Hardware keycode (unchanged; see note below) |
+| `pressButton` | Device/navigation button | Device/navigation button (unchanged; see note below) |
 | `launchApp`, `terminateApp`, `installApp` | Standard | Unchanged |
 
 No tool parameters change. Existing automation scripts work without modification.

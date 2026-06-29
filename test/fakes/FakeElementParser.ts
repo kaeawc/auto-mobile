@@ -14,7 +14,7 @@ export class FakeElementParser implements ElementParser {
     return this.nextNodeProperties;
   }
 
-  parseBounds(_boundsString: string): ElementBounds | null {
+  parseBounds(_bounds: unknown): ElementBounds | null {
     return this.nextParsedBounds;
   }
 

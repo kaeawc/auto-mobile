@@ -1029,6 +1029,23 @@ class ViewHierarchyExtractorTest {
     assertTrue(regions.isEmpty())
   }
 
+  @Test
+  fun `detectContentHiddenRegions deduplicates hidden regions aggregated across window roots`() {
+    val firstWindow = composeRootWithHiddenBoundary(bounds(0, 368, 1440, 1400))
+    val duplicateWindow = composeRootWithHiddenBoundary(bounds(0, 368, 1440, 1400))
+    val secondWindow = composeRootWithHiddenBoundary(bounds(0, 1500, 1440, 2752))
+
+    val regions =
+        extractor.detectContentHiddenRegionsAcrossRootsForTest(
+            listOf(firstWindow, duplicateWindow, secondWindow),
+        )
+
+    assertNotNull(regions)
+    assertEquals(2, regions!!.size)
+    assertEquals(bounds(0, 368, 1440, 1400), regions[0].bounds)
+    assertEquals(bounds(0, 1500, 1440, 2752), regions[1].bounds)
+  }
+
   private fun ViewHierarchyExtractor.generateDeterministicUuidForTest(path: String): String {
     val method = this.javaClass.getDeclaredMethod("generateDeterministicUuid", String::class.java)
     method.isAccessible = true
@@ -1078,6 +1095,19 @@ class ViewHierarchyExtractorTest {
 
   private fun bounds(left: Int, top: Int, right: Int, bottom: Int): ElementBounds {
     return ElementBounds(left, top, right, bottom)
+  }
+
+  private fun composeRootWithHiddenBoundary(boundaryBounds: ElementBounds): UIElementInfo {
+    val hiddenBoundary =
+        elementWithBounds(
+            bounds = boundaryBounds,
+            actions = listOf("accessibility_focus"),
+        )
+    return elementWithBounds(
+        className = "androidx.compose.ui.platform.ComposeView",
+        bounds = bounds(0, 0, 1440, 3000),
+        children = listOf(hiddenBoundary),
+    )
   }
 
   private fun findElementByResourceId(
@@ -1186,5 +1216,20 @@ class ViewHierarchyExtractorTest {
     @Suppress("UNCHECKED_CAST")
     return method.invoke(this, element, screenWidth, screenHeight)
         as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>
+  }
+
+  private fun ViewHierarchyExtractor.detectContentHiddenRegionsAcrossRootsForTest(
+      elements: List<UIElementInfo>
+  ): List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>? {
+    val method =
+        this.javaClass.getDeclaredMethod(
+            "detectContentHiddenRegions",
+            List::class.java,
+            dev.jasonpearson.automobile.ctrlproxy.models.ScreenDimensions::class.java,
+        )
+    method.isAccessible = true
+    @Suppress("UNCHECKED_CAST")
+    return method.invoke(this, elements, null)
+        as List<dev.jasonpearson.automobile.ctrlproxy.models.ContentHiddenRegion>?
   }
 }

@@ -86,10 +86,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               accessibilityFocusedNode,
           )
       val contentHiddenRegions =
-          rootElement?.let {
-            val (screenWidth, screenHeight) = resolveScreenDimensions(it, screenDimensions)
-            detectContentHiddenRegions(it, screenWidth, screenHeight)
-          }
+          rootElement?.let { detectContentHiddenRegions(listOf(it), screenDimensions) }
 
       // Skip optimization and filtering if disableAllFiltering is true
       val processedElement =
@@ -203,7 +200,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
     var activeWindowLayer = 0
     var activeWindowKey: Int? = null
     val windowInfos = mutableListOf<WindowInfo>()
-    val contentHiddenRegions = mutableListOf<ContentHiddenRegion>()
+    val contentHiddenRegionRoots = mutableListOf<UIElementInfo>()
 
     // Track whether the accessibility service hierarchy is incomplete
     // This happens when active windows have null roots or only system UI is accessible
@@ -277,8 +274,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
                 parentPath = "w${window.id}",
             )
         if (element != null) {
-          val (screenWidth, screenHeight) = resolveScreenDimensions(element, screenDimensions)
-          contentHiddenRegions.addAll(detectContentHiddenRegions(element, screenWidth, screenHeight))
+          contentHiddenRegionRoots.add(element)
         }
         // Skip optimization if disableAllFiltering is true
         val processedElement =
@@ -344,8 +340,7 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
               accessibilityFocusedNode,
           )
       if (element != null) {
-        val (screenWidth, screenHeight) = resolveScreenDimensions(element, screenDimensions)
-        contentHiddenRegions.addAll(detectContentHiddenRegions(element, screenWidth, screenHeight))
+        contentHiddenRegionRoots.add(element)
       }
       // Skip optimization if disableAllFiltering is true
       mainHierarchy =
@@ -458,9 +453,21 @@ class ViewHierarchyExtractor(private val recompositionStore: RecompositionStore?
         notificationPermissionDetected = notificationPermissionDetected,
         accessibilityFocusedElement = accessibilityFocusedElement,
         ctrlProxyIncomplete = if (ctrlProxyIncomplete) true else null,
-        contentHiddenRegions =
-            contentHiddenRegions.distinctBy { it.bounds }.takeIf { it.isNotEmpty() },
+        contentHiddenRegions = detectContentHiddenRegions(contentHiddenRegionRoots, screenDimensions),
     )
+  }
+
+  private fun detectContentHiddenRegions(
+      roots: List<UIElementInfo>,
+      screenDimensions: ScreenDimensions?,
+  ): List<ContentHiddenRegion>? {
+    return roots
+        .flatMap {
+          val (screenWidth, screenHeight) = resolveScreenDimensions(it, screenDimensions)
+          detectContentHiddenRegions(it, screenWidth, screenHeight)
+        }
+        .distinctBy { it.bounds }
+        .takeIf { it.isNotEmpty() }
   }
 
   private fun resolveScreenDimensions(

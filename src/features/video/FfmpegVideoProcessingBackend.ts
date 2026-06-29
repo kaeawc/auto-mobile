@@ -407,6 +407,10 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       if (!config.resolution) {
         args.push("-c", "copy");
         args.push("-movflags", "+faststart");
+        // Keep the iOS simulator fast stream-copy remux while honoring explicit duration caps.
+        if (config.maxDurationSeconds && config.maxDurationSeconds > 0) {
+          args.push("-t", String(config.maxDurationSeconds));
+        }
         args.push("-y");
         args.push(config.outputPath);
         return args;

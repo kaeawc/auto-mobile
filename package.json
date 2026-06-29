@@ -83,7 +83,7 @@
     "async-mutex": "^0.5.0",
     "jimp": "^1.6.0",
     "js-tiktoken": "^1.0.21",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^5.1.0",
     "kysely": "^0.29.0",
     "pixelmatch": "^7.1.0",
     "pngjs": "^7.0.0",

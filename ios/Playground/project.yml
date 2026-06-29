@@ -38,15 +38,34 @@ targets:
         CODE_SIGN_STYLE: Automatic
         GENERATE_INFOPLIST_FILE: NO
 
+  PlaygroundTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Playground
+      - package: AutoMobileSDK
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.jasonpearson.automobile.PlaygroundTests
+        CODE_SIGN_STYLE: Automatic
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_HOST: "$(BUILT_PRODUCTS_DIR)/Playground.app/Playground"
+        BUNDLE_LOADER: "$(TEST_HOST)"
+
 schemes:
   Playground:
     build:
       targets:
         Playground: all
+        PlaygroundTests: [test]
     run:
       config: Debug
     test:
       config: Debug
+      targets:
+        - PlaygroundTests
     profile:
       config: Release
     analyze:

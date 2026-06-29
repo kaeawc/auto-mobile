@@ -12,23 +12,37 @@
 		5339DAC5909A688059ABBA80 /* ContentView.swift in Sources */ = {isa = PBXBuildFile; fileRef = D01BCE22E951887741F32904 /* ContentView.swift */; };
 		54C16E199D10E281E1E316CF /* SettingsTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = 64FD18EC8D1B9A665615C374 /* SettingsTab.swift */; };
 		553F94B4D033BCA44B07AC4E /* PlaygroundApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */; };
+		72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 3137B15D8D485C363DB78A3E /* AutoMobileSDK */; };
 		97CA6F2DE628A139094EF72D /* Colors.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2B46870C2DDF4A2F73A5778B /* Colors.swift */; };
+		B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */; };
 		C437D38FD2B064F815AE6F33 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */; };
 		E46744897A309BECE20573D9 /* AutoMobileSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */; };
 		EA349DF37933D70B410F7135 /* DiscoverTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */; };
 /* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		BFE3470C534A49ECA416CB8A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = DF84942AD828BBDD499F04C0 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 739B1FD817D42F0264714A50;
+			remoteInfo = Playground;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
 		0C5B41C44C18F0045A6B61C2 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		25213AE8A9FD9A5B1EEFD97F /* DemosTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DemosTab.swift; sourceTree = "<group>"; };
 		2B46870C2DDF4A2F73A5778B /* Colors.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Colors.swift; sourceTree = "<group>"; };
 		64FD18EC8D1B9A665615C374 /* SettingsTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsTab.swift; sourceTree = "<group>"; };
+		8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SdkHighlightOverlayE2ETests.swift; sourceTree = "<group>"; };
 		AA0EB8290A6E5436B2C8CE6F /* auto-mobile-sdk */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "auto-mobile-sdk"; path = "../auto-mobile-sdk"; sourceTree = SOURCE_ROOT; };
 		BDA9169E926B14087F3B1BA2 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		C2F4747AC5700DF138836D5F /* Theme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
 		C6D8C10EFC976E6B3CCD16BD /* Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Debug.xcconfig; sourceTree = "<group>"; };
 		C6EA6F80147865B6F32DD526 /* PlaygroundApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlaygroundApp.swift; sourceTree = "<group>"; };
 		CAC67DC1CDDC454A7BB7870A /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder; name = Assets.xcassets; path = Sources/Assets.xcassets; sourceTree = SOURCE_ROOT; };
+		CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PlaygroundTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		D01BCE22E951887741F32904 /* ContentView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ContentView.swift; sourceTree = "<group>"; };
 		E40DD68F934F5F0D2981ACA1 /* Playground.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = Playground.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		FF86B8E1368C9B39424F13C0 /* DiscoverTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverTab.swift; sourceTree = "<group>"; };
@@ -43,6 +57,14 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		B64F0215A55F3C27A62337ED /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				72CDA6DB361FDC97490C3C2C /* AutoMobileSDK in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -50,6 +72,7 @@
 			isa = PBXGroup;
 			children = (
 				E40DD68F934F5F0D2981ACA1 /* Playground.app */,
+				CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -83,6 +106,14 @@
 			path = Sources;
 			sourceTree = "<group>";
 		};
+		B500CE1A6941BEA33903C091 /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				8A719AFBA1888450E8653AB6 /* SdkHighlightOverlayE2ETests.swift */,
+			);
+			path = Tests;
+			sourceTree = "<group>";
+		};
 		C8708B4984B178C033908015 /* Configurations */ = {
 			isa = PBXGroup;
 			children = (
@@ -99,6 +130,7 @@
 				C8708B4984B178C033908015 /* Configurations */,
 				75054112A41CDCE58ADACF92 /* Packages */,
 				AABC9BE64A1302199D5D2AF8 /* Sources */,
+				B500CE1A6941BEA33903C091 /* Tests */,
 				3F6B916872C30820F6241E84 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -116,6 +148,26 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
+		21356511771170ED7D28D6F3 /* PlaygroundTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AC8DEF66CB98E0F46E3C6FE7 /* Build configuration list for PBXNativeTarget "PlaygroundTests" */;
+			buildPhases = (
+				FA5EB2AAF4B2DDCF8C91A9B7 /* Sources */,
+				B64F0215A55F3C27A62337ED /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				EDB85CA665C60FA530302190 /* PBXTargetDependency */,
+			);
+			name = PlaygroundTests;
+			packageProductDependencies = (
+				3137B15D8D485C363DB78A3E /* AutoMobileSDK */,
+			);
+			productName = PlaygroundTests;
+			productReference = CBBA4475C2A7A68AE3987086 /* PlaygroundTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 		739B1FD817D42F0264714A50 /* Playground */ = {
 			isa = PBXNativeTarget;
 			buildConfigurationList = CBF67F902A381FB2989A98D4 /* Build configuration list for PBXNativeTarget "Playground" */;
@@ -145,6 +197,9 @@
 				BuildIndependentTargetsInParallel = YES;
 				LastUpgradeCheck = 1500;
 				TargetAttributes = {
+					21356511771170ED7D28D6F3 = {
+						ProvisioningStyle = Automatic;
+					};
 					739B1FD817D42F0264714A50 = {
 						ProvisioningStyle = Automatic;
 					};
@@ -168,6 +223,7 @@
 			projectRoot = "";
 			targets = (
 				739B1FD817D42F0264714A50 /* Playground */,
+				21356511771170ED7D28D6F3 /* PlaygroundTests */,
 			);
 		};
 /* End PBXProject section */
@@ -198,7 +254,23 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		FA5EB2AAF4B2DDCF8C91A9B7 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B3B613858665E331B7E7EB99 /* SdkHighlightOverlayE2ETests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		EDB85CA665C60FA530302190 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 739B1FD817D42F0264714A50 /* Playground */;
+			targetProxy = BFE3470C534A49ECA416CB8A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		18883859C44E4AE8042B204F /* Debug */ = {
@@ -256,6 +328,42 @@
 				SWIFT_VERSION = 5;
 			};
 			name = Debug;
+		};
+		3EB1B10D321959EDDD857750 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.PlaygroundTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Playground.app/Playground";
+			};
+			name = Debug;
+		};
+		4113A08B089F4F8DC88FAB10 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = dev.jasonpearson.automobile.PlaygroundTests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Playground.app/Playground";
+			};
+			name = Release;
 		};
 		4F8F737A22C49C70A327F32E /* Debug */ = {
 			isa = XCBuildConfiguration;
@@ -350,6 +458,15 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
+		AC8DEF66CB98E0F46E3C6FE7 /* Build configuration list for PBXNativeTarget "PlaygroundTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				3EB1B10D321959EDDD857750 /* Debug */,
+				4113A08B089F4F8DC88FAB10 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
 		C1581E14B552D0BE7FA2423D /* Build configuration list for PBXProject "Playground" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
@@ -378,6 +495,10 @@
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		3137B15D8D485C363DB78A3E /* AutoMobileSDK */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = AutoMobileSDK;
+		};
 		5B1F96DAE2D3DE50DD89C21C /* AutoMobileSDK */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = AutoMobileSDK;

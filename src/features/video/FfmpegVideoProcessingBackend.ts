@@ -405,6 +405,7 @@ export class FfmpegVideoProcessingBackend implements VideoCaptureBackend {
       args.push("-i", input.path);
 
       if (!config.resolution) {
+        // Stream-copy remux preserves the full capture duration; trimming behavior is tracked in #2627.
         args.push("-c", "copy");
         args.push("-movflags", "+faststart");
         args.push("-y");

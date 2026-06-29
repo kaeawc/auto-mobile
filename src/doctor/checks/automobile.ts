@@ -137,7 +137,7 @@ export async function checkCtrlProxy(
     // Reset cached instances to ensure fresh ADB reads for doctor diagnostics
     // (getInstance memoizes isInstalled/isEnabled for 30 minutes which can report stale state)
     AndroidCtrlProxyManager.resetInstances();
-    const serviceManager = AndroidCtrlProxyManager.getInstance(device);
+    const serviceManager = AndroidCtrlProxyManager.getInstance(device, adbFactory);
 
     const versionResult = await serviceManager.ensureCompatibleVersion();
     const isInstalled = await serviceManager.isInstalled();
@@ -172,12 +172,25 @@ export async function checkCtrlProxy(
       diagnostics.push("downloadUnavailable=offline");
     }
 
+    if (versionResult.acceptedPreinstalled) {
+      diagnostics.push("acceptedPreinstalled=true");
+    }
+
     if (downloadUnavailable) {
       return {
         name: "CtrlProxy",
         status: "warn",
         message: diagnostics.join("; "),
         recommendation: "Newer CtrlProxy APK unavailable while offline. Connect to the internet and re-run doctor."
+      };
+    }
+
+    if (versionResult.acceptedPreinstalled && isInstalled && isEnabled) {
+      return {
+        name: "CtrlProxy",
+        status: "warn",
+        message: diagnostics.join("; "),
+        recommendation: "CtrlProxy is installed and enabled, but its APK SHA differs from the expected release. Re-run doctor after the background APK refresh completes or update CtrlProxy from the latest release."
       };
     }
 

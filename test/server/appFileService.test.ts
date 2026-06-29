@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   type AppFileFileSystem,
@@ -338,7 +338,8 @@ describe("AppFileService", () => {
 
   test("resolves relative sourcePath from the daemon launch working directory", async () => {
     const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
-    process.env[DAEMON_LAUNCH_CWD_ENV] = "/launch/cwd";
+    const launchCwd = resolve("/launch/cwd");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
     try {
       const fileSystem = new TestAppFileFileSystem();
       const dataRoot = "/simulators/SIM-1/data";
@@ -352,7 +353,7 @@ describe("AppFileService", () => {
         fileSystem,
       });
       const sourceBytes = Buffer.from("from launch cwd");
-      await fileSystem.writeFileBuffer("/launch/cwd/fixtures/source.bin", sourceBytes);
+      await fileSystem.writeFileBuffer(join(launchCwd, "fixtures", "source.bin"), sourceBytes);
 
       const result = await service.putFile({
         device: iosSimulatorDevice,

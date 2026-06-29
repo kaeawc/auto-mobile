@@ -1552,6 +1552,22 @@ describe("IOSCtrlProxyClient", function() {
       expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBe(created);
     });
 
+    test("createDetached returns an unregistered client (not rediscoverable after close)", async function() {
+      IOSCtrlProxyClient.resetInstances();
+
+      const detached = IOSCtrlProxyClient.createDetached(testDevice);
+      try {
+        // The throwaway probe must never enter the singleton map, so a later probe
+        // can't rediscover a closed client and reconnect it (regression guard).
+        expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+        expect(detached).toBeInstanceOf(IOSCtrlProxyClient);
+      } finally {
+        await detached.close();
+      }
+
+      expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();
+    });
+
     test("returns null when the runner cannot be reached", async function() {
       const testTimer = fakeTimer;
       const testClient = IOSCtrlProxyClient.createForTesting(

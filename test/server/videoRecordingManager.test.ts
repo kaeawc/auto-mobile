@@ -11,6 +11,7 @@ import { VideoRecorderService } from "../../src/features/video";
 import type { BootedDevice } from "../../src/models";
 import {
   listVideoRecordings,
+  interruptVideoRecording,
   recordVideoRecordingHighlightAdded,
   resetVideoRecordingManagerDependencies,
   setVideoRecordingManagerDependencies,
@@ -23,6 +24,7 @@ describe("videoRecordingManager", () => {
   let fakeTimer: FakeTimer;
   let fakeBackend: FakeVideoCaptureBackend;
   let fakeHighlightClient: FakeHighlightClient;
+  let fakeRepository: FakeVideoRecordingRepository;
   let archiveRoot: string;
   let testDevice: BootedDevice;
 
@@ -35,6 +37,7 @@ describe("videoRecordingManager", () => {
     fakeBackend = new FakeVideoCaptureBackend();
     fakeBackend.setNowProvider(() => new Date(fakeTimer.now()));
     fakeHighlightClient = new FakeHighlightClient();
+    fakeRepository = new FakeVideoRecordingRepository();
     await fsPromises.rm(archiveRoot, { recursive: true, force: true });
     await fsPromises.mkdir(archiveRoot, { recursive: true });
 
@@ -46,7 +49,7 @@ describe("videoRecordingManager", () => {
 
     await setVideoRecordingManagerDependencies({
       videoRecorderService: service,
-      recordingRepository: new FakeVideoRecordingRepository(),
+      recordingRepository: fakeRepository,
       configRepository: new FakeVideoRecordingConfigRepository(),
       highlightClient: fakeHighlightClient,
       timer: fakeTimer,
@@ -116,6 +119,26 @@ describe("videoRecordingManager", () => {
 
     fakeTimer.advanceTime(3000);
     expect(fakeBackend.stopCalls.length).toBe(1);
+  });
+
+  test("interrupt marks active recording inactive without calling capture stop", async () => {
+    const active = await startVideoRecording({
+      device: testDevice,
+      maxDurationSeconds: 3,
+    });
+
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(1);
+
+    fakeTimer.advanceTime(1000);
+    await interruptVideoRecording(active.recordingId);
+
+    expect(fakeBackend.stopCalls.length).toBe(0);
+    expect(fakeTimer.getPendingTimeoutCount()).toBe(0);
+
+    const record = await fakeRepository.getRecording(active.recordingId);
+    expect(record?.status).toBe("interrupted");
+    expect(record?.endedAt).toBe(new Date(fakeTimer.now()).toISOString());
+    expect(record?.durationMs).toBe(1000);
   });
 
   test("records highlight timelines for scheduled highlights", async () => {

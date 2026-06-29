@@ -78,6 +78,7 @@ export class DevicePool {
   private lastReleasedDeviceId: string | null = null;
   private readonly mcpSessionAutolockMap: Map<string, string> = new Map();
   private readonly refreshMissingDeviceMisses: Map<string, number> = new Map();
+  private readonly suppressedAutoStartDeviceImageKeys: Set<string> = new Set();
   private daemonSessionId: string;
   private installedAppsRepository: InstalledAppsStore;
   private deviceManager: PlatformDeviceManager;
@@ -132,6 +133,7 @@ export class DevicePool {
 
     perf.startOperation("populatePool");
     for (const device of devices) {
+      this.clearAutoStartSuppressionForBootedDevice(device);
       this.devices.set(device.deviceId, {
         id: device.deviceId,
         name: device.name,
@@ -195,6 +197,7 @@ export class DevicePool {
       );
 
       for (const device of bootedDevices) {
+        this.clearAutoStartSuppressionForBootedDevice(device);
         const pooledDevice = this.devices.get(device.deviceId);
         if (!pooledDevice) {
           this.devices.set(device.deviceId, {
@@ -249,6 +252,7 @@ export class DevicePool {
    * Add a new device to the pool
    */
   async addDevice(device: BootedDevice): Promise<void> {
+    this.clearAutoStartSuppressionForBootedDevice(device);
     const existing = this.devices.get(device.deviceId);
     if (existing) {
       // A successful (re)boot of an errored, idle device clears its failure state so
@@ -308,6 +312,14 @@ export class DevicePool {
     }
     await this.clearDeviceSessionCache(deviceId);
     logger.info(`Removed device ${deviceId} from pool and cleared cached data`);
+  }
+
+  async removeDisconnectedDevice(deviceId: string): Promise<void> {
+    const device = this.devices.get(deviceId);
+    if (device && !device.sessionId) {
+      this.suppressAutoStartForDevice(device);
+    }
+    await this.removeDevice(deviceId);
   }
 
   private async removeDevicesMissingFrom(
@@ -760,6 +772,9 @@ export class DevicePool {
       if (excludedImageIds.has(this.criteriaMatcher.getDeviceImageKey(image))) {
         continue;
       }
+      if (this.suppressedAutoStartDeviceImageKeys.has(this.criteriaMatcher.getDeviceImageKey(image))) {
+        continue;
+      }
       if (image.deviceId && bootedIds.has(image.deviceId)) {
         continue;
       }
@@ -800,6 +815,16 @@ export class DevicePool {
     }
     this.lastUsedAtMarker = now;
     return now;
+  }
+
+  private suppressAutoStartForDevice(device: PooledDevice): void {
+    this.suppressedAutoStartDeviceImageKeys.add(device.id);
+    this.suppressedAutoStartDeviceImageKeys.add(`${device.platform}:${device.name}`);
+  }
+
+  private clearAutoStartSuppressionForBootedDevice(device: BootedDevice): void {
+    this.suppressedAutoStartDeviceImageKeys.delete(device.deviceId);
+    this.suppressedAutoStartDeviceImageKeys.delete(`${device.platform}:${device.name}`);
   }
 
   /**

@@ -88,6 +88,53 @@ describe("DevicePool autolock", () => {
     expect(session).toBeNull();
   });
 
+  it("does not auto-start a device image after that pool device disconnects", async () => {
+    const androidImage = {
+      name: "Medium_Phone_API_35",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local" as const,
+    };
+
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeDeviceUtils.setBootedDevices("android", []);
+    await pool.initializeWithDevices([
+      { name: "Medium_Phone_API_35", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    await pool.removeDisconnectedDevice("emulator-5554");
+
+    await expect(pool.assignMultipleDevices(["next-session"], 1000, "android")).rejects.toThrow(ActionableError);
+    expect(fakeDeviceUtils.getCallCount("startDevice")).toBe(0);
+  });
+
+  it("does not suppress auto-start when disconnected removal is blocked by assignment", async () => {
+    const androidImage = {
+      name: "Medium_Phone_API_35",
+      platform: "android" as const,
+      deviceId: "emulator-5554",
+      isRunning: false,
+      source: "local" as const,
+    };
+
+    fakeDeviceUtils.setDeviceImages("android", [androidImage]);
+    fakeDeviceUtils.setBootedDevices("android", []);
+    await pool.initializeWithDevices([
+      { name: "Medium_Phone_API_35", platform: "android", deviceId: "emulator-5554" },
+    ]);
+
+    await pool.assignDeviceToSession("active-session", "android");
+    await pool.removeDisconnectedDevice("emulator-5554");
+    await pool.releaseDevice("emulator-5554");
+    await pool.removeDevice("emulator-5554");
+
+    const assignments = await pool.assignMultipleDevices(["next-session"], 1000, "android");
+
+    expect(assignments.get("next-session")).toBe("emulator-5554");
+    expect(fakeDeviceUtils.getCallCount("startDevice")).toBe(1);
+  });
+
   it("createSession accepts custom timeout", async () => {
     const session = await sessionManager.createSession(
       "autolock-session",

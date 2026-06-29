@@ -19,10 +19,10 @@ const simulateErrorsSchema = z.object({
   errorType: z
     .enum(["http500", "timeout", "connectionRefused", "dnsFailure", "tlsFailure"])
     .optional()
-    .describe("Type of error to simulate. Default: http500"),
-  limit: z.number().int().positive().optional().describe("Max errors to inject. Omit for unlimited"),
-  durationSeconds: z.number().positive().optional().describe("How long to simulate errors. Required unless cancel is true"),
-  cancel: z.boolean().optional().describe("Set to true to cancel active simulation"),
+    .describe("Error type; default http500"),
+  limit: z.number().int().positive().optional().describe("Max errors"),
+  durationSeconds: z.number().positive().optional().describe("Simulation duration seconds"),
+  cancel: z.boolean().optional().describe("Cancel active simulation"),
 }).superRefine((value, ctx) => {
   if (value.cancel !== true && value.durationSeconds === undefined) {
     ctx.addIssue({
@@ -35,26 +35,26 @@ const simulateErrorsSchema = z.object({
 
 const networkSchema = addDeviceTargetingToSchema(
   z.object({
-    capture: z.boolean().optional().describe("Toggle network capture on/off"),
+    capture: z.boolean().optional().describe("Toggle capture"),
     simulateErrors: simulateErrorsSchema
       .optional()
-      .describe("Start error simulation, or set cancel:true to stop"),
+      .describe("Error simulation settings"),
     notifFilter: z
       .enum(["all", "errors", "slow"])
       .optional()
-      .describe("Filter which events trigger resource notifications"),
+      .describe("Notification filter"),
     notifDebounceMs: z
       .number()
       .int()
       .min(0)
       .optional()
-      .describe("Debounce interval for notifications in ms. Default: 100"),
+      .describe("Notification debounce ms"),
     slowThresholdMs: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe("Duration threshold in ms for 'slow' filter. Default: 2000"),
+      .describe("Slow threshold ms"),
   })
 );
 
@@ -66,20 +66,20 @@ const mockNetworkSchema = addDeviceTargetingToSchema(
   z.object({
     host: z.string().describe("Host pattern (regex)"),
     path: z.string().describe("Path pattern (regex)"),
-    method: z.string().optional().describe("HTTP method to match. Default: * (any)"),
+    method: z.string().optional().describe("HTTP method; default *"),
     limit: z
       .number()
       .int()
       .positive()
       .optional()
-      .describe("Number of times to serve mock before reverting. Omit for unlimited"),
-    statusCode: z.number().int().min(100).max(599).optional().describe("Response status code. Default: 200"),
+      .describe("Mock response limit"),
+    statusCode: z.number().int().min(100).max(599).optional().describe("Response status; default 200"),
     responseHeaders: z
       .record(z.string(), z.string())
       .optional()
       .describe("Response headers"),
     responseBody: z.string().optional().describe("Response body (max 10KB)"),
-    contentType: z.string().optional().describe("Content-Type header. Default: application/json"),
+    contentType: z.string().optional().describe("Content-Type; default application/json"),
   })
 );
 
@@ -89,7 +89,7 @@ type MockNetworkArgs = z.infer<typeof mockNetworkSchema>;
 
 const clearMockNetworkSchema = addDeviceTargetingToSchema(
   z.object({
-    mockId: z.string().optional().describe("ID of specific mock to clear. Omit to clear all"),
+    mockId: z.string().optional().describe("Mock ID; omit to clear all"),
   })
 );
 
@@ -103,14 +103,14 @@ const getNetworkGraphSchema = addDeviceTargetingToSchema(
       .number()
       .positive()
       .optional()
-      .describe("Only include traffic from the last N seconds"),
+      .describe("Lookback seconds"),
     method: z.string().optional().describe("Filter by HTTP method"),
     minRequests: z
       .number()
       .int()
       .min(1)
       .optional()
-      .describe("Exclude endpoints with fewer requests. Default: 1"),
+      .describe("Minimum request count"),
   })
 );
 
@@ -167,7 +167,7 @@ export function registerNetworkTools(): void {
   // --- network ---
   ToolRegistry.registerDeviceAware(
     "network",
-    "Control network capture, error simulation, and notification settings. Call with no args to read current state.",
+    "Control network capture and error simulation.",
     networkSchema,
     async (device, args: NetworkArgs) => {
       if (args.capture !== undefined) {
@@ -208,13 +208,16 @@ export function registerNetworkTools(): void {
       }
 
       return createJSONToolResponse(state.getSnapshot());
-    }
+    },
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 
   // --- mockNetwork ---
   ToolRegistry.registerDeviceAware(
     "mockNetwork",
-    "Add a mock response rule for matching Android or iOS SDK-integrated network requests. Requires --network-mockable flag.",
+    "Add mock network response rule.",
     mockNetworkSchema,
     async (device, args: MockNetworkArgs) => {
       if (!serverConfig.isNetworkMockableEnabled()) {
@@ -258,13 +261,16 @@ export function registerNetworkTools(): void {
         mockId: mock.mockId,
         mocked: state.getMockSummary(),
       });
-    }
+    },
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 
   // --- clearMockNetwork ---
   ToolRegistry.registerDeviceAware(
     "clearMockNetwork",
-    "Clear Android or iOS mock network response rules. Optionally target a specific mock by ID. Requires --network-mockable flag.",
+    "Clear mock network response rules.",
     clearMockNetworkSchema,
     async (device, args: ClearMockNetworkArgs) => {
       if (!serverConfig.isNetworkMockableEnabled()) {
@@ -294,13 +300,16 @@ export function registerNetworkTools(): void {
         cleared,
         remaining: state.getMockSummary(),
       });
-    }
+    },
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 
   // --- getNetworkGraph ---
   ToolRegistry.registerDeviceAware(
     "getNetworkGraph",
-    "Get an aggregate URL tree of captured network traffic with stats (success/error counts, p50/p95 latency).",
+    "Get aggregate captured network graph.",
     getNetworkGraphSchema,
     async (device, args: GetNetworkGraphArgs) => {
       const sinceTimestamp = args.sinceSeconds
@@ -319,6 +328,9 @@ export function registerNetworkTools(): void {
       });
 
       return createJSONToolResponse(graph);
-    }
+    },
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 }

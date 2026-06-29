@@ -35,11 +35,10 @@ const TYPE_GUIDANCE: Record<string, string> = {
 };
 
 const STORAGE_NAME_DESCRIPTION =
-  "Storage name: SharedPreferences file name (without .xml) on Android, " +
-  "UserDefaults suite name on iOS. Use 'Standard' for the default iOS suite.";
+  "Storage name";
 
 const legacyFileNameDescription =
-  "Deprecated alias for `name`. Accepted for backward compatibility.";
+  "Deprecated alias for name";
 
 function resolveStorageName(args: { name?: string; fileName?: string }): string {
   return args.name ?? args.fileName!;
@@ -48,25 +47,23 @@ function resolveStorageName(args: { name?: string; fileName?: string }): string 
 // Schema for setKeyValue tool
 const setKeyValueSchema = z.union([
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().optional().describe(legacyFileNameDescription),
-    key: z.string().describe("The key to set"),
-    value: z.string().nullable().describe("The value to set, serialized as a string (null to clear)"),
+    key: z.string().describe("Key"),
+    value: z.string().nullable().describe("Value string; null clears"),
     type: z.enum(KEY_VALUE_TYPES).describe(
-      "Value type. Android: STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET. " +
-      "iOS: STRING, INT, DOUBLE, BOOLEAN, DATA, DATE, ARRAY, DICTIONARY."
+      "Value type"
     ),
   })),
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().describe(legacyFileNameDescription),
-    key: z.string().describe("The key to set"),
-    value: z.string().nullable().describe("The value to set, serialized as a string (null to clear)"),
+    key: z.string().describe("Key"),
+    value: z.string().nullable().describe("Value string; null clears"),
     type: z.enum(KEY_VALUE_TYPES).describe(
-      "Value type. Android: STRING, INT, LONG, FLOAT, BOOLEAN, STRING_SET. " +
-      "iOS: STRING, INT, DOUBLE, BOOLEAN, DATA, DATE, ARRAY, DICTIONARY."
+      "Value type"
     ),
   })),
 ]);
@@ -74,28 +71,28 @@ const setKeyValueSchema = z.union([
 // Schema for removeKeyValue tool
 const removeKeyValueSchema = z.union([
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().optional().describe(legacyFileNameDescription),
-    key: z.string().describe("The key to remove"),
+    key: z.string().describe("Key"),
   })),
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().describe(legacyFileNameDescription),
-    key: z.string().describe("The key to remove"),
+    key: z.string().describe("Key"),
   })),
 ]);
 
 // Schema for clearKeyValueFile tool
 const clearKeyValueFileSchema = z.union([
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().optional().describe(legacyFileNameDescription),
   })),
   addDeviceTargetingToSchema(z.object({
-    appId: z.string().describe("App identifier (package name on Android, bundle ID on iOS)"),
+    appId: z.string(),
     name: z.string().optional().describe(STORAGE_NAME_DESCRIPTION),
     fileName: z.string().describe(legacyFileNameDescription),
   })),
@@ -270,25 +267,31 @@ export function registerStorageTools(): void {
 
   ToolRegistry.registerDeviceAware(
     "setKeyValue",
-    "Set a key-value entry in an app's storage (Android SharedPreferences or iOS UserDefaults). " +
-    "Requires the app to have AutoMobile SDK integrated with storage inspection enabled.",
+    "Set app key-value storage entry.",
     setKeyValueSchema,
-    setKeyValueHandler
+    setKeyValueHandler,
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 
   ToolRegistry.registerDeviceAware(
     "removeKeyValue",
-    "Remove a key-value entry from an app's storage (Android SharedPreferences or iOS UserDefaults). " +
-    "Requires the app to have AutoMobile SDK integrated with storage inspection enabled.",
+    "Remove app key-value storage entry.",
     removeKeyValueSchema,
-    removeKeyValueHandler
+    removeKeyValueHandler,
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 
   ToolRegistry.registerDeviceAware(
     "clearKeyValueFile",
-    "Clear all key-value entries from an app's storage file (Android SharedPreferences or iOS UserDefaults suite). " +
-    "Requires the app to have AutoMobile SDK integrated with storage inspection enabled.",
+    "Clear app key-value storage file.",
     clearKeyValueFileSchema,
-    clearKeyValueFileHandler
+    clearKeyValueFileHandler,
+    false,
+    false,
+    { embeddedSdkOnly: true }
   );
 }

@@ -364,7 +364,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         logger.info(`[PLAN_STEP_${i + 1}/${plan.steps.length}] Tool: ${step.tool}, Label: ${stepLabel}`);
 
         // Get the registered tool
-        const tool = ToolRegistry.getTool(step.tool);
+        const tool = ToolRegistry.getToolForPlan(step.tool);
         if (!tool) {
           logger.info(`Could not find tool: ${step.tool}`);
 
@@ -860,7 +860,7 @@ export class DefaultPlanExecutor implements PlanExecutor {
         );
 
         // Get the registered tool
-        const tool = ToolRegistry.getTool(step.tool);
+        const tool = ToolRegistry.getToolForPlan(step.tool);
         if (!tool) {
           logger.error(`[PARALLEL_EXEC][${device}] Unknown tool: ${step.tool}`);
           return {

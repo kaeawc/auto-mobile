@@ -6,32 +6,32 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 import { captureDeviceSnapshot, restoreDeviceSnapshot } from "./deviceSnapshotManager";
 
 const snapshotNameRequiredMessage = "snapshotName is required when action is restore";
-const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Name for the snapshot");
+const optionalSnapshotNameSchema = z.string().min(1).optional().describe("Snapshot name");
 
 const deviceSnapshotCommonShape = {
-  includeAppData: z.boolean().optional().describe("Include app data directories in snapshot"),
-  includeSettings: z.boolean().optional().describe("Include system settings in snapshot"),
-  useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot if available (faster, emulator only)"),
-  strictBackupMode: z.boolean().optional().describe("If true, fail entire snapshot if app data backup fails or times out"),
-  backupTimeoutMs: z.number().optional().describe("Timeout in milliseconds for adb backup user confirmation"),
+  includeAppData: z.boolean().optional().describe("Include app data"),
+  includeSettings: z.boolean().optional().describe("Include settings"),
+  useVmSnapshot: z.boolean().optional().describe("Use emulator VM snapshot"),
+  strictBackupMode: z.boolean().optional().describe("Fail if app data backup fails"),
+  backupTimeoutMs: z.number().optional().describe("adb backup confirmation timeout ms"),
   userApps: z.enum(["current", "all"]).optional()
-    .describe("Which apps to backup: 'current' (foreground app only) or 'all' (all user-installed apps)"),
-  vmSnapshotTimeoutMs: z.number().optional().describe("Timeout in milliseconds for emulator VM snapshot commands"),
+    .describe("Apps to back up: current or all"),
+  vmSnapshotTimeoutMs: z.number().optional().describe("VM snapshot timeout ms"),
   appBundleIds: z.array(z.string()).optional()
-    .describe("iOS-only: bundle IDs to include in app data snapshots (omit to skip app data capture)"),
+    .describe("iOS bundle IDs for app data snapshot"),
 };
 
 export const deviceSnapshotSchema = z.discriminatedUnion("action", [
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("capture").describe("Action to perform"),
+    action: z.literal("capture"),
     snapshotName: optionalSnapshotNameSchema,
     ...deviceSnapshotCommonShape,
   })),
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("restore").describe("Action to perform"),
+    action: z.literal("restore"),
     snapshotName: z.string({ error: snapshotNameRequiredMessage })
       .min(1, snapshotNameRequiredMessage)
-      .describe("Name for the snapshot"),
+      .describe("Snapshot name"),
     ...deviceSnapshotCommonShape,
   }))
 ]);
@@ -84,7 +84,7 @@ export function registerSnapshotTools() {
 
   ToolRegistry.registerDeviceAware(
     "deviceSnapshot",
-    "Capture or restore a device snapshot for the active device.",
+    "Capture or restore device snapshot.",
     deviceSnapshotSchema,
     deviceSnapshotHandler
   );

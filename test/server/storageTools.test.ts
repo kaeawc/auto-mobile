@@ -1,14 +1,17 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { registerStorageTools } from "../../src/server/storageTools";
 import { ToolRegistry } from "../../src/server/toolRegistry";
+import { serverConfig } from "../../src/utils/ServerConfig";
 
 describe("Storage Tools Registration", () => {
   beforeEach(() => {
     (ToolRegistry as any).tools.clear();
+    serverConfig.setEmbeddedSdkEnabled(true);
   });
 
   afterEach(() => {
     (ToolRegistry as any).tools.clear();
+    serverConfig.setEmbeddedSdkEnabled(false);
   });
 
   test("registers all three storage write tools", () => {

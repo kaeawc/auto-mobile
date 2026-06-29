@@ -120,8 +120,8 @@ export {
 // ============================================================================
 
 export const shakeSchema = addDeviceTargetingToSchema(z.object({
-  duration: z.number().optional().describe("Shake duration in ms (default: 1000). On iOS Simulator this contributes to the runner timeout budget."),
-  intensity: z.number().optional().describe("Shake acceleration intensity (default: 100). Ignored on iOS Simulator because XCTest shake has no intensity parameter."),
+  duration: z.number().optional().describe("Shake duration ms (default 1000)"),
+  intensity: z.number().optional().describe("Shake intensity (Android; default 100)"),
   platform: platformSchema
 }));
 
@@ -131,56 +131,47 @@ export const keyboardSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 const tapOnSelectorSchema = z.union([
-  z.object({ elementId: z.string().min(1).describe("Element resource-id (e.g. \"com.app:id/btn_login\"). Only use for resource-id values.") }).strict(),
-  z.object({ text: z.string().min(1).describe("Element text, content-desc, or placeholder value from observe output.") }).strict()
-]).describe("Element to tap. Provide exactly one of elementId or text.");
+  z.object({ elementId: z.string().min(1).describe("Resource ID, e.g. com.app:id/btn_login") }).strict(),
+  z.object({ text: z.string().min(1).describe("Text, content-desc, or placeholder") }).strict()
+]).describe("Element to tap: elementId or text");
 
 export const tapOnSchema = addDeviceTargetingToSchema(z.object({
   selector: tapOnSelectorSchema,
   sibling: z.boolean().optional().describe(
-    "When true, tap a clickable sibling of the matched element instead of the element itself. " +
-    "Useful for tapping checkboxes, icons, or buttons adjacent to a text label."
+    "Tap a clickable sibling of the match, e.g. checkbox beside label"
   ),
   container: elementContainerSchema.optional().describe(
-    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+    "Scope search to a container"
   ),
   action: z.enum(["tap", "doubleTap", "longPress", "focus"]).default("tap").describe("Action type (default: tap)"),
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
-    "Element selection strategy when multiple matches are found (default: first)"
+    "Selection strategy when multiple match (default: first)"
   ),
   duration: z.number().optional().describe("Long press duration (ms)"),
   searchUntil: z.object({
     duration: z.number().min(100).max(12000).optional().describe("Polling duration (ms, default: 500)"),
   }).optional().describe("Poll for element before tapping"),
   preTapStability: z.boolean().optional().describe(
-    "When true, refresh the accessibility hierarchy before tapping and require consecutive re-finds with " +
-    "stable bounds before dispatching the gesture. Prevents tapping stale coordinates when the UI is still " +
-    "settling (loading overlays, list refreshes, keyboard). Recommended for search result lists and dynamic content."
+    "Require stable bounds before tapping; use for dynamic UI"
   ),
   retryIfNoChange: z.boolean().optional().describe(
-    "When true, compare the view hierarchy before and after the tap. If unchanged (ghost tap detected), " +
-    "retry the tap once after a short delay. Recommended for taps that should cause obvious UI changes " +
-    "like navigation or screen transitions."
+    "Retry once if the view hierarchy is unchanged after tap"
   ),
   ensureTap: z.boolean().optional().describe(
-    "Convenience flag that enables both preTapStability and retryIfNoChange. " +
-    "Use on taps in dynamic UI where you want both stable bounds before tapping " +
-    "and ghost-tap detection after."
+    "Enable preTapStability and retryIfNoChange"
   ),
   platform: platformSchema
 }).strict());
 
 export const tapAnySchema = addDeviceTargetingToSchema(z.object({
   container: elementContainerSchema.optional().describe(
-    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+    "Scope search to a container"
   ),
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
     "Element selection strategy: 'first' (default) or 'random'"
   ),
   scrollableContainer: z.boolean().optional().describe(
-    "Only search within scrollable containers (lists/RecyclerViews). " +
-    "Use this to avoid tapping search bars or other clickable UI elements " +
-    "when you want the first list item."
+    "Search only scrollable containers/lists"
   ),
   action: z.enum(["tap", "doubleTap", "longPress"]).default("tap").describe("Action type (default: tap)"),
   duration: z.number().optional().describe("Long press duration (ms)"),
@@ -219,12 +210,12 @@ export const dragAndDropSchema = addDeviceTargetingToSchema(z.object({
 export const swipeOnSchema = addDeviceTargetingToSchema(z.object({
   includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
   container: elementContainerSchema.optional().describe(
-    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+    "Scope search to a container"
   ),
   autoTarget: z.boolean().optional().describe("Auto-target scrollable containers (default: true)"),
   direction: z.enum(["up", "down", "left", "right"]).describe("Swipe/scroll direction"),
   gestureType: z.enum(["swipeFingerTowardsDirection", "scrollTowardsDirection"]).optional()
-    .describe("swipeFingerTowardsDirection: finger moves in direction (e.g., 'up' = finger up = content scrolls down). scrollTowardsDirection: content moves in direction (e.g., 'up' = content up = see content below). Default: scrollTowardsDirection."),
+    .describe("Finger direction or content scroll direction; default: scrollTowardsDirection"),
   lookFor: swipeOnLookForSchema.optional().describe("Element to look for during swipe"),
   boomerang: z.boolean().optional().describe("Return to start position after swipe apex"),
   apexPause: z.number().min(0).max(3000).optional().describe("Pause duration at swipe apex in ms (0-3000)"),
@@ -242,7 +233,7 @@ export const pinchOnSchema = addDeviceTargetingToSchema(z.object({
   rotationDegrees: z.number().optional().describe("Rotation during pinch (degrees)"),
   includeSystemInsets: z.boolean().optional().describe("Use full screen including status/nav bars"),
   container: elementContainerSchema.optional().describe(
-    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+    "Scope search to a container"
   ),
   autoTarget: z.boolean().optional().describe("Auto-target pinchable containers"),
   platform: platformSchema
@@ -257,8 +248,7 @@ export const selectAllTextSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 export const pressButtonSchema = addDeviceTargetingToSchema(z.object({
-  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"])
-    .describe("Button to press"),
+  button: z.enum(["home", "back", "menu", "power", "volume_up", "volume_down", "recent"]),
   platform: platformSchema
 }));
 
@@ -271,7 +261,7 @@ const systemTrayNotificationSchema = z.object({
 
 const systemTraySchemaBase = z.object({
   action: z.enum(["open", "close", "find", "tap", "dismiss", "clearAll"]).describe(
-    "Action: open=expand tray, close=collapse tray/shade, find=search for notification, tap=tap notification, dismiss=swipe away, clearAll=dismiss all for app"
+    "open/close/find/tap/dismiss/clearAll notification"
   ),
   notification: systemTrayNotificationSchema.optional().describe("Notification criteria to match"),
   awaitTimeout: z.number().optional().describe("Timeout in ms to wait for notification (default: 5000)"),
@@ -309,24 +299,24 @@ export const systemTraySchema = addDeviceTargetingToSchema(systemTraySchemaBase)
 });
 
 export const stopAppSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID"),
+  appId: z.string(),
   platform: platformSchema
 }));
 
 export const clearStateSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID"),
+  appId: z.string(),
   clearKeychain: z.boolean().optional().describe("Clear iOS keychain"),
   platform: platformSchema
 }));
 
 export const inputTextSchema = addDeviceTargetingToSchema(z.object({
-  text: z.string().min(1).describe("Text to input"),
+  text: z.string().min(1),
   mode: z.enum(["a11y", "eventLast", "eventAll"]).optional()
-    .describe("(Android only; ignored on iOS) Text input mode. a11y (default) sets text directly. eventLast sets text with a11y up to the last printable non-whitespace ASCII character, sends that character as a real key event, then restores any suffix with a11y. eventAll clears the field with a11y, sends key events for mappable ASCII characters, and uses a11y for Unicode/emoji runs. Search fields that use autocomplete should probably try eventLast; otherwise accept the default."),
+    .describe("Android text mode: a11y default; eventLast helps autocomplete; eventAll sends key events"),
   imeAction: z.enum(["done", "next", "search", "send", "go", "previous"]).optional()
     .describe("IME action after input"),
   dismissKeyboard: z.boolean().optional()
-    .describe("(Android only) Dismiss soft keyboard after input (default: false). Ignored on iOS."),
+    .describe("Android: dismiss keyboard after input"),
   platform: platformSchema
 }));
 
@@ -349,7 +339,7 @@ export const homeScreenSchema = addDeviceTargetingToSchema(z.object({
 }));
 
 export const rotateSchema = addDeviceTargetingToSchema(z.object({
-  orientation: z.enum(["portrait", "landscape"]).describe("Orientation"),
+  orientation: z.enum(["portrait", "landscape"]),
   platform: platformSchema
 }));
 
@@ -361,24 +351,24 @@ const clipboardPlatformSchema = {
 
 export const clipboardSchema = z.discriminatedUnion("action", [
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("copy").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    action: z.literal("copy").describe("Clipboard action"),
     text: z.string({ error: clipboardTextRequiredMessage })
       .min(1, clipboardTextRequiredMessage)
       .describe("Text to copy (required for 'copy' action)"),
     ...clipboardPlatformSchema,
   })),
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("paste").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    action: z.literal("paste").describe("Clipboard action"),
     text: optionalClipboardTextSchema,
     ...clipboardPlatformSchema,
   })),
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("clear").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    action: z.literal("clear").describe("Clipboard action"),
     text: optionalClipboardTextSchema,
     ...clipboardPlatformSchema,
   })),
   addDeviceTargetingToSchema(z.object({
-    action: z.literal("get").describe("Clipboard action: copy=set clipboard, paste=paste into focused field, clear=clear clipboard, get=get clipboard content"),
+    action: z.literal("get").describe("Clipboard action"),
     text: optionalClipboardTextSchema,
     ...clipboardPlatformSchema,
   }))
@@ -993,10 +983,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "tapOn",
-    "Tap a specific UI element identified by text or resource-id.\n" +
-    "Provide a selector: { \"text\": \"Login\" } or { \"elementId\": \"com.app:id/btn\" }.\n" +
-    "Set sibling: true to tap a clickable sibling adjacent to the matched element (e.g., a checkbox next to a label).\n" +
-    "content-desc values from observe should be passed as text, not elementId.",
+    "Tap an element by text/content-desc or resource-id; use sibling for adjacent controls.",
     tapOnSchema,
     tapOnHandler,
     true,
@@ -1006,10 +993,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "tapAny",
-    "Tap any clickable element without knowing its text or ID. " +
-    "Good for tapping the first list item. Use container to scope, " +
-    "selectionStrategy to pick 'first' (default) or 'random', and " +
-    "scrollableContainer: true to limit to list/RecyclerView items.",
+    "Tap any clickable element; scope with container or scrollableContainer.",
     tapAnySchema,
     tapAnyHandler,
     true
@@ -1041,7 +1025,7 @@ export function registerInteractionTools() {
 
   ToolRegistry.registerDeviceAware(
     "shake",
-    "Shake device. iOS support is Simulator-only; physical iOS devices are not supported by XCTest.",
+    "Shake device; iOS Simulator only.",
     shakeSchema,
     shakeHandler,
     true // Supports progress notifications

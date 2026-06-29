@@ -313,6 +313,99 @@ describe("DaemonMcpProxy", () => {
       });
     });
 
+    describe("startup option mismatch handling", () => {
+      function runningStatus(options: { embeddedSdk?: boolean }) {
+        return {
+          running: true,
+          pid: 1234,
+          port: 3000,
+          socketPath: "/tmp/test.sock",
+          version: DAEMON_VERSION,
+          startedAt: ANCIENT_TIMESTAMP,
+          options,
+        };
+      }
+
+      test("restarts daemon when embedded SDK mode differs", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ embeddedSdk: false }),
+          runningStatus({ embeddedSdk: false }),
+          runningStatus({ embeddedSdk: true }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(true);
+          expect(fakeManager.restartOptions).toEqual({ embeddedSdk: true });
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("does not restart daemon when embedded SDK mode matches", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ embeddedSdk: true }),
+          runningStatus({ embeddedSdk: true }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await proxy.listTools();
+          expect(fakeManager.restartCalled).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+
+      test("throws on embedded SDK mode mismatch when auto-start is disabled", async () => {
+        const fakeClient = new FakeDaemonClient({
+          daemonMethodResults: new Map([["tools/list", { tools: [] }]]),
+        });
+        const fakeManager = new FakeDaemonManager();
+        fakeManager.statusResults = [
+          runningStatus({ embeddedSdk: false }),
+          runningStatus({ embeddedSdk: false }),
+        ];
+        const isAvailableSpy = spyOn(DaemonClient, "isAvailable").mockResolvedValue(true);
+        const proxy = new DaemonMcpProxy({
+          clientFactory: () => fakeClient,
+          daemonManager: fakeManager,
+          autoStartDaemon: false,
+          daemonOptions: { embeddedSdk: true },
+        });
+
+        try {
+          await expect(proxy.listTools()).rejects.toThrow("startup options differ");
+          expect(fakeManager.restartCalled).toBe(false);
+          expect(fakeClient.isConnected()).toBe(false);
+        } finally {
+          isAvailableSpy.mockRestore();
+          await proxy.close();
+        }
+      });
+    });
+
     test("throws error when auto-start is disabled and daemon not running", async () => {
       const fakeClient = new FakeDaemonClient();
       const fakeManager = new FakeDaemonManager();

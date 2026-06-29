@@ -12,19 +12,19 @@ export const accessibilityFocusSchema = addDeviceTargetingToSchema(
     action: z
       .enum(["set", "clear"])
       .optional()
-      .describe("Set (default) or clear the accessibility (TalkBack) focus cursor"),
+      .describe("set default or clear TalkBack focus"),
     resourceId: z
       .string()
       .optional()
-      .describe("Resource ID of the target element, e.g. com.example:id/title"),
+      .describe("Target resource ID"),
     text: z
       .string()
       .optional()
-      .describe("Text of the target element (resolved to a resource-id via the element finder)"),
+      .describe("Target text"),
     contentDesc: z
       .string()
       .optional()
-      .describe("Content description of the target element (resolved to a resource-id)")
+      .describe("Target content-desc")
   })
 );
 
@@ -66,14 +66,18 @@ export function registerAccessibilityFocusTools() {
     });
   };
 
+  // Debug-only pending audit: this explicit cursor setter is not a typical UI
+  // navigation/interaction tool because a human cannot directly command TalkBack
+  // to focus an arbitrary node. Re-evaluate whether it should be removed, kept as
+  // an internal debug primitive, or implemented through human-representative
+  // TalkBack navigation gestures instead.
   ToolRegistry.registerDeviceAware(
     "accessibilityFocus",
-    "Set or clear the Android TalkBack accessibility-focus cursor on a target element (Android only). " +
-      "Provide one selector: resourceId, text, or contentDesc. action defaults to 'set'; pass 'clear' to clear the cursor.",
+    "Set or clear Android TalkBack focus by resourceId, text, or contentDesc.",
     accessibilityFocusSchema,
     handler,
     false,
-    false,
+    true,
     { outputSchema: accessibilityFocusResultSchema }
   );
 }

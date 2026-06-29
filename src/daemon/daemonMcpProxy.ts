@@ -172,8 +172,10 @@ export class DaemonMcpProxy {
       logger.info("[DaemonMcpProxy] Daemon not available, starting daemon...");
       await this.startDaemon();
       await this.ensureVersionMatches();
+      await this.ensureStartupOptionsMatch();
     } else {
       await this.ensureVersionMatches();
+      await this.ensureStartupOptionsMatch();
     }
 
     // Create and connect client
@@ -274,6 +276,44 @@ export class DaemonMcpProxy {
       detail,
       retryAfterMs,
     });
+  }
+
+  private async ensureStartupOptionsMatch(): Promise<void> {
+    const status = await this.daemonManager.status();
+    if (!status.running) {
+      return;
+    }
+
+    const requestedEmbeddedSdk = this.config.daemonOptions?.embeddedSdk === true;
+    const runningEmbeddedSdk = status.options?.embeddedSdk === true;
+    if (requestedEmbeddedSdk === runningEmbeddedSdk) {
+      return;
+    }
+
+    if (!this.config.autoStartDaemon) {
+      throw new DaemonUnavailableError(
+        "Daemon startup options differ from MCP server options and auto-start is disabled"
+      );
+    }
+
+    logger.info(
+      `[DaemonMcpProxy] Daemon embeddedSdk=${runningEmbeddedSdk} differs from MCP server embeddedSdk=${requestedEmbeddedSdk}, restarting daemon`
+    );
+    await this.daemonManager.restart(this.config.daemonOptions ?? {});
+    const ready = await this.daemonManager.waitForReady(DAEMON_STARTUP_TIMEOUT_MS);
+    if (!ready) {
+      throw new DaemonUnavailableError(
+        `Daemon failed to restart within ${DAEMON_STARTUP_TIMEOUT_MS}ms`
+      );
+    }
+
+    const restartedStatus = await this.daemonManager.status();
+    const restartedEmbeddedSdk = restartedStatus.options?.embeddedSdk === true;
+    if (!restartedStatus.running || restartedEmbeddedSdk !== requestedEmbeddedSdk) {
+      throw new DaemonUnavailableError(
+        "Daemon restart completed but startup options still differ"
+      );
+    }
   }
 
   /**

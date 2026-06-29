@@ -25,24 +25,23 @@ const testMetadataSchema = z.object({
 // Execute plan tool schema
 const executePlanSchema = z.object({
   planContent: z.string().describe("YAML plan content"),
-  startStep: z.number().default(0).describe("Start step index (0-based, default: 0)"),
-  platform: z.enum(["android", "ios"]).describe("Target platform"),
-  sessionUuid: z.string().optional().describe("Session UUID for parallel execution"),
-  keepScreenAwake: z.boolean().optional().describe("Keep device awake"),
-  deviceId: z.string().optional().describe("Device ID"),
+  startStep: z.number().default(0).describe("Start step index"),
+  platform: z.enum(["android", "ios"]),
+  sessionUuid: z.string().optional().describe("Session"),
+  keepScreenAwake: z.boolean().optional(),
+  deviceId: z.string().optional(),
   device: z.string().optional().describe(DEVICE_LABEL_DESCRIPTION),
-  devices: z.array(z.string()).optional().describe("Device labels for multi-device plans"),
-  deviceAllocationTimeoutMs: z.number().default(300000).describe("Timeout in milliseconds for allocating all devices (default: 300000 = 5 minutes)"),
-  abortStrategy: z.enum(["immediate", "finish-current-step"]).default("immediate").describe("Abort strategy: immediate (default) or finish-current-step"),
-  testMetadata: testMetadataSchema.optional().describe("Test metadata for timing history"),
-  cleanupAppId: z.string().optional().describe("App ID to terminate after execution"),
-  cleanupClearAppData: z.boolean().optional().describe("Clear app data on cleanup"),
+  devices: z.array(z.string()).optional().describe("Device labels"),
+  deviceAllocationTimeoutMs: z.number().default(300000).describe("Allocation timeout ms"),
+  abortStrategy: z.enum(["immediate", "finish-current-step"]).default("immediate").describe("Abort strategy"),
+  testMetadata: testMetadataSchema.optional().describe("Test metadata"),
+  cleanupAppId: z.string().optional().describe("Cleanup app ID"),
+  cleanupClearAppData: z.boolean().optional().describe("Clear app data"),
   captureObserveSteps: z
     .enum(["summary", "full"])
     .optional()
     .describe(
-      "Single-device plans only: attach each successful observe step snapshot to executePlan result `debug.steps[n].details.stepObservation` " +
-        "(`summary` = metadata + element samples; `full` = includes viewHierarchy). Ignored for multi-device plans."
+      "Attach observe snapshots"
     )
 });
 
@@ -74,7 +73,7 @@ const executePlanResultSchema = z.object({
     failureObservation: z.any().optional()
   }).optional(),
   error: z.string().optional(),
-  platform: z.enum(["android", "ios"]).describe("Target platform").optional(),
+  platform: z.enum(["android", "ios"]).optional(),
   deviceId: z.string().optional(),
   deviceMapping: z.record(z.string(), z.string()).optional(),
   debug: executePlanDebugSchema.optional()
@@ -148,8 +147,8 @@ const startTestRecordingTool = async (device: BootedDevice): Promise<any> => {
 
 // Export plan tool schema
 const exportPlanSchema = z.object({
-  recordingId: z.string().optional().describe("Recording ID to export (uses active recording if not specified)"),
-  planName: z.string().optional().describe("Name for the exported plan (auto-generated if not specified)"),
+  recordingId: z.string().optional().describe("Recording ID"),
+  planName: z.string().optional().describe("Plan name"),
 });
 
 const exportPlanResultSchema = z.object({
@@ -213,8 +212,8 @@ const exportPlanTool = async (params: {
 // ============================================================================
 
 const recordStepsSchema = z.object({
-  action: z.enum(["begin", "end", "status"]).describe("begin: start capturing tool calls. end: stop and export the recorded plan as YAML. status: check if a recording session is active."),
-  planName: z.string().optional().describe("Name for the exported plan (kebab-case recommended, auto-generated if not specified). Only used with action 'end'."),
+  action: z.enum(["begin", "end", "status"]),
+  planName: z.string().optional().describe("Plan name for action=end"),
 });
 
 const recordStepsResultSchema = z.object({
@@ -292,7 +291,7 @@ const recordStepsTool = async (params: { action: "begin" | "end" | "status"; pla
 export const registerPlanTools = () => {
   ToolRegistry.registerDeviceAware(
     "executePlan",
-    "Execute a series of tool calls from a YAML plan content. Stops execution if any step fails (success: false). Optionally can resume execution from a specific step index.",
+    "Execute YAML plan steps; stops on first failed step.",
     executePlanSchema,
     executePlanTool,
     true,
@@ -302,7 +301,7 @@ export const registerPlanTools = () => {
 
   ToolRegistry.registerDeviceAware(
     "startTestRecording",
-    "Start test recording mode on the active device. Records user interactions for later export as a test plan. Returns the session ID which can be used with exportPlan.",
+    "Start recording user interactions for exportPlan.",
     startTestRecordingSchema,
     startTestRecordingTool,
     false,
@@ -312,7 +311,7 @@ export const registerPlanTools = () => {
 
   ToolRegistry.register(
     "exportPlan",
-    "Stop the active test recording and export recorded interactions as a YAML plan. Returns the plan content.",
+    "Stop active recording and export a YAML plan.",
     exportPlanSchema,
     exportPlanTool,
     false,
@@ -323,7 +322,7 @@ export const registerPlanTools = () => {
   // MCP call recording — begin/end gated by "mcp-recording" feature flag; status always available.
   ToolRegistry.register(
     "recordSteps",
-    "Record MCP tool calls as a replayable YAML test plan. Actions: 'begin' starts capturing plan-relevant tool calls, 'end' stops and exports the plan as YAML (both require the 'mcp-recording' feature flag), 'status' checks if a recording session is active (always available, even when the flag is off).",
+    "Record MCP tool calls to YAML. begin/end require mcp-recording; status always works.",
     recordStepsSchema,
     recordStepsTool,
     false,

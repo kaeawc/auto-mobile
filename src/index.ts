@@ -89,6 +89,7 @@ function parseArgs(log: ParseLogger): {
   daemonCommand?: string;
   daemonArgs: string[];
   skipCtrlProxyDownload: boolean;
+  embeddedSdk: boolean;
   dismissKeyboardAfterInput: boolean;
   mcpRecording: boolean;
   navigationScreenshots: boolean;
@@ -151,6 +152,7 @@ function parseArgs(log: ParseLogger): {
   const predictiveUi = args.includes("--predictive") || args.includes("--predictive-ui");
   const rawElementSearch = args.includes("--raw-element-search");
   const skipCtrlProxyDownload = args.includes("--skip-ctrl-proxy-download") || args.includes("--skip-accessibility-download");
+  const embeddedSdk = args.includes("--embedded-sdk");
   const networkMockable = args.includes("--network-mockable");
   const dismissKeyboardAfterInput = args.includes("--dismiss-keyboard-after-input");
   const mcpRecording = args.includes("--mcp-recording");
@@ -349,6 +351,7 @@ function parseArgs(log: ParseLogger): {
     daemonCommand,
     daemonArgs,
     skipCtrlProxyDownload,
+    embeddedSdk,
     networkMockable,
     dismissKeyboardAfterInput,
     mcpRecording,
@@ -427,6 +430,7 @@ async function main() {
       daemonCommand,
       daemonArgs,
       skipCtrlProxyDownload,
+      embeddedSdk,
       networkMockable,
       dismissKeyboardAfterInput,
       mcpRecording,
@@ -442,6 +446,7 @@ async function main() {
     serverConfig.setPlanExecutionLockScope(planExecutionLockScope);
     serverConfig.setVideoRecordingDefaults(videoRecordingDefaults);
     serverConfig.setSkipCtrlProxyDownload(skipCtrlProxyDownload);
+    serverConfig.setEmbeddedSdkEnabled(embeddedSdk);
     serverConfig.setNetworkMockableEnabled(networkMockable);
     serverConfig.setDismissKeyboardAfterInputEnabled(dismissKeyboardAfterInput);
     if (skipCtrlProxyDownload) {
@@ -505,6 +510,7 @@ async function main() {
     // grep-verifiable so a missing flag is visible without re-running.
     const silentDaemonFlags: Array<[boolean, string]> = [
       [!uiPerfMode, "UI perf mode disabled (--no-ui-perf-mode): skipping selection-state visual capture on taps and UI perf auditing"],
+      [embeddedSdk, "Embedded SDK tools enabled (--embedded-sdk)"],
       [dismissKeyboardAfterInput, "Dismiss keyboard after inputText enabled (--dismiss-keyboard-after-input)"],
       [noA11yIncludeNotImportantViews, "Accessibility includeNotImportantViews disabled (--no-include-not-important-views)"],
       [noA11yReportViewIds, "Accessibility reportViewIds disabled (--no-report-view-ids)"],
@@ -530,6 +536,7 @@ async function main() {
         videoFormat: videoRecordingDefaults.format,
         videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
         networkMockable,
+        embeddedSdk,
         dismissKeyboardAfterInput,
         noUiPerfMode: !uiPerfMode,
         memPerfAudit: memPerfAuditMode,
@@ -588,6 +595,7 @@ async function main() {
         videoFormat: videoRecordingDefaults.format,
         videoMaxArchiveSizeMb: videoRecordingDefaults.maxArchiveSizeMb,
         networkMockable,
+        embeddedSdk,
         dismissKeyboardAfterInput,
         noUiPerfMode: !uiPerfMode,
         memPerfAudit: memPerfAuditMode,

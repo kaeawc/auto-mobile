@@ -8,7 +8,7 @@ import { addDeviceTargetingToSchema } from "./toolSchemaHelpers";
 
 // Schema definitions for tool arguments
 export const getDeepLinksSchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().describe("App package ID"),
+  appId: z.string(),
 }));
 
 // Type definitions for better TypeScript support
@@ -45,7 +45,7 @@ export function registerDeepLinkTools() {
   // Register with the tool registry
   ToolRegistry.registerDeviceAware(
     "getDeepLinks",
-    "Query deep links for app",
+    "Query app deep links",
     getDeepLinksSchema,
     getDeepLinksHandler,
     false // Does not support progress notifications

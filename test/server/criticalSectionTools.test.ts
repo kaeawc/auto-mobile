@@ -23,7 +23,7 @@ describe("criticalSection tool", () => {
 
     expect(tool).toBeDefined();
     expect(tool?.name).toBe("criticalSection");
-    expect(tool?.description).toContain("Coordinate multiple devices");
+    expect(tool?.description).toContain("Synchronize multiple devices");
     expect(tool?.deviceAwareHandler).toBeDefined();
   });
 

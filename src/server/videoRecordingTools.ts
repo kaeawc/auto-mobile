@@ -43,8 +43,8 @@ export interface VideoRecordingArgs {
 }
 
 const resolutionSchema = z.object({
-  width: z.number().int().positive().describe("Override resolution width in pixels"),
-  height: z.number().int().positive().describe("Override resolution height in pixels"),
+  width: z.number().int().positive(),
+  height: z.number().int().positive(),
 });
 
 const highlightTimingSchema = z.object({
@@ -52,31 +52,31 @@ const highlightTimingSchema = z.object({
 });
 
 const highlightSchema = z.object({
-  description: z.string().optional().describe("Description of the highlight"),
-  shape: highlightShapeSchema.describe("Highlight shape definition"),
-  timing: highlightTimingSchema.optional().describe("Optional highlight timing"),
+  description: z.string().optional().describe("Highlight description"),
+  shape: highlightShapeSchema.describe("Highlight shape"),
+  timing: highlightTimingSchema.optional().describe("Highlight timing"),
 });
 
 const videoRecordingSchema = addDeviceTargetingToSchema(z.object({
-  action: z.enum(["start", "stop"]).describe("Action to perform"),
+  action: z.enum(["start", "stop"]),
   platform: platformSchema,
-  deviceId: z.string().optional().describe("Optional device ID override"),
-  recordingId: z.string().optional().describe("Recording ID to stop"),
-  qualityPreset: z.enum(["low", "medium", "high"]).optional().describe("Recording quality preset"),
-  targetBitrateKbps: z.number().int().positive().optional().describe("Target bitrate in Kbps"),
-  maxThroughputMbps: z.number().positive().optional().describe("Max throughput in Mbps"),
-  fps: z.number().int().positive().optional().describe("Frames per second"),
-  resolution: resolutionSchema.optional().describe("Override capture resolution"),
-  format: z.enum(["mp4"]).optional().describe("Video format"),
+  deviceId: z.string().optional(),
+  recordingId: z.string().optional().describe("Recording ID"),
+  qualityPreset: z.enum(["low", "medium", "high"]).optional(),
+  targetBitrateKbps: z.number().int().positive().optional().describe("Bitrate Kbps"),
+  maxThroughputMbps: z.number().positive().optional().describe("Max throughput Mbps"),
+  fps: z.number().int().positive().optional().describe("FPS"),
+  resolution: resolutionSchema.optional().describe("Resolution"),
+  format: z.enum(["mp4"]).optional(),
   maxDuration: z
     .number()
     .int()
     .positive()
     .max(300)
     .optional()
-    .describe("Max seconds to record video for (default 30, max 300)"),
-  outputName: z.string().optional().describe("Optional label to identify the recording"),
-  highlights: z.array(highlightSchema).optional().describe("Optional highlights to show during recording"),
+    .describe("Max duration seconds"),
+  outputName: z.string().optional().describe("Recording label"),
+  highlights: z.array(highlightSchema).optional().describe("Recording highlights"),
 }));
 
 function buildConfigOverrides(args: VideoRecordingArgs): VideoRecordingConfigInput {
@@ -319,7 +319,7 @@ export function registerVideoRecordingTools(): void {
 
   ToolRegistry.registerDeviceAware(
     "videoRecording",
-    "Start or stop a low-overhead video recording for the active device.",
+    "Start or stop device video recording.",
     videoRecordingSchema,
     videoRecordingHandler,
     false,

@@ -66,6 +66,8 @@ export interface DaemonStatus {
   startedAt?: number;
   /** Daemon version */
   version?: string;
+  /** Options used to start the daemon */
+  options?: DaemonOptions;
 }
 
 /**
@@ -84,6 +86,8 @@ export interface PidFileData {
   startedAt: number;
   /** Daemon version */
   version: string;
+  /** Options used to start the daemon */
+  options?: DaemonOptions;
 }
 
 /**
@@ -114,6 +118,8 @@ export interface DaemonOptions {
   videoMaxArchiveSizeMb?: number;
   /** Enable network mocking */
   networkMockable?: boolean;
+  /** Expose tools that require the target app to embed the AutoMobile SDK */
+  embeddedSdk?: boolean;
   /** Dismiss keyboard after text input (Android only) */
   dismissKeyboardAfterInput?: boolean;
   /** Disable UI performance mode */

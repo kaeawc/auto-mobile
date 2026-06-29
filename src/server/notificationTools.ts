@@ -21,9 +21,9 @@ const postNotificationCommonShape = {
   title: z.string().min(1).describe("Notification title"),
   body: z.string().min(1).describe("Notification body"),
   imageType: z.enum(["normal", "bigPicture"]).optional().describe("Notification image type (default: normal)"),
-  imagePath: z.string().optional().describe("Host image file path to push to /sdcard/Download/automobile when imageType is bigPicture"),
-  actions: z.array(actionSchema).optional().describe("Action buttons to include (Android only)"),
-  channelId: z.string().optional().describe("Notification channel ID (Android); reused as the APNs category on iOS"),
+  imagePath: z.string().optional().describe("Host image path for bigPicture"),
+  actions: z.array(actionSchema).optional().describe("Android action buttons"),
+  channelId: z.string().optional().describe("Android channel ID / iOS APNs category"),
 };
 
 export const postNotificationSchema = z.discriminatedUnion("platform", [
@@ -31,23 +31,23 @@ export const postNotificationSchema = z.discriminatedUnion("platform", [
     ...postNotificationCommonShape,
     appId: z.string({ error: iosAppIdRequiredMessage })
       .min(1, iosAppIdRequiredMessage)
-      .describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
-    platform: z.literal("ios").describe("Target platform")
+      .describe("iOS target bundle ID"),
+    platform: z.literal("ios")
   })),
   addDeviceTargetingToSchema(z.object({
     ...postNotificationCommonShape,
-    appId: z.string().min(1).optional().describe("iOS bundle identifier to target (required on iOS; maps to APNs 'Simulator Target Bundle'). Ignored on Android."),
-    platform: z.literal("android").describe("Target platform")
+    appId: z.string().min(1).optional().describe("iOS target bundle ID"),
+    platform: z.literal("android")
   }))
 ]);
 
 export const getNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().min(1).describe("App package ID or bundle identifier"),
+  appId: z.string().min(1),
 }));
 
 export const setNotificationPolicySchema = addDeviceTargetingToSchema(z.object({
-  appId: z.string().min(1).describe("App package ID or bundle identifier"),
-  policyAccess: z.boolean().describe("Android only: allow or revoke app notification policy / DND access"),
+  appId: z.string().min(1),
+  policyAccess: z.boolean().describe("Android: allow DND policy access"),
 }));
 
 export type GetNotificationPolicyArgs = z.infer<typeof getNotificationPolicySchema>;
@@ -109,22 +109,21 @@ export function registerNotificationTools() {
 
   ToolRegistry.registerDeviceAware(
     "postNotification",
-    "Post a notification: on Android, from the app-under-test when AutoMobile SDK hooks are installed; " +
-    "on the iOS Simulator, deliver a simulated remote push to the given bundle id via 'simctl push' (requires appId; physical iOS devices unsupported).",
+    "Post notification via Android SDK hooks or iOS Simulator simctl push.",
     postNotificationSchema,
     postNotificationHandler
   );
 
   ToolRegistry.registerDeviceAware(
     "getNotificationPolicy",
-    "Read app notification policy state, including Android Do Not Disturb policy access",
+    "Read app notification/DND policy state",
     getNotificationPolicySchema,
     getNotificationPolicyHandler
   );
 
   ToolRegistry.registerDeviceAware(
     "setNotificationPolicy",
-    "Set app notification policy state, including Android Do Not Disturb policy access",
+    "Set app notification/DND policy state",
     setNotificationPolicySchema,
     setNotificationPolicyHandler
   );

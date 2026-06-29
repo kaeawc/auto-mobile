@@ -5,6 +5,7 @@ import { ResourceRegistry } from "../../src/server/resourceRegistry";
 import { ToolRegistry } from "../../src/server/toolRegistry";
 import { IOSCtrlProxyClient } from "../../src/features/observe/ios";
 import { PlatformDeviceManagerFactory } from "../../src/utils/factories/PlatformDeviceManagerFactory";
+import { serverConfig } from "../../src/utils/ServerConfig";
 import type { BootedDevice } from "../../src/models";
 
 describe("iOS database inspection server integration", function() {
@@ -21,6 +22,7 @@ describe("iOS database inspection server integration", function() {
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
+    serverConfig.setEmbeddedSdkEnabled(true);
     originalGetInstance = IOSCtrlProxyClient.getInstance;
   });
 
@@ -30,6 +32,7 @@ describe("iOS database inspection server integration", function() {
     ResourceRegistry.clearResources();
     PlatformDeviceManagerFactory.reset();
     IOSCtrlProxyClient.resetInstances();
+    serverConfig.setEmbeddedSdkEnabled(false);
   });
 
   test("sqlQuery executes SELECT on iOS through CtrlProxy and keeps Android response shape", async function() {

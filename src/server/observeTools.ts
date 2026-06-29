@@ -24,7 +24,7 @@ import { serverConfig } from "../utils/ServerConfig";
 const waitForContainerField = elementContainerSchema
   .optional()
   .describe(
-    "Scope the match inside this container. Use when resource IDs repeat (e.g. id/name in a RecyclerView)."
+    "Scope match to a container"
   );
 
 const waitForSchema = z.union([
@@ -43,8 +43,8 @@ const waitForSchema = z.union([
 export const observeSchema = addDeviceTargetingToSchema(z.object({
   platform: platformSchema,
   waitFor: waitForSchema.optional().describe("Wait for element to appear before returning observation"),
-  raw: z.boolean().optional().describe("When true, include unprocessed view hierarchy in response alongside normal output (default: false)"),
-  skipBackStack: z.boolean().optional().describe("When true, skip back stack collection during waitFor polling to reduce ADB overhead (default: false)")
+  raw: z.boolean().optional().describe("Include raw view hierarchy"),
+  skipBackStack: z.boolean().optional().describe("Skip back stack during waitFor polling")
 }));
 
 export const identifyInteractionsSchema = addDeviceTargetingToSchema(z.object({

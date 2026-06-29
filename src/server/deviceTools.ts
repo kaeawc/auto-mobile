@@ -37,7 +37,7 @@ const startDeviceParametersSchema = z.object({
     width: z.number().describe("Screen width in pixels"),
     height: z.number().describe("Screen height in pixels"),
   }).optional().describe("Desired screen dimensions"),
-  deviceId: z.string().optional().describe("Specific device ID (bypasses matching)"),
+  deviceId: z.string().optional(),
   preferRunning: z.boolean().optional().describe("Prefer already-booted device (default true)"),
   timeoutMs: z.number().optional().describe("Boot timeout in ms"),
 });
@@ -64,7 +64,7 @@ export const startDeviceSchema = z.preprocess(input => {
 export const killDeviceSchema = z.object({
   device: z.object({
     name: z.string().describe("Device image name"),
-    deviceId: z.string().describe("Device ID"),
+    deviceId: z.string(),
     platform: platformSchema
   })
 });

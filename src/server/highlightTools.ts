@@ -38,20 +38,20 @@ const generateHighlightId = (timer: Timer = defaultTimer): string => {
 
 const highlightBaseSchema = z.object({
   platform: platformSchema,
-  deviceId: z.string().optional().describe("Optional device ID override"),
+  deviceId: z.string().optional(),
   timeoutMs: z.number().int().positive().optional().describe("Highlight request timeout ms (default: 5000)"),
   description: z.string().optional().describe("Optional description of the highlight"),
   shape: highlightShapeSchema.optional().describe("Optional highlight shape definition"),
   elementId: elementIdTextFieldsSchema.shape.elementId,
   text: elementIdTextFieldsSchema.shape.text,
   container: elementContainerSchema.optional().describe(
-    "Container selector object to scope search. Provide { \"elementId\": \"<id>\" } or { \"text\": \"<text>\" }."
+    "Scope search to a container"
   ),
   containerOf: z.boolean().optional().describe(
-    "Whether to highlight the container of the selected element"
+    "Highlight selected element's container"
   ),
   selectionStrategy: elementSelectionStrategySchema.optional().describe(
-    "Element selection strategy when multiple matches are found (default: first)"
+    "Selection strategy when multiple match (default: first)"
   )
 }).strict();
 
@@ -329,7 +329,7 @@ export function registerHighlightTools(dependencies: HighlightToolDependencies =
 
   ToolRegistry.registerDeviceAware(
     "highlight",
-    "Draw a visual highlight around a UI element on the device screen for debugging.",
+    "Draw a visual highlight around a UI element.",
     highlightSchema,
     highlightHandler,
     false,

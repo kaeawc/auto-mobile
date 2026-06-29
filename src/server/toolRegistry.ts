@@ -218,6 +218,8 @@ interface DeviceAwareToolOptions<T = any> {
   shouldEnsureDevice?: (args: T) => boolean;
   nonDeviceHandler?: ToolHandler<T>;
   outputSchema?: any;
+  embeddedSdkOnly?: boolean;
+  planExecutable?: boolean;
 }
 
 // Interface for a registered tool
@@ -230,6 +232,8 @@ export interface RegisteredTool {
   requiresDevice?: boolean;
   deviceAwareHandler?: DeviceAwareToolHandler;
   debugOnly?: boolean;
+  embeddedSdkOnly?: boolean;
+  planExecutable?: boolean;
   outputSchema?: any;
 }
 
@@ -249,7 +253,13 @@ class ToolRegistryClass {
   }
 
   private isToolAvailable(tool: RegisteredTool): boolean {
-    return !tool.debugOnly || isDebugModeEnabled();
+    if (tool.debugOnly && !isDebugModeEnabled()) {
+      return false;
+    }
+    if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
+      return false;
+    }
+    return true;
   }
 
   // Register a new tool
@@ -270,6 +280,7 @@ class ToolRegistryClass {
       supportsProgress,
       requiresDevice: false,
       debugOnly,
+      embeddedSdkOnly: false,
       outputSchema
     });
   }
@@ -649,6 +660,8 @@ class ToolRegistryClass {
       requiresDevice: true,
       deviceAwareHandler: handler,
       debugOnly,
+      embeddedSdkOnly: options.embeddedSdkOnly ?? false,
+      planExecutable: options.planExecutable ?? false,
       outputSchema: options.outputSchema
     });
   }
@@ -775,6 +788,22 @@ class ToolRegistryClass {
   getTool(name: string): RegisteredTool | undefined {
     const tool = this.tools.get(name);
     if (!tool || !this.isToolAvailable(tool)) {
+      return undefined;
+    }
+    return tool;
+  }
+
+  // Get a tool for internal plan execution. Some tools are intentionally hidden
+  // from MCP navigation surfaces but remain valid in recorded/replayed plans.
+  getToolForPlan(name: string): RegisteredTool | undefined {
+    const tool = this.tools.get(name);
+    if (!tool) {
+      return undefined;
+    }
+    if (tool.embeddedSdkOnly && !serverConfig.isEmbeddedSdkEnabled()) {
+      return undefined;
+    }
+    if (tool.debugOnly && !isDebugModeEnabled() && !tool.planExecutable) {
       return undefined;
     }
     return tool;

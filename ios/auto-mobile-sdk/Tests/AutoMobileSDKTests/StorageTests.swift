@@ -1,4 +1,5 @@
 @testable import AutoMobileSDK
+import SQLite3
 import XCTest
 
 final class UserDefaultsInspectorTests: XCTestCase {
@@ -208,6 +209,103 @@ final class SdkDatabaseRouteHandlerTests: XCTestCase {
     }
 }
 
+final class SQLiteDatabaseDriverConcurrencyTests: XCTestCase {
+    private var filesToDelete: [URL] = []
+
+    override func tearDown() {
+        for file in filesToDelete {
+            try? FileManager.default.removeItem(at: file)
+        }
+        filesToDelete.removeAll()
+        super.tearDown()
+    }
+
+    func testSerializesParallelReadsAndWritesThroughOneDriver() throws {
+        let databaseURL = try createDatabase()
+        let driver = SQLiteDatabaseDriver()
+        let queue = DispatchQueue(label: "sqlite-driver-concurrency", attributes: .concurrent)
+        let group = DispatchGroup()
+        let errors = LockedErrors()
+
+        for index in 0 ..< 80 {
+            group.enter()
+            queue.async {
+                defer { group.leave() }
+
+                if index % 4 == 0 {
+                    let result = driver.executeSQL(
+                        databasePath: databaseURL.path,
+                        query: "UPDATE items SET value = value + 1 WHERE id = 1"
+                    )
+                    if let error = result.error {
+                        errors.append(error)
+                    }
+                } else {
+                    let result = driver.getTableData(
+                        databasePath: databaseURL.path,
+                        table: "items",
+                        limit: 10,
+                        offset: 0
+                    )
+                    if result.columns != ["id", "value"] {
+                        errors.append("unexpected columns: \(result.columns)")
+                    }
+                    if result.totalRows != 1 {
+                        errors.append("unexpected total rows: \(result.totalRows)")
+                    }
+                }
+            }
+        }
+
+        XCTAssertEqual(group.wait(timeout: .now() + 10), .success)
+        let finalData = driver.getTableData(
+            databasePath: databaseURL.path,
+            table: "items",
+            limit: 10,
+            offset: 0
+        )
+        XCTAssertEqual(finalData.rows.first?[1], "20")
+
+        driver.closeAll()
+        XCTAssertTrue(errors.all.isEmpty, errors.all.joined(separator: "\n"))
+    }
+
+    private func createDatabase() throws -> URL {
+        let file = FileManager.default.temporaryDirectory
+            .appendingPathComponent("auto-mobile-\(UUID().uuidString).sqlite")
+        filesToDelete.append(file)
+
+        var db: OpaquePointer?
+        let openResult = sqlite3_open(file.path, &db)
+        XCTAssertEqual(openResult, SQLITE_OK)
+        guard openResult == SQLITE_OK, let db else {
+            throw NSError(domain: "SQLiteDatabaseDriverConcurrencyTests", code: 1)
+        }
+        defer { sqlite3_close(db) }
+
+        try executeSQL(db, "CREATE TABLE items (id INTEGER PRIMARY KEY, value INTEGER NOT NULL)")
+        try executeSQL(db, "INSERT INTO items (id, value) VALUES (1, 0)")
+
+        return file
+    }
+
+    private func executeSQL(_ db: OpaquePointer, _ sql: String) throws {
+        var errorMessage: UnsafeMutablePointer<CChar>?
+        let result = sqlite3_exec(db, sql, nil, nil, &errorMessage)
+        defer { sqlite3_free(errorMessage) }
+
+        XCTAssertEqual(result, SQLITE_OK)
+        guard result == SQLITE_OK else {
+            let message = errorMessage.map { String(cString: $0) } ?? "Unknown SQLite error"
+            throw NSError(
+                domain: "SQLiteDatabaseDriverConcurrencyTests",
+                code: Int(result),
+                userInfo: [NSLocalizedDescriptionKey: message]
+            )
+        }
+    }
+}
+
 private final class RouteFakeDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     var databases: [DatabaseDescriptor] = []
     var tablesByDatabase: [String: [String]] = [:]
@@ -242,5 +340,22 @@ private final class RouteFakeDatabaseDriver: DatabaseDriver, @unchecked Sendable
     func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
         executeSqlCalls.append((databasePath: databasePath, query: query))
         return sqlResult
+    }
+}
+
+private final class LockedErrors: @unchecked Sendable {
+    private let lock = NSLock()
+    private var messages: [String] = []
+
+    var all: [String] {
+        lock.lock()
+        defer { lock.unlock() }
+        return messages
+    }
+
+    func append(_ message: String) {
+        lock.lock()
+        defer { lock.unlock() }
+        messages.append(message)
     }
 }

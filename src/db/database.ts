@@ -92,6 +92,62 @@ let dbInstance: Kysely<DatabaseSchema> | null = null;
 let migrationsRun = false;
 let migrationsPromise: Promise<void> | null = null;
 
+async function waitForMigrationsBeforeQuery(): Promise<void> {
+  if (migrationsRun || !migrationsPromise) {
+    return;
+  }
+
+  await migrationsPromise;
+}
+
+function createSqliteKysely<T>(
+  dbPath: string,
+  beforeQuery?: () => Promise<void>
+): Kysely<T> {
+  const BunDatabaseConstructor = resolveBunDatabaseConstructor();
+  const sqliteDb = new BunDatabaseConstructor(dbPath);
+  configureSqliteDatabase(sqliteDb);
+
+  return new Kysely<T>({
+    dialect: new BunSqliteDialect({
+      database: sqliteDb,
+      beforeQuery,
+    }),
+  });
+}
+
+async function startMigrations(dbPath: string): Promise<void> {
+  const migrationDb = createSqliteKysely<unknown>(dbPath);
+
+  try {
+    await runMigrations(migrationDb);
+    migrationsRun = true;
+  } catch (error) {
+    logger.error("Failed to run migrations on database initialization:", error);
+    throw error;
+  } finally {
+    await migrationDb.destroy();
+  }
+}
+
+function ensureMigrationsStarted(dbPath: string): void {
+  if (!migrationsRun && !migrationsPromise) {
+    migrationsPromise = startMigrations(dbPath);
+  }
+}
+
+function ensureDatabaseDirectory(dbPath: string): void {
+  const dbDir = path.dirname(dbPath);
+
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+  }
+}
+
+function createApplicationDatabase(dbPath: string): Kysely<DatabaseSchema> {
+  return createSqliteKysely<DatabaseSchema>(dbPath, waitForMigrationsBeforeQuery);
+}
+
 /**
  * Get the singleton database instance.
  * Creates the database file and directory if they don't exist.
@@ -99,35 +155,10 @@ let migrationsPromise: Promise<void> | null = null;
 export function getDatabase(): Kysely<DatabaseSchema> {
   if (!dbInstance) {
     const dbPath = resolveDbPath();
-    const dbDir = path.dirname(dbPath);
+    ensureDatabaseDirectory(dbPath);
 
-    // Ensure directory exists
-    if (!fs.existsSync(dbDir)) {
-      fs.mkdirSync(dbDir, { recursive: true });
-    }
-
-    // Use Bun's built-in SQLite
-    const BunDatabaseConstructor = resolveBunDatabaseConstructor();
-    const sqliteDb = new BunDatabaseConstructor(dbPath);
-    configureSqliteDatabase(sqliteDb);
-
-    dbInstance = new Kysely<DatabaseSchema>({
-      dialect: new BunSqliteDialect({
-        database: sqliteDb,
-      }),
-    });
-
-    // Run migrations if not already run
-    if (!migrationsRun && !migrationsPromise) {
-      migrationsPromise = runMigrations(dbInstance as Kysely<unknown>)
-        .then(() => {
-          migrationsRun = true;
-        })
-        .catch(error => {
-          logger.error("Failed to run migrations on database initialization:", error);
-          throw error;
-        });
-    }
+    dbInstance = createApplicationDatabase(dbPath);
+    ensureMigrationsStarted(dbPath);
   }
 
   return dbInstance;
@@ -142,16 +173,7 @@ export async function ensureMigrations(): Promise<void> {
     getDatabase();
   }
 
-  if (!migrationsPromise) {
-    migrationsPromise = runMigrations(dbInstance as Kysely<unknown>)
-      .then(() => {
-        migrationsRun = true;
-      })
-      .catch(error => {
-        logger.error("Failed to run migrations on database initialization:", error);
-        throw error;
-      });
-  }
+  ensureMigrationsStarted(resolveDbPath());
 
   await migrationsPromise;
 }

@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import path from "path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 
 /**
@@ -69,5 +71,26 @@ describe("database path lazy resolution", () => {
     const second = databaseModule.getDatabasePath();
 
     expect(second).toBe(first);
+  });
+
+  test("queries issued immediately after getDatabase wait for startup migrations", async () => {
+    const dbDir = await mkdtemp(path.join(tmpdir(), "auto-mobile-db-startup-"));
+    process.env.AUTOMOBILE_DB_DIR = dbDir;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+    const db = databaseModule.getDatabase();
+
+    try {
+      const rows = await db
+        .selectFrom("tool_calls" as any)
+        .selectAll()
+        .execute();
+
+      expect(rows).toEqual([]);
+    } finally {
+      await databaseModule.closeDatabase();
+      await rm(dbDir, { recursive: true, force: true });
+    }
   });
 });

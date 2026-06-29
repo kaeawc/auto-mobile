@@ -10,6 +10,7 @@ import {
   SqliteAdapter,
   SqliteIntrospector,
   SqliteQueryCompiler,
+  TransactionSettings,
 } from "kysely";
 import { CompiledQuery } from "kysely";
 
@@ -43,6 +44,7 @@ export class BunSqliteDialect implements Dialect {
 
 interface BunSqliteDialectConfig {
   database: BunDatabase;
+  beforeQuery?: () => Promise<void>;
 }
 
 class BunSqliteDriver implements Driver {
@@ -54,7 +56,7 @@ class BunSqliteDriver implements Driver {
   }
 
   async init(): Promise<void> {
-    this.#connection = new BunSqliteConnection(this.#config.database);
+    this.#connection = new BunSqliteConnection(this.#config.database, this.#config.beforeQuery);
   }
 
   async acquireConnection(): Promise<DatabaseConnection> {
@@ -64,16 +66,16 @@ class BunSqliteDriver implements Driver {
     return this.#connection;
   }
 
-  async beginTransaction(): Promise<void> {
-    // No-op for Bun SQLite as it handles transactions internally
+  async beginTransaction(connection: DatabaseConnection, _settings: TransactionSettings): Promise<void> {
+    await connection.executeQuery(CompiledQuery.raw("begin"));
   }
 
-  async commitTransaction(): Promise<void> {
-    // No-op for Bun SQLite as it handles transactions internally
+  async commitTransaction(connection: DatabaseConnection): Promise<void> {
+    await connection.executeQuery(CompiledQuery.raw("commit"));
   }
 
-  async rollbackTransaction(): Promise<void> {
-    // No-op for Bun SQLite as it handles transactions internally
+  async rollbackTransaction(connection: DatabaseConnection): Promise<void> {
+    await connection.executeQuery(CompiledQuery.raw("rollback"));
   }
 
   async releaseConnection(): Promise<void> {
@@ -89,15 +91,19 @@ class BunSqliteDriver implements Driver {
 
 class BunSqliteConnection implements DatabaseConnection {
   readonly #db: BunDatabase;
+  readonly #beforeQuery?: () => Promise<void>;
 
-  constructor(db: BunDatabase) {
+  constructor(db: BunDatabase, beforeQuery?: () => Promise<void>) {
     this.#db = db;
+    this.#beforeQuery = beforeQuery;
   }
 
   async executeQuery<R>(compiledQuery: CompiledQuery): Promise<QueryResult<R>> {
     const { sql, parameters } = compiledQuery;
 
     try {
+      await this.#beforeQuery?.();
+
       // Prepare statement
       const stmt = this.#db.prepare(sql);
 

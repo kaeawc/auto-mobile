@@ -6,6 +6,7 @@ import SQLite3
 /// Uses the SQLite C API directly (available on all Apple platforms).
 public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     private let lock = NSLock()
+    private let operationLock = NSLock()
     private var openDatabases: [String: OpaquePointer] = [:]
 
     public init() {}
@@ -52,6 +53,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func getTables(databasePath: String) -> [String] {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
         guard let db = openDatabase(path: databasePath, readOnly: true) else { return [] }
 
         let query = "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name"
@@ -73,6 +77,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func getTableData(databasePath: String, table: String, limit: Int, offset: Int) -> TableDataResult {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
         guard let db = openDatabase(path: databasePath, readOnly: true) else {
             return TableDataResult(columns: [], rows: [], totalRows: 0)
         }
@@ -101,7 +108,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let columnCount = Int(sqlite3_column_count(dataStmt))
         var columns: [String] = []
-        for i in 0..<columnCount {
+        for i in 0 ..< columnCount {
             if let name = sqlite3_column_name(dataStmt, Int32(i)) {
                 columns.append(String(cString: name))
             }
@@ -110,7 +117,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         var rows: [[String?]] = []
         while sqlite3_step(dataStmt) == SQLITE_ROW {
             var row: [String?] = []
-            for i in 0..<columnCount {
+            for i in 0 ..< columnCount {
                 row.append(getColumnValue(stmt: dataStmt, index: Int32(i)))
             }
             rows.append(row)
@@ -120,6 +127,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func getTableStructure(databasePath: String, table: String) -> TableStructureResult {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
         guard let db = openDatabase(path: databasePath, readOnly: true) else {
             return TableStructureResult(columns: [])
         }
@@ -152,6 +162,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
     }
 
     public func executeSQL(databasePath: String, query: String) -> SQLExecutionResult {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
         let isRead = isReadQuery(trimmed)
         let readOnly = isRead
@@ -255,7 +268,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
         let columnCount = Int(sqlite3_column_count(stmt))
         var columns: [String] = []
-        for i in 0..<columnCount {
+        for i in 0 ..< columnCount {
             if let name = sqlite3_column_name(stmt, Int32(i)) {
                 columns.append(String(cString: name))
             }
@@ -264,7 +277,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
         var rows: [[String?]] = []
         while sqlite3_step(stmt) == SQLITE_ROW {
             var row: [String?] = []
-            for i in 0..<columnCount {
+            for i in 0 ..< columnCount {
                 row.append(getColumnValue(stmt: stmt, index: Int32(i)))
             }
             rows.append(row)
@@ -289,7 +302,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             // RETURNING clause produces rows — collect them like a query
             let columnCount = Int(sqlite3_column_count(stmt))
             var columns: [String] = []
-            for i in 0..<columnCount {
+            for i in 0 ..< columnCount {
                 if let name = sqlite3_column_name(stmt, Int32(i)) {
                     columns.append(String(cString: name))
                 }
@@ -298,7 +311,7 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
             // First row is already stepped
             repeat {
                 var row: [String?] = []
-                for i in 0..<columnCount {
+                for i in 0 ..< columnCount {
                     row.append(getColumnValue(stmt: stmt, index: Int32(i)))
                 }
                 rows.append(row)
@@ -348,6 +361,9 @@ public final class SQLiteDatabaseDriver: DatabaseDriver, @unchecked Sendable {
 
     /// Close all open database connections.
     public func closeAll() {
+        operationLock.lock()
+        defer { operationLock.unlock() }
+
         lock.lock()
         for (_, db) in openDatabases {
             sqlite3_close(db)

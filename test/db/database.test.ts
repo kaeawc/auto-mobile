@@ -3,6 +3,8 @@ import { Database as BunDatabase } from "bun:sqlite";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { Kysely } from "kysely";
+import { BunSqliteDialect } from "../../src/db/bunSqliteDialect";
 import {
   configureSqliteDatabase,
   SQLITE_BUSY_TIMEOUT_MS,
@@ -50,6 +52,61 @@ describe("configureSqliteDatabase", () => {
       expect(result?.timeout).toBe(5_000);
     } finally {
       sqliteDb.close();
+    }
+  });
+});
+
+describe("BunSqliteDialect transactions", () => {
+  test("rolls back all statements when a transaction throws", async () => {
+    const db = new Kysely<{ items: { id: number; name: string } }>({
+      dialect: new BunSqliteDialect({
+        database: new BunDatabase(":memory:"),
+      }),
+    });
+
+    try {
+      await db.schema
+        .createTable("items")
+        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("name", "text", col => col.notNull())
+        .execute();
+
+      await expect(
+        db.transaction().execute(async trx => {
+          await trx.insertInto("items").values({ id: 1, name: "rolled-back" }).execute();
+          throw new Error("force rollback");
+        })
+      ).rejects.toThrow("force rollback");
+
+      const rows = await db.selectFrom("items").selectAll().execute();
+      expect(rows).toEqual([]);
+    } finally {
+      await db.destroy();
+    }
+  });
+
+  test("commits all statements when a transaction completes", async () => {
+    const db = new Kysely<{ items: { id: number; name: string } }>({
+      dialect: new BunSqliteDialect({
+        database: new BunDatabase(":memory:"),
+      }),
+    });
+
+    try {
+      await db.schema
+        .createTable("items")
+        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("name", "text", col => col.notNull())
+        .execute();
+
+      await db.transaction().execute(async trx => {
+        await trx.insertInto("items").values({ id: 1, name: "committed" }).execute();
+      });
+
+      const rows = await db.selectFrom("items").selectAll().execute();
+      expect(rows).toEqual([{ id: 1, name: "committed" }]);
+    } finally {
+      await db.destroy();
     }
   });
 });

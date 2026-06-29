@@ -624,6 +624,7 @@ describe("CtrlProxyManager", function() {
 
       const result = await manager.ensureCompatibleVersion();
       expect(result.status).toBe("skipped");
+      expect(result.acceptedPreinstalled).toBeUndefined();
     });
 
     test("should reinstall when installed SHA cannot be determined", async function() {

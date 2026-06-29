@@ -116,4 +116,40 @@ describe("checkCtrlProxy", () => {
       (AndroidCtrlProxyManager as any).defaultFileDownloader = originalDefaultDownloader;
     }
   });
+
+  test("passes skip-env checks without reporting a stale CtrlProxy warning", async () => {
+    AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+    const originalSkipDownload = process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+    process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = "true";
+
+    try {
+      fakeAdb.setDevices([{
+        deviceId: "emulator-5554",
+        platform: "android",
+        isEmulator: true,
+        name: "Pixel"
+      }]);
+      fakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      fakeAdb.setCommandResponse("settings get secure", {
+        stdout: `${AndroidCtrlProxyManager.PACKAGE}/${AndroidCtrlProxyManager.PACKAGE}.CtrlProxy`,
+        stderr: ""
+      });
+
+      const result = await checkCtrlProxy(fakeFactory);
+
+      expect(result.status).toBe("pass");
+      expect(result.message).toContain("versionStatus=skipped");
+      expect(result.message).not.toContain("acceptedPreinstalled=true");
+      expect(result.recommendation).toBeUndefined();
+    } finally {
+      if (originalSkipDownload === undefined) {
+        delete process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED;
+      } else {
+        process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_DOWNLOAD_IF_INSTALLED = originalSkipDownload;
+      }
+    }
+  });
 });

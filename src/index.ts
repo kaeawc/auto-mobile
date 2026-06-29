@@ -1,8 +1,19 @@
 #!/usr/bin/env bun
 import { bootstrapEnvironment } from "./utils/envBootstrap";
+import { DAEMON_LAUNCH_CWD_ENV, safeProcessCwd } from "./utils/workingDirectory";
 
 // Run before any other imports that may resolve tool paths at module load time.
 bootstrapEnvironment();
+
+// Record the launch working directory before db/constants are imported. Those
+// modules resolve relative env-overridden paths (AUTOMOBILE_DB_DIR/DB_PATH and the
+// daemon socket/pid/lock paths) against AUTOMOBILE_DAEMON_LAUNCH_CWD. A directly
+// launched daemon (--daemon-mode, not spawned by DaemonManager) otherwise only sets
+// this inside Daemon.start(), which runs after it has chdir'd to a stable dir — too
+// late, so paths would resolve against the wrong cwd. db/constants are pulled in via
+// the dynamic import("./daemon/daemon") inside main(), so this body-level assignment
+// runs first. ??= preserves a value inherited from DaemonManager-spawned daemons.
+process.env[DAEMON_LAUNCH_CWD_ENV] ??= safeProcessCwd();
 
 import type { DaemonOptions } from "./daemon/types";
 import type { FeatureFlagKey } from "./features/featureFlags/FeatureFlagDefinitions";

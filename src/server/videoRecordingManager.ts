@@ -32,7 +32,7 @@ import { VisualHighlightClient } from "../features/debug/VisualHighlight";
 const DEFAULT_MAX_DURATION_SECONDS = 30;
 const MAX_DURATION_SECONDS = 300;
 // Android uses HighlightAnimator's total fade-in + display + fade-out duration.
-// iOS SDK/runner overlays auto-remove after their 3 second TTL.
+// iOS SDK overlays auto-remove after their 3 second TTL.
 const ANDROID_HIGHLIGHT_ANIMATION_DURATION_MS = 6000;
 const IOS_HIGHLIGHT_ANIMATION_DURATION_MS = 3000;
 

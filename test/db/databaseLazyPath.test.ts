@@ -42,13 +42,13 @@ describe("database path lazy resolution", () => {
   }
 
   async function removeTempDirWithRetry(dir: string): Promise<void> {
-    for (let attempt = 0; attempt < 10; attempt += 1) {
+    for (let attempt = 0; attempt < 100; attempt += 1) {
       try {
         await rm(dir, { recursive: true, force: true });
         return;
       } catch (error) {
         const code = (error as NodeJS.ErrnoException).code;
-        if (code !== "EBUSY" && code !== "EPERM") {
+        if (code !== "EBUSY" && code !== "EPERM" && code !== "ENOTEMPTY") {
           throw error;
         }
         await defaultTimer.sleep(50);

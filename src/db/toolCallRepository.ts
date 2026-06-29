@@ -7,6 +7,7 @@ interface ToolCallRecord {
   toolName: string;
   timestamp: string;
   sessionUuid?: string | null;
+  durationMs?: number | null;
 }
 
 export class ToolCallRepository {
@@ -30,6 +31,9 @@ export class ToolCallRepository {
         tool_name: record.toolName,
         timestamp: record.timestamp,
         session_uuid: record.sessionUuid ?? null,
+        duration_ms: record.durationMs === undefined || record.durationMs === null
+          ? null
+          : Math.max(0, Math.round(record.durationMs)),
       };
 
       await db.insertInto("tool_calls").values(entry).execute();

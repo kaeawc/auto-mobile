@@ -1394,9 +1394,29 @@ export class IOSCtrlProxyClient extends DeviceServiceClient implements IOSCtrlPr
    */
   public async getSupportedCommands(): Promise<string[] | null> {
     if (this.supportedCommands === null) {
-      await this.ensureConnected();
+      const connected = await this.ensureConnected();
+      // ensureConnected resolves on the WebSocket `open` event, but the runner's
+      // `supportedCommands` arrive a beat later in the `connected` handshake
+      // message. Without waiting for it, the first probe (e.g. doctor) of a
+      // healthy runner reads null and misreports it as `unknown`. Poll briefly
+      // for the handshake before reading.
+      if (connected) {
+        await this.waitForHandshake();
+      }
     }
     return this.getCachedSupportedCommands();
+  }
+
+  private static readonly HANDSHAKE_WAIT_TIMEOUT_MS = 2000;
+  private static readonly HANDSHAKE_POLL_INTERVAL_MS = 50;
+
+  private async waitForHandshake(
+    timeoutMs: number = IOSCtrlProxyClient.HANDSHAKE_WAIT_TIMEOUT_MS
+  ): Promise<void> {
+    const deadline = this.timer.now() + timeoutMs;
+    while (this.supportedCommands === null && this.timer.now() < deadline) {
+      await this.timer.sleep(IOSCtrlProxyClient.HANDSHAKE_POLL_INTERVAL_MS);
+    }
   }
 
   /**

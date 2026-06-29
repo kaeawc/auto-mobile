@@ -1512,6 +1512,38 @@ describe("IOSCtrlProxyClient", function() {
       }
     });
 
+    test("waits for the connected handshake that arrives after the socket opens", async function() {
+      const testTimer = fakeTimer;
+      const { factory, getSocket } = createCapturingWebSocketFactory(testTimer);
+      const testClient = IOSCtrlProxyClient.createForTesting(
+        testDevice,
+        serverPort,
+        factory,
+        testTimer
+      );
+
+      try {
+        // Probe before any handshake — the runner sends `connected` a beat after
+        // the WebSocket opens, simulating doctor being first to reach the runner.
+        const pending = testClient.getSupportedCommands();
+
+        const socket = await waitForSocket(getSocket);
+        await waitForSocketOpen(socket);
+        await flushPromises();
+
+        socket!.simulateMessage(JSON.stringify({
+          type: "connected",
+          id: 1,
+          supportedCommands: ["request_shake", "add_highlight"]
+        }));
+
+        const commands = await pending;
+        expect(commands).toEqual(["add_highlight", "request_shake"]);
+      } finally {
+        await testClient.close();
+      }
+    });
+
     test("getExistingInstance does not create a client when none exists", function() {
       IOSCtrlProxyClient.resetInstances();
       expect(IOSCtrlProxyClient.getExistingInstance(testDevice.deviceId)).toBeNull();

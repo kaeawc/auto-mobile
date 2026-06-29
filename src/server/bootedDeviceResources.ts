@@ -436,10 +436,11 @@ async function queryDeviceServiceStatus(device: BootedDeviceInfo): Promise<Devic
         }
       }
 
-      // Only claim compatibility we can verify. When the command set is known,
-      // a stale runner (incomplete features) is reported incompatible instead of
-      // the previous always-true reassurance; when unknown, fall back to running.
-      const isCompatible = supportedCommandsComplete === null ? running : supportedCommandsComplete;
+      // Only claim compatibility we can actually verify. isCompatible is true
+      // *only* when the runner's advertised command set is known complete; a stale
+      // runner (incomplete) or an unknown one (no cached handshake yet) is reported
+      // not-compatible rather than the previous always-true reassurance.
+      const isCompatible = supportedCommandsComplete === true;
 
       return {
         installed,

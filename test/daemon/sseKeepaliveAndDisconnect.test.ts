@@ -250,7 +250,7 @@ describe("disconnect monitor miss counting", () => {
     expect(misses.get("device-1")).toBe(1);
   });
 
-  test("settles a disconnected stale candidate after threshold", () => {
+  test("keeps returning a threshold-missed stale candidate until caller settles cleanup", () => {
     const misses = new Map<string, number>();
     const confirmedDisconnectedDeviceIds = new Set<string>();
     const input = {
@@ -267,8 +267,13 @@ describe("disconnect monitor miss counting", () => {
     expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
     expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
     expect(evaluateDeviceDisconnects(input).disconnected).toEqual(["device-1"]);
-    expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(true);
-    expect(misses.has("device-1")).toBe(false);
+    expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);
+    expect(misses.get("device-1")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
+
+    expect(evaluateDeviceDisconnects(input).disconnected).toEqual(["device-1"]);
+    expect(misses.get("device-1")).toBe(DEVICE_DISCONNECT_MISS_THRESHOLD);
+
+    confirmedDisconnectedDeviceIds.add("device-1");
 
     expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
     expect(misses.has("device-1")).toBe(false);

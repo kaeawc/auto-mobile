@@ -878,11 +878,14 @@ export class Daemon {
         }
 
         for (const [deviceId, recordingIds] of missingByDevice.entries()) {
+          let deviceCleanupSucceeded = true;
+
           // Stop performance monitoring for this device
           getPerformanceMonitor().stopMonitoring(deviceId);
 
           for (const recordingId of recordingIds) {
             if (this.stoppingRecordings.has(recordingId)) {
+              deviceCleanupSucceeded = false;
               continue;
             }
             this.stoppingRecordings.add(recordingId);
@@ -901,6 +904,7 @@ export class Daemon {
                   `[Daemon] Marked recording ${recordingId} interrupted after device ${deviceId} disconnected`
                 );
               } catch (interruptError) {
+                deviceCleanupSucceeded = false;
                 logger.warn(
                   `[Daemon] Failed to mark recording ${recordingId} interrupted after device ${deviceId} disconnected: ${interruptError}`
                 );
@@ -921,7 +925,13 @@ export class Daemon {
           }
 
           await this.devicePool.removeDisconnectedDevice(deviceId);
-          this.deviceDisconnectMisses.delete(deviceId);
+          if (this.devicePool.getDevice(deviceId)) {
+            deviceCleanupSucceeded = false;
+          }
+          if (deviceCleanupSucceeded) {
+            this.confirmedDisconnectedDeviceIds.add(deviceId);
+            this.deviceDisconnectMisses.delete(deviceId);
+          }
         }
       } catch (error) {
         logger.warn(`[Daemon] Device disconnect monitor failed: ${error}`);

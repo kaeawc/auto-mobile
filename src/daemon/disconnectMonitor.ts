@@ -49,13 +49,14 @@ export function evaluateDeviceDisconnects(
       continue;
     }
 
-    const misses = (input.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
+    const misses = Math.min(
+      (input.deviceDisconnectMisses.get(deviceId) ?? 0) + 1,
+      input.missThreshold
+    );
     input.deviceDisconnectMisses.set(deviceId, misses);
     missed.push({ deviceId, misses });
     if (misses >= input.missThreshold) {
       disconnected.push(deviceId);
-      input.confirmedDisconnectedDeviceIds.add(deviceId);
-      input.deviceDisconnectMisses.delete(deviceId);
     }
   }
 

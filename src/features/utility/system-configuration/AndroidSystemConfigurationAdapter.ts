@@ -1,5 +1,4 @@
 import type { AdbExecutor } from "../../../utils/android-cmdline-tools/interfaces/AdbExecutor";
-import { readAndroidDeviceApiLevel } from "../../../utils/android-cmdline-tools/readAndroidDeviceApiLevel";
 import { logger } from "../../../utils/logger";
 import { AndroidCtrlProxyClient } from "../../observe/android/AndroidCtrlProxyClient";
 import type { SettingsNamespace } from "../../observe/android";
@@ -27,11 +26,6 @@ import {
 
 type TextDirectionSettingKey = "debug.force_rtl" | "force_rtl";
 
-type CommandAttempt = {
-  method: string;
-  command: string;
-};
-
 /**
  * Android implementation of {@link SystemConfigurationAdapter}. Uses
  * ADB shell commands (with an accessibility-service fast path for
@@ -49,45 +43,27 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
   async setLocale(languageTag: string, options: BroadcastOptions): Promise<SetLocaleResult> {
     const previousLanguageTag = await this.getCurrentLocaleTag();
-    const apiLevel = await readAndroidDeviceApiLevel(this.adb);
 
-    const commandAttempts: CommandAttempt[] = [];
-    const cmdLocaleAttempt = {
-      method: "cmd locale set-locales",
-      command: `shell cmd locale set-locales ${languageTag}`
-    };
-    const settingsAttempt = {
-      method: "settings put system user_locale",
-      command: `shell settings put system user_locale ${languageTag}`
-    };
-
-    if (apiLevel === null || apiLevel >= 31) {
-      commandAttempts.push(cmdLocaleAttempt, settingsAttempt);
-    } else {
-      commandAttempts.push(settingsAttempt, cmdLocaleAttempt);
-    }
-
-    let appliedMethod: string | null = null;
-    let lastError: string | null = null;
-
-    for (const attempt of commandAttempts) {
-      try {
-        await this.runShellCommand(attempt.command);
-        appliedMethod = attempt.method;
-        break;
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : String(error);
-        lastError = errorMessage;
-        logger.warn(`[SystemConfigurationManager] Failed locale command (${attempt.method}): ${errorMessage}`);
-      }
-    }
-
-    if (!appliedMethod) {
+    try {
+      await this.runShellCommand(`shell setprop persist.sys.locale ${quoteShellArg(languageTag)}`);
+      await this.runShellCommand("shell stop; start");
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
       return {
         success: false,
         languageTag,
         previousLanguageTag,
-        error: `Failed to set locale${lastError ? `: ${lastError}` : ""}`
+        error: `Failed to set locale: ${errorMessage}`
+      };
+    }
+
+    const effectiveLanguageTag = await this.getEffectiveLocaleTag();
+    if (!this.localeTagsMatch(effectiveLanguageTag, languageTag)) {
+      return {
+        success: false,
+        languageTag,
+        previousLanguageTag,
+        error: `Read-back verification failed: expected "${languageTag}" but got "${effectiveLanguageTag ?? "null"}"`
       };
     }
 
@@ -99,7 +75,7 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       success: true,
       languageTag,
       previousLanguageTag,
-      method: appliedMethod,
+      method: "setprop persist.sys.locale + stop/start",
       broadcasted
     };
   }
@@ -351,9 +327,9 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
       return parsedSystemLocale;
     }
 
-    const userLocale = await this.readSetting("shell settings get system user_locale");
-    if (userLocale) {
-      return userLocale;
+    const effectiveLocale = await this.getEffectiveLocaleTag();
+    if (effectiveLocale) {
+      return effectiveLocale;
     }
 
     const persistedLocale = await this.readSetting("shell getprop persist.sys.locale");
@@ -373,4 +349,45 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
 
     return language;
   }
+
+  private async getEffectiveLocaleTag(): Promise<string | null> {
+    try {
+      const result = await this.adb.executeCommand("shell am get-config", undefined, undefined, true);
+      return this.parseLocaleFromAmConfig(result.stdout);
+    } catch (error) {
+      logger.warn(`[SystemConfigurationManager] Failed to read effective Android locale: ${error}`);
+      return null;
+    }
+  }
+
+  private parseLocaleFromAmConfig(output: string): string | null {
+    const normalized = normalizeSettingValue(output);
+    if (!normalized) {
+      return null;
+    }
+
+    const bcp47Match = normalized.match(/(?:^|[-\s])b\+([a-z]{2,3})(?:\+([A-Za-z]{4}))?(?:\+([A-Z]{2}|\d{3}))?(?=[-\s]|$)/);
+    if (bcp47Match?.[1]) {
+      return [bcp47Match[1], bcp47Match[2], bcp47Match[3]].filter(Boolean).join("-");
+    }
+
+    const languageRegionMatch = normalized.match(/(?:^|[-\s])([a-z]{2,3})-r([A-Z]{2})(?=[-\s]|$)/);
+    if (languageRegionMatch?.[1] && languageRegionMatch[2]) {
+      return `${languageRegionMatch[1]}-${languageRegionMatch[2]}`;
+    }
+
+    const languageOnlyMatch = normalized.match(/(?:^|[-\s])([a-z]{2,3})(?=[-\s]|$)/);
+    return languageOnlyMatch?.[1] ?? null;
+  }
+
+  private localeTagsMatch(actual: string | null, expected: string): boolean {
+    if (!actual) {
+      return false;
+    }
+    return actual.replace(/_/g, "-").toLowerCase() === expected.replace(/_/g, "-").toLowerCase();
+  }
+}
+
+function quoteShellArg(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
 }

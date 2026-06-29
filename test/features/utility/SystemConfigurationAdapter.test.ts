@@ -170,6 +170,45 @@ describe("SystemConfigurationAdapter", () => {
   }
 
   describe("AndroidSystemConfigurationAdapter behavior", () => {
+    it("sets system locale with setprop, restarts Android, and verifies am get-config", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell settings get system system_locales", "en-US");
+      adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-ja-rJP-sw411dp\n");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", { broadcast: false });
+
+      expect(result.success).toBe(true);
+      expect(result.method).toBe("setprop persist.sys.locale + stop/start");
+      expect(result.previousLanguageTag).toBe("en-US");
+      expect(adb.wasCommandExecuted("setprop persist.sys.locale 'ja-JP'")).toBe(true);
+      expect(adb.wasCommandExecuted("stop; start")).toBe(true);
+      expect(adb.wasCommandExecuted("cmd locale set-locales ja-JP")).toBe(false);
+      expect(adb.wasCommandExecuted("settings put system user_locale ja-JP")).toBe(false);
+    });
+
+    it("returns false when Android locale verification reads the old effective locale", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell settings get system system_locales", "en-US");
+      adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-en-rUS-sw411dp\n");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setLocale("ja-JP", {});
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Read-back verification failed: expected "ja-JP" but got "en-US"');
+      expect(adb.wasCommandExecuted("am broadcast")).toBe(false);
+    });
+
+    it("ignores no-op user_locale when reading Android localization settings", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell settings get system user_locale", "fr-FR");
+      adb.setCommandResult("shell am get-config", "config: mcc310-mnc260-en-rUS-sw411dp\n");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.getLocalizationSettings();
+
+      expect(result.locale).toBe("en-US");
+      expect(adb.wasCommandExecuted("settings get system user_locale")).toBe(false);
+    });
+
     it("broadcasts the LOCALE_CHANGED intent via ADB", async () => {
       const adb = new FakeAdbClient();
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);

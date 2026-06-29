@@ -92,6 +92,14 @@ let dbInstance: Kysely<DatabaseSchema> | null = null;
 let migrationsRun = false;
 let migrationsPromise: Promise<void> | null = null;
 
+const DATABASE_STARTUP_MIGRATION_FAILURE =
+  "Database startup migrations failed; refusing to run queries until the daemon restarts.";
+
+function createStartupMigrationError(cause: unknown): Error {
+  const causeMessage = cause instanceof Error ? cause.message : String(cause);
+  return new Error(`${DATABASE_STARTUP_MIGRATION_FAILURE} Cause: ${causeMessage}`, { cause });
+}
+
 async function waitForMigrationsBeforeQuery(): Promise<void> {
   if (migrationsRun || !migrationsPromise) {
     return;
@@ -132,7 +140,9 @@ async function startMigrations(dbPath: string): Promise<void> {
 
 function ensureMigrationsStarted(dbPath: string): void {
   if (!migrationsRun && !migrationsPromise) {
-    migrationsPromise = startMigrations(dbPath);
+    migrationsPromise = startMigrations(dbPath).catch(error => {
+      throw createStartupMigrationError(error);
+    });
   }
 }
 

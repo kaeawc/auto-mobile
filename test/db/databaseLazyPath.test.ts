@@ -18,6 +18,8 @@ import { defaultTimer } from "../../src/utils/SystemTimer";
 describe("database path lazy resolution", () => {
   const originalLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
   const originalDbDir = process.env.AUTOMOBILE_DB_DIR;
+  const originalMigrationsDir = process.env.AUTOMOBILE_MIGRATIONS_DIR;
+  const originalLegacyMigrationsDir = process.env.AUTO_MOBILE_MIGRATIONS_DIR;
 
   function restore(key: string, value: string | undefined): void {
     if (value === undefined) {
@@ -30,6 +32,8 @@ describe("database path lazy resolution", () => {
   afterEach(() => {
     restore(DAEMON_LAUNCH_CWD_ENV, originalLaunchCwd);
     restore("AUTOMOBILE_DB_DIR", originalDbDir);
+    restore("AUTOMOBILE_MIGRATIONS_DIR", originalMigrationsDir);
+    restore("AUTO_MOBILE_MIGRATIONS_DIR", originalLegacyMigrationsDir);
   });
 
   async function importFreshDatabaseModule() {
@@ -106,6 +110,34 @@ describe("database path lazy resolution", () => {
         .execute();
 
       expect(rows).toEqual([]);
+    } finally {
+      await databaseModule.closeDatabase();
+      await removeTempDirWithRetry(dbDir);
+    }
+  });
+
+  test("queries fail clearly and consistently when startup migrations fail", async () => {
+    const dbDir = await mkdtemp(path.join(tmpdir(), "auto-mobile-db-startup-fail-"));
+    process.env.AUTOMOBILE_DB_DIR = dbDir;
+    process.env.AUTOMOBILE_MIGRATIONS_DIR = path.join(dbDir, "missing-migrations");
+    delete process.env.AUTO_MOBILE_MIGRATIONS_DIR;
+    delete process.env[DAEMON_LAUNCH_CWD_ENV];
+
+    const databaseModule = await importFreshDatabaseModule();
+    const db = databaseModule.getDatabase();
+    const query = () =>
+      db
+        .selectFrom("tool_calls" as any)
+        .selectAll()
+        .execute();
+
+    try {
+      await expect(query()).rejects.toThrow(
+        "Database startup migrations failed; refusing to run queries until the daemon restarts."
+      );
+      await expect(query()).rejects.toThrow(
+        "Database startup migrations failed; refusing to run queries until the daemon restarts."
+      );
     } finally {
       await databaseModule.closeDatabase();
       await removeTempDirWithRetry(dbDir);

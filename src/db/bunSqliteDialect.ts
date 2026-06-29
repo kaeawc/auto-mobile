@@ -104,6 +104,7 @@ class BunSqliteConnectionState {
   readonly #db: BunDatabase;
   readonly #beforeQuery?: () => Promise<void>;
   #transactionOwner: symbol | null = null;
+  #pendingTransactions = 0;
   #activeQueries = 0;
   #waiters: Array<() => void> = [];
 
@@ -113,7 +114,13 @@ class BunSqliteConnectionState {
   }
 
   async beginTransaction(owner: symbol): Promise<void> {
-    await this.#reserveTransaction(owner);
+    this.#pendingTransactions += 1;
+    try {
+      await this.#reserveTransaction(owner);
+    } finally {
+      this.#pendingTransactions -= 1;
+      this.#notifyWaiters();
+    }
 
     try {
       await this.executeQuery(CompiledQuery.raw("begin"), owner);
@@ -193,7 +200,10 @@ class BunSqliteConnectionState {
   }
 
   async #enterQuery(owner: symbol): Promise<void> {
-    while (this.#transactionOwner !== null && this.#transactionOwner !== owner) {
+    while (
+      (this.#transactionOwner !== null && this.#transactionOwner !== owner) ||
+      (this.#transactionOwner === null && this.#pendingTransactions > 0)
+    ) {
       await this.#waitForStateChange();
     }
     this.#activeQueries += 1;

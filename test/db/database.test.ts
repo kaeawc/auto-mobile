@@ -160,4 +160,76 @@ describe("BunSqliteDialect transactions", () => {
       await db.destroy();
     }
   });
+
+  test("prioritizes a pending transaction before later non-transaction queries", async () => {
+    const heldQueryStarted = createDeferred();
+    const releaseHeldQuery = createDeferred();
+    const transactionStarted = createDeferred();
+    const releaseTransaction = createDeferred();
+    let holdNextQuery = false;
+
+    const db = new Kysely<{ items: { id: number; name: string } }>({
+      dialect: new BunSqliteDialect({
+        database: new BunDatabase(":memory:"),
+        beforeQuery: async () => {
+          if (!holdNextQuery) {
+            return;
+          }
+
+          holdNextQuery = false;
+          heldQueryStarted.resolve();
+          await releaseHeldQuery.promise;
+        },
+      }),
+    });
+
+    try {
+      await db.schema
+        .createTable("items")
+        .addColumn("id", "integer", col => col.primaryKey())
+        .addColumn("name", "text", col => col.notNull())
+        .execute();
+
+      holdNextQuery = true;
+      const heldRead = db.selectFrom("items").selectAll().execute();
+      await heldQueryStarted.promise;
+
+      const transaction = db.transaction().execute(async trx => {
+        await trx.insertInto("items").values({ id: 1, name: "transaction" }).execute();
+        transactionStarted.resolve();
+        await releaseTransaction.promise;
+      });
+
+      await Promise.resolve();
+
+      let outsideInsertFinished = false;
+      const outsideInsert = db
+        .insertInto("items")
+        .values({ id: 2, name: "outside" })
+        .execute()
+        .then(() => {
+          outsideInsertFinished = true;
+        });
+
+      await Promise.resolve();
+      expect(outsideInsertFinished).toBe(false);
+
+      releaseHeldQuery.resolve();
+      await heldRead;
+      await transactionStarted.promise;
+      expect(outsideInsertFinished).toBe(false);
+
+      releaseTransaction.resolve();
+      await transaction;
+      await outsideInsert;
+
+      const rows = await db.selectFrom("items").selectAll().orderBy("id").execute();
+      expect(rows).toEqual([
+        { id: 1, name: "transaction" },
+        { id: 2, name: "outside" },
+      ]);
+    } finally {
+      await db.destroy();
+    }
+  });
 });

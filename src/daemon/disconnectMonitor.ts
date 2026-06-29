@@ -1,0 +1,63 @@
+import type { Platform } from "../models";
+
+export interface DisconnectMonitorEvaluation {
+  disconnected: string[];
+  missed: Array<{ deviceId: string; misses: number }>;
+  skippedAdbUnreachable: boolean;
+}
+
+export interface DisconnectMonitorEvaluationInput {
+  deviceDisconnectMisses: Map<string, number>;
+  confirmedDisconnectedDeviceIds: Set<string>;
+  bootedDeviceIds: Set<string>;
+  candidateDeviceIds: Set<string>;
+  succeededPlatforms: Set<Platform>;
+  candidatePlatforms: Map<string, Platform>;
+  idleCandidateIds: Set<string>;
+  missThreshold: number;
+}
+
+export function evaluateDeviceDisconnects(
+  input: DisconnectMonitorEvaluationInput
+): DisconnectMonitorEvaluation {
+  const disconnected: string[] = [];
+  const missed: Array<{ deviceId: string; misses: number }> = [];
+
+  if (input.bootedDeviceIds.size === 0 && input.candidateDeviceIds.size > 0) {
+    return { disconnected, missed, skippedAdbUnreachable: true };
+  }
+
+  for (const deviceId of input.candidateDeviceIds) {
+    if (input.bootedDeviceIds.has(deviceId)) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      input.confirmedDisconnectedDeviceIds.delete(deviceId);
+      continue;
+    }
+
+    if (input.confirmedDisconnectedDeviceIds.has(deviceId)) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      continue;
+    }
+
+    const platform = input.candidatePlatforms.get(deviceId);
+    if (
+      platform &&
+      input.idleCandidateIds.has(deviceId) &&
+      !input.succeededPlatforms.has(platform)
+    ) {
+      input.deviceDisconnectMisses.delete(deviceId);
+      continue;
+    }
+
+    const misses = (input.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
+    input.deviceDisconnectMisses.set(deviceId, misses);
+    missed.push({ deviceId, misses });
+    if (misses >= input.missThreshold) {
+      disconnected.push(deviceId);
+      input.confirmedDisconnectedDeviceIds.add(deviceId);
+      input.deviceDisconnectMisses.delete(deviceId);
+    }
+  }
+
+  return { disconnected, missed, skippedAdbUnreachable: false };
+}

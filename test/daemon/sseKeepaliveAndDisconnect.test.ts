@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { evaluateDeviceDisconnects } from "../../src/daemon/disconnectMonitor";
 import { FakeTimer } from "../fakes/FakeTimer";
 
 
@@ -136,36 +137,16 @@ describe("disconnect monitor miss counting", () => {
     candidatePlatforms: Map<string, string> = new Map(),
     idleCandidateIds: Set<string> = new Set(),
   ): { disconnected: string[]; skippedAdbUnreachable: boolean } => {
-    const disconnected: string[] = [];
-
-    if (bootedDeviceIds.size === 0 && candidateDeviceIds.size > 0) {
-      return { disconnected, skippedAdbUnreachable: true };
-    }
-
-    for (const deviceId of candidateDeviceIds) {
-      if (bootedDeviceIds.has(deviceId)) {
-        deviceDisconnectMisses.delete(deviceId);
-        continue;
-      }
-      const platform = candidatePlatforms.get(deviceId);
-      // Idle devices on platforms whose discovery did not succeed this poll are
-      // skipped — a partial/failed discovery cannot confirm they disconnected.
-      if (
-        platform &&
-        idleCandidateIds.has(deviceId) &&
-        !succeededPlatforms.has(platform)
-      ) {
-        deviceDisconnectMisses.delete(deviceId);
-        continue;
-      }
-      const misses = (deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
-      deviceDisconnectMisses.set(deviceId, misses);
-      if (misses >= DEVICE_DISCONNECT_MISS_THRESHOLD) {
-        disconnected.push(deviceId);
-      }
-    }
-
-    return { disconnected, skippedAdbUnreachable: false };
+    return evaluateDeviceDisconnects({
+      deviceDisconnectMisses,
+      confirmedDisconnectedDeviceIds: new Set(),
+      bootedDeviceIds,
+      candidateDeviceIds,
+      succeededPlatforms: succeededPlatforms as Set<"android" | "ios">,
+      candidatePlatforms: candidatePlatforms as Map<string, "android" | "ios">,
+      idleCandidateIds,
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
   };
 
   test("resets miss count when device appears in booted list", () => {
@@ -267,6 +248,48 @@ describe("disconnect monitor miss counting", () => {
 
     runDisconnectPoll(misses, new Set(["other"]), new Set(["device-1"]));
     expect(misses.get("device-1")).toBe(1);
+  });
+
+  test("settles a disconnected stale candidate after threshold", () => {
+    const misses = new Map<string, number>();
+    const confirmedDisconnectedDeviceIds = new Set<string>();
+    const input = {
+      deviceDisconnectMisses: misses,
+      confirmedDisconnectedDeviceIds,
+      bootedDeviceIds: new Set(["other"]),
+      candidateDeviceIds: new Set(["device-1"]),
+      succeededPlatforms: new Set(["android" as const, "ios" as const]),
+      candidatePlatforms: new Map([["device-1", "android" as const]]),
+      idleCandidateIds: new Set<string>(),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    };
+
+    expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
+    expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
+    expect(evaluateDeviceDisconnects(input).disconnected).toEqual(["device-1"]);
+    expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(true);
+    expect(misses.has("device-1")).toBe(false);
+
+    expect(evaluateDeviceDisconnects(input).disconnected).toEqual([]);
+    expect(misses.has("device-1")).toBe(false);
+  });
+
+  test("clears settled disconnect state when the device reappears", () => {
+    const confirmedDisconnectedDeviceIds = new Set(["device-1"]);
+    const misses = new Map<string, number>();
+
+    evaluateDeviceDisconnects({
+      deviceDisconnectMisses: misses,
+      confirmedDisconnectedDeviceIds,
+      bootedDeviceIds: new Set(["device-1"]),
+      candidateDeviceIds: new Set(["device-1"]),
+      succeededPlatforms: new Set(["android" as const]),
+      candidatePlatforms: new Map([["device-1", "android" as const]]),
+      idleCandidateIds: new Set<string>(),
+      missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+    });
+
+    expect(confirmedDisconnectedDeviceIds.has("device-1")).toBe(false);
   });
 
   test("fires at poll interval using FakeTimer", () => {

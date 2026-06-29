@@ -50,8 +50,9 @@ import { DeviceSessionRepository } from "../db/deviceSessionRepository";
 import { DeviceSessionManager } from "../utils/DeviceSessionManager";
 import { startAppearanceSyncScheduler, stopAppearanceSyncScheduler } from "../utils/appearance/AppearanceSyncScheduler";
 import { startPerformanceMonitor, stopPerformanceMonitor, getPerformanceMonitor } from "../features/performance/PerformanceMonitor";
-import { listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
+import { interruptVideoRecording, listActiveVideoRecordings, stopVideoRecording } from "../server/videoRecordingManager";
 import { Timer, defaultTimer } from "../utils/SystemTimer";
+import { evaluateDeviceDisconnects } from "./disconnectMonitor";
 import { describeUnknownError } from "../utils/describeUnknownError";
 import { FeatureFlagService } from "../features/featureFlags/FeatureFlagService";
 import { serverConfig } from "../utils/ServerConfig";
@@ -93,6 +94,7 @@ export class Daemon {
   private deviceDisconnectTimer: NodeJS.Timeout | null = null;
   private pidFileWritten = false;
   private deviceDisconnectMisses: Map<string, number> = new Map();
+  private confirmedDisconnectedDeviceIds: Set<string> = new Set();
   private stoppingRecordings: Set<string> = new Set();
   private sessionManager: SessionManager;
   private devicePool: DevicePool;
@@ -824,52 +826,48 @@ export class Daemon {
 
         const missingByDevice = new Map<string, string[]>();
         const candidateDeviceIds = new Set<string>();
+        const candidatePlatforms = new Map<string, "android" | "ios">();
+        const idleCandidateIds = new Set<string>();
         for (const recording of activeRecordings) {
           candidateDeviceIds.add(recording.deviceId);
+          candidatePlatforms.set(recording.deviceId, recording.platform);
         }
         for (const device of this.devicePool.getAllDevices()) {
-          // Skip idle devices on platforms whose discovery failed or was
-          // unavailable this poll — a partial discovery cannot confirm they
-          // disconnected, so counting misses would risk dropping a healthy
-          // idle device.
-          if (device.status === "idle" && !succeededPlatforms.has(device.platform)) {
-            logger.warn(
-              `[DisconnectMonitor] Skipping idle ${device.platform} device ${device.id}: ` +
-              `${device.platform} discovery did not succeed this poll`
-            );
-            this.deviceDisconnectMisses.delete(device.id);
-            continue;
-          }
           candidateDeviceIds.add(device.id);
+          candidatePlatforms.set(device.id, device.platform);
+          if (device.status === "idle") {
+            idleCandidateIds.add(device.id);
+          }
         }
         for (const deviceId of this.sessionManager.getAssignedDevices()) {
           candidateDeviceIds.add(deviceId);
         }
 
-        // When getBootedDevices returns empty but we have tracked devices, ADB
-        // itself likely failed (timeout, connection error). Counting misses in
-        // this state causes false disconnect detections on remote emulators
-        // where ADB can be intermittently slow.
-        if (bootedDeviceIds.size === 0 && candidateDeviceIds.size > 0) {
+        const disconnectResult = evaluateDeviceDisconnects({
+          deviceDisconnectMisses: this.deviceDisconnectMisses,
+          confirmedDisconnectedDeviceIds: this.confirmedDisconnectedDeviceIds,
+          bootedDeviceIds,
+          candidateDeviceIds,
+          succeededPlatforms,
+          candidatePlatforms,
+          idleCandidateIds,
+          missThreshold: DEVICE_DISCONNECT_MISS_THRESHOLD,
+        });
+
+        if (disconnectResult.skippedAdbUnreachable) {
           logger.warn(
             `[DisconnectMonitor] ADB returned 0 devices but ${candidateDeviceIds.size} tracked — skipping miss count (ADB likely unreachable)`
           );
           return;
         }
 
-        for (const deviceId of candidateDeviceIds) {
-          if (bootedDeviceIds.has(deviceId)) {
-            this.deviceDisconnectMisses.delete(deviceId);
-            continue;
-          }
-          const misses = (this.deviceDisconnectMisses.get(deviceId) ?? 0) + 1;
-          this.deviceDisconnectMisses.set(deviceId, misses);
+        for (const { deviceId, misses } of disconnectResult.missed) {
           logger.info(
             `[DisconnectMonitor] Device ${deviceId} not in booted list (miss ${misses}/${DEVICE_DISCONNECT_MISS_THRESHOLD}, booted=${bootedDeviceIds.size})`
           );
-          if (misses < DEVICE_DISCONNECT_MISS_THRESHOLD) {
-            continue;
-          }
+        }
+
+        for (const deviceId of disconnectResult.disconnected) {
           missingByDevice.set(deviceId, []);
         }
 
@@ -897,6 +895,16 @@ export class Daemon {
               logger.warn(
                 `[Daemon] Failed to stop recording ${recordingId} after device ${deviceId} disconnected: ${error}`
               );
+              try {
+                await interruptVideoRecording(recordingId);
+                logger.warn(
+                  `[Daemon] Marked recording ${recordingId} interrupted after device ${deviceId} disconnected`
+                );
+              } catch (interruptError) {
+                logger.warn(
+                  `[Daemon] Failed to mark recording ${recordingId} interrupted after device ${deviceId} disconnected: ${interruptError}`
+                );
+              }
             } finally {
               this.stoppingRecordings.delete(recordingId);
             }
@@ -912,7 +920,7 @@ export class Daemon {
             await this.cancelAndReleaseSession(sessionId);
           }
 
-          await this.devicePool.removeDevice(deviceId);
+          await this.devicePool.removeDisconnectedDevice(deviceId);
           this.deviceDisconnectMisses.delete(deviceId);
         }
       } catch (error) {

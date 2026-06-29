@@ -639,6 +639,34 @@ export async function stopVideoRecording(
   return { metadata, evictedRecordingIds: eviction.evictedRecordingIds };
 }
 
+export async function interruptVideoRecording(recordingId: string): Promise<void> {
+  const { recordingRepository, now } = await getVideoRecordingDependencies();
+  clearAutoStop(recordingId);
+
+  const record = await recordingRepository.getRecording(recordingId);
+  if (!record || record.status !== "recording") {
+    disposeHighlightSession(recordingId);
+    return;
+  }
+
+  const endedAt = now().toISOString();
+  const highlightSession = disposeHighlightSession(recordingId);
+  const highlights = highlightSession
+    ? finalizeHighlightSession(highlightSession, endedAt)
+    : record.highlights;
+
+  await recordingRepository.updateRecording(recordingId, {
+    status: "interrupted",
+    endedAt,
+    lastAccessedAt: endedAt,
+    sizeBytes: await getFileSize(record.filePath),
+    durationMs: calculateDurationMs(record.startedAt, endedAt),
+    highlights,
+  });
+
+  await notifyVideoRecordingResources([recordingId]);
+}
+
 export async function recordVideoRecordingHighlightAdded(
   device: BootedDevice,
   highlight: VideoRecordingHighlightInput

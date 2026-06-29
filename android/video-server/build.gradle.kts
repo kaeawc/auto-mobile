@@ -20,9 +20,16 @@ val androidSdkPath: String =
 val compileSdk: String = libs.versions.build.android.compileSdk.get()
 val buildToolsVersion: String = libs.versions.build.android.buildTools.get()
 val minSdk: String = libs.versions.build.android.minSdk.get()
+val androidPlatformJar: File =
+    listOf(
+            File("$androidSdkPath/platforms/android-$compileSdk/android.jar"),
+            File("$androidSdkPath/platforms/android-$compileSdk.0/android.jar"),
+        )
+        .firstOrNull { it.exists() }
+        ?: error("Unable to find android.jar for compileSdk $compileSdk in $androidSdkPath/platforms")
 
 dependencies {
-  compileOnly(files("$androidSdkPath/platforms/android-$compileSdk/android.jar"))
+  compileOnly(files(androidPlatformJar))
 }
 
 // Configure Kotlin compilation options

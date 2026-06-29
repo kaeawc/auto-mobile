@@ -596,7 +596,7 @@ export class UnixSocketServer {
             allowDownloadWhenInstalled: true,
             bypassVersionCheckCache: true
           });
-          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled", "skipped"]);
+          const successStatuses = new Set(["compatible", "upgraded", "installed", "reinstalled"]);
           return {
             success: successStatuses.has(result.status),
             message: `Accessibility service ${result.status}${result.error ? `: ${result.error}` : ""}`,

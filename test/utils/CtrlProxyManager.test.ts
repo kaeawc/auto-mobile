@@ -50,9 +50,10 @@ describe("CtrlProxyManager", function() {
     accessibilityServiceClient.clearAvailabilityCache();
   });
 
-  afterEach(function() {
+  afterEach(async function() {
     AndroidCtrlProxyManager.setExpectedChecksumForTesting(null);
     AndroidCtrlProxyManager.setAccessibilityDetectorForTesting(null);
+    await AndroidCtrlProxyManager.cleanupPrefetchedApk();
     if (originalApkPathEnv === undefined) {
       delete process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH;
     } else {
@@ -346,6 +347,85 @@ describe("CtrlProxyManager", function() {
 
       const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
       expect(result.status).toBe("upgraded");
+      expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+    });
+
+    test("should install local APK override when explicit update is requested", async function() {
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-local-update-"));
+      const localApkPath = path.join(tempDir, "control-proxy-debug.apk");
+      const zip = new AdmZip();
+      zip.addFile("AndroidManifest.xml", Buffer.from('<?xml version="1.0" encoding="utf-8"?><manifest></manifest>', "utf8"));
+      zip.addFile("classes.dex", crypto.randomBytes(15000));
+      zip.writeZip(localApkPath);
+
+      process.env.AUTOMOBILE_CTRL_PROXY_APK_PATH = localApkPath;
+      process.env.AUTOMOBILE_SKIP_ACCESSIBILITY_CHECKSUM = "true";
+
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "local-dev-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+
+      AndroidCtrlProxyManager.resetInstances();
+      const manager = AndroidCtrlProxyManager.getInstance(testDevice, { create: () => localFakeAdb });
+
+      const result = await manager.ensureCompatibleVersion({ allowDownloadWhenInstalled: true });
+      expect(result.status).toBe("upgraded");
+      expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
+
+      await fs.rm(tempDir, { recursive: true, force: true });
+    });
+
+    test("should install completed background prefetch on later readiness check without downloading", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+      const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+      await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponse(`shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: `package:${AndroidCtrlProxyManager.PACKAGE}\n`,
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("install -r -d", createExecResult("Success", ""));
+
+      let downloadCalls = 0;
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            downloadCalls++;
+            throw new Error("download should not be called for completed prefetch");
+          }
+        }
+      );
+
+      const result = await manager.ensureCompatibleVersion();
+      expect(result.status).toBe("upgraded");
+      expect(result.attemptedDownload).toBe(false);
+      expect(result.attemptedInstall).toBe(true);
+      expect(downloadCalls).toBe(0);
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
     });
 

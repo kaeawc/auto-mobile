@@ -203,10 +203,16 @@ AutoMobile manages accessibility service versions automatically:
 - Accepts an already-installed CtrlProxy during normal readiness checks even when
   the checksum differs, so local/offline tool calls do not block on a release APK download
 - Queues a background release APK prefetch when a mismatch is detected with the default downloader
+- Installs an already-completed background prefetch on a later readiness check without
+  waiting on network, so genuinely stale services can self-heal after the download finishes
 - Upgrades when version mismatch is detected through an explicit service update request
 - Falls back to reinstallation if upgrade fails
 - Validates downloaded APKs via SHA256 checksum
 - Supports local APK overrides for development
+
+A cold device with no CtrlProxy installed still needs an APK source for the first install.
+If the network is unavailable and no local `AUTOMOBILE_CTRL_PROXY_APK_PATH` is configured,
+the first install attempt fails fast and is cached briefly to avoid repeated download attempts.
 
 When device setup uses `skipAccessibilityDownload`, AutoMobile still validates the installed service checksum.
 If the version is incompatible, it surfaces a warning/error advising you to rerun without

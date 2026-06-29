@@ -234,18 +234,80 @@ describe("SystemConfigurationAdapter", () => {
       expect(await adapter.broadcastLocaleChange()).toBe(false);
     });
 
-    it("sets the system time zone via setprop", async () => {
+    it("sets the system time zone via setprop and verifies the read-back", async () => {
       const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop persist.sys.timezone", "Asia/Tokyo");
       const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
       const result = await adapter.setTimeZone("Asia/Tokyo");
       expect(result.success).toBe(true);
       expect(result.zoneId).toBe("Asia/Tokyo");
-      const recorded = (adb as any).commandCalls;
-      expect(
-        recorded.some((c: { command: string }) =>
-          c.command.includes("setprop persist.sys.timezone Asia/Tokyo")
-        )
-      ).toBe(true);
+      expect(result.method).toBe("setprop persist.sys.timezone");
+      expect(adb.wasCommandExecuted("setprop persist.sys.timezone 'Asia/Tokyo'")).toBe(true);
+    });
+
+    it("returns the previous time zone when read-back confirms the change", async () => {
+      const adb = new FakeAdbClient();
+      const responses = ["America/New_York", "Asia/Tokyo"];
+      const original = adb.executeCommand.bind(adb);
+      adb.executeCommand = (async (command: string, ...rest: any[]) => {
+        if (command === "shell getprop persist.sys.timezone") {
+          return {
+            stdout: responses.shift() ?? "Asia/Tokyo",
+            stderr: "",
+            toString: () => "",
+            trim: () => "",
+            includes: () => false,
+          };
+        }
+        return original(command, ...rest);
+      }) as any;
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+      expect(result.success).toBe(true);
+      expect(result.previousZoneId).toBe("America/New_York");
+    });
+
+    it("returns false when the time-zone read-back does not match (silent no-op)", async () => {
+      const adb = new FakeAdbClient();
+      // setprop is silently ignored (e.g. non-root adbd): getprop still returns the old value.
+      adb.setCommandResult("shell getprop persist.sys.timezone", "America/New_York");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.success).toBe(false);
+      expect(result.zoneId).toBe("Asia/Tokyo");
+      expect(result.error).toBe('Read-back verification failed: expected "Asia/Tokyo" but got "America/New_York"');
+    });
+
+    it("returns false when the time-zone read-back is null", async () => {
+      const adb = new FakeAdbClient();
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe('Read-back verification failed: expected "Asia/Tokyo" but got "null"');
+    });
+
+    it("surfaces setprop failures for time-zone changes", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandError(
+        "shell setprop persist.sys.timezone 'Asia/Tokyo'",
+        new Error("device offline")
+      );
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      const result = await adapter.setTimeZone("Asia/Tokyo");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Failed to set time zone: device offline");
+    });
+
+    it("shell-quotes the time-zone id to avoid injection", async () => {
+      const adb = new FakeAdbClient();
+      adb.setCommandResult("shell getprop persist.sys.timezone", "Asia/Tokyo");
+      const adapter = new AndroidSystemConfigurationAdapter(androidDevice, adb as any);
+      await adapter.setTimeZone("Asia/Tokyo");
+      expect(adb.wasCommandExecuted("setprop persist.sys.timezone 'Asia/Tokyo'")).toBe(true);
+      expect(adb.wasCommandExecuted("setprop persist.sys.timezone Asia/Tokyo;")).toBe(false);
     });
   });
 

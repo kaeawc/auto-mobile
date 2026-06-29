@@ -27,6 +27,17 @@ export interface AccessibilityHierarchy {
 }
 
 /**
+ * Reduced node produced by {@link ScreenFingerprint.filterHierarchyEnhanced}.
+ * It carries a dynamic subset of accessibility fields plus synthetic markers
+ * (`_scrollable`, `_selected`) used only for hashing, so the value bag is typed
+ * as `unknown` while the recursive `node` shape stays explicit.
+ */
+export interface FilteredNode {
+  node?: FilteredNode[];
+  [key: string]: unknown;
+}
+
+/**
  * Fingerprint confidence levels based on method used
  */
 export enum FingerprintConfidence {
@@ -197,7 +208,7 @@ export class ScreenFingerprint {
   /**
    * Extract navigation resource-id from hierarchy (navigation.* pattern).
    */
-  private static extractNavigationId(node: any): string | null {
+  private static extractNavigationId(node: AccessibilityNode): string | null {
     if (!node || typeof node !== "object") {return null;}
 
     if (node["resource-id"]?.startsWith("navigation.")) {
@@ -221,7 +232,7 @@ export class ScreenFingerprint {
    * Indicators: content-desc with "Delete", "Enter", "keyboard", "emoji"
    */
   private static detectKeyboard(hierarchy: AccessibilityHierarchy): boolean {
-    function hasKeyboardElements(node: any): boolean {
+    function hasKeyboardElements(node: AccessibilityNode): boolean {
       if (!node || typeof node !== "object") {return false;}
 
       // Check resource-id patterns
@@ -326,7 +337,7 @@ export class ScreenFingerprint {
    * - Keep static text for differentiation
    * - Preserve selected state
    */
-  private static filterHierarchyEnhanced(node: any): any {
+  private static filterHierarchyEnhanced(node: AccessibilityNode): FilteredNode | null {
     if (!node || typeof node !== "object") {return null;}
 
     // Skip keyboard elements (match detectKeyboard indicators)
@@ -342,7 +353,7 @@ export class ScreenFingerprint {
       return null;
     }
 
-    const filtered: any = {};
+    const filtered: FilteredNode = {};
 
     // Handle scrollable containers with enhanced strategy
     if (node.scrollable === "true") {
@@ -364,8 +375,8 @@ export class ScreenFingerprint {
       if (node.node) {
         const children = Array.isArray(node.node) ? node.node : [node.node];
         const selectedItems = children
-          .filter((child: any) => child.selected === "true")
-          .map((child: any) => this.extractSelectedInfo(child))
+          .filter((child: AccessibilityNode) => child.selected === "true")
+          .map((child: AccessibilityNode) => this.extractSelectedInfo(child))
           .filter(Boolean);
 
         if (selectedItems.length > 0) {
@@ -430,8 +441,8 @@ export class ScreenFingerprint {
     if (node.node) {
       const children = Array.isArray(node.node) ? node.node : [node.node];
       const filteredChildren = children
-        .map((child: any) => this.filterHierarchyEnhanced(child))
-        .filter(Boolean);
+        .map((child: AccessibilityNode) => this.filterHierarchyEnhanced(child))
+        .filter(Boolean) as FilteredNode[];
 
       if (filteredChildren.length > 0) {
         filtered.node = filteredChildren;
@@ -444,10 +455,10 @@ export class ScreenFingerprint {
   /**
    * Extract selected item information (text, content-desc, or resource-id).
    */
-  private static extractSelectedInfo(node: any): any {
+  private static extractSelectedInfo(node: AccessibilityNode): FilteredNode | null {
     if (!node || typeof node !== "object") {return null;}
 
-    const info: any = { selected: "true" };
+    const info: FilteredNode = { selected: "true" };
 
     // Get text from node or its children
     if (node.text) {
@@ -473,8 +484,14 @@ export class ScreenFingerprint {
   /**
    * Find text in node children.
    */
-  private static findTextInChildren(node: any): string | null {
+  private static findTextInChildren(
+    node: AccessibilityNode | AccessibilityNode[]
+  ): string | null {
     if (!node || typeof node !== "object") {return null;}
+
+    // An array argument has no text/node fields of its own; preserve the
+    // original behavior of treating it as "no text found" (it is never iterated).
+    if (Array.isArray(node)) {return null;}
 
     if (node.text) {return node.text;}
 
@@ -492,7 +509,7 @@ export class ScreenFingerprint {
   /**
    * Count elements in filtered hierarchy.
    */
-  private static countElements(node: any): number {
+  private static countElements(node: FilteredNode | null): number {
     if (!node || typeof node !== "object") {return 0;}
 
     let count = 1; // Count this node
@@ -517,7 +534,7 @@ export class ScreenFingerprint {
   /**
    * Generate SHA-256 hash from object.
    */
-  private static hashObject(obj: any): string {
+  private static hashObject(obj: FilteredNode | null): string {
     const data = JSON.stringify(obj);
     return crypto.createHash("sha256").update(data).digest("hex");
   }

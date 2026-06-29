@@ -21,6 +21,7 @@ import type { AdbExecutor } from "../utils/android-cmdline-tools/interfaces/AdbE
 import { SimCtlClient } from "../utils/ios-cmdline-tools/SimCtlClient";
 import { isIosSimulatorUdid } from "../utils/ios-cmdline-tools/iosDeviceType";
 import { PlatformDeviceManagerFactory } from "../utils/factories/PlatformDeviceManagerFactory";
+import { resolvePathFromDaemonLaunchWorkingDirectory } from "../utils/workingDirectory";
 
 export interface PutAppFileRequest extends PutAppFileArgs {
   device: BootedDevice;
@@ -254,11 +255,12 @@ class DefaultAppFileService implements AppFileService {
 
   private async prepareSource(args: PutAppFileArgs): Promise<FileSource> {
     if (args.sourcePath !== undefined) {
-      const stat = await this.fileSystem.stat(args.sourcePath);
+      const sourcePath = resolvePathFromDaemonLaunchWorkingDirectory(args.sourcePath);
+      const stat = await this.fileSystem.stat(sourcePath);
       if (!stat.isFile()) {
-        throw new ActionableError(`sourcePath is not a file: ${args.sourcePath}`);
+        throw new ActionableError(`sourcePath is not a file: ${sourcePath}`);
       }
-      return { path: args.sourcePath, byteCount: stat.size };
+      return { path: sourcePath, byteCount: stat.size };
     }
 
     const buffer = args.contentBase64 !== undefined

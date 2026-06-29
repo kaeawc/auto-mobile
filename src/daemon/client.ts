@@ -28,7 +28,15 @@ export class DaemonUnavailableError extends Error {
   }
 }
 
-export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {}
+export interface DaemonClientRecoveryOptions extends StaleDaemonFileCleanupOptions {
+  /**
+   * When true, `isAvailable()` performs an observation-only probe and never
+   * unlinks socket/PID files, even if the recorded PID is dead. Used by
+   * doctor/debug diagnostics so a momentary refusal or timeout from a loaded
+   * daemon cannot delete its live socket (issue #2658).
+   */
+  skipStaleCleanup?: boolean;
+}
 
 /**
  * CLI Client for communicating with the daemon via Unix socket
@@ -77,11 +85,14 @@ export class DaemonClient {
     // On Unix, verify the path exists and is a socket (not a stale regular file).
     // On Windows, named pipes don't have filesystem entries — skip the stat check
     // and let createConnection determine reachability.
+    const skipCleanup = recoveryOptions.skipStaleCleanup === true;
     if (platform() !== "win32") {
       try {
         const stats = statSync(socketPath);
         if (!stats.isSocket()) {
-          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+          if (!skipCleanup) {
+            DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+          }
           return false;
         }
       } catch {
@@ -106,12 +117,16 @@ export class DaemonClient {
       socket.on("error", () => {
         defaultTimer.clearTimeout(timeout);
         socket.destroy();
-        DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+        if (!skipCleanup) {
+          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+        }
         settle(false);
       });
       const timeout = defaultTimer.setTimeout(() => {
         socket.destroy();
-        DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+        if (!skipCleanup) {
+          DaemonClient.cleanupStaleSocketIfDaemonDead(socketPath, recoveryOptions);
+        }
         settle(false);
       }, 1000);
     });

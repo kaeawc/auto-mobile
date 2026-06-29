@@ -84,11 +84,21 @@ export class AndroidSystemConfigurationAdapter implements SystemConfigurationAda
     const previousZoneId = await this.readSetting("shell getprop persist.sys.timezone");
 
     try {
-      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${zoneId}`);
+      await this.adb.executeCommand(`shell setprop persist.sys.timezone ${quoteShellArg(zoneId)}`);
+      const effectiveZoneId = await this.readSetting("shell getprop persist.sys.timezone");
+      if (effectiveZoneId !== zoneId) {
+        return {
+          success: false,
+          zoneId,
+          previousZoneId,
+          error: `Read-back verification failed: expected "${zoneId}" but got "${effectiveZoneId ?? "null"}"`
+        };
+      }
       return {
         success: true,
         zoneId,
-        previousZoneId
+        previousZoneId,
+        method: "setprop persist.sys.timezone"
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);

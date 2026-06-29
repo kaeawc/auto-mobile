@@ -1,4 +1,4 @@
-import { dirname, join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { describe, expect, test } from "bun:test";
 import {
   type AppFileFileSystem,
@@ -9,6 +9,7 @@ import {
 } from "../../src/server/appFileService";
 import type { BootedDevice } from "../../src/models";
 import type { AdbClientFactory } from "../../src/utils/android-cmdline-tools/AdbClientFactory";
+import { DAEMON_LAUNCH_CWD_ENV } from "../../src/utils/workingDirectory";
 import { FakeAdbClientFactory } from "../fakes/FakeAdbClientFactory";
 import { FakeAdbExecutor } from "../fakes/FakeAdbExecutor";
 import { FakeSimCtlClient } from "../fakes/FakeSimCtlClient";
@@ -333,6 +334,45 @@ describe("AppFileService", () => {
       blob: sourceBytes.toString("base64"),
     });
     expect(readResult.text).toBeUndefined();
+  });
+
+  test("resolves relative sourcePath from the daemon launch working directory", async () => {
+    const previousLaunchCwd = process.env[DAEMON_LAUNCH_CWD_ENV];
+    const launchCwd = resolve("/launch/cwd");
+    process.env[DAEMON_LAUNCH_CWD_ENV] = launchCwd;
+    try {
+      const fileSystem = new TestAppFileFileSystem();
+      const dataRoot = "/simulators/SIM-1/data";
+      const simctl = new FakeSimCtlClient();
+      simctl.setCommandResult(
+        `get_app_container '${iosSimulatorDevice.deviceId}' 'com.example.app' data`,
+        dataRoot
+      );
+      const service = createAppFileServiceForTesting({
+        simctlFactory: () => simctl as any,
+        fileSystem,
+      });
+      const sourceBytes = Buffer.from("from launch cwd");
+      await fileSystem.writeFileBuffer(join(launchCwd, "fixtures", "source.bin"), sourceBytes);
+
+      const result = await service.putFile({
+        device: iosSimulatorDevice,
+        appId: "com.example.app",
+        container: "documents",
+        sourcePath: "./fixtures/source.bin",
+        destinationPath: "fixtures/copied.bin",
+      });
+
+      expect(result.byteCount).toBe(sourceBytes.byteLength);
+      await expect(fileSystem.readFileBuffer(join(dataRoot, "Documents", "fixtures", "copied.bin")))
+        .resolves.toEqual(sourceBytes);
+    } finally {
+      if (previousLaunchCwd === undefined) {
+        delete process.env[DAEMON_LAUNCH_CWD_ENV];
+      } else {
+        process.env[DAEMON_LAUNCH_CWD_ENV] = previousLaunchCwd;
+      }
+    }
   });
 
   test("lists iOS app files and directories with relative metadata only", async () => {

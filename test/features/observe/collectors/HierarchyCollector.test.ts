@@ -176,4 +176,67 @@ describe("HierarchyCollector", () => {
       expect(size).toBeNull();
     });
   });
+
+  describe("reconcileScreenDimensions", () => {
+    test("overwrites stale screenWidth/screenHeight with authoritative screenSize", () => {
+      // Regression for #2683: the iOS runner reports 320x480 (legacy
+      // compatibility mode) while the authoritative size from root bounds is
+      // the real device size. screenWidth/screenHeight must follow screenSize.
+      const viewHierarchy = {
+        hierarchy: { bounds: { left: 0, top: 0, right: 402, bottom: 874 } },
+        screenWidth: 320,
+        screenHeight: 480,
+      } as any;
+
+      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 874 });
+
+      expect(result.screenWidth).toBe(402);
+      expect(result.screenHeight).toBe(874);
+    });
+
+    test("mutates and returns the same view hierarchy object", () => {
+      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+
+      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 874 });
+
+      expect(result).toBe(viewHierarchy);
+      expect(viewHierarchy.screenWidth).toBe(402);
+      expect(viewHierarchy.screenHeight).toBe(874);
+    });
+
+    test("populates screenWidth/screenHeight when previously absent", () => {
+      const viewHierarchy = { hierarchy: {} } as any;
+
+      const result = collector.reconcileScreenDimensions(viewHierarchy, { width: 1170, height: 2532 });
+
+      expect(result.screenWidth).toBe(1170);
+      expect(result.screenHeight).toBe(2532);
+    });
+
+    test("leaves screenWidth/screenHeight untouched when screenSize is null", () => {
+      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+
+      const result = collector.reconcileScreenDimensions(viewHierarchy, null);
+
+      expect(result.screenWidth).toBe(320);
+      expect(result.screenHeight).toBe(480);
+    });
+
+    test("leaves screenWidth/screenHeight untouched when screenSize has non-positive dimensions", () => {
+      const viewHierarchy = { hierarchy: {}, screenWidth: 320, screenHeight: 480 } as any;
+
+      const zeroWidth = collector.reconcileScreenDimensions(viewHierarchy, { width: 0, height: 874 });
+      expect(zeroWidth.screenWidth).toBe(320);
+      expect(zeroWidth.screenHeight).toBe(480);
+
+      const zeroHeight = collector.reconcileScreenDimensions(viewHierarchy, { width: 402, height: 0 });
+      expect(zeroHeight.screenWidth).toBe(320);
+      expect(zeroHeight.screenHeight).toBe(480);
+    });
+
+    test("returns the input unchanged when view hierarchy is null", () => {
+      expect(collector.reconcileScreenDimensions(null as any, { width: 402, height: 874 })).toBeNull();
+      expect(collector.reconcileScreenDimensions(undefined as any, { width: 402, height: 874 })).toBeUndefined();
+    });
+  });
 });

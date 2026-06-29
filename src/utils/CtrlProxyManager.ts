@@ -719,7 +719,16 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
         return upgradeResult;
       }
 
-      logger.warn("[CTRL_PROXY] Completed prefetched APK install failed; accepting existing CtrlProxy for readiness", {
+      this.clearServiceAvailabilityCache();
+      const stillInstalled = await this.isInstalled();
+      if (!stillInstalled) {
+        logger.warn("[CTRL_PROXY] Completed prefetched APK install failed and existing CtrlProxy is no longer installed", {
+          error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError
+        });
+        return upgradeResult;
+      }
+
+      logger.warn("[CTRL_PROXY] Completed prefetched APK install failed; verified existing CtrlProxy remains installed for readiness", {
         error: upgradeResult.error || upgradeResult.upgradeError || upgradeResult.reinstallError
       });
       return {
@@ -776,6 +785,7 @@ export class AndroidCtrlProxyManager implements CtrlProxyManager {
       };
     } catch (reinstallError) {
       const reinstallMessage = reinstallError instanceof Error ? reinstallError.message : String(reinstallError);
+      this.clearServiceAvailabilityCache();
       return {
         ...result,
         status: "failed",

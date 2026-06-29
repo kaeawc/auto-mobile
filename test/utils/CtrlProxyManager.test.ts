@@ -429,6 +429,54 @@ describe("CtrlProxyManager", function() {
       expect(localFakeAdb.wasCommandExecuted("install -r -d")).toBe(true);
     });
 
+    test("should keep completed prefetch install failure failed after fallback uninstall removes service", async function() {
+      AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "auto-mobile-prefetch-source-"));
+      const prefetchedApkPath = path.join(tempDir, "control-proxy.apk");
+      await fs.writeFile(prefetchedApkPath, Buffer.from("prefetched-apk"));
+      (AndroidCtrlProxyManager as any).prefetchedApkPath = prefetchedApkPath;
+
+      const packageCheckCommand = `shell pm list packages | grep ${AndroidCtrlProxyManager.PACKAGE}`;
+      const localFakeAdb = new FakeAdbExecutor();
+      localFakeAdb.setCommandResponseSequence(packageCheckCommand, [
+        createExecResult(`package:${AndroidCtrlProxyManager.PACKAGE}\n`, ""),
+        createExecResult("", "")
+      ]);
+      localFakeAdb.setCommandResponse(`shell pm path ${AndroidCtrlProxyManager.PACKAGE}`, {
+        stdout: "package:/data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandResponse("shell sha256sum", {
+        stdout: "different-sha /data/app/dev.jasonpearson.automobile.ctrlproxy/base.apk\n",
+        stderr: ""
+      });
+      localFakeAdb.setCommandError("install -r -d", new Error("INSTALL_FAILED_UPDATE_INCOMPATIBLE"));
+      localFakeAdb.setCommandResponse(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`, createExecResult("Success", ""));
+      localFakeAdb.setCommandError("install \"", new Error("INSTALL_FAILED_ABORTED"));
+
+      const manager = AndroidCtrlProxyManager.createForTestingWithDeps(
+        testDevice,
+        localFakeAdb,
+        new FakeTimer(),
+        {
+          download: async () => {
+            throw new Error("download should not be called for completed prefetch");
+          }
+        }
+      );
+
+      const result = await manager.ensureCompatibleVersion();
+      const packageCheckCalls = localFakeAdb.getExecutedCommands()
+        .filter(command => command.includes(packageCheckCommand));
+
+      expect(result.status).toBe("failed");
+      expect(result.acceptedPreinstalled).toBeUndefined();
+      expect(result.attemptedInstall).toBe(true);
+      expect(result.attemptedReinstall).toBe(true);
+      expect(packageCheckCalls.length).toBe(2);
+      expect(localFakeAdb.wasCommandExecuted(`shell pm uninstall ${AndroidCtrlProxyManager.PACKAGE}`)).toBe(true);
+    });
+
     test("should cache failed download result briefly instead of retrying every call", async function() {
       AndroidCtrlProxyManager.setExpectedChecksumForTesting("expected-sha");
       const fakeTimer = new FakeTimer();

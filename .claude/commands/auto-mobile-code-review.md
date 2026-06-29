@@ -6,12 +6,12 @@ argument-hint: [PR number (optional; default = current branch diff vs origin/mai
 
 # AutoMobile Code Review
 
-Review a change — a PR (`$1` = its number) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review: fewer findings, each grounded and checked, beats a long list of plausible-but-unverified concerns.
+Review a change — a PR (`$ARGUMENTS` = its number) or, with no argument, the current branch's diff vs `origin/main` — for correctness, regressions, and fit with AutoMobile's architecture and conventions. The deliverable is a **verified, actionable** review: fewer findings, each grounded and checked, beats a long list of plausible-but-unverified concerns.
 
 ## Scope the diff
 
 - `git fetch origin main` first — always review against **latest main**, not a stale base.
-- With `$1` (a PR number): `gh pr view $1 --json title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff $1`, then read the changed files on disk and the **issue it claims to close**. A PR's reviewed head can differ from what squash-**merged**, and a "fix" PR can merge **test-only** — check `git log origin/main` for what actually landed.
+- With `$ARGUMENTS` (a PR number): `gh pr view $ARGUMENTS --json title,body,headRefOid,files,closingIssuesReferences`, `gh pr diff $ARGUMENTS`, then read the changed files on disk and the **issue it claims to close**. A PR's reviewed head can differ from what squash-**merged**, and a "fix" PR can merge **test-only** — check `git log origin/main` for what actually landed.
 - No argument: `git diff origin/main...HEAD` and read the changed files in full (the hunk lies by omission).
 
 ## Review principles (verify, don't speculate)

@@ -1,4 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import type { ChildProcess, SpawnOptions } from "node:child_process";
 import {
   DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES,
   DaemonManager,
@@ -7,9 +11,15 @@ import {
   resolveDaemonLaunchCommand,
   runDaemonCommand
 } from "../../src/daemon/manager";
-import type { DaemonProcessFinder, DaemonProcessRecord } from "../../src/daemon/manager";
+import type {
+  DaemonProcessFinder,
+  DaemonProcessLivenessChecker,
+  DaemonProcessSpawner,
+  DaemonProcessRecord,
+} from "../../src/daemon/manager";
 import type { DaemonStateLike } from "../../src/daemon/daemonState";
 import type { DaemonClientLike } from "../../src/daemon/client";
+import { FakeTimer } from "../fakes/FakeTimer";
 
 class FakeDaemonClient implements DaemonClientLike {
   readonly readResourceCalls: string[] = [];
@@ -41,11 +51,18 @@ class FakeDaemonClient implements DaemonClientLike {
   }
 }
 
-class FakeDaemonProcessFinder implements DaemonProcessFinder {
-  constructor(private readonly records: DaemonProcessRecord[]) {}
+class FakeDaemonProcessFinder implements DaemonProcessFinder, DaemonProcessLivenessChecker {
+  constructor(
+    private readonly records: DaemonProcessRecord[],
+    private readonly livePids: Set<number> = new Set(records.map(record => record.pid))
+  ) {}
 
   findDaemonProcesses(): DaemonProcessRecord[] {
     return this.records;
+  }
+
+  isProcessRunning(pid: number): boolean {
+    return this.livePids.has(pid);
   }
 }
 
@@ -133,7 +150,10 @@ describe("Daemon manager process detection", () => {
     expect(DAEMON_PROCESS_TABLE_MAX_BUFFER_BYTES).toBeGreaterThan(1024 * 1024);
   });
 
-  function managerWithProcesses(records: DaemonProcessRecord[]): DaemonManager {
+  function managerWithProcesses(
+    records: DaemonProcessRecord[],
+    options: { livePids?: Set<number> } = {}
+  ): DaemonManager {
     return new DaemonManager(
       undefined,
       undefined,
@@ -141,7 +161,8 @@ describe("Daemon manager process detection", () => {
       undefined,
       undefined,
       undefined,
-      new FakeDaemonProcessFinder(records)
+      new FakeDaemonProcessFinder(records, options.livePids),
+      undefined
     );
   }
 
@@ -201,9 +222,190 @@ describe("Daemon manager process detection", () => {
         ppid: 300,
         command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
       },
-    ]);
+    ], { livePids: new Set([201, 301]) });
 
     expect(manager.findOtherDaemonProcesses(201)).toEqual([301]);
+  });
+
+  test("preserves live daemon-mode candidates that are not backed by the PID file", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 201,
+        ppid: 200,
+        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+      },
+      {
+        pid: 401,
+        ppid: 1,
+        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+      },
+    ], { livePids: new Set([201, 401]) });
+
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([401]);
+  });
+
+  test("ignores daemon-mode candidates that are gone by liveness re-check", () => {
+    const manager = managerWithProcesses([
+      {
+        pid: 201,
+        ppid: 200,
+        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+      },
+      {
+        pid: 401,
+        ppid: 1,
+        command: `bun /worktree-a/dist/src/index.js --daemon-mode`,
+      },
+    ], { livePids: new Set([201]) });
+
+    expect(manager.findOtherDaemonProcesses(201)).toEqual([]);
+  });
+
+  test("fails closed when the process table cannot be inspected", () => {
+    const manager = new DaemonManager(
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      {
+        findDaemonProcesses() {
+          throw new Error("spawn ENOBUFS");
+        },
+      }
+    );
+
+    expect(() => manager.findAllDaemonProcesses()).toThrow("Failed to inspect daemon process table: spawn ENOBUFS");
+  });
+
+  test("start takeover escalates to SIGKILL when another daemon survives SIGTERM", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-test-"));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    const processFinder = new FakeDaemonProcessFinder([
+      {
+        pid: 301,
+        ppid: 1,
+        command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+      },
+    ], new Set([301]));
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
+        unref() {},
+        once() { return this; },
+        off() { return this; },
+      }) as ChildProcess,
+    };
+    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === 301) {
+        killCalls.push({ pid, signal });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner
+      );
+
+      await manager.start();
+
+      expect(killCalls).toEqual([
+        { pid: 301, signal: "SIGTERM" },
+        { pid: 301, signal: "SIGKILL" },
+      ]);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("start takeover does not SIGKILL when daemon identity is no longer confirmed", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "daemon-manager-takeover-revalidate-test-"));
+    const fakeTimer = new FakeTimer();
+    fakeTimer.enableAutoAdvance();
+    const killCalls: Array<{ pid: number; signal: NodeJS.Signals | number | undefined }> = [];
+    let findCalls = 0;
+    const processFinder: DaemonProcessFinder & DaemonProcessLivenessChecker = {
+      findDaemonProcesses() {
+        findCalls++;
+        return findCalls === 1 ? [
+          {
+            pid: 301,
+            ppid: 1,
+            command: `bun /worktree-b/dist/src/index.js --daemon-mode`,
+          },
+        ] : [];
+      },
+      isProcessRunning(pid: number) {
+        return pid === 301;
+      },
+    };
+    const processSpawner: DaemonProcessSpawner = {
+      spawn: (_command: string, _args: string[], _options: SpawnOptions) => ({
+        unref() {},
+        once() { return this; },
+        off() { return this; },
+      }) as ChildProcess,
+    };
+    const killSpy = spyOn(process, "kill").mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+      if (pid === 301) {
+        killCalls.push({ pid, signal });
+      }
+      return true;
+    }) as typeof process.kill);
+
+    class TestDaemonManager extends DaemonManager {
+      override async status(): Promise<any> {
+        return { running: false };
+      }
+
+      override async waitForReady(_timeout: number): Promise<boolean> {
+        return true;
+      }
+    }
+
+    try {
+      const manager = new TestDaemonManager(
+        undefined,
+        undefined,
+        fakeTimer,
+        join(dir, "daemon.lock"),
+        join(dir, "daemon.pid"),
+        join(dir, "daemon.sock"),
+        processFinder,
+        processSpawner
+      );
+
+      await manager.start();
+
+      expect(killCalls).toEqual([
+        { pid: 301, signal: "SIGTERM" },
+      ]);
+      expect(findCalls).toBe(2);
+    } finally {
+      killSpy.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 

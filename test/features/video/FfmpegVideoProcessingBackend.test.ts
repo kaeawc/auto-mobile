@@ -1,10 +1,41 @@
 import { beforeEach, describe, expect, test } from "bun:test";
+import { spawn, spawnSync } from "node:child_process";
 import { promises as fsPromises } from "node:fs";
 import os, { platform } from "node:os";
 import path from "node:path";
 import { FfmpegVideoProcessingBackend } from "../../../src/features/video/FfmpegVideoProcessingBackend";
 import type { VideoCaptureConfig } from "../../../src/features/video/VideoRecorderService";
 import type { BootedDevice } from "../../../src/models";
+
+function commandVersionAvailable(command: string): boolean {
+  const result = spawnSync(command, ["-version"], { stdio: "ignore" });
+  return result.status === 0;
+}
+
+async function runCommand(command: string, args: string[]): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const process = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let stdout = "";
+    let stderr = "";
+
+    process.stdout.on("data", chunk => {
+      stdout += chunk.toString();
+    });
+    process.stderr.on("data", chunk => {
+      stderr += chunk.toString();
+    });
+    process.once("error", error => reject(error));
+    process.once("exit", code => {
+      if (code === 0) {
+        resolve({ stdout, stderr });
+      } else {
+        reject(new Error(`${command} exited with code ${code}: ${stderr}`));
+      }
+    });
+  });
+}
+
+const hasFfmpegTools = commandVersionAvailable("ffmpeg") && commandVersionAvailable("ffprobe");
 
 describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
   let backend: FfmpegVideoProcessingBackend;
@@ -202,6 +233,95 @@ describe("FfmpegVideoProcessingBackend - Unit Tests", function() {
         "-y",
         mockConfig.outputPath,
       ]);
+    });
+
+    test("should trim unscaled iOS simulator file input while preserving stream-copy remux", async function() {
+      const hwAccel = {
+        encoder: "h264_videotoolbox",
+        available: true,
+        description: "VideoToolbox HW accel",
+      };
+
+      const args = await (backend as any).buildFfmpegArgs(
+        {
+          ...mockConfig,
+          maxDurationSeconds: 1,
+        },
+        hwAccel,
+        { type: "file", path: "/tmp/test/test-recording-raw.mov" }
+      );
+
+      expect(args).toEqual([
+        "-i",
+        "/tmp/test/test-recording-raw.mov",
+        "-c",
+        "copy",
+        "-movflags",
+        "+faststart",
+        "-t",
+        "1",
+        "-y",
+        mockConfig.outputPath,
+      ]);
+    });
+
+    (hasFfmpegTools ? test : test.skip)("should produce playable trimmed output when stream-copy remuxing unscaled iOS input", async function() {
+      const tempDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "auto-mobile-remux-"));
+      const rawPath = path.join(tempDir, "raw.mov");
+      const outputPath = path.join(tempDir, "trimmed.mp4");
+
+      try {
+        await runCommand("ffmpeg", [
+          "-hide_banner",
+          "-loglevel",
+          "error",
+          "-f",
+          "lavfi",
+          "-i",
+          "testsrc=size=16x16:rate=5",
+          "-t",
+          "2",
+          "-c:v",
+          "libx264",
+          "-pix_fmt",
+          "yuv420p",
+          rawPath,
+        ]);
+
+        const args = await (backend as any).buildFfmpegArgs(
+          {
+            ...mockConfig,
+            outputPath,
+            maxDurationSeconds: 1,
+          },
+          {
+            encoder: "libx264",
+            available: false,
+            description: "Software encoding",
+          },
+          { type: "file", path: rawPath }
+        );
+
+        await runCommand("ffmpeg", ["-hide_banner", "-loglevel", "error", ...args]);
+
+        const stats = await fsPromises.stat(outputPath);
+        expect(stats.size).toBeGreaterThan(0);
+
+        const probe = await runCommand("ffprobe", [
+          "-v",
+          "error",
+          "-show_entries",
+          "format=duration",
+          "-of",
+          "default=noprint_wrappers=1:nokey=1",
+          outputPath,
+        ]);
+        const durationSeconds = Number.parseFloat(probe.stdout.trim());
+        expect(durationSeconds).toBeGreaterThan(0);
+        expect(durationSeconds).toBeLessThan(1.6);
+      } finally {
+        await fsPromises.rm(tempDir, { recursive: true, force: true });
+      }
     });
 
     test("should transcode file input when scaling is requested", async function() {

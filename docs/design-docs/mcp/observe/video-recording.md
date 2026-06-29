@@ -92,6 +92,7 @@ Platform-specific capture sources:
   - Emulators: FFmpeg screen/window capture for higher throughput when ADB capture is slow.
 - iOS (simulator only, macOS):
   - Prefer `simctl io recordVideo` for simulator-native capture.
+  - Unscaled simulator recordings are finalized with an FFmpeg stream-copy remux from `.mov` to `.mp4`; this avoids a lossy re-encode and still applies `maxDuration` when a caller provides one.
   - Fallback to FFmpeg capture when available and needed for cross-platform parity.
 
 ## Storage and retention

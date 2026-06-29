@@ -977,15 +977,30 @@ public class CommandHandler: CommandHandling {
             )
         }
         let highlightId = request.id ?? request.requestId ?? UUID().uuidString
-        if sdkHierarchyClient != nil,
-           sdkServerMatchesTrackedForegroundApp(),
-           sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) == true
-        {
-            return WebSocketResponse.success(
-                type: ResponseType.highlightResponse.rawValue,
-                requestId: request.requestId,
-                totalTimeMs: totalTimeMs(from: startTime)
-            )
+        // When the in-app SDK bridge owns the foreground app, it is the authoritative
+        // (and only) highlight path. A rejection there — e.g. missing source dimensions
+        // (issue #2682) — must be reported precisely rather than collapsed into the
+        // generic "SDK not embedded" error below, which would mislead since the SDK is
+        // in fact embedded. An unreachable bridge falls through to that generic error.
+        if sdkHierarchyClient != nil, sdkServerMatchesTrackedForegroundApp() {
+            switch sdkHierarchyClient?.addHighlight(id: highlightId, shape: shape) {
+            case .rendered:
+                return WebSocketResponse.success(
+                    type: ResponseType.highlightResponse.rawValue,
+                    requestId: request.requestId,
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            case .rejected:
+                return WebSocketResponse.error(
+                    type: ResponseType.highlightResponse.rawValue,
+                    requestId: request.requestId,
+                    error: "Target app SDK highlight bridge rejected the highlight "
+                        + "(missing source dimensions or invalid shape).",
+                    totalTimeMs: totalTimeMs(from: startTime)
+                )
+            case .unavailable, .none:
+                break // Bridge unreachable — fall through to the SDK-required error.
+            }
         }
         // iOS cannot draw an overlay into another app from the test runner: the runner's
         // own UIWindow only composites while the runner is foreground, which never happens

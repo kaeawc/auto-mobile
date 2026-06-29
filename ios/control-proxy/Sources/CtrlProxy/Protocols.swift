@@ -252,7 +252,22 @@ public protocol SdkHierarchyFetching {
     /// Replace network mock rules in the in-app SDK.
     func setMockRules(_ rules: [NetworkMockRuleDTO]) -> Bool
     /// Draw a highlight in the in-app SDK process.
-    func addHighlight(id: String, shape: HighlightShape) -> Bool
+    func addHighlight(id: String, shape: HighlightShape) -> SdkHighlightOutcome
+}
+
+/// Result of asking the in-app SDK bridge to draw a highlight.
+///
+/// Distinguishes a deliberate rejection (the SDK is reachable but declined to
+/// render, e.g. missing source dimensions per issue #2682) from the SDK being
+/// unreachable. A rejection must fail loudly rather than fall back to the runner
+/// overlay, which would draw the highlight unscaled and misplace it.
+public enum SdkHighlightOutcome: Equatable {
+    /// The SDK rendered the highlight (HTTP 200).
+    case rendered
+    /// The SDK was reachable but declined to render it (non-200 response).
+    case rejected
+    /// The SDK bridge was unreachable; the caller may fall back to the runner overlay.
+    case unavailable
 }
 
 /// Protocol for accessing the cached SDK hierarchy.

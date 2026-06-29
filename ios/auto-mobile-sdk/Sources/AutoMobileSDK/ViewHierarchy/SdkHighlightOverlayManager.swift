@@ -1,7 +1,11 @@
-#if DEBUG && canImport(UIKit) && canImport(QuartzCore) && !os(watchOS)
+#if DEBUG && !os(watchOS)
 import Foundation
+#if canImport(QuartzCore)
 import QuartzCore
+#endif
+#if canImport(UIKit)
 import UIKit
+#endif
 
 struct SdkHighlightShape: Codable {
     let type: String
@@ -91,10 +95,14 @@ enum SdkHighlightCommandScaler {
         _ command: SdkHighlightRenderCommand,
         targetSize: SdkHighlightTargetSize
     ) -> SdkHighlightRenderCommand? {
+        // The SDK draws into the target app's own view space, so device-coordinate
+        // bounds MUST carry their source dimensions to be mapped correctly. Missing
+        // source dims means we cannot place the highlight reliably — reject rather
+        // than draw raw daemon-pixel coordinates and misplace the overlay (issue #2682).
         guard let bounds = command.bounds,
               let sourceWidth = bounds.sourceWidth,
               let sourceHeight = bounds.sourceHeight else {
-            return command
+            return nil
         }
         guard sourceWidth > 0,
               sourceHeight > 0,
@@ -163,6 +171,7 @@ struct SdkHighlightColorComponents: Equatable {
     }
 }
 
+#if canImport(UIKit)
 final class SdkHighlightOverlayManager {
     static let shared = SdkHighlightOverlayManager()
 
@@ -217,6 +226,18 @@ final class SdkHighlightOverlayManager {
             self?.remove(id: id)
         }
         return true
+    }
+
+    /// Test hook: the on-screen bounding box of the rendered highlight path for `id`,
+    /// in the overlay window's coordinate space. Used by the Playground E2E test to
+    /// assert the drawn overlay frame lands on the intended element (issue #2682).
+    func renderedPathBounds(id: String) -> CGRect? {
+        layers[id]?.path?.boundingBoxOfPath
+    }
+
+    /// Test hook: the overlay window size used as the scaling target.
+    func renderTargetSize() -> CGSize? {
+        window?.bounds.size
     }
 
     func remove(id: String) {
@@ -309,4 +330,5 @@ private extension String {
         }
     }
 }
+#endif
 #endif

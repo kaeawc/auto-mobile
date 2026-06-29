@@ -261,15 +261,66 @@ const resolveHighlightShapeFromSelector = async (
     throw new ActionableError("Selected element bounds are invalid for highlight.");
   }
 
+  const highlightBounds = {
+    x: Math.round(bounds.left),
+    y: Math.round(bounds.top),
+    width,
+    height
+  };
+
+  // The in-app iOS SDK draws into the target app's own view space, so it must
+  // know the device/observation coordinate space these bounds came from to map
+  // them correctly. Always attach source dims on the iOS path so the SDK never
+  // falls back to drawing raw daemon coordinates (issue #2682). Android draws its
+  // overlay in observation space, so no source dims are needed there.
+  if (device.platform === "ios") {
+    const sourceDimensions = resolveSourceDimensions(viewHierarchy);
+    if (sourceDimensions) {
+      return {
+        type: "circle",
+        bounds: { ...highlightBounds, ...sourceDimensions }
+      };
+    }
+  }
+
   return {
     type: "circle",
-    bounds: {
-      x: Math.round(bounds.left),
-      y: Math.round(bounds.top),
-      width,
-      height
-    }
+    bounds: highlightBounds
   };
+};
+
+const resolveSourceDimensions = (
+  viewHierarchy: ViewHierarchyResult
+): { sourceWidth: number; sourceHeight: number } | null => {
+  if (
+    typeof viewHierarchy.screenWidth === "number"
+    && typeof viewHierarchy.screenHeight === "number"
+    && viewHierarchy.screenWidth > 0
+    && viewHierarchy.screenHeight > 0
+  ) {
+    return {
+      sourceWidth: Math.round(viewHierarchy.screenWidth),
+      sourceHeight: Math.round(viewHierarchy.screenHeight)
+    };
+  }
+
+  const parser = new DefaultElementParser();
+  let maxWidth = 0;
+  let maxHeight = 0;
+  for (const root of parser.extractRootNodes(viewHierarchy)) {
+    const parsed = parser.parseNodeBounds(root);
+    if (!parsed) {
+      continue;
+    }
+    maxWidth = Math.max(maxWidth, parsed.bounds.right - parsed.bounds.left);
+    maxHeight = Math.max(maxHeight, parsed.bounds.bottom - parsed.bounds.top);
+  }
+
+  if (maxWidth > 0 && maxHeight > 0) {
+    return { sourceWidth: Math.round(maxWidth), sourceHeight: Math.round(maxHeight) };
+  }
+
+  return null;
 };
 
 interface HighlightViewHierarchyClient {

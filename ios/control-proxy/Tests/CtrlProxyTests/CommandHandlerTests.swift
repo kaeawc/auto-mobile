@@ -1565,7 +1565,7 @@ final class CommandHandlerTests: XCTestCase {
 
     func testAddHighlightUsesSdkBridgeWhenForegroundAppHasSdk() {
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = true
+        sdkClient.addHighlightResult = .rendered
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1628,7 +1628,7 @@ final class CommandHandlerTests: XCTestCase {
 
     func testAddHighlightReturnsSdkRequiredErrorWhenSdkTargetsDifferentBundle() {
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = true
+        sdkClient.addHighlightResult = .rendered
         fakeElementLocator.foregroundBundleId = "com.apple.reminders"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.other.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1660,9 +1660,9 @@ final class CommandHandlerTests: XCTestCase {
         )
     }
 
-    func testAddHighlightReturnsSdkRequiredErrorWhenSdkBridgeCallFails() {
+    func testAddHighlightReturnsSdkRequiredErrorWhenSdkBridgeUnreachable() {
         let sdkClient = FakeSdkHierarchyFetcher()
-        sdkClient.addHighlightResult = false
+        sdkClient.addHighlightResult = .unavailable
         fakeElementLocator.foregroundBundleId = "com.test.app"
         sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
         commandHandler = CommandHandler.createForTesting(
@@ -1691,6 +1691,43 @@ final class CommandHandlerTests: XCTestCase {
             response.error,
             "Highlighting com.test.app requires the AutoMobile SDK embedded in the target app; "
                 + "iOS cannot draw an overlay into another app from the test runner."
+        )
+    }
+
+    func testAddHighlightReportsRejectionWhenSdkBridgeDeclines() {
+        // Issue #2682: when the SDK bridge owns the foreground app but declines the
+        // highlight (e.g. missing source dimensions), report that precise reason
+        // rather than the misleading "SDK not embedded" error — the SDK *is* embedded.
+        let sdkClient = FakeSdkHierarchyFetcher()
+        sdkClient.addHighlightResult = .rejected
+        fakeElementLocator.foregroundBundleId = "com.test.app"
+        sdkClient.setServerInfo(SdkHierarchyServerInfo(status: "ok", bundleId: "com.test.app"))
+        commandHandler = CommandHandler.createForTesting(
+            elementLocator: fakeElementLocator,
+            gesturePerformer: fakeGesturePerformer,
+            perfProvider: perfProvider,
+            sdkHierarchyClient: sdkClient
+        )
+        let shape = HighlightShape(
+            type: "box",
+            bounds: HighlightBounds(x: 10, y: 20, width: 100, height: 50)
+        )
+        let request = WebSocketRequest(
+            type: "add_highlight",
+            requestId: "highlight-request",
+            id: "highlight-1",
+            shape: shape
+        )
+
+        guard let response = handleRequest(request, as: WebSocketResponse.self) else { return }
+
+        XCTAssertEqual(response.type, "highlight_response")
+        XCTAssertEqual(response.success, false)
+        XCTAssertEqual(sdkClient.addHighlightCallCount, 1)
+        XCTAssertEqual(
+            response.error,
+            "Target app SDK highlight bridge rejected the highlight "
+                + "(missing source dimensions or invalid shape)."
         )
     }
 

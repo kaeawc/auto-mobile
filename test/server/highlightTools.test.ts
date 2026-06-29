@@ -164,9 +164,105 @@ describe("Highlight Tools Registration", () => {
     const payload = JSON.parse(response.content[0].text);
 
     expect(payload.success).toBe(true);
+    // iOS selector path must attach source dims so the in-app SDK can map
+    // device-coordinate bounds into its own view space (issue #2682).
     expect(addCalls[0]?.shape).toEqual({
       type: "circle",
-      bounds: { x: 12, y: 124, width: 366, height: 44 }
+      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 390, sourceHeight: 844 }
+    });
+  });
+
+  test("attaches iOS source dims from hierarchy screen size when present", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          text: "Root",
+          bounds: { left: 0, top: 0, right: 390, bottom: 844 },
+          node: [
+            {
+              text: "General",
+              bounds: { left: 12, top: 124, right: 378, bottom: 168 },
+            }
+          ]
+        }
+      },
+      packageName: "com.apple.Preferences",
+      updatedAt: 123,
+      screenWidth: 402,
+      screenHeight: 874,
+    };
+    const addCalls: Array<{ shape: HighlightShape }> = [];
+    registerHighlightTools({
+      generateHighlightId: () => "highlight-ios-screen",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: source => source as ViewHierarchyResult,
+      }),
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          addCalls.push({ shape });
+          return { success: true };
+        }
+      } as any),
+    });
+
+    const tool = ToolRegistry.getTool("highlight");
+    const parsed = tool!.schema.parse({ platform: "ios", text: "General" });
+    await tool!.deviceAwareHandler!({
+      deviceId: "ios-device",
+      platform: "ios",
+      name: "iPhone Simulator",
+    } as BootedDevice, parsed);
+
+    expect(addCalls[0]?.shape).toEqual({
+      type: "circle",
+      bounds: { x: 12, y: 124, width: 366, height: 44, sourceWidth: 402, sourceHeight: 874 }
+    });
+  });
+
+  test("does not attach source dims for Android selector highlights", async () => {
+    const hierarchy: ViewHierarchyResult = {
+      hierarchy: {
+        node: {
+          text: "Root",
+          bounds: { left: 0, top: 0, right: 1080, bottom: 2400 },
+          node: [
+            {
+              text: "Settings",
+              bounds: { left: 24, top: 200, right: 1056, bottom: 320 },
+            }
+          ]
+        }
+      },
+      packageName: "com.android.settings",
+      updatedAt: 123,
+    };
+    const addCalls: Array<{ shape: HighlightShape }> = [];
+    registerHighlightTools({
+      generateHighlightId: () => "highlight-android-selector",
+      viewHierarchyClientFactory: () => ({
+        requestHierarchySync: async () => ({ hierarchy }),
+        convertToViewHierarchyResult: source => source as ViewHierarchyResult,
+      }),
+      highlightClientFactory: () => ({
+        addHighlight: async (_id, shape) => {
+          addCalls.push({ shape });
+          return { success: true };
+        }
+      } as any),
+    });
+
+    const tool = ToolRegistry.getTool("highlight");
+    const parsed = tool!.schema.parse({ platform: "android", text: "Settings" });
+    await tool!.deviceAwareHandler!({
+      deviceId: "android-device",
+      platform: "android",
+      name: "Android Emulator",
+    } as BootedDevice, parsed);
+
+    expect(addCalls[0]?.shape).toEqual({
+      type: "circle",
+      bounds: { x: 24, y: 200, width: 1032, height: 120 }
     });
   });
 });

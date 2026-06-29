@@ -6,3 +6,18 @@ export class ActionableError extends Error {
     super(message);
   }
 }
+
+/**
+ * Wrap an unknown caught error in an ActionableError with actionable context.
+ *
+ * Use at system/MCP boundaries and feature actions where the failure should
+ * surface to the client (see the error-handling convention in CLAUDE.md).
+ * Already-actionable errors are returned unchanged so context isn't doubled up.
+ */
+export function toActionableError(error: unknown, context: string): ActionableError {
+  if (error instanceof ActionableError) {
+    return error;
+  }
+  const message = error instanceof Error ? error.message : String(error);
+  return new ActionableError(`${context}: ${message}`);
+}

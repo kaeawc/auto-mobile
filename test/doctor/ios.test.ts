@@ -13,6 +13,7 @@ import {
 } from "../../src/doctor/checks/ios";
 import type { ExecResult } from "../../src/models";
 import { FakeTimer } from "../fakes/FakeTimer";
+import { FakeLogger } from "../fakes/FakeLogger";
 
 const createExecResult = (stdout: string, stderr: string = ""): ExecResult => ({
   stdout,
@@ -34,6 +35,7 @@ const baseDependencies: IosDoctorDependencies = {
   fileExists: () => true,
   readDir: async () => [],
   homedir: () => "/Users/test",
+  logger: new FakeLogger(),
   createSimctlClient: () => ({
     setDevice: () => {},
     executeCommand: async () => createExecResult(""),
@@ -443,6 +445,136 @@ describe("iOS doctor checks", () => {
       expect(result.status).toBe("skip");
       expect(result.message).toContain("only available on macOS");
       expect(createSimctlClientCalls).toBe(0);
+    });
+  });
+
+  describe("diagnostic tracing", () => {
+    const throwingExecFile = async () => {
+      throw new Error("xcrun: command not found");
+    };
+
+    test("checkXcodeInstallation logs the underlying error before returning fail", async () => {
+      const logger = new FakeLogger();
+      const result = await checkXcodeInstallation("15.0", {
+        ...baseDependencies,
+        logger,
+        execFile: throwingExecFile
+      });
+
+      expect(result.status).toBe("fail");
+      const debug = logger.at("warn");
+      expect(debug.length).toBeGreaterThan(0);
+      expect(JSON.stringify(debug)).toContain("xcrun: command not found");
+    });
+
+    test("checkXcodeCommandLineTools logs the underlying error before returning fail", async () => {
+      const logger = new FakeLogger();
+      const result = await checkXcodeCommandLineTools({}, {
+        ...baseDependencies,
+        logger,
+        execFile: throwingExecFile
+      });
+
+      expect(result.status).toBe("fail");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkXcrunAvailable logs the underlying error before returning fail", async () => {
+      const logger = new FakeLogger();
+      const result = await checkXcrunAvailable({
+        ...baseDependencies,
+        logger,
+        execFile: throwingExecFile
+      });
+
+      expect(result.status).toBe("fail");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkSimctlAvailable logs the underlying error before returning fail", async () => {
+      const logger = new FakeLogger();
+      const result = await checkSimctlAvailable({
+        ...baseDependencies,
+        logger,
+        createSimctlClient: () => {
+          throw new Error("simctl exploded");
+        }
+      });
+
+      expect(result.status).toBe("fail");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkSimulatorRuntimes logs the underlying error before returning fail", async () => {
+      const logger = new FakeLogger();
+      const result = await checkSimulatorRuntimes({
+        ...baseDependencies,
+        logger,
+        createSimctlClient: () => ({
+          ...baseDependencies.createSimctlClient(),
+          isAvailable: async () => true,
+          getRuntimes: async () => {
+            throw new Error("runtimes exploded");
+          }
+        })
+      });
+
+      expect(result.status).toBe("fail");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkCodeSigning logs the underlying error before returning warn", async () => {
+      const logger = new FakeLogger();
+      const result = await checkCodeSigning({
+        ...baseDependencies,
+        logger,
+        execFile: throwingExecFile
+      });
+
+      expect(result.status).toBe("warn");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkAppleDeveloperAccount logs the underlying error before returning warn", async () => {
+      const logger = new FakeLogger();
+      const result = await checkAppleDeveloperAccount({
+        ...baseDependencies,
+        logger,
+        readDir: async () => {
+          throw new Error("home dir unreadable");
+        }
+      });
+
+      expect(result.status).toBe("warn");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkProvisioningProfiles logs the underlying error before returning warn", async () => {
+      const logger = new FakeLogger();
+      const result = await checkProvisioningProfiles({
+        ...baseDependencies,
+        logger,
+        readDir: async () => {
+          throw new Error("profiles unreadable");
+        }
+      });
+
+      expect(result.status).toBe("warn");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
+    });
+
+    test("checkBootedSimulators logs the underlying error before returning skip", async () => {
+      const logger = new FakeLogger();
+      const result = await checkBootedSimulators({
+        ...baseDependencies,
+        logger,
+        createSimctlClient: () => {
+          throw new Error("booted lookup failed");
+        }
+      });
+
+      expect(result.status).toBe("skip");
+      expect(logger.at("warn").length).toBeGreaterThan(0);
     });
   });
 });

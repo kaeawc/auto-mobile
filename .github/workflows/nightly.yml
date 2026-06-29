@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  # mikepenz/action-junit-report (emulator test report steps) creates a check run.
+  checks: write
 
 jobs:
   build-control-proxy-apk:

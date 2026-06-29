@@ -4,6 +4,10 @@ on:
   pull_request:
     branches:
       - "**"
+    # Include `labeled` so applying run-native / run-ios / run-android to an
+    # existing PR actually starts a run (the default opened/synchronize/reopened
+    # set does not fire on label changes).
+    types: [opened, synchronize, reopened, labeled]
 
 concurrency:
   group: pull-request-${{ github.event.pull_request.number || github.ref }}
@@ -286,6 +290,7 @@ jobs:
               - 'src/**'
               - 'test/**'
               - 'scripts/**'
+              - 'benchmark/**'
               - 'package.json'
               - 'bun.lock'
               - 'tsconfig.json'
